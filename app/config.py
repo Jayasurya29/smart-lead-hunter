@@ -1,15 +1,15 @@
 """
 Application configuration - loads settings from .env file
 """
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, SettingsConfigDict
 from functools import lru_cache
 
 
 class Settings(BaseSettings):
     """Application settings loaded from environment variables"""
     
-    # Database
-    database_url: str = "postgresql://postgres:leadhunter123@localhost:5432/smart_lead_hunter"
+    # Database - NO DEFAULT PASSWORD, must come from .env
+    database_url: str
     
     # Redis
     redis_url: str = "redis://localhost:6379/0"
@@ -27,8 +27,8 @@ class Settings(BaseSettings):
         return f"https://api.{self.insightly_pod}.insightly.com/v3.1"
     
     # Scraping settings
-    scrape_delay: float = 2.0  # seconds between requests
-    max_depth: int = 3  # how deep to crawl
+    scrape_delay: float = 2.0
+    max_depth: int = 3
     
     # Lead scoring weights
     score_florida: int = 15
@@ -42,16 +42,17 @@ class Settings(BaseSettings):
     environment: str = "development"
     debug: bool = True
     
-    class Config:
-        env_file = ".env"
-        env_file_encoding = "utf-8"
+    # Pydantic v2 way to load .env
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        extra="ignore"
+    )
 
 
 @lru_cache()
 def get_settings() -> Settings:
-    """Get cached settings instance"""
     return Settings()
 
 
-# Export settings instance
 settings = get_settings()
