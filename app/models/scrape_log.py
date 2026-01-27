@@ -2,9 +2,8 @@
 Scrape Log model - tracks history of scraping runs
 """
 from sqlalchemy import Column, String, Integer, DateTime, Text, ForeignKey
-from sqlalchemy.dialects.postgresql import UUID
-from datetime import datetime
-import uuid
+from sqlalchemy.dialects.postgresql import JSONB
+from datetime import datetime, timezone
 
 from app.database import Base
 
@@ -15,38 +14,40 @@ class ScrapeLog(Base):
     __tablename__ = "scrape_logs"
     
     # Primary key
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    id = Column(Integer, primary_key=True, autoincrement=True)
     
     # Source reference
-    source_id = Column(UUID(as_uuid=True), ForeignKey("sources.id"))
+    source_id = Column(Integer, ForeignKey("sources.id"))
     
     # Timing
-    started_at = Column(DateTime, nullable=False, default=datetime.utcnow)
-    completed_at = Column(DateTime)
+    started_at = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
+    completed_at = Column(DateTime(timezone=True))
     
     # Results
+    urls_scraped = Column(Integer, default=0)
     pages_crawled = Column(Integer, default=0)
     leads_found = Column(Integer, default=0)
     leads_new = Column(Integer, default=0)
     leads_duplicate = Column(Integer, default=0)
     
     # Status
-    status = Column(String(20), default="running")  # running, completed, failed
-    errors = Column(Text)
+    status = Column(String(20), default="running")  # running, completed, failed, completed_with_errors
+    errors = Column(JSONB)  # Store as JSON array
     
     # Timestamps
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     
     def __repr__(self):
-        return f"<ScrapeLog(source_id='{self.source_id}', status='{self.status}')>"
+        return f"<ScrapeLog(id={self.id}, source_id={self.source_id}, status='{self.status}')>"
     
     def to_dict(self):
         """Convert to dictionary for API responses"""
         return {
-            "id": str(self.id),
-            "source_id": str(self.source_id) if self.source_id else None,
-            "started_at": str(self.started_at) if self.started_at else None,
-            "completed_at": str(self.completed_at) if self.completed_at else None,
+            "id": self.id,
+            "source_id": self.source_id,
+            "started_at": self.started_at.isoformat() if self.started_at else None,
+            "completed_at": self.completed_at.isoformat() if self.completed_at else None,
+            "urls_scraped": self.urls_scraped,
             "pages_crawled": self.pages_crawled,
             "leads_found": self.leads_found,
             "leads_new": self.leads_new,

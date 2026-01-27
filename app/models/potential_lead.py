@@ -1,11 +1,10 @@
 """
 Potential Lead model - stores scraped leads before pushing to Insightly
 """
-from sqlalchemy import Column, String, Integer, DateTime, Text, Date, CheckConstraint
-from sqlalchemy.dialects.postgresql import UUID, JSONB
+from sqlalchemy import Column, String, Integer, DateTime, Text, CheckConstraint
+from sqlalchemy.dialects.postgresql import JSONB
 from pgvector.sqlalchemy import Vector
-from datetime import datetime
-import uuid
+from datetime import datetime, timezone
 
 from app.database import Base
 
@@ -16,11 +15,13 @@ class PotentialLead(Base):
     __tablename__ = "potential_leads"
     
     # Primary key
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    id = Column(Integer, primary_key=True, autoincrement=True)
     
     # Hotel Information
     hotel_name = Column(String(255), nullable=False)
+    hotel_name_normalized = Column(String(255))
     brand = Column(String(100))
+    hotel_type = Column(String(50))
     hotel_website = Column(String(500))
     
     # Location
@@ -29,14 +30,13 @@ class PotentialLead(Base):
     country = Column(String(100), default="USA")
     
     # Contact Information
-    contact_first_name = Column(String(100))
-    contact_last_name = Column(String(100))
+    contact_name = Column(String(200))
     contact_title = Column(String(100))
     contact_email = Column(String(255))
     contact_phone = Column(String(50))
     
     # Hotel Details
-    projected_opening_date = Column(Date)
+    opening_date = Column(String(50))
     room_count = Column(Integer)
     description = Column(Text)
     
@@ -45,56 +45,31 @@ class PotentialLead(Base):
     score_breakdown = Column(JSONB)
     
     # Source Tracking
-    source_id = Column(UUID(as_uuid=True))
-    source_url = Column(Text, nullable=False)
-    source_site = Column(String(100), nullable=False)
-    scraped_at = Column(DateTime, default=datetime.utcnow)
+    source_id = Column(Integer)
+    source_url = Column(Text)
+    source_site = Column(String(100))
+    scraped_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     
     # Workflow Status
-    status = Column(String(20), default="New")
+    status = Column(String(20), default="new")
     claimed_by = Column(String(100))
-    claimed_at = Column(DateTime)
-    rejection_reason = Column(String(50))
-    rejection_notes = Column(Text)
+    claimed_at = Column(DateTime(timezone=True))
+    notes = Column(Text)
     
     # Insightly Sync
-    insightly_lead_id = Column(Integer)
-    pushed_to_insightly_at = Column(DateTime)
+    insightly_id = Column(Integer)
+    synced_at = Column(DateTime(timezone=True))
     
     # Deduplication
     embedding = Column(Vector(384))
+    duplicate_of_id = Column(Integer)
+    
+    # Raw data
+    raw_data = Column(JSONB)
     
     # Timestamps
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
     
     def __repr__(self):
-        return f"<PotentialLead(hotel_name='{self.hotel_name}', status='{self.status}')>"
-    
-    def to_dict(self):
-        """Convert to dictionary for API responses"""
-        return {
-            "id": str(self.id),
-            "hotel_name": self.hotel_name,
-            "brand": self.brand,
-            "city": self.city,
-            "state": self.state,
-            "country": self.country,
-            "contact_first_name": self.contact_first_name,
-            "contact_last_name": self.contact_last_name,
-            "contact_title": self.contact_title,
-            "contact_email": self.contact_email,
-            "contact_phone": self.contact_phone,
-            "hotel_website": self.hotel_website,
-            "projected_opening_date": str(self.projected_opening_date) if self.projected_opening_date else None,
-            "room_count": self.room_count,
-            "description": self.description,
-            "lead_score": self.lead_score,
-            "score_breakdown": self.score_breakdown,
-            "source_url": self.source_url,
-            "source_site": self.source_site,
-            "status": self.status,
-            "claimed_by": self.claimed_by,
-            "rejection_reason": self.rejection_reason,
-            "created_at": str(self.created_at) if self.created_at else None
-        }
+        return f"<PotentialLead(id={self.id}, hotel_name='{self.hotel_name}', status='{self.status}')>"

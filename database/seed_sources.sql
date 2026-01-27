@@ -1,47 +1,158 @@
 -- ============================================================================
 -- SMART LEAD HUNTER - SEED SOURCES
--- Populates the sources table with validated hotel opening websites
+-- FOCUS: United States + Caribbean ONLY
 -- ============================================================================
 
--- Aggregator Sites (High Priority - Multiple hotels per page)
-INSERT INTO sources (id, name, url, scrape_frequency, is_active, leads_found, notes, created_at) VALUES
-(gen_random_uuid(), 'The Orange Studio - Hotel Openings', 'https://www.theorangestudio.com/hotel-openings', 'daily', true, 0, 'Aggregator - Lists multiple new hotel openings. Score: 96/100', NOW()),
-(gen_random_uuid(), 'New Hotels Opening', 'https://www.newhotelsopening.com/', 'daily', true, 0, 'Aggregator - Dedicated to new hotel announcements', NOW()),
-(gen_random_uuid(), 'NewSleeps', 'https://www.newsleeps.com/index.php', 'daily', true, 0, 'Aggregator - New hotel listings worldwide', NOW()),
-(gen_random_uuid(), 'Hotel Online - New Openings', 'https://www.hotel-online.com/categories/new-hotel-openings', 'daily', true, 0, 'Industry news - New openings category', NOW());
-
--- Luxury Hotel Sources (High Priority - Target Market)
-INSERT INTO sources (id, name, url, scrape_frequency, is_active, leads_found, notes, created_at) VALUES
-(gen_random_uuid(), 'Leading Hotels - Opening Soon', 'https://www.lhw.com/get-inspired/new-hotels/opening-soon', 'weekly', true, 0, 'Luxury - Leading Hotels of the World new properties. Score: 89/100', NOW()),
-(gen_random_uuid(), 'Four Seasons Press Room', 'https://press.fourseasons.com', 'weekly', true, 0, 'Luxury chain - Press releases for new openings', NOW()),
-(gen_random_uuid(), 'Mandarin Oriental News', 'https://www.mandarinoriental.com/newsroom', 'weekly', true, 0, 'Luxury chain - Newsroom announcements', NOW());
-
--- Major Hotel Chain Newsrooms
-INSERT INTO sources (id, name, url, scrape_frequency, is_active, leads_found, notes, created_at) VALUES
-(gen_random_uuid(), 'Hilton Stories - New Openings 2026', 'https://stories.hilton.com/releases/new-hilton-openings-in-2026', 'weekly', true, 0, 'Major chain - Hilton new openings for Americas', NOW()),
-(gen_random_uuid(), 'Marriott News Center', 'https://news.marriott.com', 'weekly', true, 0, 'Major chain - Marriott press releases', NOW()),
-(gen_random_uuid(), 'Hyatt Newsroom', 'https://newsroom.hyatt.com', 'weekly', true, 0, 'Major chain - Hyatt announcements', NOW()),
-(gen_random_uuid(), 'IHG Newsroom', 'https://www.ihgplc.com/en/news-and-media', 'weekly', true, 0, 'Major chain - IHG news and media', NOW()),
-(gen_random_uuid(), 'Accor Newsroom', 'https://group.accor.com/en/newsroom', 'weekly', true, 0, 'Major chain - Accor group news', NOW()),
-(gen_random_uuid(), 'Wyndham Newsroom', 'https://corporate.wyndham.com/newsroom', 'weekly', true, 0, 'Major chain - Wyndham announcements', NOW()),
-(gen_random_uuid(), 'Drury Hotels Coming Soon', 'https://www.druryhotels.com/coming-soon', 'weekly', true, 0, 'Regional chain - Drury new locations', NOW());
-
--- Hospitality Industry Publications
-INSERT INTO sources (id, name, url, scrape_frequency, is_active, leads_found, notes, created_at) VALUES
-(gen_random_uuid(), 'Travel + Leisure - Hotel Openings', 'https://www.travelandleisure.com/hotels-resorts/hotel-openings', 'daily', true, 0, 'Publication - Travel + Leisure hotel coverage', NOW()),
-(gen_random_uuid(), 'Hospitality Net', 'https://www.hospitalitynet.org', 'daily', true, 0, 'Industry publication - Hotel news', NOW()),
-(gen_random_uuid(), 'Hotel News Resource', 'https://www.hotelnewsresource.com', 'daily', true, 0, 'Industry publication - Hotel industry news', NOW()),
-(gen_random_uuid(), 'Boutique Hotel News', 'https://www.boutiquehotelnews.com', 'daily', true, 0, 'Publication - Boutique and luxury hotels', NOW()),
-(gen_random_uuid(), 'Hotel Management', 'https://www.hotelmanagement.net', 'daily', true, 0, 'Industry publication - Hotel management news', NOW()),
-(gen_random_uuid(), 'Luxury Travel Advisor', 'https://www.luxurytraveladvisor.com', 'weekly', true, 0, 'Publication - Luxury travel and hotels', NOW()),
-(gen_random_uuid(), 'Travel Weekly', 'https://www.travelweekly.com', 'daily', true, 0, 'Publication - Travel industry news. Score: 80/100', NOW());
-
--- Caribbean & Regional Sources (Target Market - Florida/Caribbean Focus)
-INSERT INTO sources (id, name, url, scrape_frequency, is_active, leads_found, notes, created_at) VALUES
-(gen_random_uuid(), 'Caribbean Journal', 'https://www.caribjournal.com', 'daily', true, 0, 'Regional - Caribbean travel and hotel news. Target market!', NOW());
+-- Clear existing sources (optional - comment out if you want to keep existing)
+-- TRUNCATE TABLE sources RESTART IDENTITY CASCADE;
 
 -- ============================================================================
--- VERIFICATION QUERY
+-- TIER 1: AGGREGATOR SITES (Filter for US/Caribbean content)
 -- ============================================================================
--- Run this after inserting to verify:
--- SELECT name, url, is_active FROM sources ORDER BY name;
+INSERT INTO sources (name, url, scrape_frequency, is_active, notes) VALUES
+('The Orange Studio - Hotel Openings', 'https://www.theorangestudio.com/hotel-openings', 'daily', true, 'Aggregator - Filter for US/Caribbean only'),
+('New Hotels Opening', 'https://www.newhotelsopening.com/', 'daily', true, 'Aggregator - Filter for US/Caribbean only'),
+('Hotel Openings List 2025', 'https://www.newhotelsopening.com/hotel-openings-2025', 'daily', true, 'Aggregator - 2025 openings'),
+('Hotel Openings List 2026', 'https://www.newhotelsopening.com/hotel-openings-2026', 'daily', true, 'Aggregator - 2026 openings'),
+('Hotel Online - New Openings', 'https://www.hotel-online.com/press_releases/release/new-hotel-openings', 'daily', true, 'Industry aggregator');
+
+-- ============================================================================
+-- TIER 2: FLORIDA SOURCES (53% of your clients!)
+-- ============================================================================
+INSERT INTO sources (name, url, scrape_frequency, is_active, notes) VALUES
+('Florida Restaurant & Lodging', 'https://frla.org/news/', 'daily', true, 'FLORIDA: State association news'),
+('South Florida Business Journal - Hotels', 'https://www.bizjournals.com/southflorida/news/industry/hotels', 'daily', true, 'FLORIDA: Miami, Fort Lauderdale, Palm Beach'),
+('Orlando Business Journal - Hotels', 'https://www.bizjournals.com/orlando/news/industry/hotels', 'daily', true, 'FLORIDA: Orlando area'),
+('Tampa Bay Business Journal - Hotels', 'https://www.bizjournals.com/tampabay/news/industry/hotels', 'daily', true, 'FLORIDA: Tampa, Clearwater, St Pete'),
+('Jacksonville Business Journal', 'https://www.bizjournals.com/jacksonville/news/industry/hotels', 'daily', true, 'FLORIDA: Jacksonville area'),
+('Miami Herald - Travel', 'https://www.miamiherald.com/travel/', 'daily', true, 'FLORIDA: Miami travel news'),
+('Orlando Sentinel - Theme Parks', 'https://www.orlandosentinel.com/theme-parks/', 'daily', true, 'FLORIDA: Orlando attractions/hotels'),
+('Visit Florida News', 'https://www.visitflorida.com/en-us/media/press-releases.html', 'weekly', true, 'FLORIDA: State tourism news'),
+('Florida Trend - Hospitality', 'https://www.floridatrend.com/hospitality', 'weekly', true, 'FLORIDA: Business magazine'),
+('Naples Daily News', 'https://www.naplesnews.com/business/', 'daily', true, 'FLORIDA: Naples, Southwest Florida'),
+('Sun Sentinel - Hotels', 'https://www.sun-sentinel.com/business/', 'daily', true, 'FLORIDA: Fort Lauderdale area'),
+('Palm Beach Post', 'https://www.palmbeachpost.com/business/', 'daily', true, 'FLORIDA: Palm Beach area'),
+('Sarasota Herald-Tribune', 'https://www.heraldtribune.com/business/', 'weekly', true, 'FLORIDA: Sarasota area'),
+('Keys Weekly', 'https://keysweekly.com/', 'weekly', true, 'FLORIDA: Florida Keys');
+
+-- ============================================================================
+-- TIER 3: CARIBBEAN SOURCES (5% of your clients - growth opportunity)
+-- ============================================================================
+INSERT INTO sources (name, url, scrape_frequency, is_active, notes) VALUES
+('Caribbean Journal', 'https://www.caribjournal.com/', 'daily', true, 'CARIBBEAN: Leading Caribbean travel news'),
+('Caribbean Hotel & Tourism Association', 'https://www.caribbeanhotelandtourism.com/news/', 'daily', true, 'CARIBBEAN: Industry association'),
+('Loop Caribbean', 'https://caribbean.loopnews.com/', 'daily', true, 'CARIBBEAN: Regional news'),
+('Caribbean News Digital', 'https://www.caribbeannewsdigital.com/', 'daily', true, 'CARIBBEAN: Regional news'),
+('Bahamas Ministry of Tourism', 'https://www.bahamas.com/press-releases', 'weekly', true, 'CARIBBEAN: Bahamas - 8 clients'),
+('Jamaica Tourist Board', 'https://www.visitjamaica.com/press-room/', 'weekly', true, 'CARIBBEAN: Jamaica - 2 clients'),
+('Turks and Caicos Tourism', 'https://www.turksandcaicostourism.com/media/', 'weekly', true, 'CARIBBEAN: TCI - 8 clients'),
+('Barbados Tourism', 'https://www.visitbarbados.org/media-centre', 'weekly', true, 'CARIBBEAN: Barbados - 4 clients'),
+('Aruba Tourism', 'https://www.aruba.com/us/press', 'weekly', true, 'CARIBBEAN: Aruba'),
+('Puerto Rico Tourism', 'https://www.discoverpuertorico.com/press-room', 'weekly', true, 'CARIBBEAN: Puerto Rico'),
+('Cayman Islands Tourism', 'https://www.visitcaymanislands.com/en-us/about-cayman/media-centre', 'weekly', true, 'CARIBBEAN: Cayman - 8 clients'),
+('St. Lucia Tourism', 'https://www.stlucia.org/en/media/', 'weekly', true, 'CARIBBEAN: St. Lucia - 4 clients'),
+('USVI Tourism', 'https://www.visitusvi.com/media', 'weekly', true, 'CARIBBEAN: US Virgin Islands'),
+('BVI Tourism', 'https://www.bvitourism.com/media', 'weekly', true, 'CARIBBEAN: British Virgin Islands - 2 clients');
+
+-- ============================================================================
+-- TIER 4: OTHER US STATES (33% of your clients)
+-- ============================================================================
+INSERT INTO sources (name, url, scrape_frequency, is_active, notes) VALUES
+-- California (4.5% of clients)
+('LA Business Journal - Hotels', 'https://labusinessjournal.com/news/hotels/', 'weekly', true, 'USA: Los Angeles'),
+('San Diego Business Journal', 'https://www.sdbj.com/news/hotels-tourism/', 'weekly', true, 'USA: San Diego'),
+('SF Business Times - Hotels', 'https://www.bizjournals.com/sanfrancisco/news/industry/hotels', 'weekly', true, 'USA: San Francisco'),
+
+-- New York (3.5% of clients)
+('NYC Tourism Press', 'https://www.nycgo.com/press-and-media', 'weekly', true, 'USA: New York City'),
+('Crain NY - Hotels', 'https://www.crainsnewyork.com/hospitality-tourism', 'weekly', true, 'USA: New York'),
+
+-- Texas (2.6% of clients)
+('Dallas Business Journal - Hotels', 'https://www.bizjournals.com/dallas/news/industry/hotels', 'weekly', true, 'USA: Dallas'),
+('Houston Business Journal - Hotels', 'https://www.bizjournals.com/houston/news/industry/hotels', 'weekly', true, 'USA: Houston'),
+('San Antonio Business Journal', 'https://www.bizjournals.com/sanantonio/news/industry/hotels', 'weekly', true, 'USA: San Antonio'),
+('Austin Business Journal - Hotels', 'https://www.bizjournals.com/austin/news/industry/hotels', 'weekly', true, 'USA: Austin'),
+
+-- Georgia (2.3% of clients)
+('Atlanta Business Chronicle - Hotels', 'https://www.bizjournals.com/atlanta/news/industry/hotels', 'weekly', true, 'USA: Atlanta'),
+
+-- Tennessee (2.2% of clients)
+('Nashville Business Journal - Hotels', 'https://www.bizjournals.com/nashville/news/industry/hotels', 'weekly', true, 'USA: Nashville'),
+('Memphis Business Journal', 'https://www.bizjournals.com/memphis/news/industry/hotels', 'weekly', true, 'USA: Memphis'),
+
+-- South Carolina (1.7% of clients)
+('Charleston Business Journal', 'https://www.bizjournals.com/charleston/news/industry/hotels', 'weekly', true, 'USA: Charleston'),
+('Greenville Business Magazine', 'https://www.greenvillebusinessmag.com/', 'weekly', true, 'USA: Greenville'),
+
+-- Louisiana (1.1% of clients)
+('New Orleans Business', 'https://www.bizjournals.com/neworleans/news/industry/hotels', 'weekly', true, 'USA: New Orleans'),
+
+-- North Carolina (1.1% of clients)
+('Charlotte Business Journal - Hotels', 'https://www.bizjournals.com/charlotte/news/industry/hotels', 'weekly', true, 'USA: Charlotte'),
+('Triangle Business Journal', 'https://www.bizjournals.com/triangle/news/industry/hotels', 'weekly', true, 'USA: Raleigh-Durham'),
+
+-- Washington DC (1.2% of clients)
+('Washington Business Journal - Hotels', 'https://www.bizjournals.com/washington/news/industry/hotels', 'weekly', true, 'USA: Washington DC'),
+
+-- Virginia (1.0% of clients)
+('Virginia Business', 'https://www.virginiabusiness.com/', 'weekly', true, 'USA: Virginia'),
+
+-- Pennsylvania (1.1% of clients)
+('Philadelphia Business Journal - Hotels', 'https://www.bizjournals.com/philadelphia/news/industry/hotels', 'weekly', true, 'USA: Philadelphia'),
+('Pittsburgh Business Times', 'https://www.bizjournals.com/pittsburgh/news/industry/hotels', 'weekly', true, 'USA: Pittsburgh');
+
+-- ============================================================================
+-- TIER 5: US HOSPITALITY PUBLICATIONS
+-- ============================================================================
+INSERT INTO sources (name, url, scrape_frequency, is_active, notes) VALUES
+('Travel + Leisure - Hotel Openings', 'https://www.travelandleisure.com/hotels-resorts/hotel-openings', 'daily', true, 'Publication - Filter for US/Caribbean'),
+('Conde Nast Traveler - New Hotels', 'https://www.cntraveler.com/tags/hotel-openings', 'daily', true, 'Publication - Filter for US/Caribbean'),
+('Hospitality Net', 'https://www.hospitalitynet.org/', 'daily', true, 'Industry publication'),
+('Hotel News Resource', 'https://www.hotelnewsresource.com/', 'daily', true, 'Industry publication'),
+('Hotel Management', 'https://www.hotelmanagement.net/', 'daily', true, 'Industry publication'),
+('Hotel Business', 'https://www.hotelbusiness.com/', 'daily', true, 'Hotel industry news'),
+('Lodging Magazine', 'https://lodgingmagazine.com/', 'weekly', true, 'Lodging industry'),
+('Hotel News Now', 'https://hotelnewsnow.com/', 'daily', true, 'STR hotel news'),
+('Skift', 'https://skift.com/', 'daily', true, 'Travel intelligence - Filter for US');
+
+-- ============================================================================
+-- TIER 6: US HOTEL CHAINS - AMERICAS FOCUS
+-- ============================================================================
+INSERT INTO sources (name, url, scrape_frequency, is_active, notes) VALUES
+('Hilton Stories - Americas', 'https://stories.hilton.com/releases', 'weekly', true, 'Chain news - Filter for Americas'),
+('Marriott News - Americas', 'https://news.marriott.com/', 'weekly', true, 'Chain news - Filter for Americas'),
+('Hyatt Newsroom', 'https://newsroom.hyatt.com/', 'weekly', true, 'Chain news - Filter for Americas'),
+('IHG Newsroom - Americas', 'https://www.ihgplc.com/en/news-and-media', 'weekly', true, 'Chain news - Filter for Americas'),
+('Wyndham Newsroom', 'https://corporate.wyndham.com/newsroom', 'weekly', true, 'Chain news - US focused'),
+('Choice Hotels News', 'https://news.choicehotels.com/', 'weekly', true, 'Chain news - US focused'),
+('Best Western News', 'https://www.bestwestern.com/en_US/about/press-media.html', 'weekly', true, 'Chain news - US focused'),
+('Drury Hotels Coming Soon', 'https://www.druryhotels.com/coming-soon', 'weekly', true, 'Regional chain - US only');
+
+-- ============================================================================
+-- TIER 7: HOTEL DEVELOPMENT / REAL ESTATE (US Focus)
+-- ============================================================================
+INSERT INTO sources (name, url, scrape_frequency, is_active, notes) VALUES
+('Hotel News Resource - Development', 'https://www.hotelnewsresource.com/hotel_development.html', 'daily', true, 'Development pipeline - US'),
+('Lodging Econometrics', 'https://lodgingeconometrics.com/', 'weekly', true, 'Construction pipeline - US'),
+('Bisnow - Hotels', 'https://www.bisnow.com/tags/hotels', 'daily', true, 'Real estate news - US'),
+('Commercial Observer - Hotels', 'https://commercialobserver.com/tag/hotels/', 'weekly', true, 'Real estate - US'),
+('Globe St - Hotels', 'https://www.globest.com/hospitality/', 'weekly', true, 'Real estate news - US');
+
+-- ============================================================================
+-- SUMMARY
+-- ============================================================================
+-- Florida sources: 14
+-- Caribbean sources: 14  
+-- Other US states: 20
+-- US Publications: 9
+-- US Hotel Chains: 8
+-- US Development: 5
+-- Aggregators: 5
+-- -----------------------
+-- TOTAL: ~75 sources (all US + Caribbean focused)
+
+-- ============================================================================
+-- VERIFY
+-- ============================================================================
+-- SELECT COUNT(*) as total FROM sources;
+-- SELECT scrape_frequency, COUNT(*) FROM sources GROUP BY scrape_frequency;

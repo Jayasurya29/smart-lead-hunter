@@ -41,3 +41,12 @@ test-results/
 # Celery
 celerybeat-schedule
 celerybeat.pid
+
+# Ollama model files
+blobs/
+manifests/
+
+# Ollama model files
+blobs/
+manifests/
+commands.txt

@@ -3,12 +3,6 @@ Smart Lead Hunter - Main Application
 ------------------------------------
 FastAPI entry point with REST API endpoints
 
-Features:
-- Lead management endpoints (CRUD)
-- Manual scrape triggers
-- Health checks and status
-- Dashboard stats
-
 Run with:
     uvicorn app.main:app --reload --port 8000
 """
@@ -23,11 +17,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, text
-from sqlalchemy.orm import selectinload
 
-from .config import settings
-from .database import get_db, init_db
-from .models import PotentialLead, Source, ScrapeLog
+from app.config import settings
+from app.database import get_db, init_db
+from app.models import PotentialLead, Source, ScrapeLog
 
 # Configure logging
 logging.basicConfig(
@@ -47,6 +40,7 @@ class LeadBase(BaseModel):
     contact_email: Optional[str] = None
     contact_phone: Optional[str] = None
     contact_name: Optional[str] = None
+    contact_title: Optional[str] = None
     city: Optional[str] = None
     state: Optional[str] = None
     country: Optional[str] = "USA"
@@ -54,12 +48,16 @@ class LeadBase(BaseModel):
     room_count: Optional[int] = None
     hotel_type: Optional[str] = None
     brand: Optional[str] = None
+    hotel_website: Optional[str] = None
+    description: Optional[str] = None
     notes: Optional[str] = None
 
 
 class LeadCreate(LeadBase):
     """Schema for creating a lead"""
+    lead_score: Optional[int] = None
     source_url: Optional[str] = None
+    source_site: Optional[str] = None
 
 
 class LeadUpdate(BaseModel):
@@ -68,8 +66,10 @@ class LeadUpdate(BaseModel):
     contact_email: Optional[str] = None
     contact_phone: Optional[str] = None
     contact_name: Optional[str] = None
+    contact_title: Optional[str] = None
     notes: Optional[str] = None
-    
+    lead_score: Optional[int] = None
+
 
 class LeadResponse(LeadBase):
     """Schema for lead response"""
@@ -77,6 +77,7 @@ class LeadResponse(LeadBase):
     lead_score: Optional[int] = None
     status: str
     source_url: Optional[str] = None
+    source_site: Optional[str] = None
     created_at: datetime
     updated_at: Optional[datetime] = None
     
@@ -96,26 +97,28 @@ class LeadListResponse(BaseModel):
 class SourceBase(BaseModel):
     """Base source schema"""
     name: str
-    base_url: str
-    source_type: Optional[str] = "aggregator"
-    priority: Optional[int] = 5
+    url: str
+    scrape_frequency: Optional[str] = "daily"
     is_active: Optional[bool] = True
-
+    notes: Optional[str] = None
 
 class SourceCreate(SourceBase):
     """Schema for creating a source"""
     pass
 
-
 class SourceResponse(BaseModel):
     """Schema for source response"""
-    id: str
+    id: str  # UUID as string
     name: str
     url: str
     scrape_frequency: Optional[str] = None
     is_active: bool
     last_scraped_at: Optional[datetime] = None
     leads_found: Optional[int] = 0
+    success_rate: Optional[float] = None
+    notes: Optional[str] = None
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
     
     class Config:
         from_attributes = True
@@ -156,12 +159,10 @@ class StatsResponse(BaseModel):
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application startup and shutdown"""
-    # Startup
     logger.info("=" * 50)
     logger.info("Starting Smart Lead Hunter...")
     logger.info("=" * 50)
     
-    # Initialize database tables
     await init_db()
     logger.info("Database tables verified")
     
@@ -170,7 +171,6 @@ async def lifespan(app: FastAPI):
     
     yield
     
-    # Shutdown
     logger.info("Shutting down Smart Lead Hunter...")
 
 
@@ -185,7 +185,6 @@ app = FastAPI(
     lifespan=lifespan
 )
 
-# CORS middleware
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -206,15 +205,13 @@ async def root():
         "name": "Smart Lead Hunter",
         "version": "1.0.0",
         "status": "running",
-        "docs": "/docs",
-        "company": "J.A. Uniforms"
+        "docs": "/docs"
     }
 
 
 @app.get("/health", tags=["Health"])
 async def health_check(db: AsyncSession = Depends(get_db)):
     """Health check endpoint"""
-    # Check database
     try:
         await db.execute(text("SELECT 1"))
         db_status = "healthy"
@@ -225,8 +222,7 @@ async def health_check(db: AsyncSession = Depends(get_db)):
         "status": "healthy" if db_status == "healthy" else "degraded",
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "components": {
-            "database": db_status,
-            "insightly": "disabled (for later)"
+            "database": db_status
         }
     }
 
@@ -316,7 +312,6 @@ async def list_leads(
     db: AsyncSession = Depends(get_db)
 ):
     """List leads with filtering and pagination"""
-    # Build base query
     query = select(PotentialLead)
     count_query = select(func.count(PotentialLead.id))
     
@@ -353,7 +348,6 @@ async def list_leads(
     result = await db.execute(query)
     leads = result.scalars().all()
     
-    # Calculate total pages
     pages = (total + per_page - 1) // per_page if total > 0 else 1
     
     return LeadListResponse(
@@ -380,21 +374,18 @@ async def get_lead(lead_id: int, db: AsyncSession = Depends(get_db)):
 
 
 @app.post("/leads", response_model=LeadResponse, tags=["Leads"])
-async def create_lead(
-    lead_data: LeadCreate,
-    db: AsyncSession = Depends(get_db)
-):
+async def create_lead(lead_data: LeadCreate, db: AsyncSession = Depends(get_db)):
     """Create a new lead manually"""
-    # Normalize hotel name
+    # Normalize hotel name for deduplication
     normalized_name = lead_data.hotel_name.lower().strip()
     
-    # Create lead
     lead = PotentialLead(
         hotel_name=lead_data.hotel_name,
         hotel_name_normalized=normalized_name,
         contact_email=lead_data.contact_email,
         contact_phone=lead_data.contact_phone,
         contact_name=lead_data.contact_name,
+        contact_title=lead_data.contact_title,
         city=lead_data.city,
         state=lead_data.state,
         country=lead_data.country,
@@ -402,9 +393,13 @@ async def create_lead(
         room_count=lead_data.room_count,
         hotel_type=lead_data.hotel_type,
         brand=lead_data.brand,
+        hotel_website=lead_data.hotel_website,
+        description=lead_data.description,
         notes=lead_data.notes,
         source_url=lead_data.source_url,
-        status="new"
+        source_site=lead_data.source_site or "manual",
+        status="new",
+        lead_score=lead_data.lead_score
     )
     
     db.add(lead)
@@ -417,11 +412,7 @@ async def create_lead(
 
 
 @app.patch("/leads/{lead_id}", response_model=LeadResponse, tags=["Leads"])
-async def update_lead(
-    lead_id: int,
-    updates: LeadUpdate,
-    db: AsyncSession = Depends(get_db)
-):
+async def update_lead(lead_id: int, updates: LeadUpdate, db: AsyncSession = Depends(get_db)):
     """Update a lead"""
     result = await db.execute(
         select(PotentialLead).where(PotentialLead.id == lead_id)
@@ -431,7 +422,6 @@ async def update_lead(
     if not lead:
         raise HTTPException(status_code=404, detail="Lead not found")
     
-    # Apply updates
     update_data = updates.model_dump(exclude_unset=True)
     for field, value in update_data.items():
         setattr(lead, field, value)
@@ -447,11 +437,8 @@ async def update_lead(
 
 
 @app.post("/leads/{lead_id}/approve", response_model=LeadResponse, tags=["Leads"])
-async def approve_lead(
-    lead_id: int,
-    db: AsyncSession = Depends(get_db)
-):
-    """Approve a lead (marks as ready for CRM sync when enabled)"""
+async def approve_lead(lead_id: int, db: AsyncSession = Depends(get_db)):
+    """Approve a lead"""
     result = await db.execute(
         select(PotentialLead).where(PotentialLead.id == lead_id)
     )
@@ -459,9 +446,6 @@ async def approve_lead(
     
     if not lead:
         raise HTTPException(status_code=404, detail="Lead not found")
-    
-    if lead.status == "approved":
-        raise HTTPException(status_code=400, detail="Lead already approved")
     
     lead.status = "approved"
     lead.updated_at = datetime.now(timezone.utc)
@@ -475,12 +459,8 @@ async def approve_lead(
 
 
 @app.post("/leads/{lead_id}/reject", response_model=LeadResponse, tags=["Leads"])
-async def reject_lead(
-    lead_id: int,
-    reason: Optional[str] = None,
-    db: AsyncSession = Depends(get_db)
-):
-    """Reject/mark a lead as bad"""
+async def reject_lead(lead_id: int, reason: Optional[str] = None, db: AsyncSession = Depends(get_db)):
+    """Reject a lead"""
     result = await db.execute(
         select(PotentialLead).where(PotentialLead.id == lead_id)
     )
@@ -526,10 +506,7 @@ async def delete_lead(lead_id: int, db: AsyncSession = Depends(get_db)):
 # -----------------------------------------------------------------------------
 
 @app.get("/sources", response_model=List[SourceResponse], tags=["Sources"])
-async def list_sources(
-    active_only: bool = False,
-    db: AsyncSession = Depends(get_db)
-):
+async def list_sources(active_only: bool = False, db: AsyncSession = Depends(get_db)):
     """List all scraping sources"""
     query = select(Source)
     
@@ -541,44 +518,41 @@ async def list_sources(
     result = await db.execute(query)
     sources = result.scalars().all()
     
-    return [SourceResponse.model_validate(source) for source in sources]
-
-
-@app.get("/sources/{source_id}", response_model=SourceResponse, tags=["Sources"])
-async def get_source(source_id: int, db: AsyncSession = Depends(get_db)):
-    """Get a single source by ID"""
-    result = await db.execute(
-        select(Source).where(Source.id == source_id)
-    )
-    source = result.scalar_one_or_none()
-    
-    if not source:
-        raise HTTPException(status_code=404, detail="Source not found")
-    
-    return SourceResponse.model_validate(source)
+    return [
+        SourceResponse(
+            id=str(source.id),
+            name=source.name,
+            url=source.url,
+            scrape_frequency=source.scrape_frequency,
+            is_active=source.is_active,
+            last_scraped_at=source.last_scraped_at,
+            leads_found=source.leads_found,
+            success_rate=float(source.success_rate) if source.success_rate else None,
+            notes=source.notes,
+            created_at=source.created_at,
+            updated_at=source.updated_at
+        )
+        for source in sources
+    ]
 
 
 @app.post("/sources", response_model=SourceResponse, tags=["Sources"])
-async def create_source(
-    source_data: SourceCreate,
-    db: AsyncSession = Depends(get_db)
-):
+async def create_source(source_data: SourceCreate, db: AsyncSession = Depends(get_db)):
     """Create a new scraping source"""
     # Check for duplicate URL
     result = await db.execute(
-        select(Source).where(Source.base_url == source_data.base_url)
+        select(Source).where(Source.url == source_data.url)
     )
     existing = result.scalar_one_or_none()
-    
     if existing:
         raise HTTPException(status_code=409, detail="Source with this URL already exists")
     
     source = Source(
         name=source_data.name,
-        base_url=source_data.base_url,
-        source_type=source_data.source_type,
-        priority=source_data.priority,
-        is_active=source_data.is_active
+        url=source_data.url,
+        scrape_frequency=source_data.scrape_frequency,
+        is_active=source_data.is_active,
+        notes=source_data.notes
     )
     
     db.add(source)
@@ -587,7 +561,20 @@ async def create_source(
     
     logger.info(f"Created source: {source.name} (ID: {source.id})")
     
-    return SourceResponse.model_validate(source)
+    # Return with string ID
+    return SourceResponse(
+        id=str(source.id),
+        name=source.name,
+        url=source.url,
+        scrape_frequency=source.scrape_frequency,
+        is_active=source.is_active,
+        last_scraped_at=source.last_scraped_at,
+        leads_found=source.leads_found,
+        success_rate=float(source.success_rate) if source.success_rate else None,
+        notes=source.notes,
+        created_at=source.created_at,
+        updated_at=source.updated_at
+    )
 
 
 @app.post("/sources/{source_id}/toggle", response_model=SourceResponse, tags=["Sources"])
@@ -652,7 +639,6 @@ async def get_scrape_logs(
     result = await db.execute(query)
     logs = result.scalars().all()
     
-    # Add source names
     response_list = []
     for log in logs:
         log_response = ScrapeLogResponse.model_validate(log)
@@ -665,25 +651,3 @@ async def get_scrape_logs(
         response_list.append(log_response)
     
     return response_list
-
-
-# -----------------------------------------------------------------------------
-# Placeholder for future scraping endpoints
-# -----------------------------------------------------------------------------
-
-@app.post("/scrape/test", tags=["Scraping"])
-async def test_scrape_endpoint():
-    """
-    Placeholder for scraping functionality.
-    Will be enabled once scraping services are ready.
-    """
-    return {
-        "message": "Scraping endpoints coming soon!",
-        "status": "not_implemented",
-        "note": "Use Celery worker for background scraping"
-    }
-
-
-# -----------------------------------------------------------------------------
-# Run with: uvicorn app.main:app --reload --port 8000
-# -----------------------------------------------------------------------------

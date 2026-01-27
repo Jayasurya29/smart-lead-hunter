@@ -1,35 +1,44 @@
+-- ============================================================
+-- SMART LEAD HUNTER - DATABASE SCHEMA
+-- ============================================================
+
 -- Enable required extensions
 CREATE EXTENSION IF NOT EXISTS vector;
 CREATE EXTENSION IF NOT EXISTS pg_trgm;
 
 -- ============================================================
 -- TABLE: sources
--- Stores the 150+ websites we scrape
 -- ============================================================
-CREATE TABLE sources (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+CREATE TABLE IF NOT EXISTS sources (
+    id SERIAL PRIMARY KEY,
     name VARCHAR(100) NOT NULL,
-    url VARCHAR(500) NOT NULL,
+    base_url VARCHAR(500) NOT NULL,
+    source_type VARCHAR(50) DEFAULT 'aggregator',
+    priority INTEGER DEFAULT 5,
+    entry_urls TEXT[],
     scrape_frequency VARCHAR(20) DEFAULT 'daily',
+    max_depth INTEGER DEFAULT 2,
+    use_playwright BOOLEAN DEFAULT false,
     is_active BOOLEAN DEFAULT true,
-    last_scraped_at TIMESTAMP,
+    last_scraped_at TIMESTAMPTZ,
     leads_found INTEGER DEFAULT 0,
     success_rate DECIMAL(5,2),
     notes TEXT,
-    created_at TIMESTAMP DEFAULT NOW(),
-    updated_at TIMESTAMP DEFAULT NOW()
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
 -- ============================================================
 -- TABLE: potential_leads
--- Scraped leads waiting for review before pushing to Insightly
 -- ============================================================
-CREATE TABLE potential_leads (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+CREATE TABLE IF NOT EXISTS potential_leads (
+    id SERIAL PRIMARY KEY,
     
     -- Hotel Information
     hotel_name VARCHAR(255) NOT NULL,
+    hotel_name_normalized VARCHAR(255),
     brand VARCHAR(100),
+    hotel_type VARCHAR(50),
     hotel_website VARCHAR(500),
     
     -- Location
@@ -38,14 +47,13 @@ CREATE TABLE potential_leads (
     country VARCHAR(100) DEFAULT 'USA',
     
     -- Contact Information
-    contact_first_name VARCHAR(100),
-    contact_last_name VARCHAR(100),
+    contact_name VARCHAR(200),
     contact_title VARCHAR(100),
     contact_email VARCHAR(255),
     contact_phone VARCHAR(50),
     
     -- Hotel Details
-    projected_opening_date DATE,
+    opening_date VARCHAR(50),
     room_count INTEGER,
     description TEXT,
     
@@ -54,86 +62,82 @@ CREATE TABLE potential_leads (
     score_breakdown JSONB,
     
     -- Source Tracking
-    source_id UUID REFERENCES sources(id),
-    source_url TEXT NOT NULL,
-    source_site VARCHAR(100) NOT NULL,
-    scraped_at TIMESTAMP DEFAULT NOW(),
+    source_id INTEGER REFERENCES sources(id),
+    source_url TEXT,
+    source_site VARCHAR(100),
+    scraped_at TIMESTAMPTZ DEFAULT NOW(),
     
     -- Workflow Status
-    status VARCHAR(20) DEFAULT 'New' CHECK (status IN ('New', 'Claimed', 'Approved', 'Rejected')),
+    status VARCHAR(20) DEFAULT 'new',
     claimed_by VARCHAR(100),
-    claimed_at TIMESTAMP,
-    rejection_reason VARCHAR(50) CHECK (rejection_reason IN ('Duplicate', 'Bad Data', 'Wrong Market', 'Not a Hotel', 'Already Client', 'Other')),
-    rejection_notes TEXT,
+    claimed_at TIMESTAMPTZ,
+    notes TEXT,
     
     -- Insightly Sync
-    insightly_lead_id BIGINT,
-    pushed_to_insightly_at TIMESTAMP,
+    insightly_id INTEGER,
+    synced_at TIMESTAMPTZ,
     
     -- Deduplication
     embedding VECTOR(384),
+    duplicate_of_id INTEGER,
+    
+    -- Raw data
+    raw_data JSONB,
     
     -- Timestamps
-    created_at TIMESTAMP DEFAULT NOW(),
-    updated_at TIMESTAMP DEFAULT NOW()
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
 -- ============================================================
 -- TABLE: scrape_logs
--- History of scraping runs for monitoring
 -- ============================================================
-CREATE TABLE scrape_logs (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    source_id UUID REFERENCES sources(id),
-    started_at TIMESTAMP NOT NULL,
-    completed_at TIMESTAMP,
+CREATE TABLE IF NOT EXISTS scrape_logs (
+    id SERIAL PRIMARY KEY,
+    source_id INTEGER REFERENCES sources(id),
+    started_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    completed_at TIMESTAMPTZ,
+    urls_scraped INTEGER DEFAULT 0,
     pages_crawled INTEGER DEFAULT 0,
     leads_found INTEGER DEFAULT 0,
     leads_new INTEGER DEFAULT 0,
     leads_duplicate INTEGER DEFAULT 0,
-    errors TEXT,
-    status VARCHAR(20) DEFAULT 'running' CHECK (status IN ('running', 'completed', 'failed')),
-    created_at TIMESTAMP DEFAULT NOW()
+    status VARCHAR(20) DEFAULT 'running',
+    errors JSONB,
+    created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
 -- ============================================================
--- INDEXES for performance
+-- INDEXES
 -- ============================================================
 
 -- Potential Leads indexes
-CREATE INDEX idx_potential_leads_status ON potential_leads(status);
-CREATE INDEX idx_potential_leads_score ON potential_leads(lead_score DESC);
-CREATE INDEX idx_potential_leads_source ON potential_leads(source_site);
-CREATE INDEX idx_potential_leads_hotel ON potential_leads(hotel_name);
-CREATE INDEX idx_potential_leads_state ON potential_leads(state);
-CREATE INDEX idx_potential_leads_created ON potential_leads(created_at DESC);
-CREATE INDEX idx_potential_leads_insightly ON potential_leads(insightly_lead_id);
+CREATE INDEX IF NOT EXISTS idx_leads_status ON potential_leads(status);
+CREATE INDEX IF NOT EXISTS idx_leads_score ON potential_leads(lead_score DESC NULLS LAST);
+CREATE INDEX IF NOT EXISTS idx_leads_state ON potential_leads(state);
+CREATE INDEX IF NOT EXISTS idx_leads_created ON potential_leads(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_leads_normalized_name ON potential_leads(hotel_name_normalized);
 
 -- Vector similarity index for deduplication
-CREATE INDEX idx_potential_leads_embedding ON potential_leads 
+CREATE INDEX IF NOT EXISTS idx_leads_embedding ON potential_leads 
 USING ivfflat (embedding vector_cosine_ops) WITH (lists = 100);
 
--- Full-text search index
-CREATE INDEX idx_potential_leads_search ON potential_leads 
-USING GIN (to_tsvector('english', hotel_name || ' ' || COALESCE(description, '')));
-
--- Fuzzy matching index for hotel names
-CREATE INDEX idx_potential_leads_name_trgm ON potential_leads USING gin (hotel_name gin_trgm_ops);
+-- Fuzzy matching index
+CREATE INDEX IF NOT EXISTS idx_leads_name_trgm ON potential_leads 
+USING gin (hotel_name gin_trgm_ops);
 
 -- Sources indexes
-CREATE INDEX idx_sources_active ON sources(is_active);
-CREATE INDEX idx_sources_frequency ON sources(scrape_frequency);
+CREATE INDEX IF NOT EXISTS idx_sources_active ON sources(is_active);
+CREATE INDEX IF NOT EXISTS idx_sources_priority ON sources(priority DESC);
 
 -- Scrape Logs indexes
-CREATE INDEX idx_scrape_logs_source ON scrape_logs(source_id);
-CREATE INDEX idx_scrape_logs_status ON scrape_logs(status);
-CREATE INDEX idx_scrape_logs_date ON scrape_logs(started_at DESC);
+CREATE INDEX IF NOT EXISTS idx_scrape_logs_source ON scrape_logs(source_id);
+CREATE INDEX IF NOT EXISTS idx_scrape_logs_started ON scrape_logs(started_at DESC);
 
 -- ============================================================
--- FUNCTIONS
+-- AUTO-UPDATE TRIGGER
 -- ============================================================
 
--- Auto-update updated_at timestamp
 CREATE OR REPLACE FUNCTION update_updated_at_column()
 RETURNS TRIGGER AS $$
 BEGIN
@@ -142,11 +146,12 @@ BEGIN
 END;
 $$ language 'plpgsql';
 
--- Triggers for updated_at
-CREATE TRIGGER update_potential_leads_updated_at 
+DROP TRIGGER IF EXISTS update_leads_updated_at ON potential_leads;
+CREATE TRIGGER update_leads_updated_at 
     BEFORE UPDATE ON potential_leads 
     FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
+DROP TRIGGER IF EXISTS update_sources_updated_at ON sources;
 CREATE TRIGGER update_sources_updated_at 
     BEFORE UPDATE ON sources 
     FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();

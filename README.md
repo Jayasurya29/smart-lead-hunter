@@ -1,6 +1,6 @@
 # Smart Lead Hunter
 
-Automated hotel lead generation system for JAU Uniforms.
+Automated hotel lead generation system for J.A.Uniforms.
 
 ## What It Does
 

@@ -1,35 +1,85 @@
-# Core Framework
+# =============================================================================
+# SMART LEAD HUNTER - REQUIREMENTS
+# =============================================================================
+# Full tech stack for hotel lead generation system
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# WEB FRAMEWORK
+# -----------------------------------------------------------------------------
 fastapi==0.109.0
 uvicorn[standard]==0.27.0
-pydantic==2.5.0
+pydantic==2.5.3
 pydantic-settings==2.1.0
-python-dotenv==1.0.0
+python-multipart==0.0.6
 
-# Database
-sqlalchemy==2.0.25
-asyncpg==0.29.0
-psycopg2-binary==2.9.9
-pgvector==0.2.4
+# -----------------------------------------------------------------------------
+# DATABASE
+# -----------------------------------------------------------------------------
+sqlalchemy[asyncio]==2.0.25
+asyncpg==0.29.0          # Async PostgreSQL driver
+psycopg2-binary==2.9.9   # Sync PostgreSQL driver (for migrations)
+pgvector==0.2.4          # Vector similarity search
+alembic==1.13.1          # Database migrations
 
-# Redis & Task Queue
-redis==5.0.1
-celery==5.3.6
-
-# Web Scraping
+# -----------------------------------------------------------------------------
+# WEB SCRAPING - DUAL APPROACH
+# -----------------------------------------------------------------------------
+# Playwright - For JavaScript-heavy sites (chain newsrooms, dynamic content)
 playwright==1.41.0
+
+# BeautifulSoup - For static HTML parsing
 beautifulsoup4==4.12.3
-lxml==5.1.0
-httpx==0.25.2
+lxml==5.1.0              # Fast HTML/XML parser
 
-# AI/ML
+# HTTP Client - For simple requests
+httpx>=0.25.2,<0.26.0
+aiohttp==3.9.1
+
+# -----------------------------------------------------------------------------
+# AI & NLP
+# -----------------------------------------------------------------------------
+# Ollama client (for local Llama 3.2)
 ollama==0.1.6
+
+# spaCy - NLP for entity extraction
 spacy==3.7.2
-sentence-transformers==2.3.1
 
-# Utilities
-tenacity==8.2.3
-python-dateutil==2.8.2
+# Sentence Transformers - For embeddings/deduplication
+sentence-transformers==2.2.2
 
-# Testing
+# -----------------------------------------------------------------------------
+# TASK QUEUE & SCHEDULING
+# -----------------------------------------------------------------------------
+celery==5.3.4
+redis==5.0.1
+celery-redbeat==2.1.1    # Redis-based scheduler
+
+# -----------------------------------------------------------------------------
+# UTILITIES
+# -----------------------------------------------------------------------------
+python-dotenv==1.0.0     # Environment variables
+tenacity==8.2.3          # Retry logic
+aiofiles==23.2.1         # Async file operations
+python-dateutil==2.8.2   # Date parsing
+
+# -----------------------------------------------------------------------------
+# LOGGING & MONITORING
+# -----------------------------------------------------------------------------
+structlog==24.1.0        # Structured logging
+rich==13.7.0             # Beautiful terminal output
+
+# -----------------------------------------------------------------------------
+# TESTING
+# -----------------------------------------------------------------------------
 pytest==7.4.4
 pytest-asyncio==0.23.3
+pytest-cov==4.1.0
+
+# -----------------------------------------------------------------------------
+# POST-INSTALL COMMANDS
+# -----------------------------------------------------------------------------
+# After pip install, run:
+#   playwright install chromium
+#   python -m spacy download en_core_web_sm
+# =============================================================================
