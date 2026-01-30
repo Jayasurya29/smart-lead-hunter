@@ -1,0 +1,8 @@
+hotel_name,brand,city,state,country,opening_date,room_count,hotel_type,contact_name,contact_title,contact_email,contact_phone,source_url,source_name,scraped_at,confidence_score
+Ruby Hotel Chicago,IHG Hotels & Resorts,Chicago,Illinois,USA,"2026, Q2 2026",,Urban lifestyle brand,,,,,https://www.hoteldive.com/topic/development/,Hotel Dive,2026-01-28T12:09:29.437832,0.7
+Six Senses Camp Korongo,IHG Hotels & Resorts,Utah,,USA,"2026, Q2 2026",,Ultra-luxury resort,,,,,https://www.hoteldive.com/topic/development/,Hotel Dive,2026-01-28T12:09:29.437832,0.7
+Ruby Hotel Nashville,IHG Hotels & Resorts,Nashville,Tennessee,USA,"2026, Q2 2026",,Urban lifestyle brand,,,,,https://www.hoteldive.com/topic/development/,Hotel Dive,2026-01-28T12:09:29.437832,0.7
+Motto by Hilton Nashville Downtown,Apple Hospitality,Nashville,Tennessee,USA,"2025, December 23rd",,Apartment-style accommodations,,,,,https://www.hoteldive.com/topic/development/,Hotel Dive,2026-01-28T12:09:29.437832,0.7
+Fort Lauderdale Flagship Hotel,Omni Hotels & Resorts,Fort Lauderdale,Florida,USA,"2025, December 22nd",,Waterfront property,,,,,https://www.hoteldive.com/topic/development/,Hotel Dive,2026-01-28T12:09:29.437832,0.7
+Hotel Daphne,Bunkhouse Hotels,Houston,Texas,USA,"2025, December 8th",,Boutique property,,,,,https://www.hoteldive.com/topic/development/,Hotel Dive,2026-01-28T12:09:29.437832,0.7
+St. Regis Estates,Marriott International,,,,"2026, Q2 2026",,Luxury hotels with significant history and expansive grounds,,,,,https://www.hoteldive.com/topic/development/,Hotel Dive,2026-01-28T12:09:29.437832,0.5

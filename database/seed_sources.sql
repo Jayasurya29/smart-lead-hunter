@@ -1,158 +1,276 @@
 -- ============================================================================
--- SMART LEAD HUNTER - SEED SOURCES
--- FOCUS: United States + Caribbean ONLY
+-- SMART LEAD HUNTER - MAJOR HOTEL CHAIN NEWSROOM SOURCES
+-- Verified Press Release URLs for New Hotel Opening Announcements
+-- Last Updated: January 30, 2026
 -- ============================================================================
 
--- Clear existing sources (optional - comment out if you want to keep existing)
--- TRUNCATE TABLE sources RESTART IDENTITY CASCADE;
+-- IMPORTANT: These are the OFFICIAL newsroom URLs for major hotel chains
+-- Each chain owns multiple brands under one corporate umbrella
+-- These URLs announce new hotel openings, groundbreakings, and expansions
 
 -- ============================================================================
--- TIER 1: AGGREGATOR SITES (Filter for US/Caribbean content)
+-- TIER 1: MARRIOTT INTERNATIONAL (30+ brands)
+-- Brands: Ritz-Carlton, St. Regis, W Hotels, EDITION, JW Marriott, 
+--         Luxury Collection, Westin, Sheraton, Marriott, Renaissance,
+--         Autograph Collection, Tribute Portfolio, Courtyard, Aloft, Moxy
 -- ============================================================================
-INSERT INTO sources (name, url, scrape_frequency, is_active, notes) VALUES
-('The Orange Studio - Hotel Openings', 'https://www.theorangestudio.com/hotel-openings', 'daily', true, 'Aggregator - Filter for US/Caribbean only'),
-('New Hotels Opening', 'https://www.newhotelsopening.com/', 'daily', true, 'Aggregator - Filter for US/Caribbean only'),
-('Hotel Openings List 2025', 'https://www.newhotelsopening.com/hotel-openings-2025', 'daily', true, 'Aggregator - 2025 openings'),
-('Hotel Openings List 2026', 'https://www.newhotelsopening.com/hotel-openings-2026', 'daily', true, 'Aggregator - 2026 openings'),
-('Hotel Online - New Openings', 'https://www.hotel-online.com/press_releases/release/new-hotel-openings', 'daily', true, 'Industry aggregator');
 
--- ============================================================================
--- TIER 2: FLORIDA SOURCES (53% of your clients!)
--- ============================================================================
-INSERT INTO sources (name, url, scrape_frequency, is_active, notes) VALUES
-('Florida Restaurant & Lodging', 'https://frla.org/news/', 'daily', true, 'FLORIDA: State association news'),
-('South Florida Business Journal - Hotels', 'https://www.bizjournals.com/southflorida/news/industry/hotels', 'daily', true, 'FLORIDA: Miami, Fort Lauderdale, Palm Beach'),
-('Orlando Business Journal - Hotels', 'https://www.bizjournals.com/orlando/news/industry/hotels', 'daily', true, 'FLORIDA: Orlando area'),
-('Tampa Bay Business Journal - Hotels', 'https://www.bizjournals.com/tampabay/news/industry/hotels', 'daily', true, 'FLORIDA: Tampa, Clearwater, St Pete'),
-('Jacksonville Business Journal', 'https://www.bizjournals.com/jacksonville/news/industry/hotels', 'daily', true, 'FLORIDA: Jacksonville area'),
-('Miami Herald - Travel', 'https://www.miamiherald.com/travel/', 'daily', true, 'FLORIDA: Miami travel news'),
-('Orlando Sentinel - Theme Parks', 'https://www.orlandosentinel.com/theme-parks/', 'daily', true, 'FLORIDA: Orlando attractions/hotels'),
-('Visit Florida News', 'https://www.visitflorida.com/en-us/media/press-releases.html', 'weekly', true, 'FLORIDA: State tourism news'),
-('Florida Trend - Hospitality', 'https://www.floridatrend.com/hospitality', 'weekly', true, 'FLORIDA: Business magazine'),
-('Naples Daily News', 'https://www.naplesnews.com/business/', 'daily', true, 'FLORIDA: Naples, Southwest Florida'),
-('Sun Sentinel - Hotels', 'https://www.sun-sentinel.com/business/', 'daily', true, 'FLORIDA: Fort Lauderdale area'),
-('Palm Beach Post', 'https://www.palmbeachpost.com/business/', 'daily', true, 'FLORIDA: Palm Beach area'),
-('Sarasota Herald-Tribune', 'https://www.heraldtribune.com/business/', 'weekly', true, 'FLORIDA: Sarasota area'),
-('Keys Weekly', 'https://keysweekly.com/', 'weekly', true, 'FLORIDA: Florida Keys');
+INSERT INTO sources (name, url, category, scrape_frequency, is_active, notes) VALUES
+('Marriott News Center', 'https://news.marriott.com/', 'chain_newsroom', 'daily', true, 
+ 'PRIMARY - Main corporate newsroom for all 30+ Marriott brands including Ritz-Carlton, St. Regis, W Hotels'),
+
+('Marriott Media Centre EMEA', 'https://marriott.pressarea.com/pressrelease?keywords=Opening', 'chain_newsroom', 'weekly', true,
+ 'Europe/Middle East/Africa regional newsroom - filter by Opening keyword'),
+
+('Marriott Investor Relations', 'https://marriott.gcs-web.com/news-releases', 'chain_newsroom', 'weekly', true,
+ 'Financial press releases with quarterly development pipeline updates'),
+
+('Marriott New Openings Page', 'https://www.marriott.com/en-us/marriott-brands/portfolio/openings.mi', 'chain_newsroom', 'weekly', true,
+ 'Consumer-facing new hotel openings list - good for confirmed openings'),
 
 -- ============================================================================
--- TIER 3: CARIBBEAN SOURCES (5% of your clients - growth opportunity)
+-- TIER 2: HILTON WORLDWIDE (24 brands)
+-- Brands: Waldorf Astoria, Conrad, LXR, NoMad, Signia, Canopy, Curio,
+--         Tapestry, DoubleTree, Embassy Suites, Hilton, Hilton Garden Inn
 -- ============================================================================
-INSERT INTO sources (name, url, scrape_frequency, is_active, notes) VALUES
-('Caribbean Journal', 'https://www.caribjournal.com/', 'daily', true, 'CARIBBEAN: Leading Caribbean travel news'),
-('Caribbean Hotel & Tourism Association', 'https://www.caribbeanhotelandtourism.com/news/', 'daily', true, 'CARIBBEAN: Industry association'),
-('Loop Caribbean', 'https://caribbean.loopnews.com/', 'daily', true, 'CARIBBEAN: Regional news'),
-('Caribbean News Digital', 'https://www.caribbeannewsdigital.com/', 'daily', true, 'CARIBBEAN: Regional news'),
-('Bahamas Ministry of Tourism', 'https://www.bahamas.com/press-releases', 'weekly', true, 'CARIBBEAN: Bahamas - 8 clients'),
-('Jamaica Tourist Board', 'https://www.visitjamaica.com/press-room/', 'weekly', true, 'CARIBBEAN: Jamaica - 2 clients'),
-('Turks and Caicos Tourism', 'https://www.turksandcaicostourism.com/media/', 'weekly', true, 'CARIBBEAN: TCI - 8 clients'),
-('Barbados Tourism', 'https://www.visitbarbados.org/media-centre', 'weekly', true, 'CARIBBEAN: Barbados - 4 clients'),
-('Aruba Tourism', 'https://www.aruba.com/us/press', 'weekly', true, 'CARIBBEAN: Aruba'),
-('Puerto Rico Tourism', 'https://www.discoverpuertorico.com/press-room', 'weekly', true, 'CARIBBEAN: Puerto Rico'),
-('Cayman Islands Tourism', 'https://www.visitcaymanislands.com/en-us/about-cayman/media-centre', 'weekly', true, 'CARIBBEAN: Cayman - 8 clients'),
-('St. Lucia Tourism', 'https://www.stlucia.org/en/media/', 'weekly', true, 'CARIBBEAN: St. Lucia - 4 clients'),
-('USVI Tourism', 'https://www.visitusvi.com/media', 'weekly', true, 'CARIBBEAN: US Virgin Islands'),
-('BVI Tourism', 'https://www.bvitourism.com/media', 'weekly', true, 'CARIBBEAN: British Virgin Islands - 2 clients');
 
--- ============================================================================
--- TIER 4: OTHER US STATES (33% of your clients)
--- ============================================================================
-INSERT INTO sources (name, url, scrape_frequency, is_active, notes) VALUES
--- California (4.5% of clients)
-('LA Business Journal - Hotels', 'https://labusinessjournal.com/news/hotels/', 'weekly', true, 'USA: Los Angeles'),
-('San Diego Business Journal', 'https://www.sdbj.com/news/hotels-tourism/', 'weekly', true, 'USA: San Diego'),
-('SF Business Times - Hotels', 'https://www.bizjournals.com/sanfrancisco/news/industry/hotels', 'weekly', true, 'USA: San Francisco'),
+('Hilton Stories Main', 'https://stories.hilton.com/', 'chain_newsroom', 'daily', true,
+ 'PRIMARY - Main newsroom for all 24 Hilton brands including Waldorf Astoria, Conrad'),
 
--- New York (3.5% of clients)
-('NYC Tourism Press', 'https://www.nycgo.com/press-and-media', 'weekly', true, 'USA: New York City'),
-('Crain NY - Hotels', 'https://www.crainsnewyork.com/hospitality-tourism', 'weekly', true, 'USA: New York'),
+('Hilton Press Releases', 'https://stories.hilton.com/releases', 'chain_newsroom', 'daily', true,
+ 'Direct press releases feed - all brands'),
 
--- Texas (2.6% of clients)
-('Dallas Business Journal - Hotels', 'https://www.bizjournals.com/dallas/news/industry/hotels', 'weekly', true, 'USA: Dallas'),
-('Houston Business Journal - Hotels', 'https://www.bizjournals.com/houston/news/industry/hotels', 'weekly', true, 'USA: Houston'),
-('San Antonio Business Journal', 'https://www.bizjournals.com/sanantonio/news/industry/hotels', 'weekly', true, 'USA: San Antonio'),
-('Austin Business Journal - Hotels', 'https://www.bizjournals.com/austin/news/industry/hotels', 'weekly', true, 'USA: Austin'),
+('Hilton New Openings 2026', 'https://stories.hilton.com/releases/new-hilton-openings-in-2026', 'chain_newsroom', 'monthly', true,
+ 'Annual new openings roundup - updated each year'),
 
--- Georgia (2.3% of clients)
-('Atlanta Business Chronicle - Hotels', 'https://www.bizjournals.com/atlanta/news/industry/hotels', 'weekly', true, 'USA: Atlanta'),
-
--- Tennessee (2.2% of clients)
-('Nashville Business Journal - Hotels', 'https://www.bizjournals.com/nashville/news/industry/hotels', 'weekly', true, 'USA: Nashville'),
-('Memphis Business Journal', 'https://www.bizjournals.com/memphis/news/industry/hotels', 'weekly', true, 'USA: Memphis'),
-
--- South Carolina (1.7% of clients)
-('Charleston Business Journal', 'https://www.bizjournals.com/charleston/news/industry/hotels', 'weekly', true, 'USA: Charleston'),
-('Greenville Business Magazine', 'https://www.greenvillebusinessmag.com/', 'weekly', true, 'USA: Greenville'),
-
--- Louisiana (1.1% of clients)
-('New Orleans Business', 'https://www.bizjournals.com/neworleans/news/industry/hotels', 'weekly', true, 'USA: New Orleans'),
-
--- North Carolina (1.1% of clients)
-('Charlotte Business Journal - Hotels', 'https://www.bizjournals.com/charlotte/news/industry/hotels', 'weekly', true, 'USA: Charlotte'),
-('Triangle Business Journal', 'https://www.bizjournals.com/triangle/news/industry/hotels', 'weekly', true, 'USA: Raleigh-Durham'),
-
--- Washington DC (1.2% of clients)
-('Washington Business Journal - Hotels', 'https://www.bizjournals.com/washington/news/industry/hotels', 'weekly', true, 'USA: Washington DC'),
-
--- Virginia (1.0% of clients)
-('Virginia Business', 'https://www.virginiabusiness.com/', 'weekly', true, 'USA: Virginia'),
-
--- Pennsylvania (1.1% of clients)
-('Philadelphia Business Journal - Hotels', 'https://www.bizjournals.com/philadelphia/news/industry/hotels', 'weekly', true, 'USA: Philadelphia'),
-('Pittsburgh Business Times', 'https://www.bizjournals.com/pittsburgh/news/industry/hotels', 'weekly', true, 'USA: Pittsburgh');
+('Hilton Luxury Hot List', 'https://stories.hilton.com/releases/hiltons-luxury-lifestyle-hot-list-2025-year-in-review-2026-strategic-expansion', 'chain_newsroom', 'monthly', true,
+ 'Luxury and lifestyle brand openings - Waldorf, Conrad, LXR, NoMad'),
 
 -- ============================================================================
--- TIER 5: US HOSPITALITY PUBLICATIONS
+-- TIER 3: HYATT HOTELS CORPORATION (25+ brands)
+-- Brands: Park Hyatt, Alila, Miraval, Andaz, Thompson, The Standard,
+--         Grand Hyatt, Hyatt Regency, Hyatt Ziva, Hyatt Zilara, Secrets, Dreams
 -- ============================================================================
-INSERT INTO sources (name, url, scrape_frequency, is_active, notes) VALUES
-('Travel + Leisure - Hotel Openings', 'https://www.travelandleisure.com/hotels-resorts/hotel-openings', 'daily', true, 'Publication - Filter for US/Caribbean'),
-('Conde Nast Traveler - New Hotels', 'https://www.cntraveler.com/tags/hotel-openings', 'daily', true, 'Publication - Filter for US/Caribbean'),
-('Hospitality Net', 'https://www.hospitalitynet.org/', 'daily', true, 'Industry publication'),
-('Hotel News Resource', 'https://www.hotelnewsresource.com/', 'daily', true, 'Industry publication'),
-('Hotel Management', 'https://www.hotelmanagement.net/', 'daily', true, 'Industry publication'),
-('Hotel Business', 'https://www.hotelbusiness.com/', 'daily', true, 'Hotel industry news'),
-('Lodging Magazine', 'https://lodgingmagazine.com/', 'weekly', true, 'Lodging industry'),
-('Hotel News Now', 'https://hotelnewsnow.com/', 'daily', true, 'STR hotel news'),
-('Skift', 'https://skift.com/', 'daily', true, 'Travel intelligence - Filter for US');
+
+('Hyatt Newsroom', 'https://newsroom.hyatt.com/news-releases', 'chain_newsroom', 'daily', true,
+ 'PRIMARY - Main newsroom for all Hyatt brands including Park Hyatt, Alila, Thompson'),
+
+('Hyatt Investor News', 'https://investors.hyatt.com/news/investor-news/default.aspx', 'chain_newsroom', 'weekly', true,
+ 'Financial press releases with development pipeline data'),
 
 -- ============================================================================
--- TIER 6: US HOTEL CHAINS - AMERICAS FOCUS
+-- TIER 4: IHG HOTELS & RESORTS (20 brands)
+-- Brands: Six Senses, Regent, InterContinental, Vignette, Kimpton,
+--         Hotel Indigo, voco, Crowne Plaza, Holiday Inn, Staybridge Suites
 -- ============================================================================
-INSERT INTO sources (name, url, scrape_frequency, is_active, notes) VALUES
-('Hilton Stories - Americas', 'https://stories.hilton.com/releases', 'weekly', true, 'Chain news - Filter for Americas'),
-('Marriott News - Americas', 'https://news.marriott.com/', 'weekly', true, 'Chain news - Filter for Americas'),
-('Hyatt Newsroom', 'https://newsroom.hyatt.com/', 'weekly', true, 'Chain news - Filter for Americas'),
-('IHG Newsroom - Americas', 'https://www.ihgplc.com/en/news-and-media', 'weekly', true, 'Chain news - Filter for Americas'),
-('Wyndham Newsroom', 'https://corporate.wyndham.com/newsroom', 'weekly', true, 'Chain news - US focused'),
-('Choice Hotels News', 'https://news.choicehotels.com/', 'weekly', true, 'Chain news - US focused'),
-('Best Western News', 'https://www.bestwestern.com/en_US/about/press-media.html', 'weekly', true, 'Chain news - US focused'),
-('Drury Hotels Coming Soon', 'https://www.druryhotels.com/coming-soon', 'weekly', true, 'Regional chain - US only');
+
+('IHG News Releases', 'https://www.ihgplc.com/en/news-and-media/news-releases', 'chain_newsroom', 'daily', true,
+ 'PRIMARY - Main newsroom for all IHG brands including Six Senses, Regent, InterContinental, Kimpton'),
+
+('IHG News & Media Main', 'https://www.ihgplc.com/news-and-media', 'chain_newsroom', 'daily', true,
+ 'Corporate news hub - all announcements'),
+
+('IHG Development News', 'https://development.ihg.com/resources/news-releases', 'chain_newsroom', 'weekly', true,
+ 'Development-focused news for owners and developers'),
+
+('IHG Owners Association', 'https://www.owners.org/resources/news-and-events', 'chain_newsroom', 'weekly', true,
+ 'Franchisee news - often has early development announcements'),
 
 -- ============================================================================
--- TIER 7: HOTEL DEVELOPMENT / REAL ESTATE (US Focus)
+-- TIER 5: ACCOR (45+ brands including Ennismore)
+-- Brands: Orient Express, Raffles, Fairmont, Sofitel, MGallery, Pullman,
+--         Swissôtel, Mövenpick, Novotel, Delano, Mondrian, SLS, Hyde
 -- ============================================================================
-INSERT INTO sources (name, url, scrape_frequency, is_active, notes) VALUES
-('Hotel News Resource - Development', 'https://www.hotelnewsresource.com/hotel_development.html', 'daily', true, 'Development pipeline - US'),
-('Lodging Econometrics', 'https://lodgingeconometrics.com/', 'weekly', true, 'Construction pipeline - US'),
-('Bisnow - Hotels', 'https://www.bisnow.com/tags/hotels', 'daily', true, 'Real estate news - US'),
-('Commercial Observer - Hotels', 'https://commercialobserver.com/tag/hotels/', 'weekly', true, 'Real estate - US'),
-('Globe St - Hotels', 'https://www.globest.com/hospitality/', 'weekly', true, 'Real estate news - US');
+
+('Accor News & Stories', 'https://group.accor.com/en/news-stories', 'chain_newsroom', 'daily', true,
+ 'PRIMARY - Main newsroom for all 45+ Accor brands including Raffles, Fairmont, Sofitel'),
+
+('Accor Pressroom', 'https://press.accor.com/', 'chain_newsroom', 'daily', true,
+ 'Direct press releases - all brands'),
+
+('Accor 2026 Openings', 'https://group.accor.com/en/news-stories/accor-2026-openings', 'chain_newsroom', 'monthly', true,
+ 'Annual openings roundup'),
+
+('Accor 2025 Openings', 'https://group.accor.com/en/news-stories/accor-hotel-openings-2025', 'chain_newsroom', 'monthly', true,
+ 'Previous year openings - reference'),
 
 -- ============================================================================
--- SUMMARY
+-- TIER 6: WYNDHAM HOTELS & RESORTS (25 brands)
+-- Brands: Wyndham Grand, Registry Collection, Dolce, Trademark,
+--         Wyndham, Wyndham Garden, La Quinta, Days Inn (EXCLUDE budget)
 -- ============================================================================
--- Florida sources: 14
--- Caribbean sources: 14  
--- Other US states: 20
--- US Publications: 9
--- US Hotel Chains: 8
--- US Development: 5
--- Aggregators: 5
--- -----------------------
--- TOTAL: ~75 sources (all US + Caribbean focused)
+
+('Wyndham News & Media', 'https://corporate.wyndhamhotels.com/news-media/', 'chain_newsroom', 'daily', true,
+ 'PRIMARY - Main newsroom for Wyndham brands - focus on Wyndham Grand, Registry Collection'),
+
+('Wyndham News Releases', 'https://corporate.wyndhamhotels.com/news-releases/', 'chain_newsroom', 'daily', true,
+ 'Direct press releases archive'),
+
+('Wyndham Investor Relations', 'https://investor.wyndhamhotels.com/news-events/press-releases', 'chain_newsroom', 'weekly', true,
+ 'Financial press releases with development updates'),
+
+('Wyndham Business News', 'https://www.wyndhambusiness.com/news-and-events/', 'chain_newsroom', 'weekly', true,
+ 'B2B news for corporate travel'),
 
 -- ============================================================================
--- VERIFY
+-- TIER 7: FOUR SEASONS (Single ultra-luxury brand)
+-- HIGH PRIORITY - Major uniform opportunity
 -- ============================================================================
--- SELECT COUNT(*) as total FROM sources;
--- SELECT scrape_frequency, COUNT(*) FROM sources GROUP BY scrape_frequency;
+
+('Four Seasons Press Room', 'https://press.fourseasons.com/', 'chain_newsroom', 'daily', true,
+ 'PRIMARY - Ultra-luxury single brand - HIGH PRIORITY for uniform sales'),
+
+('Four Seasons News Releases', 'https://press.fourseasons.com/news-releases/', 'chain_newsroom', 'daily', true,
+ 'Direct press releases'),
+
+('Four Seasons 2026 Travel', 'https://press.fourseasons.com/news-releases/2025/where-to-travel-in-2026/', 'chain_newsroom', 'monthly', true,
+ 'Annual openings and renovations guide'),
+
+('Four Seasons New Openings', 'https://www.fourseasons.com/newopenings/', 'chain_newsroom', 'weekly', true,
+ 'Consumer-facing new openings page'),
+
+('PR Newswire Four Seasons', 'https://www.prnewswire.com/news/four-seasons-hotels-and-resorts/', 'aggregator', 'daily', true,
+ 'Aggregated press releases - backup source'),
+
+-- ============================================================================
+-- TIER 8: BWH HOTELS (Best Western - 18 brands)
+-- Focus on WorldHotels luxury segment only
+-- ============================================================================
+
+('BWH Press Releases', 'https://www.bestwestern.com/en_US/about/press-media.html', 'chain_newsroom', 'weekly', true,
+ 'Main newsroom - focus on WorldHotels Luxury, Elite brands only'),
+
+-- ============================================================================
+-- TIER 9: LUXURY INDEPENDENT BRANDS
+-- HIGH PRIORITY - Ultra-luxury independent chains
+-- ============================================================================
+
+('Aman New Developments', 'https://www.aman.com/new-developments', 'chain_newsroom', 'weekly', true,
+ 'HIGH PRIORITY - Ultra-luxury Aman resorts - pipeline includes Miami Beach, Beverly Hills'),
+
+('Aman Trade News', 'https://www.aman.com/trade-professionals/new-noteworthy', 'chain_newsroom', 'weekly', true,
+ 'Trade professional updates'),
+
+('Rosewood Media', 'https://www.rosewoodhotels.com/en/media', 'chain_newsroom', 'weekly', true,
+ 'HIGH PRIORITY - Ultra-luxury Rosewood Hotels - 54 properties, 30+ in development'),
+
+('Rosewood Hotel Group', 'https://www.rosewoodhotelgroup.com/en-us/news-and-media', 'chain_newsroom', 'weekly', true,
+ 'Corporate newsroom including New World Hotels'),
+
+('Loews Hotels Press', 'https://www.loewshotels.com/press/press-releases/press-categories/press-releases', 'chain_newsroom', 'weekly', true,
+ 'FLORIDA PRIORITY - Properties in Miami Beach, Orlando - luxury American chain'),
+
+-- ============================================================================
+-- TIER 10: PR AGGREGATORS (Backup Sources)
+-- Use to catch releases that may not appear on brand newsrooms
+-- ============================================================================
+
+('PR Newswire Marriott', 'https://www.prnewswire.com/news/marriott-international,-inc./', 'aggregator', 'weekly', true,
+ 'Marriott press releases aggregator'),
+
+('PR Newswire Hyatt', 'https://www.prnewswire.com/search/news/?keyword=hyatt+hotels+opening', 'aggregator', 'weekly', true,
+ 'Hyatt press releases aggregator'),
+
+('PR Newswire IHG', 'https://www.prnewswire.com/news/intercontinental-hotels-group-(ihg)/', 'aggregator', 'weekly', true,
+ 'IHG press releases aggregator'),
+
+('PR Newswire Wyndham', 'https://www.prnewswire.com/news/wyndham-hotels-&-resorts/', 'aggregator', 'weekly', true,
+ 'Wyndham press releases aggregator'),
+
+('PR Newswire Accor', 'https://www.prnewswire.com/search/news/?keyword=accor+hotel+opening', 'aggregator', 'weekly', true,
+ 'Accor press releases aggregator'),
+
+('PR Newswire Rosewood', 'https://www.prnewswire.com/search/news/?keyword=rosewood+hotel+opening', 'aggregator', 'weekly', true,
+ 'Rosewood press releases aggregator');
+
+-- ============================================================================
+-- BRAND REFERENCE TABLE
+-- Maps major chains to their luxury/target brands for filtering
+-- ============================================================================
+
+/*
+BRAND PRIORITY REFERENCE (Focus for Smart Lead Hunter):
+
+MARRIOTT INTERNATIONAL:
+  - LUXURY: Ritz-Carlton, St. Regis, W Hotels, EDITION, JW Marriott, Luxury Collection
+  - UPPER: Westin, Sheraton, Marriott Hotels, Renaissance, Autograph Collection
+  - SKIP: Courtyard, Fairfield, Moxy (mid-scale)
+
+HILTON WORLDWIDE:
+  - LUXURY: Waldorf Astoria, Conrad, LXR Hotels, NoMad, Signia
+  - UPPER: Canopy, Curio Collection, Tapestry, DoubleTree, Embassy Suites
+  - SKIP: Hampton, Tru, Home2 (mid-scale/budget)
+
+HYATT:
+  - LUXURY: Park Hyatt, Alila, Miraval, Andaz, Thompson, The Standard
+  - UPPER: Grand Hyatt, Hyatt Regency, Hyatt Centric
+  - RESORTS: Hyatt Ziva, Hyatt Zilara, Secrets, Dreams (Caribbean focus!)
+  - SKIP: Hyatt Place, Hyatt House (mid-scale)
+
+IHG:
+  - LUXURY: Six Senses, Regent, InterContinental
+  - UPPER: Vignette, Kimpton, Hotel Indigo, voco, Crowne Plaza
+  - SKIP: Holiday Inn, Holiday Inn Express (mid-scale)
+
+ACCOR:
+  - LUXURY: Orient Express, Raffles, Fairmont, Sofitel Legend
+  - UPPER: Sofitel, MGallery, Pullman, Swissôtel
+  - LIFESTYLE: Delano, Mondrian, SLS, Hyde, 21c (Ennismore)
+  - SKIP: Novotel, Mercure, ibis (mid-scale/budget)
+
+WYNDHAM:
+  - LUXURY: Wyndham Grand, Registry Collection, Dolce
+  - UPPER: Trademark Collection, Wyndham
+  - SKIP: Days Inn, Super 8, La Quinta, Microtel (budget)
+
+INDEPENDENTS (ALL HIGH PRIORITY):
+  - Four Seasons
+  - Aman Resorts
+  - Rosewood Hotels
+  - Loews Hotels
+*/
+
+-- ============================================================================
+-- SCRAPING NOTES
+-- ============================================================================
+
+/*
+SCRAPING STRATEGY:
+
+1. DAILY SCRAPE (High Volume):
+   - Marriott News Center
+   - Hilton Stories
+   - Hyatt Newsroom
+   - IHG News Releases
+   - Accor News & Stories
+   - Wyndham News Releases
+   - Four Seasons Press Room
+
+2. WEEKLY SCRAPE (Supplemental):
+   - Regional newsrooms (EMEA, APAC, Africa)
+   - Investor relations pages
+   - PR Newswire aggregators
+   - Luxury independents (Aman, Rosewood, Loews)
+
+3. MONTHLY SCRAPE (Annual Roundups):
+   - Annual "New Openings" pages
+   - Luxury hot lists
+   - Pipeline announcements
+
+KEY EXTRACTION TARGETS:
+   - Hotel name
+   - Brand
+   - Location (City, State/Province, Country)
+   - Opening date (or "Coming Soon" / Year)
+   - Room count
+   - Property type (Resort, Hotel, All-Inclusive)
+   - Contact information (if available)
+   - Source URL
+
+FILTERING RULES:
+   - INCLUDE: Florida, Caribbean, Bahamas locations
+   - INCLUDE: Luxury and upper-upscale brands
+   - EXCLUDE: Budget brands (Days Inn, Super 8, etc.)
+   - EXCLUDE: International locations outside Americas
+   - EXCLUDE: Press releases about renovations (unless major expansion)
+*/

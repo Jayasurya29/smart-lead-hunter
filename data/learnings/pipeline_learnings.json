@@ -1,0 +1,3115 @@
+{
+  "caribjournal.com": [
+    {
+      "url": "https://www.caribjournal.com/category/hotels/",
+      "domain": "caribjournal.com",
+      "url_pattern": "https://www.caribjournal.com/category/hotels/",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T11:48:30.438147"
+    },
+    {
+      "url": "https://www.caribjournal.com",
+      "domain": "caribjournal.com",
+      "url_pattern": "https://www.caribjournal.com",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T11:48:31.941202"
+    },
+    {
+      "url": "https://www.caribjournal.com/digest",
+      "domain": "caribjournal.com",
+      "url_pattern": "https://www.caribjournal.com/digest",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T11:48:33.043213"
+    },
+    {
+      "url": "https://www.caribjournal.com/cj-invest-news",
+      "domain": "caribjournal.com",
+      "url_pattern": "https://www.caribjournal.com/cj-invest-news",
+      "was_relevant": true,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T11:48:34.275029"
+    },
+    {
+      "url": "https://www.caribjournal.com/caribbean-travel-advisor",
+      "domain": "caribjournal.com",
+      "url_pattern": "https://www.caribjournal.com/caribbean-travel-advisor",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T11:48:35.384246"
+    },
+    {
+      "url": "https://www.caribjournal.com/advertising",
+      "domain": "caribjournal.com",
+      "url_pattern": "https://www.caribjournal.com/advertising",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T11:48:36.617914"
+    },
+    {
+      "url": "https://www.caribjournal.com/cj-invest",
+      "domain": "caribjournal.com",
+      "url_pattern": "https://www.caribjournal.com/cj-invest",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T11:48:37.652241"
+    },
+    {
+      "url": "https://www.caribjournal.com/?memberful_endpoint=auth",
+      "domain": "caribjournal.com",
+      "url_pattern": "https://www.caribjournal.com/?memberful_endpoint=auth",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T11:48:38.777262"
+    },
+    {
+      "url": "https://www.caribjournal.com/2023/03/21/hotels-in-punta-cana-with-a-boutique-feel",
+      "domain": "caribjournal.com",
+      "url_pattern": "https://www.caribjournal.com/YYYY/MM/DD/hotels-in-punta-cana-with-a-boutique-feel",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T11:48:40.163653"
+    },
+    {
+      "url": "https://www.caribjournal.com/news",
+      "domain": "caribjournal.com",
+      "url_pattern": "https://www.caribjournal.com/news",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T11:48:41.361852"
+    },
+    {
+      "url": "https://www.caribjournal.com/all-inclusive",
+      "domain": "caribjournal.com",
+      "url_pattern": "https://www.caribjournal.com/all-inclusive",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T11:48:42.896028"
+    },
+    {
+      "url": "https://www.caribjournal.com/travel",
+      "domain": "caribjournal.com",
+      "url_pattern": "https://www.caribjournal.com/travel",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T11:48:44.041724"
+    },
+    {
+      "url": "https://www.caribjournal.com/eat-play",
+      "domain": "caribjournal.com",
+      "url_pattern": "https://www.caribjournal.com/eat-play",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T11:48:45.227753"
+    },
+    {
+      "url": "https://www.caribjournal.com/cj-travel-advisor",
+      "domain": "caribjournal.com",
+      "url_pattern": "https://www.caribjournal.com/cj-travel-advisor",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T11:48:46.234521"
+    },
+    {
+      "url": "https://www.caribjournal.com/2025/07/08/united-airlines-dominica",
+      "domain": "caribjournal.com",
+      "url_pattern": "https://www.caribjournal.com/YYYY/MM/DD/united-airlines-dominica",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T11:48:47.311756"
+    },
+    {
+      "url": "https://www.caribjournal.com/2022/12/27/punta-cana-all-inclusive-resorts-to-visit-in-2023-best",
+      "domain": "caribjournal.com",
+      "url_pattern": "https://www.caribjournal.com/YYYY/MM/DD/punta-cana-all-inclusive-resorts-to-visit-in-2023-best",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T11:48:48.678811"
+    },
+    {
+      "url": "https://www.caribjournal.com/2026/01/29/caribbean-vacation-beach-destinations",
+      "domain": "caribjournal.com",
+      "url_pattern": "https://www.caribjournal.com/YYYY/MM/DD/caribbean-vacation-beach-destinations",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T11:48:49.961056"
+    },
+    {
+      "url": "https://www.caribjournal.com/2023/03/21/caribbean-hotel-occupancy-levels-surging",
+      "domain": "caribjournal.com",
+      "url_pattern": "https://www.caribjournal.com/YYYY/MM/DD/caribbean-hotel-occupancy-levels-surging",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T11:48:51.396440"
+    },
+    {
+      "url": "https://www.caribjournal.com/2023/03/21/eleuthera-bahamas-all-inclusive-vacation",
+      "domain": "caribjournal.com",
+      "url_pattern": "https://www.caribjournal.com/YYYY/MM/DD/eleuthera-bahamas-all-inclusive-vacation",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T11:48:52.961763"
+    },
+    {
+      "url": "https://www.caribjournal.com/2023/03/20/caribbean-worldhotels-expansion",
+      "domain": "caribjournal.com",
+      "url_pattern": "https://www.caribjournal.com/YYYY/MM/DD/caribbean-worldhotels-expansion",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T11:48:54.231481"
+    },
+    {
+      "url": "https://www.caribjournal.com/2023/03/20/st-thomas-usvi-has-a-very-cool-new-hotel",
+      "domain": "caribjournal.com",
+      "url_pattern": "https://www.caribjournal.com/YYYY/MM/DD/st-thomas-usvi-has-a-very-cool-new-hotel",
+      "was_relevant": true,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T11:48:55.342409"
+    },
+    {
+      "url": "https://www.caribjournal.com/2023/03/20/american-airlines-st-croix-flights-more",
+      "domain": "caribjournal.com",
+      "url_pattern": "https://www.caribjournal.com/YYYY/MM/DD/american-airlines-st-croix-flights-more",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T11:48:56.538919"
+    },
+    {
+      "url": "https://www.caribjournal.com/2023/03/20/machel-montano-jamaica-music-festival",
+      "domain": "caribjournal.com",
+      "url_pattern": "https://www.caribjournal.com/YYYY/MM/DD/machel-montano-jamaica-music-festival",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T11:48:57.646602"
+    },
+    {
+      "url": "https://www.caribjournal.com/2023/03/19/jetblue-punta-cana-santiago-daily-nonstop",
+      "domain": "caribjournal.com",
+      "url_pattern": "https://www.caribjournal.com/YYYY/MM/DD/jetblue-punta-cana-santiago-daily-nonstop",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T11:48:58.865839"
+    },
+    {
+      "url": "https://www.caribjournal.com/archives",
+      "domain": "caribjournal.com",
+      "url_pattern": "https://www.caribjournal.com/archives",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T11:49:01.115165"
+    },
+    {
+      "url": "https://www.caribjournal.com/video-gallery",
+      "domain": "caribjournal.com",
+      "url_pattern": "https://www.caribjournal.com/video-gallery",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T11:49:02.792140"
+    },
+    {
+      "url": "https://www.caribjournal.com/all-inclusive/all-inclusive-hotels-resorts",
+      "domain": "caribjournal.com",
+      "url_pattern": "https://www.caribjournal.com/all-inclusive/all-inclusive-hotels-resorts",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T11:49:03.874346"
+    },
+    {
+      "url": "https://www.caribjournal.com/all-inclusive/all-inclusive-resorts-for-adults-only",
+      "domain": "caribjournal.com",
+      "url_pattern": "https://www.caribjournal.com/all-inclusive/all-inclusive-resorts-for-adults-only",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T11:49:05.149954"
+    },
+    {
+      "url": "https://www.caribjournal.com/2026/01/29/american-airlines-venezuela-flights",
+      "domain": "caribjournal.com",
+      "url_pattern": "https://www.caribjournal.com/YYYY/MM/DD/american-airlines-venezuela-flights",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T11:49:06.399442"
+    },
+    {
+      "url": "https://www.caribjournal.com/2026/01/29/hyatt-all-inclusive-melia-expansion",
+      "domain": "caribjournal.com",
+      "url_pattern": "https://www.caribjournal.com/YYYY/MM/DD/hyatt-all-inclusive-melia-expansion",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T11:49:07.802402"
+    },
+    {
+      "url": "https://www.caribjournal.com/cj-invest-news",
+      "domain": "caribjournal.com",
+      "url_pattern": "https://www.caribjournal.com/cj-invest-news",
+      "was_relevant": true,
+      "lead_count": 1,
+      "lead_quality_avg": 0.0,
+      "timestamp": "2026-01-30T11:49:10.821811"
+    },
+    {
+      "url": "https://www.caribjournal.com/2023/03/20/st-thomas-usvi-has-a-very-cool-new-hotel",
+      "domain": "caribjournal.com",
+      "url_pattern": "https://www.caribjournal.com/YYYY/MM/DD/st-thomas-usvi-has-a-very-cool-new-hotel",
+      "was_relevant": true,
+      "lead_count": 1,
+      "lead_quality_avg": 0.0,
+      "timestamp": "2026-01-30T11:49:12.050980"
+    },
+    {
+      "url": "https://www.caribjournal.com/category/hotels/",
+      "domain": "caribjournal.com",
+      "url_pattern": "https://www.caribjournal.com/category/hotels/",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T11:51:28.661389"
+    },
+    {
+      "url": "https://www.caribjournal.com",
+      "domain": "caribjournal.com",
+      "url_pattern": "https://www.caribjournal.com",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T11:51:30.100393"
+    },
+    {
+      "url": "https://www.caribjournal.com/digest",
+      "domain": "caribjournal.com",
+      "url_pattern": "https://www.caribjournal.com/digest",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T11:51:31.144016"
+    },
+    {
+      "url": "https://www.caribjournal.com/cj-invest-news",
+      "domain": "caribjournal.com",
+      "url_pattern": "https://www.caribjournal.com/cj-invest-news",
+      "was_relevant": true,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T11:51:32.584264"
+    },
+    {
+      "url": "https://www.caribjournal.com/caribbean-travel-advisor",
+      "domain": "caribjournal.com",
+      "url_pattern": "https://www.caribjournal.com/caribbean-travel-advisor",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T11:51:33.635678"
+    },
+    {
+      "url": "https://www.caribjournal.com/advertising",
+      "domain": "caribjournal.com",
+      "url_pattern": "https://www.caribjournal.com/advertising",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T11:51:34.685061"
+    },
+    {
+      "url": "https://www.caribjournal.com/cj-invest",
+      "domain": "caribjournal.com",
+      "url_pattern": "https://www.caribjournal.com/cj-invest",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T11:51:35.924944"
+    },
+    {
+      "url": "https://www.caribjournal.com/?memberful_endpoint=auth",
+      "domain": "caribjournal.com",
+      "url_pattern": "https://www.caribjournal.com/?memberful_endpoint=auth",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T11:51:36.896363"
+    },
+    {
+      "url": "https://www.caribjournal.com/2023/03/21/hotels-in-punta-cana-with-a-boutique-feel",
+      "domain": "caribjournal.com",
+      "url_pattern": "https://www.caribjournal.com/YYYY/MM/DD/hotels-in-punta-cana-with-a-boutique-feel",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T11:51:38.398924"
+    },
+    {
+      "url": "https://www.caribjournal.com/news",
+      "domain": "caribjournal.com",
+      "url_pattern": "https://www.caribjournal.com/news",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T11:51:40.240146"
+    },
+    {
+      "url": "https://www.caribjournal.com/all-inclusive",
+      "domain": "caribjournal.com",
+      "url_pattern": "https://www.caribjournal.com/all-inclusive",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T11:51:41.584891"
+    },
+    {
+      "url": "https://www.caribjournal.com/travel",
+      "domain": "caribjournal.com",
+      "url_pattern": "https://www.caribjournal.com/travel",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T11:51:43.155034"
+    },
+    {
+      "url": "https://www.caribjournal.com/eat-play",
+      "domain": "caribjournal.com",
+      "url_pattern": "https://www.caribjournal.com/eat-play",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T11:51:44.457691"
+    },
+    {
+      "url": "https://www.caribjournal.com/cj-travel-advisor",
+      "domain": "caribjournal.com",
+      "url_pattern": "https://www.caribjournal.com/cj-travel-advisor",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T11:51:45.747267"
+    },
+    {
+      "url": "https://www.caribjournal.com/2025/07/08/united-airlines-dominica",
+      "domain": "caribjournal.com",
+      "url_pattern": "https://www.caribjournal.com/YYYY/MM/DD/united-airlines-dominica",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T11:51:47.157226"
+    },
+    {
+      "url": "https://www.caribjournal.com/2022/12/27/punta-cana-all-inclusive-resorts-to-visit-in-2023-best",
+      "domain": "caribjournal.com",
+      "url_pattern": "https://www.caribjournal.com/YYYY/MM/DD/punta-cana-all-inclusive-resorts-to-visit-in-2023-best",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T11:51:48.435592"
+    },
+    {
+      "url": "https://www.caribjournal.com/2026/01/29/caribbean-vacation-beach-destinations",
+      "domain": "caribjournal.com",
+      "url_pattern": "https://www.caribjournal.com/YYYY/MM/DD/caribbean-vacation-beach-destinations",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T11:51:49.693535"
+    },
+    {
+      "url": "https://www.caribjournal.com/2023/03/21/caribbean-hotel-occupancy-levels-surging",
+      "domain": "caribjournal.com",
+      "url_pattern": "https://www.caribjournal.com/YYYY/MM/DD/caribbean-hotel-occupancy-levels-surging",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T11:51:50.904903"
+    },
+    {
+      "url": "https://www.caribjournal.com/2023/03/21/eleuthera-bahamas-all-inclusive-vacation",
+      "domain": "caribjournal.com",
+      "url_pattern": "https://www.caribjournal.com/YYYY/MM/DD/eleuthera-bahamas-all-inclusive-vacation",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T11:51:51.972512"
+    },
+    {
+      "url": "https://www.caribjournal.com/2023/03/20/caribbean-worldhotels-expansion",
+      "domain": "caribjournal.com",
+      "url_pattern": "https://www.caribjournal.com/YYYY/MM/DD/caribbean-worldhotels-expansion",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T11:51:53.601408"
+    },
+    {
+      "url": "https://www.caribjournal.com/2023/03/20/st-thomas-usvi-has-a-very-cool-new-hotel",
+      "domain": "caribjournal.com",
+      "url_pattern": "https://www.caribjournal.com/YYYY/MM/DD/st-thomas-usvi-has-a-very-cool-new-hotel",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T11:51:54.843451"
+    },
+    {
+      "url": "https://www.caribjournal.com/2023/03/20/american-airlines-st-croix-flights-more",
+      "domain": "caribjournal.com",
+      "url_pattern": "https://www.caribjournal.com/YYYY/MM/DD/american-airlines-st-croix-flights-more",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T11:51:56.062752"
+    },
+    {
+      "url": "https://www.caribjournal.com/2023/03/20/machel-montano-jamaica-music-festival",
+      "domain": "caribjournal.com",
+      "url_pattern": "https://www.caribjournal.com/YYYY/MM/DD/machel-montano-jamaica-music-festival",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T11:51:57.361346"
+    },
+    {
+      "url": "https://www.caribjournal.com/2023/03/19/jetblue-punta-cana-santiago-daily-nonstop",
+      "domain": "caribjournal.com",
+      "url_pattern": "https://www.caribjournal.com/YYYY/MM/DD/jetblue-punta-cana-santiago-daily-nonstop",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T11:51:58.826934"
+    },
+    {
+      "url": "https://www.caribjournal.com/archives",
+      "domain": "caribjournal.com",
+      "url_pattern": "https://www.caribjournal.com/archives",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T11:52:00.259759"
+    },
+    {
+      "url": "https://www.caribjournal.com/video-gallery",
+      "domain": "caribjournal.com",
+      "url_pattern": "https://www.caribjournal.com/video-gallery",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T11:52:01.501017"
+    },
+    {
+      "url": "https://www.caribjournal.com/all-inclusive/all-inclusive-hotels-resorts",
+      "domain": "caribjournal.com",
+      "url_pattern": "https://www.caribjournal.com/all-inclusive/all-inclusive-hotels-resorts",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T11:52:02.489078"
+    },
+    {
+      "url": "https://www.caribjournal.com/all-inclusive/all-inclusive-resorts-for-adults-only",
+      "domain": "caribjournal.com",
+      "url_pattern": "https://www.caribjournal.com/all-inclusive/all-inclusive-resorts-for-adults-only",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T11:52:03.782330"
+    },
+    {
+      "url": "https://www.caribjournal.com/2026/01/29/american-airlines-venezuela-flights",
+      "domain": "caribjournal.com",
+      "url_pattern": "https://www.caribjournal.com/YYYY/MM/DD/american-airlines-venezuela-flights",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T11:52:05.163607"
+    },
+    {
+      "url": "https://www.caribjournal.com/2026/01/29/hyatt-all-inclusive-melia-expansion",
+      "domain": "caribjournal.com",
+      "url_pattern": "https://www.caribjournal.com/YYYY/MM/DD/hyatt-all-inclusive-melia-expansion",
+      "was_relevant": true,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T11:52:06.370392"
+    },
+    {
+      "url": "https://www.caribjournal.com/cj-invest-news",
+      "domain": "caribjournal.com",
+      "url_pattern": "https://www.caribjournal.com/cj-invest-news",
+      "was_relevant": true,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T11:52:09.796481"
+    },
+    {
+      "url": "https://www.caribjournal.com/2026/01/29/hyatt-all-inclusive-melia-expansion",
+      "domain": "caribjournal.com",
+      "url_pattern": "https://www.caribjournal.com/YYYY/MM/DD/hyatt-all-inclusive-melia-expansion",
+      "was_relevant": true,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T11:52:11.144854"
+    },
+    {
+      "url": "https://www.caribjournal.com/category/hotels/",
+      "domain": "caribjournal.com",
+      "url_pattern": "https://www.caribjournal.com/category/hotels/",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T13:18:40.081834"
+    },
+    {
+      "url": "https://www.caribjournal.com",
+      "domain": "caribjournal.com",
+      "url_pattern": "https://www.caribjournal.com",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T13:18:41.084076"
+    },
+    {
+      "url": "https://www.caribjournal.com/digest",
+      "domain": "caribjournal.com",
+      "url_pattern": "https://www.caribjournal.com/digest",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T13:18:42.138001"
+    },
+    {
+      "url": "https://www.caribjournal.com/cj-invest-news",
+      "domain": "caribjournal.com",
+      "url_pattern": "https://www.caribjournal.com/cj-invest-news",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T13:18:43.512543"
+    },
+    {
+      "url": "https://www.caribjournal.com/caribbean-travel-advisor",
+      "domain": "caribjournal.com",
+      "url_pattern": "https://www.caribjournal.com/caribbean-travel-advisor",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T13:18:44.793303"
+    },
+    {
+      "url": "https://www.caribjournal.com/advertising",
+      "domain": "caribjournal.com",
+      "url_pattern": "https://www.caribjournal.com/advertising",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T13:18:45.699731"
+    },
+    {
+      "url": "https://www.caribjournal.com/cj-invest",
+      "domain": "caribjournal.com",
+      "url_pattern": "https://www.caribjournal.com/cj-invest",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T13:18:46.824080"
+    },
+    {
+      "url": "https://www.caribjournal.com/?memberful_endpoint=auth",
+      "domain": "caribjournal.com",
+      "url_pattern": "https://www.caribjournal.com/?memberful_endpoint=auth",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T13:18:47.817770"
+    },
+    {
+      "url": "https://www.caribjournal.com/2023/03/21/hotels-in-punta-cana-with-a-boutique-feel",
+      "domain": "caribjournal.com",
+      "url_pattern": "https://www.caribjournal.com/YYYY/MM/DD/hotels-in-punta-cana-with-a-boutique-feel",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T13:18:48.959921"
+    },
+    {
+      "url": "https://www.caribjournal.com/news",
+      "domain": "caribjournal.com",
+      "url_pattern": "https://www.caribjournal.com/news",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T13:18:50.492284"
+    },
+    {
+      "url": "https://www.caribjournal.com/all-inclusive",
+      "domain": "caribjournal.com",
+      "url_pattern": "https://www.caribjournal.com/all-inclusive",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T13:18:51.783575"
+    },
+    {
+      "url": "https://www.caribjournal.com/travel",
+      "domain": "caribjournal.com",
+      "url_pattern": "https://www.caribjournal.com/travel",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T13:18:52.863402"
+    },
+    {
+      "url": "https://www.caribjournal.com/eat-play",
+      "domain": "caribjournal.com",
+      "url_pattern": "https://www.caribjournal.com/eat-play",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T13:18:53.813658"
+    },
+    {
+      "url": "https://www.caribjournal.com/cj-travel-advisor",
+      "domain": "caribjournal.com",
+      "url_pattern": "https://www.caribjournal.com/cj-travel-advisor",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T13:18:54.976917"
+    },
+    {
+      "url": "https://www.caribjournal.com/2025/07/08/united-airlines-dominica",
+      "domain": "caribjournal.com",
+      "url_pattern": "https://www.caribjournal.com/YYYY/MM/DD/united-airlines-dominica",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T13:18:56.277862"
+    },
+    {
+      "url": "https://www.caribjournal.com/2022/12/27/punta-cana-all-inclusive-resorts-to-visit-in-2023-best",
+      "domain": "caribjournal.com",
+      "url_pattern": "https://www.caribjournal.com/YYYY/MM/DD/punta-cana-all-inclusive-resorts-to-visit-in-2023-best",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T13:18:57.363838"
+    },
+    {
+      "url": "https://www.caribjournal.com/2026/01/30/bermuda-tourism-chair",
+      "domain": "caribjournal.com",
+      "url_pattern": "https://www.caribjournal.com/YYYY/MM/DD/bermuda-tourism-chair",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T13:18:58.618822"
+    },
+    {
+      "url": "https://www.caribjournal.com/2023/03/21/caribbean-hotel-occupancy-levels-surging",
+      "domain": "caribjournal.com",
+      "url_pattern": "https://www.caribjournal.com/YYYY/MM/DD/caribbean-hotel-occupancy-levels-surging",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T13:18:59.885080"
+    },
+    {
+      "url": "https://www.caribjournal.com/2023/03/21/eleuthera-bahamas-all-inclusive-vacation",
+      "domain": "caribjournal.com",
+      "url_pattern": "https://www.caribjournal.com/YYYY/MM/DD/eleuthera-bahamas-all-inclusive-vacation",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T13:19:00.796644"
+    },
+    {
+      "url": "https://www.caribjournal.com/2023/03/20/caribbean-worldhotels-expansion",
+      "domain": "caribjournal.com",
+      "url_pattern": "https://www.caribjournal.com/YYYY/MM/DD/caribbean-worldhotels-expansion",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T13:19:01.978617"
+    },
+    {
+      "url": "https://www.caribjournal.com/2023/03/20/st-thomas-usvi-has-a-very-cool-new-hotel",
+      "domain": "caribjournal.com",
+      "url_pattern": "https://www.caribjournal.com/YYYY/MM/DD/st-thomas-usvi-has-a-very-cool-new-hotel",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T13:19:03.350102"
+    },
+    {
+      "url": "https://www.caribjournal.com/2023/03/20/american-airlines-st-croix-flights-more",
+      "domain": "caribjournal.com",
+      "url_pattern": "https://www.caribjournal.com/YYYY/MM/DD/american-airlines-st-croix-flights-more",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T13:19:04.690152"
+    },
+    {
+      "url": "https://www.caribjournal.com/2023/03/20/machel-montano-jamaica-music-festival",
+      "domain": "caribjournal.com",
+      "url_pattern": "https://www.caribjournal.com/YYYY/MM/DD/machel-montano-jamaica-music-festival",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T13:19:05.794099"
+    },
+    {
+      "url": "https://www.caribjournal.com/2023/03/19/jetblue-punta-cana-santiago-daily-nonstop",
+      "domain": "caribjournal.com",
+      "url_pattern": "https://www.caribjournal.com/YYYY/MM/DD/jetblue-punta-cana-santiago-daily-nonstop",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T13:19:07.085342"
+    },
+    {
+      "url": "https://www.caribjournal.com/archives",
+      "domain": "caribjournal.com",
+      "url_pattern": "https://www.caribjournal.com/archives",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T13:19:08.198527"
+    },
+    {
+      "url": "https://www.caribjournal.com/video-gallery",
+      "domain": "caribjournal.com",
+      "url_pattern": "https://www.caribjournal.com/video-gallery",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T13:19:09.381661"
+    },
+    {
+      "url": "https://www.caribjournal.com/all-inclusive/all-inclusive-hotels-resorts",
+      "domain": "caribjournal.com",
+      "url_pattern": "https://www.caribjournal.com/all-inclusive/all-inclusive-hotels-resorts",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T13:19:10.469490"
+    },
+    {
+      "url": "https://www.caribjournal.com/all-inclusive/all-inclusive-resorts-for-adults-only",
+      "domain": "caribjournal.com",
+      "url_pattern": "https://www.caribjournal.com/all-inclusive/all-inclusive-resorts-for-adults-only",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T13:19:11.486834"
+    },
+    {
+      "url": "https://www.caribjournal.com/2026/01/29/hyatt-all-inclusive-melia-expansion",
+      "domain": "caribjournal.com",
+      "url_pattern": "https://www.caribjournal.com/YYYY/MM/DD/hyatt-all-inclusive-melia-expansion",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T13:19:12.800721"
+    },
+    {
+      "url": "https://www.caribjournal.com/2026/01/30/san-francisco-guatemala-flights",
+      "domain": "caribjournal.com",
+      "url_pattern": "https://www.caribjournal.com/YYYY/MM/DD/san-francisco-guatemala-flights",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T13:19:13.986183"
+    }
+  ],
+  "hoteldive.com": [
+    {
+      "url": "https://www.hoteldive.com/news/hilton-opens-graduate-dallas-smu/756549/",
+      "domain": "hoteldive.com",
+      "url_pattern": "https://www.hoteldive.com/news/SLUG/ID/",
+      "was_relevant": true,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T12:52:57.263041"
+    },
+    {
+      "url": "https://www.hoteldive.com/news/graduate-acquires-hotel-boulderado-colorado/744341/",
+      "domain": "hoteldive.com",
+      "url_pattern": "https://www.hoteldive.com/news/SLUG/ID/",
+      "was_relevant": true,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T12:52:58.470036"
+    },
+    {
+      "url": "https://www.hoteldive.com/news/ihg-acquires-ruby-q4-earnings/740200/",
+      "domain": "hoteldive.com",
+      "url_pattern": "https://www.hoteldive.com/news/SLUG/ID/",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T12:53:00.688590"
+    },
+    {
+      "url": "https://www.hoteldive.com/news/ihg-brings-ruby-brand-to-us/760967/",
+      "domain": "hoteldive.com",
+      "url_pattern": "https://www.hoteldive.com/news/SLUG/ID/",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T12:53:01.902538"
+    },
+    {
+      "url": "https://www.hoteldive.com/news/lifestyle-luxury-brand-acquisition-/724975/",
+      "domain": "hoteldive.com",
+      "url_pattern": "https://www.hoteldive.com/news/SLUG/ID/",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T12:53:03.290815"
+    },
+    {
+      "url": "https://www.hoteldive.com/news/hotel-construction-pipeline-q3-2025/803977/",
+      "domain": "hoteldive.com",
+      "url_pattern": "https://www.hoteldive.com/news/SLUG/ID/",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T12:53:05.787802"
+    },
+    {
+      "url": "https://www.hoteldive.com/news/hotel-construction-pipeline-Q4-2024/738107/",
+      "domain": "hoteldive.com",
+      "url_pattern": "https://www.hoteldive.com/news/hotel-construction-pipeline-Q4-2024/ID/",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T12:53:07.132620"
+    },
+    {
+      "url": "https://www.hoteldive.com/news/six-senses-pennsylvania-expansion/727462/",
+      "domain": "hoteldive.com",
+      "url_pattern": "https://www.hoteldive.com/news/SLUG/ID/",
+      "was_relevant": true,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T12:53:08.324954"
+    },
+    {
+      "url": "https://www.hoteldive.com/news/six-senses-opens-south-carolina-resort/708852/",
+      "domain": "hoteldive.com",
+      "url_pattern": "https://www.hoteldive.com/news/SLUG/ID/",
+      "was_relevant": true,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T12:53:09.312417"
+    },
+    {
+      "url": "https://www.hoteldive.com/news/ihgs-six-senses-heads-to-colorado-mountains/725345/",
+      "domain": "hoteldive.com",
+      "url_pattern": "https://www.hoteldive.com/news/SLUG/ID/",
+      "was_relevant": true,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T12:53:10.495399"
+    },
+    {
+      "url": "https://www.hoteldive.com/news/ihg-luxury-lifestyle-leader-americas/726016/",
+      "domain": "hoteldive.com",
+      "url_pattern": "https://www.hoteldive.com/news/SLUG/ID/",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T12:53:11.998430"
+    },
+    {
+      "url": "https://www.hoteldive.com/topic/development/",
+      "domain": "hoteldive.com",
+      "url_pattern": "https://www.hoteldive.com/topic/development/",
+      "was_relevant": true,
+      "lead_count": 1,
+      "lead_quality_avg": 0.0,
+      "timestamp": "2026-01-30T12:53:18.786341"
+    },
+    {
+      "url": "https://www.hoteldive.com/news/ian-schrager-highgate-public-brand-partnership/810689/",
+      "domain": "hoteldive.com",
+      "url_pattern": "https://www.hoteldive.com/news/SLUG/ID/",
+      "was_relevant": true,
+      "lead_count": 1,
+      "lead_quality_avg": 0.0,
+      "timestamp": "2026-01-30T12:53:20.063234"
+    },
+    {
+      "url": "https://www.hoteldive.com/news/ihg-ruby-hotels-chicago-debut/810588/",
+      "domain": "hoteldive.com",
+      "url_pattern": "https://www.hoteldive.com/news/SLUG/ID/",
+      "was_relevant": true,
+      "lead_count": 1,
+      "lead_quality_avg": 0.0,
+      "timestamp": "2026-01-30T12:53:21.420258"
+    },
+    {
+      "url": "https://www.hoteldive.com/news/ihg-six-senses-resort-utah/810467/",
+      "domain": "hoteldive.com",
+      "url_pattern": "https://www.hoteldive.com/news/SLUG/ID/",
+      "was_relevant": true,
+      "lead_count": 1,
+      "lead_quality_avg": 0.0,
+      "timestamp": "2026-01-30T12:53:22.759784"
+    },
+    {
+      "url": "https://www.hoteldive.com/news/top-hotel-openings-2026/810298/",
+      "domain": "hoteldive.com",
+      "url_pattern": "https://www.hoteldive.com/news/SLUG/ID/",
+      "was_relevant": true,
+      "lead_count": 9,
+      "lead_quality_avg": 0.0,
+      "timestamp": "2026-01-30T12:53:27.598170"
+    },
+    {
+      "url": "https://www.hoteldive.com/news/wyndham-reside-partnership-apartment-hotel-opening/810218/",
+      "domain": "hoteldive.com",
+      "url_pattern": "https://www.hoteldive.com/news/SLUG/ID/",
+      "was_relevant": true,
+      "lead_count": 1,
+      "lead_quality_avg": 0.0,
+      "timestamp": "2026-01-30T12:53:28.929010"
+    },
+    {
+      "url": "https://www.hoteldive.com/news/outbound-hotels-park-city-2027-waterton-barings/809588/",
+      "domain": "hoteldive.com",
+      "url_pattern": "https://www.hoteldive.com/news/SLUG/ID/",
+      "was_relevant": true,
+      "lead_count": 1,
+      "lead_quality_avg": 0.0,
+      "timestamp": "2026-01-30T12:53:30.222214"
+    },
+    {
+      "url": "https://www.hoteldive.com/news/ritz-carlton-hotel-development-indianapolis/809199/",
+      "domain": "hoteldive.com",
+      "url_pattern": "https://www.hoteldive.com/news/SLUG/ID/",
+      "was_relevant": true,
+      "lead_count": 1,
+      "lead_quality_avg": 0.0,
+      "timestamp": "2026-01-30T12:53:31.448909"
+    },
+    {
+      "url": "https://www.hoteldive.com/news/apple-hospitality-motto-hilton-nashville-downtown/808592/",
+      "domain": "hoteldive.com",
+      "url_pattern": "https://www.hoteldive.com/news/SLUG/ID/",
+      "was_relevant": true,
+      "lead_count": 1,
+      "lead_quality_avg": 0.0,
+      "timestamp": "2026-01-30T12:53:32.513978"
+    },
+    {
+      "url": "https://www.hoteldive.com/news/omni-fort-lauderdale-hotel-opening/808495/",
+      "domain": "hoteldive.com",
+      "url_pattern": "https://www.hoteldive.com/news/SLUG/ID/",
+      "was_relevant": true,
+      "lead_count": 2,
+      "lead_quality_avg": 0.0,
+      "timestamp": "2026-01-30T12:53:34.023554"
+    },
+    {
+      "url": "https://www.hoteldive.com/news/hotel-casinos-hard-rock-resorts-world-ballys-new-york/808239/",
+      "domain": "hoteldive.com",
+      "url_pattern": "https://www.hoteldive.com/news/SLUG/ID/",
+      "was_relevant": true,
+      "lead_count": 1,
+      "lead_quality_avg": 0.0,
+      "timestamp": "2026-01-30T12:53:36.113831"
+    },
+    {
+      "url": "https://www.hoteldive.com/news/one-beverly-hills-vertical-construction/807320/",
+      "domain": "hoteldive.com",
+      "url_pattern": "https://www.hoteldive.com/news/SLUG/ID/",
+      "was_relevant": true,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T12:53:37.333230"
+    },
+    {
+      "url": "https://www.hoteldive.com/news/livaway-suites-mesa-arizona-groundbreaking/807513/",
+      "domain": "hoteldive.com",
+      "url_pattern": "https://www.hoteldive.com/news/SLUG/ID/",
+      "was_relevant": true,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T12:53:38.371549"
+    },
+    {
+      "url": "https://www.hoteldive.com/news/bunkhouse-hotels-opens-boutique-property-houston-texas/807258/",
+      "domain": "hoteldive.com",
+      "url_pattern": "https://www.hoteldive.com/news/SLUG/ID/",
+      "was_relevant": true,
+      "lead_count": 1,
+      "lead_quality_avg": 0.0,
+      "timestamp": "2026-01-30T12:53:39.423921"
+    },
+    {
+      "url": "https://www.hoteldive.com/news/accor-hotels-q3-2025-earnings/803852/",
+      "domain": "hoteldive.com",
+      "url_pattern": "https://www.hoteldive.com/news/SLUG/ID/",
+      "was_relevant": true,
+      "lead_count": 1,
+      "lead_quality_avg": 0.0,
+      "timestamp": "2026-01-30T12:53:41.142845"
+    },
+    {
+      "url": "https://www.hoteldive.com/news/hilton-debuts-upscale-outset-collection-brand/801970/",
+      "domain": "hoteldive.com",
+      "url_pattern": "https://www.hoteldive.com/news/SLUG/ID/",
+      "was_relevant": true,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T12:53:42.412907"
+    },
+    {
+      "url": "https://www.hoteldive.com/news/hilton-acquires-graduate-hotels/710268/",
+      "domain": "hoteldive.com",
+      "url_pattern": "https://www.hoteldive.com/news/SLUG/ID/",
+      "was_relevant": true,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T12:53:43.699217"
+    },
+    {
+      "url": "https://www.hoteldive.com/news/hilton-opens-graduate-dallas-smu/756549/",
+      "domain": "hoteldive.com",
+      "url_pattern": "https://www.hoteldive.com/news/SLUG/ID/",
+      "was_relevant": true,
+      "lead_count": 1,
+      "lead_quality_avg": 0.0,
+      "timestamp": "2026-01-30T12:53:44.749499"
+    },
+    {
+      "url": "https://www.hoteldive.com/news/graduate-acquires-hotel-boulderado-colorado/744341/",
+      "domain": "hoteldive.com",
+      "url_pattern": "https://www.hoteldive.com/news/SLUG/ID/",
+      "was_relevant": true,
+      "lead_count": 1,
+      "lead_quality_avg": 0.0,
+      "timestamp": "2026-01-30T12:53:45.829057"
+    },
+    {
+      "url": "https://www.hoteldive.com/news/six-senses-pennsylvania-expansion/727462/",
+      "domain": "hoteldive.com",
+      "url_pattern": "https://www.hoteldive.com/news/SLUG/ID/",
+      "was_relevant": true,
+      "lead_count": 1,
+      "lead_quality_avg": 0.0,
+      "timestamp": "2026-01-30T12:53:48.132816"
+    },
+    {
+      "url": "https://www.hoteldive.com/news/six-senses-opens-south-carolina-resort/708852/",
+      "domain": "hoteldive.com",
+      "url_pattern": "https://www.hoteldive.com/news/SLUG/ID/",
+      "was_relevant": true,
+      "lead_count": 1,
+      "lead_quality_avg": 0.0,
+      "timestamp": "2026-01-30T12:53:49.434748"
+    },
+    {
+      "url": "https://www.hoteldive.com/news/ihgs-six-senses-heads-to-colorado-mountains/725345/",
+      "domain": "hoteldive.com",
+      "url_pattern": "https://www.hoteldive.com/news/SLUG/ID/",
+      "was_relevant": true,
+      "lead_count": 1,
+      "lead_quality_avg": 0.0,
+      "timestamp": "2026-01-30T12:53:50.919062"
+    },
+    {
+      "url": "https://www.hoteldive.com/topic/development/",
+      "domain": "hoteldive.com",
+      "url_pattern": "https://www.hoteldive.com/topic/development/",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T13:16:09.209217"
+    },
+    {
+      "url": "https://www.hoteldive.com/news/accor-names-chief-franchise-officer-premium-midscale-economy/810922/",
+      "domain": "hoteldive.com",
+      "url_pattern": "https://www.hoteldive.com/news/SLUG/ID/",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T13:16:10.291379"
+    },
+    {
+      "url": "https://www.hoteldive.com/news/hilton-undergraduate-lifestyle-brand-launch-college-town-markets/810918/",
+      "domain": "hoteldive.com",
+      "url_pattern": "https://www.hoteldive.com/news/SLUG/ID/",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T13:16:11.671966"
+    },
+    {
+      "url": "https://www.hoteldive.com/news/ian-schrager-highgate-public-brand-partnership/810689/",
+      "domain": "hoteldive.com",
+      "url_pattern": "https://www.hoteldive.com/news/SLUG/ID/",
+      "was_relevant": true,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T13:16:12.652120"
+    },
+    {
+      "url": "https://www.hoteldive.com/news/ihg-ruby-hotels-chicago-debut/810588/",
+      "domain": "hoteldive.com",
+      "url_pattern": "https://www.hoteldive.com/news/SLUG/ID/",
+      "was_relevant": true,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T13:16:13.718002"
+    },
+    {
+      "url": "https://www.hoteldive.com/news/hotel-construction-pipeline-q4-2025/810587/",
+      "domain": "hoteldive.com",
+      "url_pattern": "https://www.hoteldive.com/news/SLUG/ID/",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T13:16:15.180857"
+    },
+    {
+      "url": "https://www.hoteldive.com/news/ihg-six-senses-resort-utah/810467/",
+      "domain": "hoteldive.com",
+      "url_pattern": "https://www.hoteldive.com/news/SLUG/ID/",
+      "was_relevant": true,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T13:16:16.686820"
+    },
+    {
+      "url": "https://www.hoteldive.com/news/top-hotel-openings-2026/810298/",
+      "domain": "hoteldive.com",
+      "url_pattern": "https://www.hoteldive.com/news/SLUG/ID/",
+      "was_relevant": true,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T13:16:17.715401"
+    },
+    {
+      "url": "https://www.hoteldive.com/news/wyndham-reside-partnership-apartment-hotel-opening/810218/",
+      "domain": "hoteldive.com",
+      "url_pattern": "https://www.hoteldive.com/news/SLUG/ID/",
+      "was_relevant": true,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T13:16:20.101176"
+    },
+    {
+      "url": "https://www.hoteldive.com/news/new-york-city-phoenix-hotel-openings-2026/810079/",
+      "domain": "hoteldive.com",
+      "url_pattern": "https://www.hoteldive.com/news/SLUG/ID/",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T13:16:21.133035"
+    },
+    {
+      "url": "https://www.hoteldive.com/news/ihg-appoints-mark-sergot-chief-development-officer-americas-region/809806/",
+      "domain": "hoteldive.com",
+      "url_pattern": "https://www.hoteldive.com/news/SLUG/ID/",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T13:16:22.406800"
+    },
+    {
+      "url": "https://www.hoteldive.com/news/hilton-debuts-apartment-collection-brand/809718/",
+      "domain": "hoteldive.com",
+      "url_pattern": "https://www.hoteldive.com/news/SLUG/ID/",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T13:16:23.589337"
+    },
+    {
+      "url": "https://www.hoteldive.com/news/hotel-development-trends-2026-forecast/809599/",
+      "domain": "hoteldive.com",
+      "url_pattern": "https://www.hoteldive.com/news/SLUG/ID/",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T13:16:24.979905"
+    },
+    {
+      "url": "https://www.hoteldive.com/news/outbound-hotels-park-city-2027-waterton-barings/809588/",
+      "domain": "hoteldive.com",
+      "url_pattern": "https://www.hoteldive.com/news/SLUG/ID/",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T13:16:25.833739"
+    },
+    {
+      "url": "https://www.hoteldive.com/news/ritz-carlton-hotel-development-indianapolis/809199/",
+      "domain": "hoteldive.com",
+      "url_pattern": "https://www.hoteldive.com/news/SLUG/ID/",
+      "was_relevant": true,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T13:16:26.777418"
+    },
+    {
+      "url": "https://www.hoteldive.com/news/top-hospitality-industry-trends-2026/808959/",
+      "domain": "hoteldive.com",
+      "url_pattern": "https://www.hoteldive.com/news/SLUG/ID/",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T13:16:27.813930"
+    },
+    {
+      "url": "https://www.hoteldive.com/news/hospitality-industry-executive-appointments-q4-2025/808640/",
+      "domain": "hoteldive.com",
+      "url_pattern": "https://www.hoteldive.com/news/SLUG/ID/",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T13:16:28.913054"
+    },
+    {
+      "url": "https://www.hoteldive.com/news/apple-hospitality-motto-hilton-nashville-downtown/808592/",
+      "domain": "hoteldive.com",
+      "url_pattern": "https://www.hoteldive.com/news/SLUG/ID/",
+      "was_relevant": true,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T13:16:30.284165"
+    },
+    {
+      "url": "https://www.hoteldive.com/news/omni-fort-lauderdale-hotel-opening/808495/",
+      "domain": "hoteldive.com",
+      "url_pattern": "https://www.hoteldive.com/news/SLUG/ID/",
+      "was_relevant": true,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T13:16:31.385879"
+    },
+    {
+      "url": "https://www.hoteldive.com/news/hospitality-industry-executive-interviews-2025/808370/",
+      "domain": "hoteldive.com",
+      "url_pattern": "https://www.hoteldive.com/news/SLUG/ID/",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T13:16:32.587672"
+    },
+    {
+      "url": "https://www.hoteldive.com/news/hotel-casinos-hard-rock-resorts-world-ballys-new-york/808239/",
+      "domain": "hoteldive.com",
+      "url_pattern": "https://www.hoteldive.com/news/SLUG/ID/",
+      "was_relevant": true,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T13:16:33.733304"
+    },
+    {
+      "url": "https://www.hoteldive.com/news/hyatt-appoints-jason-ballard-global-brand-leader-essentials/808107/",
+      "domain": "hoteldive.com",
+      "url_pattern": "https://www.hoteldive.com/news/SLUG/ID/",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T13:16:35.176777"
+    },
+    {
+      "url": "https://www.hoteldive.com/news/hotel-technology-design-guest-experience/807874/",
+      "domain": "hoteldive.com",
+      "url_pattern": "https://www.hoteldive.com/news/SLUG/ID/",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T13:16:36.162327"
+    },
+    {
+      "url": "https://www.hoteldive.com/news/one-beverly-hills-vertical-construction/807320/",
+      "domain": "hoteldive.com",
+      "url_pattern": "https://www.hoteldive.com/news/SLUG/ID/",
+      "was_relevant": true,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T13:16:37.183516"
+    },
+    {
+      "url": "https://www.hoteldive.com/news/livaway-suites-mesa-arizona-groundbreaking/807513/",
+      "domain": "hoteldive.com",
+      "url_pattern": "https://www.hoteldive.com/news/SLUG/ID/",
+      "was_relevant": true,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T13:16:38.437027"
+    },
+    {
+      "url": "https://www.hoteldive.com/news/bunkhouse-hotels-opens-boutique-property-houston-texas/807258/",
+      "domain": "hoteldive.com",
+      "url_pattern": "https://www.hoteldive.com/news/SLUG/ID/",
+      "was_relevant": true,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T13:16:39.705283"
+    },
+    {
+      "url": "https://www.hoteldive.com/news/protesters-arrested-hilton-hotel-new-york-city/810830/",
+      "domain": "hoteldive.com",
+      "url_pattern": "https://www.hoteldive.com/news/SLUG/ID/",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T13:16:40.753287"
+    },
+    {
+      "url": "https://www.hoteldive.com/news/solar-energy-mgm-resorts-las-vegas/810840/",
+      "domain": "hoteldive.com",
+      "url_pattern": "https://www.hoteldive.com/news/SLUG/ID/",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T13:16:41.916709"
+    },
+    {
+      "url": "https://www.hoteldive.com/what-we-are-reading",
+      "domain": "hoteldive.com",
+      "url_pattern": "https://www.hoteldive.com/what-we-are-reading",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T13:16:44.312561"
+    },
+    {
+      "url": "https://www.hoteldive.com/news/accor-hotels-q3-2025-earnings/803852/",
+      "domain": "hoteldive.com",
+      "url_pattern": "https://www.hoteldive.com/news/SLUG/ID/",
+      "was_relevant": true,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T13:16:45.462862"
+    },
+    {
+      "url": "https://www.hoteldive.com/news/accor-premium-midscale-brand-leadership/726412/",
+      "domain": "hoteldive.com",
+      "url_pattern": "https://www.hoteldive.com/news/SLUG/ID/",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T13:16:46.632814"
+    },
+    {
+      "url": "https://www.hoteldive.com/topic/brands/",
+      "domain": "hoteldive.com",
+      "url_pattern": "https://www.hoteldive.com/topic/brands/",
+      "was_relevant": true,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T13:16:47.759185"
+    },
+    {
+      "url": "https://www.hoteldive.com/topic/finances-deals/",
+      "domain": "hoteldive.com",
+      "url_pattern": "https://www.hoteldive.com/topic/finances-deals/",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T13:16:49.255175"
+    },
+    {
+      "url": "https://www.hoteldive.com/news/hilton-debuts-upscale-outset-collection-brand/801970/",
+      "domain": "hoteldive.com",
+      "url_pattern": "https://www.hoteldive.com/news/SLUG/ID/",
+      "was_relevant": true,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T13:16:50.470799"
+    },
+    {
+      "url": "https://www.hoteldive.com/news/hilton-acquires-graduate-hotels/710268/",
+      "domain": "hoteldive.com",
+      "url_pattern": "https://www.hoteldive.com/news/SLUG/ID/",
+      "was_relevant": true,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T13:16:51.657455"
+    },
+    {
+      "url": "https://www.hoteldive.com/news/hilton-opens-graduate-dallas-smu/756549/",
+      "domain": "hoteldive.com",
+      "url_pattern": "https://www.hoteldive.com/news/SLUG/ID/",
+      "was_relevant": true,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T13:16:52.921655"
+    },
+    {
+      "url": "https://www.hoteldive.com/news/graduate-acquires-hotel-boulderado-colorado/744341/",
+      "domain": "hoteldive.com",
+      "url_pattern": "https://www.hoteldive.com/news/SLUG/ID/",
+      "was_relevant": true,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T13:16:54.192700"
+    },
+    {
+      "url": "https://www.hoteldive.com/news/ihg-acquires-ruby-q4-earnings/740200/",
+      "domain": "hoteldive.com",
+      "url_pattern": "https://www.hoteldive.com/news/SLUG/ID/",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T13:16:56.194931"
+    },
+    {
+      "url": "https://www.hoteldive.com/news/ihg-brings-ruby-brand-to-us/760967/",
+      "domain": "hoteldive.com",
+      "url_pattern": "https://www.hoteldive.com/news/SLUG/ID/",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T13:16:57.189372"
+    },
+    {
+      "url": "https://www.hoteldive.com/news/lifestyle-luxury-brand-acquisition-/724975/",
+      "domain": "hoteldive.com",
+      "url_pattern": "https://www.hoteldive.com/news/SLUG/ID/",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T13:16:58.269682"
+    },
+    {
+      "url": "https://www.hoteldive.com/news/hotel-construction-pipeline-q3-2025/803977/",
+      "domain": "hoteldive.com",
+      "url_pattern": "https://www.hoteldive.com/news/SLUG/ID/",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T13:17:00.955873"
+    },
+    {
+      "url": "https://www.hoteldive.com/news/hotel-construction-pipeline-Q4-2024/738107/",
+      "domain": "hoteldive.com",
+      "url_pattern": "https://www.hoteldive.com/news/hotel-construction-pipeline-Q4-2024/ID/",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T13:17:02.381086"
+    },
+    {
+      "url": "https://www.hoteldive.com/news/six-senses-pennsylvania-expansion/727462/",
+      "domain": "hoteldive.com",
+      "url_pattern": "https://www.hoteldive.com/news/SLUG/ID/",
+      "was_relevant": true,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T13:17:03.767761"
+    },
+    {
+      "url": "https://www.hoteldive.com/news/six-senses-opens-south-carolina-resort/708852/",
+      "domain": "hoteldive.com",
+      "url_pattern": "https://www.hoteldive.com/news/SLUG/ID/",
+      "was_relevant": true,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T13:17:04.881344"
+    },
+    {
+      "url": "https://www.hoteldive.com/news/ihgs-six-senses-heads-to-colorado-mountains/725345/",
+      "domain": "hoteldive.com",
+      "url_pattern": "https://www.hoteldive.com/news/SLUG/ID/",
+      "was_relevant": true,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T13:17:06.081841"
+    },
+    {
+      "url": "https://www.hoteldive.com/news/ihg-luxury-lifestyle-leader-americas/726016/",
+      "domain": "hoteldive.com",
+      "url_pattern": "https://www.hoteldive.com/news/SLUG/ID/",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T13:17:07.270226"
+    },
+    {
+      "url": "https://www.hoteldive.com/news/ian-schrager-highgate-public-brand-partnership/810689/",
+      "domain": "hoteldive.com",
+      "url_pattern": "https://www.hoteldive.com/news/SLUG/ID/",
+      "was_relevant": true,
+      "lead_count": 1,
+      "lead_quality_avg": 0.0,
+      "timestamp": "2026-01-30T13:17:09.536162"
+    },
+    {
+      "url": "https://www.hoteldive.com/news/ihg-ruby-hotels-chicago-debut/810588/",
+      "domain": "hoteldive.com",
+      "url_pattern": "https://www.hoteldive.com/news/SLUG/ID/",
+      "was_relevant": true,
+      "lead_count": 1,
+      "lead_quality_avg": 0.0,
+      "timestamp": "2026-01-30T13:17:10.703475"
+    },
+    {
+      "url": "https://www.hoteldive.com/news/ihg-six-senses-resort-utah/810467/",
+      "domain": "hoteldive.com",
+      "url_pattern": "https://www.hoteldive.com/news/SLUG/ID/",
+      "was_relevant": true,
+      "lead_count": 1,
+      "lead_quality_avg": 0.0,
+      "timestamp": "2026-01-30T13:17:11.810268"
+    },
+    {
+      "url": "https://www.hoteldive.com/news/top-hotel-openings-2026/810298/",
+      "domain": "hoteldive.com",
+      "url_pattern": "https://www.hoteldive.com/news/SLUG/ID/",
+      "was_relevant": true,
+      "lead_count": 9,
+      "lead_quality_avg": 0.0,
+      "timestamp": "2026-01-30T13:17:16.352510"
+    },
+    {
+      "url": "https://www.hoteldive.com/news/wyndham-reside-partnership-apartment-hotel-opening/810218/",
+      "domain": "hoteldive.com",
+      "url_pattern": "https://www.hoteldive.com/news/SLUG/ID/",
+      "was_relevant": true,
+      "lead_count": 1,
+      "lead_quality_avg": 0.0,
+      "timestamp": "2026-01-30T13:17:17.874545"
+    },
+    {
+      "url": "https://www.hoteldive.com/news/ritz-carlton-hotel-development-indianapolis/809199/",
+      "domain": "hoteldive.com",
+      "url_pattern": "https://www.hoteldive.com/news/SLUG/ID/",
+      "was_relevant": true,
+      "lead_count": 1,
+      "lead_quality_avg": 0.0,
+      "timestamp": "2026-01-30T13:17:19.702105"
+    },
+    {
+      "url": "https://www.hoteldive.com/news/apple-hospitality-motto-hilton-nashville-downtown/808592/",
+      "domain": "hoteldive.com",
+      "url_pattern": "https://www.hoteldive.com/news/SLUG/ID/",
+      "was_relevant": true,
+      "lead_count": 1,
+      "lead_quality_avg": 0.0,
+      "timestamp": "2026-01-30T13:17:21.041402"
+    },
+    {
+      "url": "https://www.hoteldive.com/news/omni-fort-lauderdale-hotel-opening/808495/",
+      "domain": "hoteldive.com",
+      "url_pattern": "https://www.hoteldive.com/news/SLUG/ID/",
+      "was_relevant": true,
+      "lead_count": 2,
+      "lead_quality_avg": 0.0,
+      "timestamp": "2026-01-30T13:17:22.804963"
+    },
+    {
+      "url": "https://www.hoteldive.com/news/hotel-casinos-hard-rock-resorts-world-ballys-new-york/808239/",
+      "domain": "hoteldive.com",
+      "url_pattern": "https://www.hoteldive.com/news/SLUG/ID/",
+      "was_relevant": true,
+      "lead_count": 2,
+      "lead_quality_avg": 0.0,
+      "timestamp": "2026-01-30T13:17:24.754966"
+    },
+    {
+      "url": "https://www.hoteldive.com/news/one-beverly-hills-vertical-construction/807320/",
+      "domain": "hoteldive.com",
+      "url_pattern": "https://www.hoteldive.com/news/SLUG/ID/",
+      "was_relevant": true,
+      "lead_count": 1,
+      "lead_quality_avg": 0.0,
+      "timestamp": "2026-01-30T13:17:25.972116"
+    },
+    {
+      "url": "https://www.hoteldive.com/news/livaway-suites-mesa-arizona-groundbreaking/807513/",
+      "domain": "hoteldive.com",
+      "url_pattern": "https://www.hoteldive.com/news/SLUG/ID/",
+      "was_relevant": true,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T13:17:27.174734"
+    },
+    {
+      "url": "https://www.hoteldive.com/news/bunkhouse-hotels-opens-boutique-property-houston-texas/807258/",
+      "domain": "hoteldive.com",
+      "url_pattern": "https://www.hoteldive.com/news/SLUG/ID/",
+      "was_relevant": true,
+      "lead_count": 1,
+      "lead_quality_avg": 0.0,
+      "timestamp": "2026-01-30T13:17:28.566495"
+    },
+    {
+      "url": "https://www.hoteldive.com/news/accor-hotels-q3-2025-earnings/803852/",
+      "domain": "hoteldive.com",
+      "url_pattern": "https://www.hoteldive.com/news/SLUG/ID/",
+      "was_relevant": true,
+      "lead_count": 1,
+      "lead_quality_avg": 0.0,
+      "timestamp": "2026-01-30T13:17:30.477316"
+    },
+    {
+      "url": "https://www.hoteldive.com/topic/brands/",
+      "domain": "hoteldive.com",
+      "url_pattern": "https://www.hoteldive.com/topic/brands/",
+      "was_relevant": true,
+      "lead_count": 2,
+      "lead_quality_avg": 0.0,
+      "timestamp": "2026-01-30T13:17:34.683915"
+    },
+    {
+      "url": "https://www.hoteldive.com/news/hilton-debuts-upscale-outset-collection-brand/801970/",
+      "domain": "hoteldive.com",
+      "url_pattern": "https://www.hoteldive.com/news/SLUG/ID/",
+      "was_relevant": true,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T13:17:38.084724"
+    },
+    {
+      "url": "https://www.hoteldive.com/news/hilton-acquires-graduate-hotels/710268/",
+      "domain": "hoteldive.com",
+      "url_pattern": "https://www.hoteldive.com/news/SLUG/ID/",
+      "was_relevant": true,
+      "lead_count": 1,
+      "lead_quality_avg": 0.0,
+      "timestamp": "2026-01-30T13:17:39.266276"
+    },
+    {
+      "url": "https://www.hoteldive.com/news/hilton-opens-graduate-dallas-smu/756549/",
+      "domain": "hoteldive.com",
+      "url_pattern": "https://www.hoteldive.com/news/SLUG/ID/",
+      "was_relevant": true,
+      "lead_count": 1,
+      "lead_quality_avg": 0.0,
+      "timestamp": "2026-01-30T13:17:40.387682"
+    },
+    {
+      "url": "https://www.hoteldive.com/news/graduate-acquires-hotel-boulderado-colorado/744341/",
+      "domain": "hoteldive.com",
+      "url_pattern": "https://www.hoteldive.com/news/SLUG/ID/",
+      "was_relevant": true,
+      "lead_count": 1,
+      "lead_quality_avg": 0.0,
+      "timestamp": "2026-01-30T13:17:41.717832"
+    },
+    {
+      "url": "https://www.hoteldive.com/news/six-senses-pennsylvania-expansion/727462/",
+      "domain": "hoteldive.com",
+      "url_pattern": "https://www.hoteldive.com/news/SLUG/ID/",
+      "was_relevant": true,
+      "lead_count": 1,
+      "lead_quality_avg": 0.0,
+      "timestamp": "2026-01-30T13:17:44.355365"
+    },
+    {
+      "url": "https://www.hoteldive.com/news/six-senses-opens-south-carolina-resort/708852/",
+      "domain": "hoteldive.com",
+      "url_pattern": "https://www.hoteldive.com/news/SLUG/ID/",
+      "was_relevant": true,
+      "lead_count": 1,
+      "lead_quality_avg": 0.0,
+      "timestamp": "2026-01-30T13:17:45.941291"
+    },
+    {
+      "url": "https://www.hoteldive.com/news/ihgs-six-senses-heads-to-colorado-mountains/725345/",
+      "domain": "hoteldive.com",
+      "url_pattern": "https://www.hoteldive.com/news/SLUG/ID/",
+      "was_relevant": true,
+      "lead_count": 1,
+      "lead_quality_avg": 0.0,
+      "timestamp": "2026-01-30T13:17:47.079470"
+    }
+  ],
+  "customerexperiencedive.com": [
+    {
+      "url": "https://www.customerexperiencedive.com/news/customer-experience-trends-outlook-2026/810846/?utm_source=Sailthru&utm_medium=email&utm_campaign=Issue:%202026-01-30%20CX%20Dive%20%5Bissue:81235%5D&utm_term=CX%20Dive",
+      "domain": "customerexperiencedive.com",
+      "url_pattern": "https://www.customerexperiencedive.com/news/SLUG/ID/?utm_source=Sailthru&utm_medium=email&utm_campaign=Issue:%202026-01-30%20CX%20Dive%20%5Bissue:81235%5D&utm_term=CX%20Dive",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T11:56:26.455731"
+    },
+    {
+      "url": "https://www.customerexperiencedive.com/news/customer-experience-trends-outlook-2026/810846/?utm_source=Sailthru&utm_medium=email&utm_campaign=Issue:%202026-01-30%20CX%20Dive%20%5Bissue:81235%5D&utm_term=CX%20Dive",
+      "domain": "customerexperiencedive.com",
+      "url_pattern": "https://www.customerexperiencedive.com/news/SLUG/ID/?utm_source=Sailthru&utm_medium=email&utm_campaign=Issue:%202026-01-30%20CX%20Dive%20%5Bissue:81235%5D&utm_term=CX%20Dive",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T12:52:47.047150"
+    },
+    {
+      "url": "https://www.customerexperiencedive.com/news/customer-experience-trends-outlook-2026/810846/?utm_source=Sailthru&utm_medium=email&utm_campaign=Issue:%202026-01-30%20CX%20Dive%20%5Bissue:81235%5D&utm_term=CX%20Dive",
+      "domain": "customerexperiencedive.com",
+      "url_pattern": "https://www.customerexperiencedive.com/news/SLUG/ID/?utm_source=Sailthru&utm_medium=email&utm_campaign=Issue:%202026-01-30%20CX%20Dive%20%5Bissue:81235%5D&utm_term=CX%20Dive",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T13:16:42.938218"
+    }
+  ],
+  "hospitalitynet.org": [
+    {
+      "url": "https://www.hospitalitynet.org/news/4130608.html",
+      "domain": "hospitalitynet.org",
+      "url_pattern": "https://www.hospitalitynet.org/news/4130608.html",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T11:56:39.245478"
+    },
+    {
+      "url": "https://www.hospitalitynet.org/news/4130608.html",
+      "domain": "hospitalitynet.org",
+      "url_pattern": "https://www.hospitalitynet.org/news/4130608.html",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T12:52:59.603747"
+    },
+    {
+      "url": "https://www.hospitalitynet.org/news/4130608.html",
+      "domain": "hospitalitynet.org",
+      "url_pattern": "https://www.hospitalitynet.org/news/4130608.html",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T13:16:55.241091"
+    }
+  ],
+  "ihgplc.com": [
+    {
+      "url": "https://www.ihgplc.com/en/news-and-media/news-releases/2026/ihg-hotels-and-resorts-and-ruby-group-bring-its-first-us-ruby-hotel-to-chicago",
+      "domain": "ihgplc.com",
+      "url_pattern": "https://www.ihgplc.com/en/news-and-media/news-releases/ID/ihg-hotels-and-resorts-and-ruby-group-bring-its-first-us-ruby-hotel-to-chicago",
+      "was_relevant": true,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T11:56:43.898040"
+    },
+    {
+      "url": "https://www.ihgplc.com/en/news-and-media/news-releases/2026/a-canyon-oasis-six-senses-desert-sanctuary-to-emerge-in-southern-utah",
+      "domain": "ihgplc.com",
+      "url_pattern": "https://www.ihgplc.com/en/news-and-media/news-releases/ID/a-canyon-oasis-six-senses-desert-sanctuary-to-emerge-in-southern-utah",
+      "was_relevant": true,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T11:56:52.303079"
+    },
+    {
+      "url": "https://www.ihgplc.com/en/news-and-media/news-releases/2026/ihg-hotels-and-resorts-and-ruby-group-bring-its-first-us-ruby-hotel-to-chicago",
+      "domain": "ihgplc.com",
+      "url_pattern": "https://www.ihgplc.com/en/news-and-media/news-releases/ID/ihg-hotels-and-resorts-and-ruby-group-bring-its-first-us-ruby-hotel-to-chicago",
+      "was_relevant": true,
+      "lead_count": 1,
+      "lead_quality_avg": 0.0,
+      "timestamp": "2026-01-30T11:57:31.275172"
+    },
+    {
+      "url": "https://www.ihgplc.com/en/news-and-media/news-releases/2026/a-canyon-oasis-six-senses-desert-sanctuary-to-emerge-in-southern-utah",
+      "domain": "ihgplc.com",
+      "url_pattern": "https://www.ihgplc.com/en/news-and-media/news-releases/ID/a-canyon-oasis-six-senses-desert-sanctuary-to-emerge-in-southern-utah",
+      "was_relevant": true,
+      "lead_count": 1,
+      "lead_quality_avg": 0.0,
+      "timestamp": "2026-01-30T11:57:36.954243"
+    },
+    {
+      "url": "https://www.ihgplc.com/en/news-and-media/news-releases/2026/ihg-hotels-and-resorts-and-ruby-group-bring-its-first-us-ruby-hotel-to-chicago",
+      "domain": "ihgplc.com",
+      "url_pattern": "https://www.ihgplc.com/en/news-and-media/news-releases/ID/ihg-hotels-and-resorts-and-ruby-group-bring-its-first-us-ruby-hotel-to-chicago",
+      "was_relevant": true,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T12:53:04.415324"
+    },
+    {
+      "url": "https://www.ihgplc.com/en/news-and-media/news-releases/2026/a-canyon-oasis-six-senses-desert-sanctuary-to-emerge-in-southern-utah",
+      "domain": "ihgplc.com",
+      "url_pattern": "https://www.ihgplc.com/en/news-and-media/news-releases/ID/a-canyon-oasis-six-senses-desert-sanctuary-to-emerge-in-southern-utah",
+      "was_relevant": true,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T12:53:13.283564"
+    },
+    {
+      "url": "https://www.ihgplc.com/en/news-and-media/news-releases/2026/ihg-hotels-and-resorts-and-ruby-group-bring-its-first-us-ruby-hotel-to-chicago",
+      "domain": "ihgplc.com",
+      "url_pattern": "https://www.ihgplc.com/en/news-and-media/news-releases/ID/ihg-hotels-and-resorts-and-ruby-group-bring-its-first-us-ruby-hotel-to-chicago",
+      "was_relevant": true,
+      "lead_count": 1,
+      "lead_quality_avg": 0.0,
+      "timestamp": "2026-01-30T12:53:46.957113"
+    },
+    {
+      "url": "https://www.ihgplc.com/en/news-and-media/news-releases/2026/a-canyon-oasis-six-senses-desert-sanctuary-to-emerge-in-southern-utah",
+      "domain": "ihgplc.com",
+      "url_pattern": "https://www.ihgplc.com/en/news-and-media/news-releases/ID/a-canyon-oasis-six-senses-desert-sanctuary-to-emerge-in-southern-utah",
+      "was_relevant": true,
+      "lead_count": 1,
+      "lead_quality_avg": 0.0,
+      "timestamp": "2026-01-30T12:53:52.434039"
+    },
+    {
+      "url": "https://www.ihgplc.com/en/news-and-media/news-releases/2026/ihg-hotels-and-resorts-and-ruby-group-bring-its-first-us-ruby-hotel-to-chicago",
+      "domain": "ihgplc.com",
+      "url_pattern": "https://www.ihgplc.com/en/news-and-media/news-releases/ID/ihg-hotels-and-resorts-and-ruby-group-bring-its-first-us-ruby-hotel-to-chicago",
+      "was_relevant": true,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T13:16:59.549999"
+    },
+    {
+      "url": "https://www.ihgplc.com/en/news-and-media/news-releases/2026/a-canyon-oasis-six-senses-desert-sanctuary-to-emerge-in-southern-utah",
+      "domain": "ihgplc.com",
+      "url_pattern": "https://www.ihgplc.com/en/news-and-media/news-releases/ID/a-canyon-oasis-six-senses-desert-sanctuary-to-emerge-in-southern-utah",
+      "was_relevant": true,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T13:17:08.328309"
+    },
+    {
+      "url": "https://www.ihgplc.com/en/news-and-media/news-releases/2026/ihg-hotels-and-resorts-and-ruby-group-bring-its-first-us-ruby-hotel-to-chicago",
+      "domain": "ihgplc.com",
+      "url_pattern": "https://www.ihgplc.com/en/news-and-media/news-releases/ID/ihg-hotels-and-resorts-and-ruby-group-bring-its-first-us-ruby-hotel-to-chicago",
+      "was_relevant": true,
+      "lead_count": 1,
+      "lead_quality_avg": 0.0,
+      "timestamp": "2026-01-30T13:17:43.072470"
+    },
+    {
+      "url": "https://www.ihgplc.com/en/news-and-media/news-releases/2026/a-canyon-oasis-six-senses-desert-sanctuary-to-emerge-in-southern-utah",
+      "domain": "ihgplc.com",
+      "url_pattern": "https://www.ihgplc.com/en/news-and-media/news-releases/ID/a-canyon-oasis-six-senses-desert-sanctuary-to-emerge-in-southern-utah",
+      "was_relevant": true,
+      "lead_count": 1,
+      "lead_quality_avg": 0.0,
+      "timestamp": "2026-01-30T13:17:48.316684"
+    }
+  ],
+  "press.fourseasons.com": [
+    {
+      "url": "https://press.fourseasons.com/news-releases/",
+      "domain": "press.fourseasons.com",
+      "url_pattern": "https://press.fourseasons.com/news-releases/",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T13:19:52.023499"
+    },
+    {
+      "url": "https://press.fourseasons.com/hotel-press-kits",
+      "domain": "press.fourseasons.com",
+      "url_pattern": "https://press.fourseasons.com/hotel-press-kits",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T13:19:53.141878"
+    },
+    {
+      "url": "https://press.fourseasons.com/trending-now",
+      "domain": "press.fourseasons.com",
+      "url_pattern": "https://press.fourseasons.com/trending-now",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T13:19:54.617806"
+    },
+    {
+      "url": "https://press.fourseasons.com/press-contacts",
+      "domain": "press.fourseasons.com",
+      "url_pattern": "https://press.fourseasons.com/press-contacts",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T13:19:55.866051"
+    },
+    {
+      "url": "https://press.fourseasons.com/corporate",
+      "domain": "press.fourseasons.com",
+      "url_pattern": "https://press.fourseasons.com/corporate",
+      "was_relevant": true,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T13:19:57.141664"
+    },
+    {
+      "url": "https://press.fourseasons.com/content/fourseasons_pressroom/en/forms/influencer.html",
+      "domain": "press.fourseasons.com",
+      "url_pattern": "https://press.fourseasons.com/content/fourseasons_pressroom/en/forms/influencer.html",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T13:19:58.252847"
+    },
+    {
+      "url": "https://press.fourseasons.com/seychellesdesroches/hotel-news/2026/la-pizzeria-opening",
+      "domain": "press.fourseasons.com",
+      "url_pattern": "https://press.fourseasons.com/seychellesdesroches/hotel-news/ID/la-pizzeria-opening",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T13:19:59.520363"
+    },
+    {
+      "url": "https://press.fourseasons.com/istanbul/hotel-news/2026/sustainable-menu",
+      "domain": "press.fourseasons.com",
+      "url_pattern": "https://press.fourseasons.com/istanbul/hotel-news/ID/sustainable-menu",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T13:20:00.939645"
+    },
+    {
+      "url": "https://press.fourseasons.com/westlakevillage/hotel-news/2026/valentines-day",
+      "domain": "press.fourseasons.com",
+      "url_pattern": "https://press.fourseasons.com/westlakevillage/hotel-news/ID/valentines-day",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T13:20:02.132290"
+    },
+    {
+      "url": "https://press.fourseasons.com/montreal/hotel-news/2026/winter-escape-and-valentines-day",
+      "domain": "press.fourseasons.com",
+      "url_pattern": "https://press.fourseasons.com/montreal/hotel-news/ID/winter-escape-and-valentines-day",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T13:20:03.465517"
+    },
+    {
+      "url": "https://press.fourseasons.com/baltimore/hotel-news/2026/valentines-day",
+      "domain": "press.fourseasons.com",
+      "url_pattern": "https://press.fourseasons.com/baltimore/hotel-news/ID/valentines-day",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T13:20:04.557555"
+    },
+    {
+      "url": "https://press.fourseasons.com/shenzhen/hotel-news/2026/suite-offer",
+      "domain": "press.fourseasons.com",
+      "url_pattern": "https://press.fourseasons.com/shenzhen/hotel-news/ID/suite-offer",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T13:20:05.832276"
+    },
+    {
+      "url": "https://press.fourseasons.com/bogota/hotel-news/2026/valentines-day",
+      "domain": "press.fourseasons.com",
+      "url_pattern": "https://press.fourseasons.com/bogota/hotel-news/ID/valentines-day",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T13:20:07.118574"
+    },
+    {
+      "url": "https://press.fourseasons.com/vail/hotel-news/2026/valentines-day",
+      "domain": "press.fourseasons.com",
+      "url_pattern": "https://press.fourseasons.com/vail/hotel-news/ID/valentines-day",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T13:20:08.259945"
+    },
+    {
+      "url": "https://press.fourseasons.com/bengaluru/hotel-news/2026/lunar-new-year",
+      "domain": "press.fourseasons.com",
+      "url_pattern": "https://press.fourseasons.com/bengaluru/hotel-news/ID/lunar-new-year",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T13:20:09.681412"
+    },
+    {
+      "url": "https://press.fourseasons.com/scottsdale/hotel-news/2026/valentines-day",
+      "domain": "press.fourseasons.com",
+      "url_pattern": "https://press.fourseasons.com/scottsdale/hotel-news/ID/valentines-day",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T13:20:11.101688"
+    },
+    {
+      "url": "https://press.fourseasons.com/chiangmai/hotel-news/2026/valentines",
+      "domain": "press.fourseasons.com",
+      "url_pattern": "https://press.fourseasons.com/chiangmai/hotel-news/ID/valentines",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T13:20:12.389962"
+    },
+    {
+      "url": "https://press.fourseasons.com/chiangmai/hotel-news/2026/sunday-brunch-return",
+      "domain": "press.fourseasons.com",
+      "url_pattern": "https://press.fourseasons.com/chiangmai/hotel-news/ID/sunday-brunch-return",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T13:20:13.510457"
+    },
+    {
+      "url": "https://press.fourseasons.com/content/fourseasons_pressroom/en/sitemap.html",
+      "domain": "press.fourseasons.com",
+      "url_pattern": "https://press.fourseasons.com/content/fourseasons_pressroom/en/sitemap.html",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T13:20:14.776218"
+    },
+    {
+      "url": "https://press.fourseasons.com/",
+      "domain": "press.fourseasons.com",
+      "url_pattern": "https://press.fourseasons.com/",
+      "was_relevant": true,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T13:20:15.983534"
+    },
+    {
+      "url": "https://press.fourseasons.com/yachts",
+      "domain": "press.fourseasons.com",
+      "url_pattern": "https://press.fourseasons.com/yachts",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T13:20:17.513493"
+    },
+    {
+      "url": "https://press.fourseasons.com/jet",
+      "domain": "press.fourseasons.com",
+      "url_pattern": "https://press.fourseasons.com/jet",
+      "was_relevant": true,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T13:20:18.648325"
+    },
+    {
+      "url": "https://press.fourseasons.com/anguilla",
+      "domain": "press.fourseasons.com",
+      "url_pattern": "https://press.fourseasons.com/anguilla",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T13:20:20.051023"
+    },
+    {
+      "url": "https://press.fourseasons.com/atlanta",
+      "domain": "press.fourseasons.com",
+      "url_pattern": "https://press.fourseasons.com/atlanta",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T13:20:21.131823"
+    },
+    {
+      "url": "https://press.fourseasons.com/austin",
+      "domain": "press.fourseasons.com",
+      "url_pattern": "https://press.fourseasons.com/austin",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T13:20:22.211305"
+    },
+    {
+      "url": "https://press.fourseasons.com/oceanclub",
+      "domain": "press.fourseasons.com",
+      "url_pattern": "https://press.fourseasons.com/oceanclub",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T13:20:23.327231"
+    },
+    {
+      "url": "https://press.fourseasons.com/baltimore",
+      "domain": "press.fourseasons.com",
+      "url_pattern": "https://press.fourseasons.com/baltimore",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T13:20:24.679391"
+    },
+    {
+      "url": "https://press.fourseasons.com/boston",
+      "domain": "press.fourseasons.com",
+      "url_pattern": "https://press.fourseasons.com/boston",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T13:20:26.019546"
+    },
+    {
+      "url": "https://press.fourseasons.com/onedalton",
+      "domain": "press.fourseasons.com",
+      "url_pattern": "https://press.fourseasons.com/onedalton",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T13:20:27.301567"
+    },
+    {
+      "url": "https://press.fourseasons.com/chicago",
+      "domain": "press.fourseasons.com",
+      "url_pattern": "https://press.fourseasons.com/chicago",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T13:20:28.716172"
+    },
+    {
+      "url": "https://press.fourseasons.com/corporate",
+      "domain": "press.fourseasons.com",
+      "url_pattern": "https://press.fourseasons.com/corporate",
+      "was_relevant": true,
+      "lead_count": 2,
+      "lead_quality_avg": 0.0,
+      "timestamp": "2026-01-30T13:20:31.116051"
+    },
+    {
+      "url": "https://press.fourseasons.com/",
+      "domain": "press.fourseasons.com",
+      "url_pattern": "https://press.fourseasons.com/",
+      "was_relevant": true,
+      "lead_count": 1,
+      "lead_quality_avg": 0.0,
+      "timestamp": "2026-01-30T13:20:32.204879"
+    },
+    {
+      "url": "https://press.fourseasons.com/jet",
+      "domain": "press.fourseasons.com",
+      "url_pattern": "https://press.fourseasons.com/jet",
+      "was_relevant": true,
+      "lead_count": 1,
+      "lead_quality_avg": 0.0,
+      "timestamp": "2026-01-30T13:20:33.283406"
+    },
+    {
+      "url": "https://press.fourseasons.com/news-releases/2024/new-four-seasons-in-amaala/",
+      "domain": "press.fourseasons.com",
+      "url_pattern": "https://press.fourseasons.com/news-releases/ID/SLUG/",
+      "was_relevant": true,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T13:24:14.474948"
+    },
+    {
+      "url": "https://press.fourseasons.com/news-releases/2022/new-four-seasons-in-venice/",
+      "domain": "press.fourseasons.com",
+      "url_pattern": "https://press.fourseasons.com/news-releases/ID/SLUG/",
+      "was_relevant": true,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T13:24:15.688716"
+    },
+    {
+      "url": "https://press.fourseasons.com/news-releases/2023/new-four-seasons-in-red-sea/",
+      "domain": "press.fourseasons.com",
+      "url_pattern": "https://press.fourseasons.com/news-releases/ID/SLUG/",
+      "was_relevant": true,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T13:24:16.857242"
+    },
+    {
+      "url": "https://press.fourseasons.com/news-releases/2018/new-four-seasons-in-belize/",
+      "domain": "press.fourseasons.com",
+      "url_pattern": "https://press.fourseasons.com/news-releases/ID/SLUG/",
+      "was_relevant": true,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T13:24:17.833403"
+    },
+    {
+      "url": "https://press.fourseasons.com/news-releases/2023/new-four-seasons-in-taipei/",
+      "domain": "press.fourseasons.com",
+      "url_pattern": "https://press.fourseasons.com/news-releases/ID/SLUG/",
+      "was_relevant": true,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T13:24:18.872332"
+    },
+    {
+      "url": "https://press.fourseasons.com/news-releases",
+      "domain": "press.fourseasons.com",
+      "url_pattern": "https://press.fourseasons.com/news-releases",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T13:24:28.334391"
+    },
+    {
+      "url": "https://press.fourseasons.com/hotel-press-kits",
+      "domain": "press.fourseasons.com",
+      "url_pattern": "https://press.fourseasons.com/hotel-press-kits",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T13:24:29.366264"
+    },
+    {
+      "url": "https://press.fourseasons.com/trending-now",
+      "domain": "press.fourseasons.com",
+      "url_pattern": "https://press.fourseasons.com/trending-now",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T13:24:30.655281"
+    },
+    {
+      "url": "https://press.fourseasons.com/press-contacts",
+      "domain": "press.fourseasons.com",
+      "url_pattern": "https://press.fourseasons.com/press-contacts",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T13:24:31.688738"
+    },
+    {
+      "url": "https://press.fourseasons.com/corporate",
+      "domain": "press.fourseasons.com",
+      "url_pattern": "https://press.fourseasons.com/corporate",
+      "was_relevant": true,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T13:24:32.791315"
+    },
+    {
+      "url": "https://press.fourseasons.com/content/fourseasons_pressroom/en/forms/influencer.html",
+      "domain": "press.fourseasons.com",
+      "url_pattern": "https://press.fourseasons.com/content/fourseasons_pressroom/en/forms/influencer.html",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T13:24:34.014869"
+    },
+    {
+      "url": "https://press.fourseasons.com/content/fourseasons_pressroom/printView.html?pageToPrint=/content/fourseasons_pressroom/en/news/corporate/2024/new_four_seasons_in_",
+      "domain": "press.fourseasons.com",
+      "url_pattern": "https://press.fourseasons.com/content/fourseasons_pressroom/printView.html?pageToPrint=/content/fourseasons_pressroom/en/news/corporate/ID/new_four_seasons_in_",
+      "was_relevant": true,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T13:24:35.111584"
+    },
+    {
+      "url": "https://press.fourseasons.com/corporate-bios/bart-carnahan.html",
+      "domain": "press.fourseasons.com",
+      "url_pattern": "https://press.fourseasons.com/corporate-bios/bart-carnahan.html",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T13:24:36.229825"
+    },
+    {
+      "url": "https://press.fourseasons.com/news-releases/2022/new-four-seasons-in-jeddah-corniche/",
+      "domain": "press.fourseasons.com",
+      "url_pattern": "https://press.fourseasons.com/news-releases/ID/SLUG/",
+      "was_relevant": true,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T13:24:37.254145"
+    },
+    {
+      "url": "https://press.fourseasons.com/news-releases/2023/new-four-seasons-in-neom/",
+      "domain": "press.fourseasons.com",
+      "url_pattern": "https://press.fourseasons.com/news-releases/ID/SLUG/",
+      "was_relevant": true,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T13:24:38.288886"
+    },
+    {
+      "url": "https://press.fourseasons.com/news-releases/2022/new-four-seasons-in-diriyah/",
+      "domain": "press.fourseasons.com",
+      "url_pattern": "https://press.fourseasons.com/news-releases/ID/SLUG/",
+      "was_relevant": true,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T13:24:39.391155"
+    },
+    {
+      "url": "https://press.fourseasons.com/news-releases/2026/strategic-growth-and-expansion-2",
+      "domain": "press.fourseasons.com",
+      "url_pattern": "https://press.fourseasons.com/news-releases/ID/strategic-growth-and-expansion-2",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T13:24:40.561611"
+    },
+    {
+      "url": "https://press.fourseasons.com/news-releases/2026/strategic-growth-and-expansion",
+      "domain": "press.fourseasons.com",
+      "url_pattern": "https://press.fourseasons.com/news-releases/ID/strategic-growth-and-expansion",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T13:24:41.642214"
+    },
+    {
+      "url": "https://press.fourseasons.com/content/fourseasons_pressroom/en/sitemap.html",
+      "domain": "press.fourseasons.com",
+      "url_pattern": "https://press.fourseasons.com/content/fourseasons_pressroom/en/sitemap.html",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T13:24:42.685175"
+    },
+    {
+      "url": "https://press.fourseasons.com/content/fourseasons_pressroom/printView.html?pageToPrint=/content/fourseasons_pressroom/en/news/corporate/2022/new_four_seasons_in__1170736",
+      "domain": "press.fourseasons.com",
+      "url_pattern": "https://press.fourseasons.com/content/fourseasons_pressroom/printView.html?pageToPrint=/content/fourseasons_pressroom/en/news/corporate/ID/new_four_seasons_in__1170736",
+      "was_relevant": true,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T13:24:44.068826"
+    },
+    {
+      "url": "https://press.fourseasons.com/news-releases/2021/new-four-seasons-in-puglia-italy/",
+      "domain": "press.fourseasons.com",
+      "url_pattern": "https://press.fourseasons.com/news-releases/ID/SLUG/",
+      "was_relevant": true,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T13:24:45.387836"
+    },
+    {
+      "url": "https://press.fourseasons.com/news-releases/2021/new-four-seasons-in-mallorca-spain/",
+      "domain": "press.fourseasons.com",
+      "url_pattern": "https://press.fourseasons.com/news-releases/ID/SLUG/",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T13:24:46.279497"
+    },
+    {
+      "url": "https://press.fourseasons.com/venice/hotel-news/2026/reservations-live",
+      "domain": "press.fourseasons.com",
+      "url_pattern": "https://press.fourseasons.com/venice/hotel-news/ID/reservations-live",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T13:24:47.849996"
+    },
+    {
+      "url": "https://press.fourseasons.com/de/venice/hotel-news/2026/reservations-live-5",
+      "domain": "press.fourseasons.com",
+      "url_pattern": "https://press.fourseasons.com/de/venice/hotel-news/ID/reservations-live-5",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T13:24:49.437009"
+    },
+    {
+      "url": "https://press.fourseasons.com/venice",
+      "domain": "press.fourseasons.com",
+      "url_pattern": "https://press.fourseasons.com/venice",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T13:24:50.708673"
+    },
+    {
+      "url": "https://press.fourseasons.com/content/fourseasons_pressroom/printView.html?pageToPrint=/content/fourseasons_pressroom/en/news/corporate/2023/new_four_seasons_in__1430297916",
+      "domain": "press.fourseasons.com",
+      "url_pattern": "https://press.fourseasons.com/content/fourseasons_pressroom/printView.html?pageToPrint=/content/fourseasons_pressroom/en/news/corporate/ID/new_four_seasons_in__1430297916",
+      "was_relevant": true,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T13:24:51.991541"
+    },
+    {
+      "url": "https://press.fourseasons.com/news-releases/2025/new-four-seasons-private-residences-red-sea-shura-island",
+      "domain": "press.fourseasons.com",
+      "url_pattern": "https://press.fourseasons.com/news-releases/ID/new-four-seasons-private-residences-red-sea-shura-island",
+      "was_relevant": true,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T13:24:53.366801"
+    },
+    {
+      "url": "https://press.fourseasons.com/news-releases/2025/new-four-seasons-private-residences-red-sea-shura-island-2",
+      "domain": "press.fourseasons.com",
+      "url_pattern": "https://press.fourseasons.com/news-releases/ID/new-four-seasons-private-residences-red-sea-shura-island-2",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T13:24:54.587369"
+    },
+    {
+      "url": "https://press.fourseasons.com/content/fourseasons_pressroom/printView.html?pageToPrint=/content/fourseasons_pressroom/en/news/corporate/2018/new_four_seasons_in__97149875",
+      "domain": "press.fourseasons.com",
+      "url_pattern": "https://press.fourseasons.com/content/fourseasons_pressroom/printView.html?pageToPrint=/content/fourseasons_pressroom/en/news/corporate/ID/new_four_seasons_in__97149875",
+      "was_relevant": true,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T13:24:55.580284"
+    },
+    {
+      "url": "https://press.fourseasons.com/content/fourseasons_pressroom/printView.html?pageToPrint=/content/fourseasons_pressroom/en/news/corporate/2023/new_four_seasons_in__876143202",
+      "domain": "press.fourseasons.com",
+      "url_pattern": "https://press.fourseasons.com/content/fourseasons_pressroom/printView.html?pageToPrint=/content/fourseasons_pressroom/en/news/corporate/ID/new_four_seasons_in__876143202",
+      "was_relevant": true,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T13:24:56.687293"
+    },
+    {
+      "url": "https://press.fourseasons.com/news-releases/2024/new-four-seasons-in-amaala/",
+      "domain": "press.fourseasons.com",
+      "url_pattern": "https://press.fourseasons.com/news-releases/ID/SLUG/",
+      "was_relevant": true,
+      "lead_count": 1,
+      "lead_quality_avg": 0.0,
+      "timestamp": "2026-01-30T13:25:07.577575"
+    },
+    {
+      "url": "https://press.fourseasons.com/news-releases/2022/new-four-seasons-in-venice/",
+      "domain": "press.fourseasons.com",
+      "url_pattern": "https://press.fourseasons.com/news-releases/ID/SLUG/",
+      "was_relevant": true,
+      "lead_count": 1,
+      "lead_quality_avg": 0.0,
+      "timestamp": "2026-01-30T13:25:08.621010"
+    },
+    {
+      "url": "https://press.fourseasons.com/news-releases/2023/new-four-seasons-in-red-sea/",
+      "domain": "press.fourseasons.com",
+      "url_pattern": "https://press.fourseasons.com/news-releases/ID/SLUG/",
+      "was_relevant": true,
+      "lead_count": 1,
+      "lead_quality_avg": 0.0,
+      "timestamp": "2026-01-30T13:25:09.876657"
+    },
+    {
+      "url": "https://press.fourseasons.com/news-releases/2018/new-four-seasons-in-belize/",
+      "domain": "press.fourseasons.com",
+      "url_pattern": "https://press.fourseasons.com/news-releases/ID/SLUG/",
+      "was_relevant": true,
+      "lead_count": 1,
+      "lead_quality_avg": 0.0,
+      "timestamp": "2026-01-30T13:25:11.334983"
+    },
+    {
+      "url": "https://press.fourseasons.com/news-releases/2023/new-four-seasons-in-taipei/",
+      "domain": "press.fourseasons.com",
+      "url_pattern": "https://press.fourseasons.com/news-releases/ID/SLUG/",
+      "was_relevant": true,
+      "lead_count": 1,
+      "lead_quality_avg": 0.0,
+      "timestamp": "2026-01-30T13:25:12.732391"
+    },
+    {
+      "url": "https://press.fourseasons.com/corporate",
+      "domain": "press.fourseasons.com",
+      "url_pattern": "https://press.fourseasons.com/corporate",
+      "was_relevant": true,
+      "lead_count": 2,
+      "lead_quality_avg": 0.0,
+      "timestamp": "2026-01-30T13:25:24.209591"
+    },
+    {
+      "url": "https://press.fourseasons.com/content/fourseasons_pressroom/printView.html?pageToPrint=/content/fourseasons_pressroom/en/news/corporate/2024/new_four_seasons_in_",
+      "domain": "press.fourseasons.com",
+      "url_pattern": "https://press.fourseasons.com/content/fourseasons_pressroom/printView.html?pageToPrint=/content/fourseasons_pressroom/en/news/corporate/ID/new_four_seasons_in_",
+      "was_relevant": true,
+      "lead_count": 1,
+      "lead_quality_avg": 0.0,
+      "timestamp": "2026-01-30T13:25:25.527476"
+    },
+    {
+      "url": "https://press.fourseasons.com/news-releases/2022/new-four-seasons-in-jeddah-corniche/",
+      "domain": "press.fourseasons.com",
+      "url_pattern": "https://press.fourseasons.com/news-releases/ID/SLUG/",
+      "was_relevant": true,
+      "lead_count": 1,
+      "lead_quality_avg": 0.0,
+      "timestamp": "2026-01-30T13:25:26.544338"
+    },
+    {
+      "url": "https://press.fourseasons.com/news-releases/2023/new-four-seasons-in-neom/",
+      "domain": "press.fourseasons.com",
+      "url_pattern": "https://press.fourseasons.com/news-releases/ID/SLUG/",
+      "was_relevant": true,
+      "lead_count": 1,
+      "lead_quality_avg": 0.0,
+      "timestamp": "2026-01-30T13:25:27.929928"
+    },
+    {
+      "url": "https://press.fourseasons.com/news-releases/2022/new-four-seasons-in-diriyah/",
+      "domain": "press.fourseasons.com",
+      "url_pattern": "https://press.fourseasons.com/news-releases/ID/SLUG/",
+      "was_relevant": true,
+      "lead_count": 1,
+      "lead_quality_avg": 0.0,
+      "timestamp": "2026-01-30T13:25:29.295257"
+    },
+    {
+      "url": "https://press.fourseasons.com/content/fourseasons_pressroom/printView.html?pageToPrint=/content/fourseasons_pressroom/en/news/corporate/2022/new_four_seasons_in__1170736",
+      "domain": "press.fourseasons.com",
+      "url_pattern": "https://press.fourseasons.com/content/fourseasons_pressroom/printView.html?pageToPrint=/content/fourseasons_pressroom/en/news/corporate/ID/new_four_seasons_in__1170736",
+      "was_relevant": true,
+      "lead_count": 1,
+      "lead_quality_avg": 0.0,
+      "timestamp": "2026-01-30T13:25:30.452762"
+    },
+    {
+      "url": "https://press.fourseasons.com/news-releases/2021/new-four-seasons-in-puglia-italy/",
+      "domain": "press.fourseasons.com",
+      "url_pattern": "https://press.fourseasons.com/news-releases/ID/SLUG/",
+      "was_relevant": true,
+      "lead_count": 1,
+      "lead_quality_avg": 0.0,
+      "timestamp": "2026-01-30T13:25:31.782338"
+    },
+    {
+      "url": "https://press.fourseasons.com/content/fourseasons_pressroom/printView.html?pageToPrint=/content/fourseasons_pressroom/en/news/corporate/2023/new_four_seasons_in__1430297916",
+      "domain": "press.fourseasons.com",
+      "url_pattern": "https://press.fourseasons.com/content/fourseasons_pressroom/printView.html?pageToPrint=/content/fourseasons_pressroom/en/news/corporate/ID/new_four_seasons_in__1430297916",
+      "was_relevant": true,
+      "lead_count": 1,
+      "lead_quality_avg": 0.0,
+      "timestamp": "2026-01-30T13:25:33.017760"
+    },
+    {
+      "url": "https://press.fourseasons.com/news-releases/2025/new-four-seasons-private-residences-red-sea-shura-island",
+      "domain": "press.fourseasons.com",
+      "url_pattern": "https://press.fourseasons.com/news-releases/ID/new-four-seasons-private-residences-red-sea-shura-island",
+      "was_relevant": true,
+      "lead_count": 1,
+      "lead_quality_avg": 0.0,
+      "timestamp": "2026-01-30T13:25:34.205100"
+    },
+    {
+      "url": "https://press.fourseasons.com/content/fourseasons_pressroom/printView.html?pageToPrint=/content/fourseasons_pressroom/en/news/corporate/2018/new_four_seasons_in__97149875",
+      "domain": "press.fourseasons.com",
+      "url_pattern": "https://press.fourseasons.com/content/fourseasons_pressroom/printView.html?pageToPrint=/content/fourseasons_pressroom/en/news/corporate/ID/new_four_seasons_in__97149875",
+      "was_relevant": true,
+      "lead_count": 1,
+      "lead_quality_avg": 0.0,
+      "timestamp": "2026-01-30T13:25:35.534428"
+    },
+    {
+      "url": "https://press.fourseasons.com/content/fourseasons_pressroom/printView.html?pageToPrint=/content/fourseasons_pressroom/en/news/corporate/2023/new_four_seasons_in__876143202",
+      "domain": "press.fourseasons.com",
+      "url_pattern": "https://press.fourseasons.com/content/fourseasons_pressroom/printView.html?pageToPrint=/content/fourseasons_pressroom/en/news/corporate/ID/new_four_seasons_in__876143202",
+      "was_relevant": true,
+      "lead_count": 1,
+      "lead_quality_avg": 0.0,
+      "timestamp": "2026-01-30T13:25:36.817749"
+    }
+  ],
+  "news.marriott.com": [
+    {
+      "url": "https://news.marriott.com/news/",
+      "domain": "news.marriott.com",
+      "url_pattern": "https://news.marriott.com/news/",
+      "was_relevant": true,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T13:22:00.233797"
+    },
+    {
+      "url": "https://news.marriott.com/news/2026/01/29/marriott-bonvoy-recognized-as-the-worlds-leading-hotel-loyalty-program-by-the-points-guy",
+      "domain": "news.marriott.com",
+      "url_pattern": "https://news.marriott.com/news/YYYY/MM/DD/marriott-bonvoy-recognized-as-the-worlds-leading-hotel-loyalty-program-by-the-points-guy",
+      "was_relevant": true,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T13:22:01.586857"
+    },
+    {
+      "url": "https://news.marriott.com/news/2026/01/29/marriott-bonvoy-calls-a-timeout-on-sports-rivalry-with-pup-rally-adoption-events-celebrating-animal-planets-puppy-bowl-xxii",
+      "domain": "news.marriott.com",
+      "url_pattern": "https://news.marriott.com/news/YYYY/MM/DD/marriott-bonvoy-calls-a-timeout-on-sports-rivalry-with-pup-rally-adoption-events-celebrating-animal-planets-puppy-bowl-xxii",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T13:22:02.918820"
+    },
+    {
+      "url": "https://news.marriott.com/news/2026/01/26/marriott-bonvoy-brings-members-closer-to-cricket-with-exclusive-experiences-for-the-iccs-mens-t20-world-cup-2026",
+      "domain": "news.marriott.com",
+      "url_pattern": "https://news.marriott.com/news/YYYY/MM/DD/marriott-bonvoy-brings-members-closer-to-cricket-with-exclusive-experiences-for-the-iccs-mens-t20-world-cup-2026",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T13:22:03.836251"
+    },
+    {
+      "url": "https://news.marriott.com/news/2026/01/26/a-sweeter-stay-moxy-hotels-launches-sweet-moxy-fest",
+      "domain": "news.marriott.com",
+      "url_pattern": "https://news.marriott.com/news/YYYY/MM/DD/a-sweeter-stay-moxy-hotels-launches-sweet-moxy-fest",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T13:22:05.438114"
+    },
+    {
+      "url": "https://news.marriott.com/news/2026/01/26/marriott-international-announces-exceptional-global-growth-and-milestone-expansion-in-2025",
+      "domain": "news.marriott.com",
+      "url_pattern": "https://news.marriott.com/news/YYYY/MM/DD/marriott-international-announces-exceptional-global-growth-and-milestone-expansion-in-2025",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T13:22:06.437140"
+    },
+    {
+      "url": "https://news.marriott.com/news/2026/01/22/marriott-international-again-named-one-of-fortunes-worlds-most-admired-companies",
+      "domain": "news.marriott.com",
+      "url_pattern": "https://news.marriott.com/news/YYYY/MM/DD/marriott-international-again-named-one-of-fortunes-worlds-most-admired-companies",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T13:22:07.520695"
+    },
+    {
+      "url": "https://news.marriott.com/news/2026/01/14/al-qimmah-hospitality-and-marriott-international-announce-agreement-to-add-more-than-2700-hotel-rooms-in-saudi-arabia",
+      "domain": "news.marriott.com",
+      "url_pattern": "https://news.marriott.com/news/YYYY/MM/DD/al-qimmah-hospitality-and-marriott-international-announce-agreement-to-add-more-than-2700-hotel-rooms-in-saudi-arabia",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T13:22:08.560727"
+    },
+    {
+      "url": "https://news.marriott.com/news/2026/01/09/marriott-bonvoy-forges-global-partnership-with-international-cricket-council-offering-members-unparalleled-access-to-global-cricket-events",
+      "domain": "news.marriott.com",
+      "url_pattern": "https://news.marriott.com/news/YYYY/MM/DD/marriott-bonvoy-forges-global-partnership-with-international-cricket-council-offering-members-unparalleled-access-to-global-cricket-events",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T13:22:09.831954"
+    },
+    {
+      "url": "https://news.marriott.com/news/2026/01/09/marriott-international-announces-changes-to-its-continent-leadership-and-a-strategic-realignment-across-key-regions",
+      "domain": "news.marriott.com",
+      "url_pattern": "https://news.marriott.com/news/YYYY/MM/DD/marriott-international-announces-changes-to-its-continent-leadership-and-a-strategic-realignment-across-key-regions",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T13:22:11.169099"
+    },
+    {
+      "url": "https://news.marriott.com/news/2026/01/06/marriott-bonvoy-to-provide-unmatched-fan-access-to-fifa-world-cup-2026",
+      "domain": "news.marriott.com",
+      "url_pattern": "https://news.marriott.com/news/YYYY/MM/DD/marriott-bonvoy-to-provide-unmatched-fan-access-to-fifa-world-cup-2026",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T13:22:12.337912"
+    },
+    {
+      "url": "https://news.marriott.com/news/2025/12/31/donna-rae-garff-marriott-cherished-wife-mother-grandmother-and-community-leader-passes-away-at-age-90",
+      "domain": "news.marriott.com",
+      "url_pattern": "https://news.marriott.com/news/YYYY/MM/DD/donna-rae-garff-marriott-cherished-wife-mother-grandmother-and-community-leader-passes-away-at-age-90",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T13:22:13.723631"
+    },
+    {
+      "url": "https://news.marriott.com/news/2025/12/30/autograph-collection-hotels-debuts-in-the-philippines-with-the-farm-at-san-benito-a-sanctuary-for-nurturing-growth",
+      "domain": "news.marriott.com",
+      "url_pattern": "https://news.marriott.com/news/YYYY/MM/DD/autograph-collection-hotels-debuts-in-the-philippines-with-the-farm-at-san-benito-a-sanctuary-for-nurturing-growth",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T13:22:14.864513"
+    },
+    {
+      "url": "https://news.marriott.com/news/2025/12/26/ac-hotels-by-marriott-debuts-in-the-philippines-with-the-opening-of-ac-hotel-by-marriott-manila",
+      "domain": "news.marriott.com",
+      "url_pattern": "https://news.marriott.com/news/YYYY/MM/DD/ac-hotels-by-marriott-debuts-in-the-philippines-with-the-opening-of-ac-hotel-by-marriott-manila",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T13:22:16.489509"
+    },
+    {
+      "url": "https://news.marriott.com/news/2025/12/18/w-hotels-introduces-a-new-season-of-hotel-tales-a-global-storytelling-series-spanning-music-taste-culture-and-connection",
+      "domain": "news.marriott.com",
+      "url_pattern": "https://news.marriott.com/news/YYYY/MM/DD/w-hotels-introduces-a-new-season-of-hotel-tales-a-global-storytelling-series-spanning-music-taste-culture-and-connection",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T13:22:17.571762"
+    },
+    {
+      "url": "https://news.marriott.com/news?brand=corporate",
+      "domain": "news.marriott.com",
+      "url_pattern": "https://news.marriott.com/news?brand=corporate",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T13:22:18.644072"
+    },
+    {
+      "url": "https://news.marriott.com/news?newstopic=awards-and-recognition",
+      "domain": "news.marriott.com",
+      "url_pattern": "https://news.marriott.com/news?newstopic=awards-and-recognition",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T13:22:19.982576"
+    },
+    {
+      "url": "https://news.marriott.com/news?newstopic=bonvoy",
+      "domain": "news.marriott.com",
+      "url_pattern": "https://news.marriott.com/news?newstopic=bonvoy",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T13:22:21.856506"
+    },
+    {
+      "url": "https://news.marriott.com/news?newstype=press-releases&newstopic=bonvoy&brand=corporate",
+      "domain": "news.marriott.com",
+      "url_pattern": "https://news.marriott.com/news?newstype=press-releases&newstopic=bonvoy&brand=corporate",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T13:22:23.193554"
+    },
+    {
+      "url": "https://news.marriott.com/news/2025/12/11/marriott-bonvoy-delivers-exclusive-member-experiences-at-the-snow-leagues-first-ever-event-in-china",
+      "domain": "news.marriott.com",
+      "url_pattern": "https://news.marriott.com/news/YYYY/MM/DD/marriott-bonvoy-delivers-exclusive-member-experiences-at-the-snow-leagues-first-ever-event-in-china",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T13:22:24.430686"
+    },
+    {
+      "url": "https://news.marriott.com/news/2025/12/09/turning-resolutions-into-reservations-91percent-of-americans-plan-to-travel-in-2026-marriott-bonvoy-survey-reveals",
+      "domain": "news.marriott.com",
+      "url_pattern": "https://news.marriott.com/news/YYYY/MM/DD/turning-resolutions-into-reservations-91percent-of-americans-plan-to-travel-in-2026-marriott-bonvoy-survey-reveals",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T13:22:25.616581"
+    },
+    {
+      "url": "https://news.marriott.com/news/2025/11/24/aeg-and-marriott-bonvoy-renew-global-partnership-expanding-more-than-decade-long-alliance-across-music-sports-live-entertainment-and-ticketing",
+      "domain": "news.marriott.com",
+      "url_pattern": "https://news.marriott.com/news/YYYY/MM/DD/aeg-and-marriott-bonvoy-renew-global-partnership-expanding-more-than-decade-long-alliance-across-music-sports-live-entertainment-and-ticketing",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T13:22:26.741795"
+    },
+    {
+      "url": "https://news.marriott.com/news/2025/11/12/marriott-bonvoy-unlocks-longest-cyber-week-stay-window-ever-giving-travelers-more-time-to-stay-and-more-places-to-explore",
+      "domain": "news.marriott.com",
+      "url_pattern": "https://news.marriott.com/news/YYYY/MM/DD/marriott-bonvoy-unlocks-longest-cyber-week-stay-window-ever-giving-travelers-more-time-to-stay-and-more-places-to-explore",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T13:22:27.877925"
+    },
+    {
+      "url": "https://news.marriott.com/news/2025/10/28/marriott-bonvoy-to-launch-pawssible-journey-program-in-greater-china-creating-an-array-of-pet-friendly-travel-experiences",
+      "domain": "news.marriott.com",
+      "url_pattern": "https://news.marriott.com/news/YYYY/MM/DD/marriott-bonvoy-to-launch-pawssible-journey-program-in-greater-china-creating-an-array-of-pet-friendly-travel-experiences",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T13:22:28.997898"
+    },
+    {
+      "url": "https://news.marriott.com/news/2025/10/24/new-marriott-bonvoy-research-from-europe-middle-east-and-africa-reveals-importance-of-ai-for-holiday-planning-with-passion-pursuits-and-lux-scaping-as-key-travel-trends-for-2026",
+      "domain": "news.marriott.com",
+      "url_pattern": "https://news.marriott.com/news/YYYY/MM/DD/new-marriott-bonvoy-research-from-europe-middle-east-and-africa-reveals-importance-of-ai-for-holiday-planning-with-passion-pursuits-and-lux-scaping-as-key-travel-trends-for-2026",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T13:22:30.209280"
+    },
+    {
+      "url": "https://news.marriott.com/media-resources",
+      "domain": "news.marriott.com",
+      "url_pattern": "https://news.marriott.com/media-resources",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T13:22:31.269796"
+    },
+    {
+      "url": "https://news.marriott.com/recognition",
+      "domain": "news.marriott.com",
+      "url_pattern": "https://news.marriott.com/recognition",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T13:22:32.341617"
+    },
+    {
+      "url": "https://news.marriott.com/news/",
+      "domain": "news.marriott.com",
+      "url_pattern": "https://news.marriott.com/news/",
+      "was_relevant": true,
+      "lead_count": 3,
+      "lead_quality_avg": 0.0,
+      "timestamp": "2026-01-30T13:22:34.142971"
+    },
+    {
+      "url": "https://news.marriott.com/news/2026/01/29/marriott-bonvoy-recognized-as-the-worlds-leading-hotel-loyalty-program-by-the-points-guy",
+      "domain": "news.marriott.com",
+      "url_pattern": "https://news.marriott.com/news/YYYY/MM/DD/marriott-bonvoy-recognized-as-the-worlds-leading-hotel-loyalty-program-by-the-points-guy",
+      "was_relevant": true,
+      "lead_count": 1,
+      "lead_quality_avg": 0.0,
+      "timestamp": "2026-01-30T13:22:35.254144"
+    }
+  ],
+  "theorangestudio.com": [
+    {
+      "url": "https://www.theorangestudio.com/hotel-openings",
+      "domain": "theorangestudio.com",
+      "url_pattern": "https://www.theorangestudio.com/hotel-openings",
+      "was_relevant": true,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T13:24:09.513411"
+    },
+    {
+      "url": "https://www.theorangestudio.com/hotel-openings",
+      "domain": "theorangestudio.com",
+      "url_pattern": "https://www.theorangestudio.com/hotel-openings",
+      "was_relevant": true,
+      "lead_count": 9,
+      "lead_quality_avg": 0.0,
+      "timestamp": "2026-01-30T13:25:02.427670"
+    }
+  ],
+  "stories.hilton.com": [
+    {
+      "url": "https://stories.hilton.com/emea/releases/reuben-brothers-accelerates-plans-waldorf-astoria-admiralty-arch",
+      "domain": "stories.hilton.com",
+      "url_pattern": "https://stories.hilton.com/emea/releases/reuben-brothers-accelerates-plans-waldorf-astoria-admiralty-arch",
+      "was_relevant": true,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T13:24:11.000213"
+    },
+    {
+      "url": "https://stories.hilton.com/emea/releases/moroccos-first-waldorf-astoria-debuts-with-milestone-signing-in-tanger",
+      "domain": "stories.hilton.com",
+      "url_pattern": "https://stories.hilton.com/emea/releases/moroccos-first-waldorf-astoria-debuts-with-milestone-signing-in-tanger",
+      "was_relevant": true,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T13:24:11.910317"
+    },
+    {
+      "url": "https://stories.hilton.com/releases/hilton-waldorf-astoria-san-miguel-de-allende-signing",
+      "domain": "stories.hilton.com",
+      "url_pattern": "https://stories.hilton.com/releases/hilton-waldorf-astoria-san-miguel-de-allende-signing",
+      "was_relevant": true,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T13:24:20.035975"
+    },
+    {
+      "url": "https://stories.hilton.com/releases/hilton-celebrates-200th-hotel-in-the-caribbean-and-latin-america-with-opening-of-waldorf-astoria-cancun",
+      "domain": "stories.hilton.com",
+      "url_pattern": "https://stories.hilton.com/releases/hilton-celebrates-200th-hotel-in-the-caribbean-and-latin-america-with-opening-of-waldorf-astoria-cancun",
+      "was_relevant": true,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T13:24:57.701084"
+    },
+    {
+      "url": "https://stories.hilton.com/emea/releases/reuben-brothers-accelerates-plans-waldorf-astoria-admiralty-arch",
+      "domain": "stories.hilton.com",
+      "url_pattern": "https://stories.hilton.com/emea/releases/reuben-brothers-accelerates-plans-waldorf-astoria-admiralty-arch",
+      "was_relevant": true,
+      "lead_count": 1,
+      "lead_quality_avg": 0.0,
+      "timestamp": "2026-01-30T13:25:03.587761"
+    },
+    {
+      "url": "https://stories.hilton.com/emea/releases/moroccos-first-waldorf-astoria-debuts-with-milestone-signing-in-tanger",
+      "domain": "stories.hilton.com",
+      "url_pattern": "https://stories.hilton.com/emea/releases/moroccos-first-waldorf-astoria-debuts-with-milestone-signing-in-tanger",
+      "was_relevant": true,
+      "lead_count": 1,
+      "lead_quality_avg": 0.0,
+      "timestamp": "2026-01-30T13:25:04.732706"
+    },
+    {
+      "url": "https://stories.hilton.com/releases/hilton-waldorf-astoria-san-miguel-de-allende-signing",
+      "domain": "stories.hilton.com",
+      "url_pattern": "https://stories.hilton.com/releases/hilton-waldorf-astoria-san-miguel-de-allende-signing",
+      "was_relevant": true,
+      "lead_count": 1,
+      "lead_quality_avg": 0.0,
+      "timestamp": "2026-01-30T13:25:13.839749"
+    },
+    {
+      "url": "https://stories.hilton.com/releases/hilton-celebrates-200th-hotel-in-the-caribbean-and-latin-america-with-opening-of-waldorf-astoria-cancun",
+      "domain": "stories.hilton.com",
+      "url_pattern": "https://stories.hilton.com/releases/hilton-celebrates-200th-hotel-in-the-caribbean-and-latin-america-with-opening-of-waldorf-astoria-cancun",
+      "was_relevant": true,
+      "lead_count": 1,
+      "lead_quality_avg": 0.0,
+      "timestamp": "2026-01-30T13:25:38.085140"
+    }
+  ],
+  "marriott-international.pressarea.com": [
+    {
+      "url": "https://marriott-international.pressarea.com/en/pressrelease/details/19805",
+      "domain": "marriott-international.pressarea.com",
+      "url_pattern": "https://marriott-international.pressarea.com/en/pressrelease/details/19805",
+      "was_relevant": true,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T13:24:13.262756"
+    },
+    {
+      "url": "https://marriott-international.pressarea.com/en/news/14012026/al-qimmah-hospitality-and-marriott-international-announce-agreement-to-add-more-than-2700-hotel-rooms-in-saudi-arabia?ref=relatednews",
+      "domain": "marriott-international.pressarea.com",
+      "url_pattern": "https://marriott-international.pressarea.com/en/news/ID/al-qimmah-hospitality-and-marriott-international-announce-agreement-to-add-more-than-2700-hotel-rooms-in-saudi-arabia?ref=relatednews",
+      "was_relevant": true,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T13:24:24.882845"
+    },
+    {
+      "url": "https://marriott-international.pressarea.com/en/news/06012026/marriott-international-and-va-waterfront-holdings-announce-agreement-to-bring-edition-to-cape-towns-iconic-waterfront?ref=relatednews",
+      "domain": "marriott-international.pressarea.com",
+      "url_pattern": "https://marriott-international.pressarea.com/en/news/ID/marriott-international-and-va-waterfront-holdings-announce-agreement-to-bring-edition-to-cape-towns-iconic-waterfront?ref=relatednews",
+      "was_relevant": true,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T13:24:25.887175"
+    },
+    {
+      "url": "https://marriott-international.pressarea.com/en/news/03122025/marriott-international-enters-the-democratic-republic-of-the-congo-with-the-opening-of-two-hotels-in-kinshasa?ref=relatednews",
+      "domain": "marriott-international.pressarea.com",
+      "url_pattern": "https://marriott-international.pressarea.com/en/news/ID/marriott-international-enters-the-democratic-republic-of-the-congo-with-the-opening-of-two-hotels-in-kinshasa?ref=relatednews",
+      "was_relevant": true,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T13:24:26.953614"
+    },
+    {
+      "url": "https://marriott-international.pressarea.com/en/pressrelease/details/19805",
+      "domain": "marriott-international.pressarea.com",
+      "url_pattern": "https://marriott-international.pressarea.com/en/pressrelease/details/19805",
+      "was_relevant": true,
+      "lead_count": 1,
+      "lead_quality_avg": 0.0,
+      "timestamp": "2026-01-30T13:25:06.090658"
+    },
+    {
+      "url": "https://marriott-international.pressarea.com/en/news/14012026/al-qimmah-hospitality-and-marriott-international-announce-agreement-to-add-more-than-2700-hotel-rooms-in-saudi-arabia?ref=relatednews",
+      "domain": "marriott-international.pressarea.com",
+      "url_pattern": "https://marriott-international.pressarea.com/en/news/ID/al-qimmah-hospitality-and-marriott-international-announce-agreement-to-add-more-than-2700-hotel-rooms-in-saudi-arabia?ref=relatednews",
+      "was_relevant": true,
+      "lead_count": 5,
+      "lead_quality_avg": 0.0,
+      "timestamp": "2026-01-30T13:25:19.450324"
+    },
+    {
+      "url": "https://marriott-international.pressarea.com/en/news/06012026/marriott-international-and-va-waterfront-holdings-announce-agreement-to-bring-edition-to-cape-towns-iconic-waterfront?ref=relatednews",
+      "domain": "marriott-international.pressarea.com",
+      "url_pattern": "https://marriott-international.pressarea.com/en/news/ID/marriott-international-and-va-waterfront-holdings-announce-agreement-to-bring-edition-to-cape-towns-iconic-waterfront?ref=relatednews",
+      "was_relevant": true,
+      "lead_count": 1,
+      "lead_quality_avg": 0.0,
+      "timestamp": "2026-01-30T13:25:20.676996"
+    },
+    {
+      "url": "https://marriott-international.pressarea.com/en/news/03122025/marriott-international-enters-the-democratic-republic-of-the-congo-with-the-opening-of-two-hotels-in-kinshasa?ref=relatednews",
+      "domain": "marriott-international.pressarea.com",
+      "url_pattern": "https://marriott-international.pressarea.com/en/news/ID/marriott-international-enters-the-democratic-republic-of-the-congo-with-the-opening-of-two-hotels-in-kinshasa?ref=relatednews",
+      "was_relevant": true,
+      "lead_count": 2,
+      "lead_quality_avg": 0.0,
+      "timestamp": "2026-01-30T13:25:22.224027"
+    }
+  ],
+  "sixsenses.com": [
+    {
+      "url": "https://www.sixsenses.com/en/corporate/media-center/press-releases/2021/six-senses-lisbon-announcement",
+      "domain": "sixsenses.com",
+      "url_pattern": "https://www.sixsenses.com/en/corporate/media-center/press-releases/ID/six-senses-lisbon-announcement",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T13:24:21.262700"
+    }
+  ],
+  "ruby-hotels.com": [
+    {
+      "url": "https://www.ruby-hotels.com/en/press/ruby-expansion-rotterdam",
+      "domain": "ruby-hotels.com",
+      "url_pattern": "https://www.ruby-hotels.com/en/press/ruby-expansion-rotterdam",
+      "was_relevant": true,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T13:24:22.559919"
+    },
+    {
+      "url": "https://www.ruby-hotels.com/en/press/ruby-expansion-rotterdam",
+      "domain": "ruby-hotels.com",
+      "url_pattern": "https://www.ruby-hotels.com/en/press/ruby-expansion-rotterdam",
+      "was_relevant": true,
+      "lead_count": 1,
+      "lead_quality_avg": 0.0,
+      "timestamp": "2026-01-30T13:25:14.859562"
+    }
+  ],
+  "kempinski.com": [
+    {
+      "url": "https://www.kempinski.com/en/development/upcoming-openings/poiana-brasov-ski-resort",
+      "domain": "kempinski.com",
+      "url_pattern": "https://www.kempinski.com/en/development/upcoming-openings/poiana-brasov-ski-resort",
+      "was_relevant": true,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-01-30T13:24:23.439663"
+    },
+    {
+      "url": "https://www.kempinski.com/en/development/upcoming-openings/poiana-brasov-ski-resort",
+      "domain": "kempinski.com",
+      "url_pattern": "https://www.kempinski.com/en/development/upcoming-openings/poiana-brasov-ski-resort",
+      "was_relevant": true,
+      "lead_count": 1,
+      "lead_quality_avg": 0.0,
+      "timestamp": "2026-01-30T13:25:16.099314"
+    }
+  ]
+}

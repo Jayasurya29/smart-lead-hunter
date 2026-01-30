@@ -1,0 +1,1362 @@
+{
+  "Caribbean Journal": {
+    "name": "Caribbean Journal",
+    "domain": "caribjournal.com",
+    "entry_url": "https://www.caribjournal.com/",
+    "total_urls_tested": 187,
+    "urls_with_leads": 39,
+    "urls_without_leads": 148,
+    "total_leads_found": 39,
+    "usa_caribbean_leads": 21,
+    "gold_patterns": [
+      "/\\d+/01/\\d+/[^/]+/",
+      "/category/hotels/",
+      "",
+      "/caribbean-travel-advisor",
+      "/all-inclusive",
+      "/\\d+/12/\\d+/[^/]+",
+      "/all-inclusive/all-inclusive-hotels-resorts",
+      "/all-inclusive/[^/]+"
+    ],
+    "junk_patterns": [],
+    "maybe_patterns": [
+      "/",
+      "/destination/anguilla/",
+      "/destination/antigua-and-barbuda/",
+      "/destination/aruba/",
+      "/destination/bahamas/",
+      "/destination/belize/",
+      "/destination/bermuda/",
+      "/destination/bonaire/",
+      "/destination/british-virgin-islands/",
+      "/destination/cancun/",
+      "/destination/cayman-islands/",
+      "/destination/cuba/",
+      "/destination/curacao/",
+      "/destination/dominica/",
+      "/destination/dominican-republic/",
+      "/destination/grenada/",
+      "/destination/guadaloupe/",
+      "/destination/guyana/",
+      "/destination/haiti/",
+      "/destination/jamaica/",
+      "/destination/martinique/",
+      "/destination/montserrat/",
+      "/destination/panama/",
+      "/destination/puerto-rico/",
+      "/destination/punta-cana/",
+      "/destination/riviera-maya/",
+      "/destination/saba/",
+      "/destination/st-barth/",
+      "/destination/st-eustatius/",
+      "/destination/st-kitts-and-nevis/",
+      "/destination/st-lucia/",
+      "/destination/st-martin-st-maarten/",
+      "/destination/st-vincent-and-the-grenadines/",
+      "/destination/st-thomas-virgin-islands/",
+      "/destination/suriname/",
+      "/destination/trinidad-and-tobago/",
+      "/destination/tulum/",
+      "/destination/turks-and-caicos/",
+      "/destination/us-virgin-islands/",
+      "/\\d+/07/\\d+/united-airlines-dominica/",
+      "/\\d+/07/\\d+/nevis-beach-pinneys/",
+      "/\\d+/07/\\d+/[^/]+/",
+      "/\\d+/01/\\d+/lamborghini-caribbean-hotels/",
+      "/\\d+/01/\\d+/jw-marriott-autograph-miches/",
+      "/\\d+/01/\\d+/antigua-travel-advisors/",
+      "/\\d+/07/\\d+/caribbean-hiking-trail-longest/",
+      "/\\d+/04/\\d+/[^/]+/",
+      "/\\d+/07/\\d+/grenada-spice-resort-manager/",
+      "/\\d+/07/\\d+/cayman-brac/",
+      "/\\d+/07/\\d+/tortola-long-bay-beach/",
+      "/\\d+/07/\\d+/montego-bay-kingston-flights/",
+      "/\\d+/01/\\d+/[^/]+/\\d+/",
+      "/\\d+/08/\\d+/bahamas-resort-cat-island/",
+      "/\\d+/01/\\d+/divi-aruba-resort-renovation/",
+      "/\\d+/01/\\d+/curacao-resort-acoya/",
+      "/\\d+/01/\\d+/saint-lucia-adults-only-hyatt/",
+      "/cj-invest-news/cjiconversations/",
+      "/cj-invest-news/hotelsdevelopment/",
+      "/cj-invest-news/listings/",
+      "/cj-invest-news/projects/",
+      "/cj-invest-news/realestate-cj-invest-news/",
+      "/cj-invest-news/cji-reports/",
+      "/cj-invest-news/transactions/",
+      "/cji-media-kit/",
+      "/cji-contact-us/",
+      "/cj-invest/",
+      "/\\d+/12/\\d+/[^/]+/",
+      "/caribbean/",
+      "/cta-media-kit/",
+      "/cta-contact-us/",
+      "/caribbean-travel-advisor/",
+      "/digest",
+      "/cj-invest-news",
+      "/advertising",
+      "/cj-invest",
+      "/\\d+/03/\\d+/[^/]+",
+      "/news",
+      "/travel",
+      "/eat-play",
+      "/cj-travel-advisor",
+      "/\\d+/07/\\d+/united-airlines-dominica",
+      "/\\d+/01/\\d+/[^/]+",
+      "/archives",
+      "/video-gallery",
+      "/\\d+/01/\\d+/bermuda-tourism-chair"
+    ],
+    "pattern_stats": {
+      "/": {
+        "tested": 6,
+        "leads": 1,
+        "total_quality": 0.2,
+        "usa_caribbean": 0
+      },
+      "/destination/anguilla/": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/destination/antigua-and-barbuda/": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/destination/aruba/": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/destination/bahamas/": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/destination/belize/": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/destination/bermuda/": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/destination/bonaire/": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/destination/british-virgin-islands/": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/destination/cancun/": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/destination/cayman-islands/": {
+        "tested": 1,
+        "leads": 1,
+        "total_quality": 0.4,
+        "usa_caribbean": 1
+      },
+      "/destination/cuba/": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/destination/curacao/": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/destination/dominica/": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/destination/dominican-republic/": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/destination/grenada/": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/destination/guadaloupe/": {
+        "tested": 1,
+        "leads": 1,
+        "total_quality": 0.35,
+        "usa_caribbean": 0
+      },
+      "/destination/guyana/": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/destination/haiti/": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/destination/jamaica/": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/destination/martinique/": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/destination/montserrat/": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/destination/panama/": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/destination/puerto-rico/": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/destination/punta-cana/": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/destination/riviera-maya/": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/destination/saba/": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/destination/st-barth/": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/destination/st-eustatius/": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/destination/st-kitts-and-nevis/": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/destination/st-lucia/": {
+        "tested": 1,
+        "leads": 1,
+        "total_quality": 0.35,
+        "usa_caribbean": 0
+      },
+      "/destination/st-martin-st-maarten/": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/destination/st-vincent-and-the-grenadines/": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/destination/st-thomas-virgin-islands/": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/destination/suriname/": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/destination/trinidad-and-tobago/": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/destination/tulum/": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/destination/turks-and-caicos/": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/destination/us-virgin-islands/": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/\\d+/07/\\d+/united-airlines-dominica/": {
+        "tested": 2,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/\\d+/01/\\d+/[^/]+/": {
+        "tested": 17,
+        "leads": 8,
+        "total_quality": 3.12,
+        "usa_caribbean": 5
+      },
+      "/\\d+/07/\\d+/nevis-beach-pinneys/": {
+        "tested": 2,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/\\d+/07/\\d+/[^/]+/": {
+        "tested": 5,
+        "leads": 1,
+        "total_quality": 0.4,
+        "usa_caribbean": 1
+      },
+      "/\\d+/01/\\d+/lamborghini-caribbean-hotels/": {
+        "tested": 2,
+        "leads": 1,
+        "total_quality": 0.55,
+        "usa_caribbean": 0
+      },
+      "/\\d+/01/\\d+/jw-marriott-autograph-miches/": {
+        "tested": 1,
+        "leads": 1,
+        "total_quality": 0.4,
+        "usa_caribbean": 0
+      },
+      "/\\d+/01/\\d+/antigua-travel-advisors/": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/\\d+/07/\\d+/caribbean-hiking-trail-longest/": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/\\d+/04/\\d+/[^/]+/": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/\\d+/07/\\d+/grenada-spice-resort-manager/": {
+        "tested": 1,
+        "leads": 1,
+        "total_quality": 0.4,
+        "usa_caribbean": 0
+      },
+      "/\\d+/07/\\d+/cayman-brac/": {
+        "tested": 1,
+        "leads": 1,
+        "total_quality": 0.30000000000000004,
+        "usa_caribbean": 1
+      },
+      "/\\d+/07/\\d+/tortola-long-bay-beach/": {
+        "tested": 1,
+        "leads": 1,
+        "total_quality": 0.30000000000000004,
+        "usa_caribbean": 0
+      },
+      "/\\d+/07/\\d+/montego-bay-kingston-flights/": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/\\d+/01/\\d+/[^/]+/\\d+/": {
+        "tested": 1,
+        "leads": 1,
+        "total_quality": 0.30000000000000004,
+        "usa_caribbean": 0
+      },
+      "/\\d+/08/\\d+/bahamas-resort-cat-island/": {
+        "tested": 1,
+        "leads": 1,
+        "total_quality": 0.4,
+        "usa_caribbean": 1
+      },
+      "/\\d+/01/\\d+/divi-aruba-resort-renovation/": {
+        "tested": 1,
+        "leads": 1,
+        "total_quality": 0.45000000000000007,
+        "usa_caribbean": 1
+      },
+      "/\\d+/01/\\d+/curacao-resort-acoya/": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/\\d+/01/\\d+/saint-lucia-adults-only-hyatt/": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/cj-invest-news/cjiconversations/": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/cj-invest-news/hotelsdevelopment/": {
+        "tested": 1,
+        "leads": 1,
+        "total_quality": 0.30000000000000004,
+        "usa_caribbean": 1
+      },
+      "/cj-invest-news/listings/": {
+        "tested": 1,
+        "leads": 1,
+        "total_quality": 0.45,
+        "usa_caribbean": 1
+      },
+      "/cj-invest-news/projects/": {
+        "tested": 1,
+        "leads": 1,
+        "total_quality": 0.4,
+        "usa_caribbean": 1
+      },
+      "/cj-invest-news/realestate-cj-invest-news/": {
+        "tested": 1,
+        "leads": 1,
+        "total_quality": 0.35000000000000003,
+        "usa_caribbean": 1
+      },
+      "/cj-invest-news/cji-reports/": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/cj-invest-news/transactions/": {
+        "tested": 1,
+        "leads": 1,
+        "total_quality": 0.375,
+        "usa_caribbean": 1
+      },
+      "/cji-media-kit/": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/cji-contact-us/": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/cj-invest/": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/\\d+/12/\\d+/[^/]+/": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/caribbean/": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/cta-media-kit/": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/cta-contact-us/": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/caribbean-travel-advisor/": {
+        "tested": 1,
+        "leads": 1,
+        "total_quality": 0.22857142857142856,
+        "usa_caribbean": 1
+      },
+      "/category/hotels/": {
+        "tested": 3,
+        "leads": 1,
+        "total_quality": 0.4642857142857143,
+        "usa_caribbean": 0
+      },
+      "": {
+        "tested": 3,
+        "leads": 1,
+        "total_quality": 0.30000000000000004,
+        "usa_caribbean": 0
+      },
+      "/digest": {
+        "tested": 3,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/cj-invest-news": {
+        "tested": 3,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/caribbean-travel-advisor": {
+        "tested": 3,
+        "leads": 1,
+        "total_quality": 0.2625,
+        "usa_caribbean": 1
+      },
+      "/advertising": {
+        "tested": 3,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/cj-invest": {
+        "tested": 3,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/\\d+/03/\\d+/[^/]+": {
+        "tested": 24,
+        "leads": 3,
+        "total_quality": 1.475,
+        "usa_caribbean": 1
+      },
+      "/news": {
+        "tested": 3,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/all-inclusive": {
+        "tested": 3,
+        "leads": 1,
+        "total_quality": 0.375,
+        "usa_caribbean": 1
+      },
+      "/travel": {
+        "tested": 3,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/eat-play": {
+        "tested": 3,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/cj-travel-advisor": {
+        "tested": 3,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/\\d+/07/\\d+/united-airlines-dominica": {
+        "tested": 3,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/\\d+/12/\\d+/[^/]+": {
+        "tested": 3,
+        "leads": 1,
+        "total_quality": 0.45,
+        "usa_caribbean": 0
+      },
+      "/\\d+/01/\\d+/[^/]+": {
+        "tested": 8,
+        "leads": 2,
+        "total_quality": 0.75,
+        "usa_caribbean": 1
+      },
+      "/archives": {
+        "tested": 3,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/video-gallery": {
+        "tested": 3,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/all-inclusive/all-inclusive-hotels-resorts": {
+        "tested": 3,
+        "leads": 1,
+        "total_quality": 0.45000000000000007,
+        "usa_caribbean": 0
+      },
+      "/all-inclusive/[^/]+": {
+        "tested": 3,
+        "leads": 1,
+        "total_quality": 0.37500000000000006,
+        "usa_caribbean": 1
+      },
+      "/\\d+/01/\\d+/bermuda-tourism-chair": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      }
+    },
+    "lead_yield_rate": 0.20855614973262032,
+    "usa_caribbean_rate": 0.5384615384615384,
+    "avg_confidence": 0.0,
+    "first_tested": "2026-01-29T16:57:04.076568",
+    "last_tested": "2026-01-30T13:19:14.007221",
+    "last_updated": "2026-01-30T13:19:14.007221",
+    "recommended_max_pages": 50,
+    "recommended_priority": 10,
+    "is_worth_scraping": true,
+    "notes": []
+  },
+  "Hotel Dive": {
+    "name": "Hotel Dive",
+    "domain": "hoteldive.com",
+    "entry_url": "https://www.hoteldive.com/topic/development/",
+    "total_urls_tested": 150,
+    "urls_with_leads": 40,
+    "urls_without_leads": 110,
+    "total_leads_found": 40,
+    "usa_caribbean_leads": 40,
+    "gold_patterns": [
+      "/topic/development/",
+      "/news/ihg-ruby-hotels-chicago-debut/\\d+/",
+      "/news/ihg-six-senses-resort-utah/\\d+/",
+      "/news/top-hotel-openings-2026/\\d+/",
+      "/topic/brands/"
+    ],
+    "junk_patterns": [
+      "/en/news-and-media/news-releases/\\d+/[^/]+"
+    ],
+    "maybe_patterns": [
+      "/news/[^/]+/\\d+/",
+      "/what-we-are-reading",
+      "/news/accor-hotels-q3-2025-earnings/\\d+/",
+      "/topic/finances-deals/",
+      "/news/\\d+\\.html",
+      "/news/ihg-acquires-ruby-q4-earnings/\\d+/",
+      "/news/ihg-brings-ruby-brand-to-us/\\d+/"
+    ],
+    "pattern_stats": {
+      "/topic/development/": {
+        "tested": 3,
+        "leads": 2,
+        "total_quality": 1.12,
+        "usa_caribbean": 2
+      },
+      "/news/[^/]+/\\d+/": {
+        "tested": 111,
+        "leads": 29,
+        "total_quality": 17.49,
+        "usa_caribbean": 29
+      },
+      "/news/ihg-ruby-hotels-chicago-debut/\\d+/": {
+        "tested": 3,
+        "leads": 3,
+        "total_quality": 1.7999999999999998,
+        "usa_caribbean": 3
+      },
+      "/news/ihg-six-senses-resort-utah/\\d+/": {
+        "tested": 3,
+        "leads": 1,
+        "total_quality": 0.51,
+        "usa_caribbean": 1
+      },
+      "/news/top-hotel-openings-2026/\\d+/": {
+        "tested": 3,
+        "leads": 3,
+        "total_quality": 1.7271428571428569,
+        "usa_caribbean": 3
+      },
+      "/what-we-are-reading": {
+        "tested": 3,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/news/accor-hotels-q3-2025-earnings/\\d+/": {
+        "tested": 3,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/topic/brands/": {
+        "tested": 3,
+        "leads": 2,
+        "total_quality": 1.12,
+        "usa_caribbean": 2
+      },
+      "/topic/finances-deals/": {
+        "tested": 3,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/news/\\d+\\.html": {
+        "tested": 3,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/news/ihg-acquires-ruby-q4-earnings/\\d+/": {
+        "tested": 3,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/news/ihg-brings-ruby-brand-to-us/\\d+/": {
+        "tested": 3,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/en/news-and-media/news-releases/\\d+/[^/]+": {
+        "tested": 6,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      }
+    },
+    "lead_yield_rate": 0.26666666666666666,
+    "usa_caribbean_rate": 1.0,
+    "avg_confidence": 0.0,
+    "first_tested": "2026-01-30T11:57:36.970456",
+    "last_tested": "2026-01-30T13:17:48.334289",
+    "last_updated": "2026-01-30T13:17:48.334289",
+    "recommended_max_pages": 50,
+    "recommended_priority": 10,
+    "is_worth_scraping": true,
+    "notes": []
+  },
+  "Four Seasons Press": {
+    "name": "Four Seasons Press",
+    "domain": "press.fourseasons.com",
+    "entry_url": "https://press.fourseasons.com/news-releases/",
+    "total_urls_tested": 30,
+    "urls_with_leads": 0,
+    "urls_without_leads": 30,
+    "total_leads_found": 0,
+    "usa_caribbean_leads": 0,
+    "gold_patterns": [],
+    "junk_patterns": [],
+    "maybe_patterns": [
+      "/news-releases/",
+      "/hotel-press-kits",
+      "/trending-now",
+      "/press-contacts",
+      "/corporate",
+      "/content/fourseasons_pressroom/en/forms/influencer.html",
+      "/seychellesdesroches/hotel-news/\\d+/la-pizzeria-opening",
+      "/istanbul/hotel-news/\\d+/sustainable-menu",
+      "/westlakevillage/hotel-news/\\d+/valentines-day",
+      "/montreal/hotel-news/\\d+/[^/]+",
+      "/baltimore/hotel-news/\\d+/valentines-day",
+      "/shenzhen/hotel-news/\\d+/suite-offer",
+      "/bogota/hotel-news/\\d+/valentines-day",
+      "/vail/hotel-news/\\d+/valentines-day",
+      "/bengaluru/hotel-news/\\d+/lunar-new-year",
+      "/scottsdale/hotel-news/\\d+/valentines-day",
+      "/chiangmai/hotel-news/\\d+/valentines",
+      "/chiangmai/hotel-news/\\d+/sunday-brunch-return",
+      "/content/fourseasons_pressroom/en/sitemap.html",
+      "/",
+      "/yachts",
+      "/jet",
+      "/anguilla",
+      "/atlanta",
+      "/austin",
+      "/oceanclub",
+      "/baltimore",
+      "/boston",
+      "/onedalton",
+      "/chicago"
+    ],
+    "pattern_stats": {
+      "/news-releases/": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/hotel-press-kits": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/trending-now": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/press-contacts": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/corporate": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/content/fourseasons_pressroom/en/forms/influencer.html": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/seychellesdesroches/hotel-news/\\d+/la-pizzeria-opening": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/istanbul/hotel-news/\\d+/sustainable-menu": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/westlakevillage/hotel-news/\\d+/valentines-day": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/montreal/hotel-news/\\d+/[^/]+": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/baltimore/hotel-news/\\d+/valentines-day": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/shenzhen/hotel-news/\\d+/suite-offer": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/bogota/hotel-news/\\d+/valentines-day": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/vail/hotel-news/\\d+/valentines-day": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/bengaluru/hotel-news/\\d+/lunar-new-year": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/scottsdale/hotel-news/\\d+/valentines-day": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/chiangmai/hotel-news/\\d+/valentines": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/chiangmai/hotel-news/\\d+/sunday-brunch-return": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/content/fourseasons_pressroom/en/sitemap.html": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/yachts": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/jet": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/anguilla": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/atlanta": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/austin": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/oceanclub": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/baltimore": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/boston": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/onedalton": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/chicago": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      }
+    },
+    "lead_yield_rate": 0.0,
+    "usa_caribbean_rate": 0.0,
+    "avg_confidence": 0.0,
+    "first_tested": "2026-01-30T13:20:33.304970",
+    "last_tested": "2026-01-30T13:20:33.304970",
+    "last_updated": "2026-01-30T13:20:33.304970",
+    "recommended_max_pages": 20,
+    "recommended_priority": 4,
+    "is_worth_scraping": false,
+    "notes": []
+  },
+  "Marriott News": {
+    "name": "Marriott News",
+    "domain": "news.marriott.com",
+    "entry_url": "https://news.marriott.com/news/",
+    "total_urls_tested": 30,
+    "urls_with_leads": 0,
+    "urls_without_leads": 30,
+    "total_leads_found": 0,
+    "usa_caribbean_leads": 0,
+    "gold_patterns": [],
+    "junk_patterns": [
+      "/news/\\d+/01/\\d+/[^/]+",
+      "/news/\\d+/12/\\d+/[^/]+"
+    ],
+    "maybe_patterns": [
+      "/news/",
+      "/news",
+      "/news/\\d+/11/\\d+/[^/]+",
+      "/news/\\d+/10/\\d+/[^/]+",
+      "/leadership",
+      "/media-resources",
+      "/recognition"
+    ],
+    "pattern_stats": {
+      "/news/": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/news/\\d+/01/\\d+/[^/]+": {
+        "tested": 11,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/news/\\d+/12/\\d+/[^/]+": {
+        "tested": 7,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/news": {
+        "tested": 4,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/news/\\d+/11/\\d+/[^/]+": {
+        "tested": 2,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/news/\\d+/10/\\d+/[^/]+": {
+        "tested": 2,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/leadership": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/media-resources": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/recognition": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      }
+    },
+    "lead_yield_rate": 0.0,
+    "usa_caribbean_rate": 0.0,
+    "avg_confidence": 0.0,
+    "first_tested": "2026-01-30T13:22:35.275712",
+    "last_tested": "2026-01-30T13:22:35.275712",
+    "last_updated": "2026-01-30T13:22:35.275712",
+    "recommended_max_pages": 20,
+    "recommended_priority": 4,
+    "is_worth_scraping": false,
+    "notes": []
+  },
+  "Orange Studio": {
+    "name": "Orange Studio",
+    "domain": "theorangestudio.com",
+    "entry_url": "https://www.theorangestudio.com/hotel-openings",
+    "total_urls_tested": 42,
+    "urls_with_leads": 4,
+    "urls_without_leads": 38,
+    "total_leads_found": 4,
+    "usa_caribbean_leads": 0,
+    "gold_patterns": [
+      "/en/news/\\d+/[^/]+"
+    ],
+    "junk_patterns": [],
+    "maybe_patterns": [
+      "/hotel-openings",
+      "/emea/releases/[^/]+",
+      "/en/pressrelease/details/19805",
+      "/news-releases/\\d+/new-four-seasons-in-amaala/",
+      "/news-releases/\\d+/new-four-seasons-in-venice/",
+      "/news-releases/\\d+/new-four-seasons-in-red-sea/",
+      "/news-releases/\\d+/new-four-seasons-in-belize/",
+      "/news-releases/\\d+/new-four-seasons-in-taipei/",
+      "/releases/[^/]+",
+      "/en/corporate/media-center/press-releases/\\d+/six-senses-lisbon-announcement",
+      "/en/press/ruby-expansion-rotterdam",
+      "/en/development/upcoming-openings/poiana-brasov-ski-resort",
+      "/news-releases",
+      "/hotel-press-kits",
+      "/trending-now",
+      "/press-contacts",
+      "/corporate",
+      "/content/fourseasons_pressroom/en/forms/influencer.html",
+      "/content/fourseasons_pressroom/printView.html",
+      "/corporate-bios/bart-carnahan.html",
+      "/news-releases/\\d+/[^/]+/",
+      "/news-releases/\\d+/new-four-seasons-in-neom/",
+      "/news-releases/\\d+/new-four-seasons-in-diriyah/",
+      "/news-releases/\\d+/[^/]+",
+      "/news-releases/\\d+/strategic-growth-and-expansion",
+      "/content/fourseasons_pressroom/en/sitemap.html",
+      "/venice/hotel-news/\\d+/reservations-live",
+      "/de/venice/hotel-news/\\d+/reservations-live-5",
+      "/venice"
+    ],
+    "pattern_stats": {
+      "/hotel-openings": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/emea/releases/[^/]+": {
+        "tested": 2,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/en/pressrelease/details/19805": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/news-releases/\\d+/new-four-seasons-in-amaala/": {
+        "tested": 1,
+        "leads": 1,
+        "total_quality": 0.53,
+        "usa_caribbean": 0
+      },
+      "/news-releases/\\d+/new-four-seasons-in-venice/": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/news-releases/\\d+/new-four-seasons-in-red-sea/": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/news-releases/\\d+/new-four-seasons-in-belize/": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/news-releases/\\d+/new-four-seasons-in-taipei/": {
+        "tested": 1,
+        "leads": 1,
+        "total_quality": 0.59,
+        "usa_caribbean": 0
+      },
+      "/releases/[^/]+": {
+        "tested": 2,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/en/corporate/media-center/press-releases/\\d+/six-senses-lisbon-announcement": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/en/press/ruby-expansion-rotterdam": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/en/development/upcoming-openings/poiana-brasov-ski-resort": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/en/news/\\d+/[^/]+": {
+        "tested": 3,
+        "leads": 1,
+        "total_quality": 0.55,
+        "usa_caribbean": 0
+      },
+      "/news-releases": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/hotel-press-kits": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/trending-now": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/press-contacts": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/corporate": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/content/fourseasons_pressroom/en/forms/influencer.html": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/content/fourseasons_pressroom/printView.html": {
+        "tested": 5,
+        "leads": 1,
+        "total_quality": 0.5,
+        "usa_caribbean": 0
+      },
+      "/corporate-bios/bart-carnahan.html": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/news-releases/\\d+/[^/]+/": {
+        "tested": 3,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/news-releases/\\d+/new-four-seasons-in-neom/": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/news-releases/\\d+/new-four-seasons-in-diriyah/": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/news-releases/\\d+/[^/]+": {
+        "tested": 3,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/news-releases/\\d+/strategic-growth-and-expansion": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/content/fourseasons_pressroom/en/sitemap.html": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/venice/hotel-news/\\d+/reservations-live": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/de/venice/hotel-news/\\d+/reservations-live-5": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/venice": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      }
+    },
+    "lead_yield_rate": 0.09523809523809523,
+    "usa_caribbean_rate": 0.0,
+    "avg_confidence": 0.0,
+    "first_tested": "2026-01-30T13:25:38.109861",
+    "last_tested": "2026-01-30T13:25:38.109861",
+    "last_updated": "2026-01-30T13:25:38.109861",
+    "recommended_max_pages": 20,
+    "recommended_priority": 4,
+    "is_worth_scraping": true,
+    "notes": []
+  }
+}

@@ -1,85 +1,136 @@
 # =============================================================================
-# SMART LEAD HUNTER - REQUIREMENTS
+# SMART LEAD HUNTER - REQUIREMENTS (WITH CRAWL4AI)
 # =============================================================================
-# Full tech stack for hotel lead generation system
+# Production-ready scraping system for 73+ hotel news sources
+# Last Updated: January 2026
 # =============================================================================
 
-# -----------------------------------------------------------------------------
-# WEB FRAMEWORK
-# -----------------------------------------------------------------------------
-fastapi==0.109.0
-uvicorn[standard]==0.27.0
-pydantic==2.5.3
-pydantic-settings==2.1.0
-python-multipart==0.0.6
+# =============================================================================
+# WEB FRAMEWORK & API
+# =============================================================================
+fastapi>=0.109.0
+uvicorn[standard]>=0.27.0
+pydantic>=2.5.0
+pydantic-settings>=2.1.0
+python-multipart>=0.0.6
 
-# -----------------------------------------------------------------------------
+# =============================================================================
 # DATABASE
-# -----------------------------------------------------------------------------
-sqlalchemy[asyncio]==2.0.25
-asyncpg==0.29.0          # Async PostgreSQL driver
-psycopg2-binary==2.9.9   # Sync PostgreSQL driver (for migrations)
-pgvector==0.2.4          # Vector similarity search
-alembic==1.13.1          # Database migrations
+# =============================================================================
+sqlalchemy[asyncio]>=2.0.25
+asyncpg>=0.29.0
+psycopg2-binary>=2.9.9
+pgvector>=0.2.4
+alembic>=1.13.1
 
-# -----------------------------------------------------------------------------
-# WEB SCRAPING - DUAL APPROACH
-# -----------------------------------------------------------------------------
-# Playwright - For JavaScript-heavy sites (chain newsrooms, dynamic content)
-playwright==1.41.0
+# =============================================================================
+# WEB SCRAPING - TRIPLE ENGINE SYSTEM
+# =============================================================================
+# HTTPX - Fast async HTTP client (for simple static sites)
+httpx>=0.25.2
 
-# BeautifulSoup - For static HTML parsing
-beautifulsoup4==4.12.3
-lxml==5.1.0              # Fast HTML/XML parser
+# Playwright - Browser automation (for JavaScript-heavy sites)
+playwright>=1.41.0
 
-# HTTP Client - For simple requests
-httpx>=0.25.2,<0.26.0
-aiohttp==3.9.1
+# Crawl4AI - SMART CRAWLER (PRIMARY - best for most sites!)
+# Features: caching, parallel scraping, anti-detection, markdown output
+crawl4ai>=0.3.0
 
-# -----------------------------------------------------------------------------
-# AI & NLP
-# -----------------------------------------------------------------------------
-# Ollama client (for local Llama 3.2)
-ollama==0.1.6
+# BeautifulSoup - HTML parsing
+beautifulsoup4>=4.12.3
 
-# spaCy - NLP for entity extraction
-spacy==3.7.2
+# lxml - Fast HTML/XML parser (crawl4ai needs >=5.3)
+lxml>=5.3.0
 
-# Sentence Transformers - For embeddings/deduplication
-sentence-transformers==2.2.2
+# aiohttp - Async HTTP (crawl4ai dependency)
+aiohttp>=3.9.0
 
-# -----------------------------------------------------------------------------
+# aiofiles - Async file I/O (crawl4ai needs >=24.1)
+aiofiles>=24.1.0
+
+# =============================================================================
+# AI EXTRACTION - 100% FREE STACK
+# =============================================================================
+# Groq API - FREE tier (Llama 3.3 70B)
+groq>=0.4.0
+
+# Ollama - LOCAL AI (unlimited)
+ollama>=0.1.6
+
+# OpenAI client - For OpenRouter fallback
+openai>=1.0.0
+
+# =============================================================================
+# NLP & TEXT PROCESSING
+# =============================================================================
+spacy>=3.7.0
+# After install: python -m spacy download en_core_web_sm
+
+# =============================================================================
+# DATA VALIDATION & PARSING
+# =============================================================================
+email-validator>=2.1.0
+phonenumbers>=8.13.0
+python-dateutil>=2.8.2
+
+# =============================================================================
+# DEDUPLICATION & MATCHING
+# =============================================================================
+rapidfuzz>=3.6.0
+sentence-transformers>=2.2.2
+
+# =============================================================================
 # TASK QUEUE & SCHEDULING
-# -----------------------------------------------------------------------------
-celery==5.3.4
-redis==5.0.1
-celery-redbeat==2.1.1    # Redis-based scheduler
+# =============================================================================
+celery>=5.3.4
+redis>=5.0.1
+celery-redbeat>=2.1.1
 
-# -----------------------------------------------------------------------------
+# =============================================================================
 # UTILITIES
-# -----------------------------------------------------------------------------
-python-dotenv==1.0.0     # Environment variables
-tenacity==8.2.3          # Retry logic
-aiofiles==23.2.1         # Async file operations
-python-dateutil==2.8.2   # Date parsing
+# =============================================================================
+python-dotenv>=1.0.0
+tenacity>=8.2.0
+tqdm>=4.66.0
 
-# -----------------------------------------------------------------------------
-# LOGGING & MONITORING
-# -----------------------------------------------------------------------------
-structlog==24.1.0        # Structured logging
-rich==13.7.0             # Beautiful terminal output
+# =============================================================================
+# LOGGING & OUTPUT
+# =============================================================================
+structlog>=24.1.0
+rich>=13.7.0
 
-# -----------------------------------------------------------------------------
+# =============================================================================
 # TESTING
-# -----------------------------------------------------------------------------
-pytest==7.4.4
-pytest-asyncio==0.23.3
-pytest-cov==4.1.0
+# =============================================================================
+pytest>=7.4.0
+pytest-asyncio>=0.23.0
+pytest-cov>=4.1.0
 
-# -----------------------------------------------------------------------------
+# =============================================================================
 # POST-INSTALL COMMANDS
-# -----------------------------------------------------------------------------
-# After pip install, run:
-#   playwright install chromium
-#   python -m spacy download en_core_web_sm
+# =============================================================================
+# 
+# 1. Install Playwright browser:
+#    playwright install chromium
+#
+# 2. Install Crawl4AI browser:
+#    crawl4ai-setup
+#
+# 3. Download spaCy model:
+#    python -m spacy download en_core_web_sm
+#
+# 4. Get FREE Groq API key:
+#    https://console.groq.com/
+#    Add to .env: GROQ_API_KEY=gsk_xxxxx
+#
+# =============================================================================
+# SCRAPING STRATEGY
+# =============================================================================
+#
+# PRIMARY:   Crawl4AI  - Smart, cached, parallel (80% of sites)
+# SECONDARY: Playwright - Direct browser control (JS-heavy sites)
+# TERTIARY:  HTTPX     - Simple fast HTTP (static sites)
+#
+# The scraping_engine.py automatically picks the best one!
+#
 # =============================================================================
