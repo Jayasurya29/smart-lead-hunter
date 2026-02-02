@@ -31,6 +31,7 @@ class SourceTuning:
     """Fine-tuned configuration for a specific source"""
     name: str
     entry_url: str                          # Where to start crawling
+    additional_urls: List[str] = field(default_factory=list)  # Extra URLs to scrape
     crawler_type: CrawlerType = CrawlerType.AUTO  # AUTO by default!
     priority: int = 5                       # 1-10, higher = scrape first
     max_pages: int = 50                     # Max pages to scrape
@@ -326,27 +327,65 @@ TUNED_SOURCES: Dict[str, SourceTuning] = {
     ),
     
     # -------------------------------------------------------------------------
+    # FOUR SEASONS NEW OPENINGS - Follow "Learn More" links to property pages
+    # -------------------------------------------------------------------------
+    "Four Seasons New Openings": SourceTuning(
+        name="Four Seasons New Openings",
+        entry_url="https://www.fourseasons.com/newopenings/",
+        crawler_type=CrawlerType.CRAWL4AI,  # JS-heavy carousel page
+        priority=10,
+        max_pages=15,  # Main page + ~9-12 property pages
+        gold_patterns=[
+            r'/newopenings/$',                           # Main carousel page
+            r'/landing_pages/new-openings/',             # Property detail pages
+            r'press\.fourseasons\.com/news-releases/.*new-four-seasons',  # Press releases
+        ],
+        block_patterns=[
+            # Block booking/commerce
+            r'/reservations/', r'/checkout/', r'/book/',
+            # Block existing properties (not new openings)
+            r'/offers/', r'/spa/', r'/dining/', r'/restaurants/',
+            r'/meetings/', r'/weddings/', r'/shop/',
+            # Block marketing pages
+            r'/private-jet/', r'/yachts/', r'/residence-rentals/',
+            r'/magazine/', r'/esg/', r'/campaigns/',
+            r'/find_a_hotel/', r'/villa-residence/',
+            # Block existing resort pages (these are NOT new openings)
+            r'fourseasons\.com/[a-z]+/(?!landing_pages)',
+        ],
+        link_patterns=[
+            # ONLY follow "Learn More" links to new opening detail pages
+            r'/landing_pages/new-openings/',
+            r'press\.fourseasons\.com/news-releases/.*new-four-seasons',
+        ],
+        notes="Carousel page with 9+ new properties. Follow 'Learn More' links to /landing_pages/new-openings/ for details."
+    ),
+    
+    # -------------------------------------------------------------------------
     # THE ORANGE STUDIO - Best visual aggregator
     # -------------------------------------------------------------------------
     "Orange Studio": SourceTuning(
         name="Orange Studio",
+        # Single page with all hotels - qualifier handles filtering
         entry_url="https://www.theorangestudio.com/hotel-openings",
-        crawler_type=CrawlerType.AUTO,  # CRAWL4AI - smart scraping
+        additional_urls=[],  # No additional URLs - main page has everything
+        crawler_type=CrawlerType.CRAWL4AI,  # JS-rendered page
         priority=10,
-        max_pages=100,
+        max_pages=1,  # Just the main page - it has ALL hotels
         gold_patterns=[
-            r'/hotel-openings',
-            r'/hotel/[a-z0-9-]+',
-            r'theorangestudio\.com/[a-z0-9-]+-hotel',
+            r'/hotel-openings$',
+            r'/hotel-openings\?',  # Also match filtered views
         ],
         block_patterns=[
             r'/about',
             r'/contact',
             r'/privacy',
             r'/terms',
+            r'/news/',  # Skip news articles
+            r'/hotel/',  # Skip individual hotel pages
         ],
-        link_patterns=[r'/hotel/[a-z0-9-]+'],
-        notes="BEST AGGREGATOR - comprehensive with dates, brands, locations"
+        link_patterns=[],  # Don't crawl links
+        notes="BEST AGGREGATOR - single page with 200+ hotels. URL filters are JS-only, use qualifier to filter."
     ),
     
     # -------------------------------------------------------------------------
@@ -427,70 +466,185 @@ TUNED_SOURCES: Dict[str, SourceTuning] = {
     
     # -------------------------------------------------------------------------
     # FLORIDA BUSINESS JOURNALS - YOUR CORE MARKET
+    # FIXED: Added strict patterns to block other cities and non-hotel content
     # -------------------------------------------------------------------------
     "South Florida Business Journal": SourceTuning(
         name="South Florida Business Journal",
         entry_url="https://www.bizjournals.com/southflorida/news/industry/hotels",
-        crawler_type=CrawlerType.AUTO,
+        crawler_type=CrawlerType.CRAWL4AI,  # Required - BizJournals blocks httpx
         priority=10,
-        max_pages=30,
+        max_pages=25,
         gold_patterns=[
-            r'/news/\d{4}/\d{2}/\d{2}/',
-            r'bizjournals\.com/southflorida/news/[a-z0-9-]+-hotel',
+            # ONLY match southflorida articles with date pattern
+            r'/southflorida/news/\d{4}/\d{2}/\d{2}/[a-z0-9-]+\.html',
         ],
         block_patterns=[
-            r'/bizwomen/',
-            r'/events/',
-            r'/people/',
-            r'/lists/',
-            r'/subscribe/',
-            r'/page/',
+            # Block ALL other BizJournals cities
+            r'bizjournals\.com/albany', r'bizjournals\.com/albuquerque',
+            r'bizjournals\.com/atlanta', r'bizjournals\.com/austin',
+            r'bizjournals\.com/baltimore', r'bizjournals\.com/birmingham',
+            r'bizjournals\.com/boston', r'bizjournals\.com/buffalo',
+            r'bizjournals\.com/charlotte', r'bizjournals\.com/chicago',
+            r'bizjournals\.com/cincinnati', r'bizjournals\.com/cleveland',
+            r'bizjournals\.com/columbus', r'bizjournals\.com/dallas',
+            r'bizjournals\.com/dayton', r'bizjournals\.com/denver',
+            r'bizjournals\.com/detroit', r'bizjournals\.com/houston',
+            r'bizjournals\.com/indianapolis', r'bizjournals\.com/jacksonville',
+            r'bizjournals\.com/kansascity', r'bizjournals\.com/losangeles',
+            r'bizjournals\.com/louisville', r'bizjournals\.com/memphis',
+            r'bizjournals\.com/milwaukee', r'bizjournals\.com/minneapolis',
+            r'bizjournals\.com/nashville', r'bizjournals\.com/newyork',
+            r'bizjournals\.com/orlando', r'bizjournals\.com/pacific',
+            r'bizjournals\.com/philadelphia', r'bizjournals\.com/phoenix',
+            r'bizjournals\.com/pittsburgh', r'bizjournals\.com/portland',
+            r'bizjournals\.com/raleigh', r'bizjournals\.com/richmond',
+            r'bizjournals\.com/sacramento', r'bizjournals\.com/sanantonio',
+            r'bizjournals\.com/sanfrancisco', r'bizjournals\.com/sanjose',
+            r'bizjournals\.com/seattle', r'bizjournals\.com/stlouis',
+            r'bizjournals\.com/tampabay', r'bizjournals\.com/twincities',
+            r'bizjournals\.com/washington', r'bizjournals\.com/wichita',
+            # Block non-hotel industry categories
+            r'/news/banking', r'/news/technology', r'/news/health-care',
+            r'/news/retail', r'/news/manufacturing', r'/news/energy',
+            r'/news/education', r'/news/government', r'/news/professional',
+            r'/news/media', r'/news/philanthropy', r'/news/sports',
+            r'/news/transportation', r'/news/food-and-lifestyle',
+            r'/news/career', r'/news/residential-real-estate',
+            r'/news/commercial-real-estate', r'/news/feature/',
+            r'/news/industry/undefined', r'/news/industry/southflorida',
+            # Block junk
+            r'/undefined', r'/null', r'/bizwomen/', r'/events/',
+            r'/people/', r'/lists/', r'/subscribe/', r'/page/',
+            r'/about/', r'/contact/', r'/advertise/', r'/help/',
         ],
-        link_patterns=[r'/news/\d{4}/\d{2}/\d{2}/'],
-        notes="YOUR CORE MARKET - Miami/Fort Lauderdale/Palm Beach"
+        link_patterns=[
+            # Only follow hotel-related article links
+            r'/southflorida/news/\d{4}/\d{2}/\d{2}/.*hotel.*\.html',
+            r'/southflorida/news/\d{4}/\d{2}/\d{2}/.*resort.*\.html',
+            r'/southflorida/news/\d{4}/\d{2}/\d{2}/.*hospitality.*\.html',
+            r'/southflorida/news/\d{4}/\d{2}/\d{2}/.*hilton.*\.html',
+            r'/southflorida/news/\d{4}/\d{2}/\d{2}/.*marriott.*\.html',
+            r'/southflorida/news/\d{4}/\d{2}/\d{2}/.*hyatt.*\.html',
+            r'/southflorida/news/\d{4}/\d{2}/\d{2}/.*four.?seasons.*\.html',
+            r'/southflorida/news/\d{4}/\d{2}/\d{2}/.*ritz.*\.html',
+            r'/southflorida/news/\d{4}/\d{2}/\d{2}/.*opening.*\.html',
+        ],
+        notes="YOUR CORE MARKET - Miami/Fort Lauderdale/Palm Beach. FIXED with strict city filtering."
     ),
     
     "Orlando Business Journal": SourceTuning(
         name="Orlando Business Journal",
         entry_url="https://www.bizjournals.com/orlando/news/industry/hotels",
-        crawler_type=CrawlerType.AUTO,
+        crawler_type=CrawlerType.CRAWL4AI,  # Required - BizJournals blocks httpx
         priority=10,
-        max_pages=30,
+        max_pages=25,
         gold_patterns=[
-            r'/news/\d{4}/\d{2}/\d{2}/',
-            r'bizjournals\.com/orlando/news/[a-z0-9-]+-hotel',
+            # ONLY match orlando articles with date pattern
+            r'/orlando/news/\d{4}/\d{2}/\d{2}/[a-z0-9-]+\.html',
         ],
         block_patterns=[
-            r'/bizwomen/',
-            r'/events/',
-            r'/people/',
-            r'/lists/',
-            r'/subscribe/',
-            r'/page/',
+            # Block ALL other BizJournals cities (including other FL cities)
+            r'bizjournals\.com/southflorida', r'bizjournals\.com/tampabay',
+            r'bizjournals\.com/jacksonville',
+            r'bizjournals\.com/albany', r'bizjournals\.com/albuquerque',
+            r'bizjournals\.com/atlanta', r'bizjournals\.com/austin',
+            r'bizjournals\.com/baltimore', r'bizjournals\.com/birmingham',
+            r'bizjournals\.com/boston', r'bizjournals\.com/buffalo',
+            r'bizjournals\.com/charlotte', r'bizjournals\.com/chicago',
+            r'bizjournals\.com/cincinnati', r'bizjournals\.com/cleveland',
+            r'bizjournals\.com/columbus', r'bizjournals\.com/dallas',
+            r'bizjournals\.com/dayton', r'bizjournals\.com/denver',
+            r'bizjournals\.com/detroit', r'bizjournals\.com/houston',
+            r'bizjournals\.com/indianapolis', r'bizjournals\.com/kansascity',
+            r'bizjournals\.com/losangeles', r'bizjournals\.com/louisville',
+            r'bizjournals\.com/memphis', r'bizjournals\.com/milwaukee',
+            r'bizjournals\.com/minneapolis', r'bizjournals\.com/nashville',
+            r'bizjournals\.com/newyork', r'bizjournals\.com/pacific',
+            r'bizjournals\.com/philadelphia', r'bizjournals\.com/phoenix',
+            r'bizjournals\.com/pittsburgh', r'bizjournals\.com/portland',
+            r'bizjournals\.com/raleigh', r'bizjournals\.com/richmond',
+            r'bizjournals\.com/sacramento', r'bizjournals\.com/sanantonio',
+            r'bizjournals\.com/sanfrancisco', r'bizjournals\.com/sanjose',
+            r'bizjournals\.com/seattle', r'bizjournals\.com/stlouis',
+            r'bizjournals\.com/twincities', r'bizjournals\.com/washington',
+            r'bizjournals\.com/wichita',
+            # Block non-hotel categories
+            r'/news/banking', r'/news/technology', r'/news/health-care',
+            r'/news/retail', r'/news/manufacturing', r'/news/energy',
+            r'/news/education', r'/news/government', r'/news/professional',
+            r'/news/media', r'/news/philanthropy', r'/news/sports',
+            r'/news/transportation', r'/news/food-and-lifestyle',
+            r'/news/career', r'/news/residential-real-estate',
+            r'/news/commercial-real-estate', r'/news/feature/',
+            r'/undefined', r'/null', r'/bizwomen/', r'/events/',
+            r'/people/', r'/lists/', r'/subscribe/', r'/page/',
         ],
-        link_patterns=[r'/news/\d{4}/\d{2}/\d{2}/'],
-        notes="YOUR CORE MARKET - Orlando/Central Florida"
+        link_patterns=[
+            r'/orlando/news/\d{4}/\d{2}/\d{2}/.*hotel.*\.html',
+            r'/orlando/news/\d{4}/\d{2}/\d{2}/.*resort.*\.html',
+            r'/orlando/news/\d{4}/\d{2}/\d{2}/.*disney.*\.html',
+            r'/orlando/news/\d{4}/\d{2}/\d{2}/.*universal.*\.html',
+            r'/orlando/news/\d{4}/\d{2}/\d{2}/.*theme.*\.html',
+            r'/orlando/news/\d{4}/\d{2}/\d{2}/.*hospitality.*\.html',
+            r'/orlando/news/\d{4}/\d{2}/\d{2}/.*opening.*\.html',
+        ],
+        notes="YOUR CORE MARKET - Orlando/Central Florida. FIXED with strict city filtering."
     ),
     
     "Tampa Bay Business Journal": SourceTuning(
         name="Tampa Bay Business Journal",
         entry_url="https://www.bizjournals.com/tampabay/news/industry/hotels",
-        crawler_type=CrawlerType.AUTO,
+        crawler_type=CrawlerType.CRAWL4AI,  # Required - BizJournals blocks httpx
         priority=9,
-        max_pages=30,
+        max_pages=25,
         gold_patterns=[
-            r'/news/\d{4}/\d{2}/\d{2}/',
+            # ONLY match tampabay articles with date pattern
+            r'/tampabay/news/\d{4}/\d{2}/\d{2}/[a-z0-9-]+\.html',
         ],
         block_patterns=[
-            r'/bizwomen/',
-            r'/events/',
-            r'/people/',
-            r'/lists/',
-            r'/subscribe/',
-            r'/page/',
+            # Block ALL other BizJournals cities
+            r'bizjournals\.com/southflorida', r'bizjournals\.com/orlando',
+            r'bizjournals\.com/jacksonville',
+            r'bizjournals\.com/albany', r'bizjournals\.com/albuquerque',
+            r'bizjournals\.com/atlanta', r'bizjournals\.com/austin',
+            r'bizjournals\.com/baltimore', r'bizjournals\.com/birmingham',
+            r'bizjournals\.com/boston', r'bizjournals\.com/buffalo',
+            r'bizjournals\.com/charlotte', r'bizjournals\.com/chicago',
+            r'bizjournals\.com/cincinnati', r'bizjournals\.com/cleveland',
+            r'bizjournals\.com/columbus', r'bizjournals\.com/dallas',
+            r'bizjournals\.com/dayton', r'bizjournals\.com/denver',
+            r'bizjournals\.com/detroit', r'bizjournals\.com/houston',
+            r'bizjournals\.com/indianapolis', r'bizjournals\.com/kansascity',
+            r'bizjournals\.com/losangeles', r'bizjournals\.com/louisville',
+            r'bizjournals\.com/memphis', r'bizjournals\.com/milwaukee',
+            r'bizjournals\.com/minneapolis', r'bizjournals\.com/nashville',
+            r'bizjournals\.com/newyork', r'bizjournals\.com/pacific',
+            r'bizjournals\.com/philadelphia', r'bizjournals\.com/phoenix',
+            r'bizjournals\.com/pittsburgh', r'bizjournals\.com/portland',
+            r'bizjournals\.com/raleigh', r'bizjournals\.com/richmond',
+            r'bizjournals\.com/sacramento', r'bizjournals\.com/sanantonio',
+            r'bizjournals\.com/sanfrancisco', r'bizjournals\.com/sanjose',
+            r'bizjournals\.com/seattle', r'bizjournals\.com/stlouis',
+            r'bizjournals\.com/twincities', r'bizjournals\.com/washington',
+            r'bizjournals\.com/wichita',
+            # Block non-hotel categories
+            r'/news/banking', r'/news/technology', r'/news/health-care',
+            r'/news/retail', r'/news/manufacturing', r'/news/energy',
+            r'/news/education', r'/news/government', r'/news/professional',
+            r'/news/media', r'/news/philanthropy', r'/news/sports',
+            r'/news/transportation', r'/news/food-and-lifestyle',
+            r'/news/career', r'/news/residential-real-estate',
+            r'/news/commercial-real-estate', r'/news/feature/',
+            r'/undefined', r'/null', r'/bizwomen/', r'/events/',
+            r'/people/', r'/lists/', r'/subscribe/', r'/page/',
         ],
-        link_patterns=[r'/news/\d{4}/\d{2}/\d{2}/'],
-        notes="YOUR CORE MARKET - Tampa Bay"
+        link_patterns=[
+            r'/tampabay/news/\d{4}/\d{2}/\d{2}/.*hotel.*\.html',
+            r'/tampabay/news/\d{4}/\d{2}/\d{2}/.*resort.*\.html',
+            r'/tampabay/news/\d{4}/\d{2}/\d{2}/.*hospitality.*\.html',
+            r'/tampabay/news/\d{4}/\d{2}/\d{2}/.*opening.*\.html',
+        ],
+        notes="YOUR CORE MARKET - Tampa Bay. FIXED with strict city filtering."
     ),
     
     # -------------------------------------------------------------------------

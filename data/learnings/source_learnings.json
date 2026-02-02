@@ -681,63 +681,74 @@
     "name": "Hotel Dive",
     "domain": "hoteldive.com",
     "entry_url": "https://www.hoteldive.com/topic/development/",
-    "total_urls_tested": 150,
-    "urls_with_leads": 40,
-    "urls_without_leads": 110,
-    "total_leads_found": 40,
-    "usa_caribbean_leads": 40,
+    "total_urls_tested": 250,
+    "urls_with_leads": 58,
+    "urls_without_leads": 192,
+    "total_leads_found": 58,
+    "usa_caribbean_leads": 58,
     "gold_patterns": [
       "/topic/development/",
       "/news/ihg-ruby-hotels-chicago-debut/\\d+/",
-      "/news/ihg-six-senses-resort-utah/\\d+/",
       "/news/top-hotel-openings-2026/\\d+/",
       "/topic/brands/"
     ],
     "junk_patterns": [
+      "/what-we-are-reading",
+      "/topic/finances-deals/",
       "/en/news-and-media/news-releases/\\d+/[^/]+"
     ],
     "maybe_patterns": [
       "/news/[^/]+/\\d+/",
-      "/what-we-are-reading",
+      "/news/ihg-six-senses-resort-utah/\\d+/",
       "/news/accor-hotels-q3-2025-earnings/\\d+/",
-      "/topic/finances-deals/",
       "/news/\\d+\\.html",
       "/news/ihg-acquires-ruby-q4-earnings/\\d+/",
-      "/news/ihg-brings-ruby-brand-to-us/\\d+/"
+      "/news/ihg-brings-ruby-brand-to-us/\\d+/",
+      "/article/[^/]+",
+      "/article/\\d+/[^/]+",
+      "/milwaukee/news/\\d+/01/\\d+/[^/]+",
+      "/releases/[^/]+",
+      "/news/family-travel-hotel-business/\\d+/",
+      "/news/grand-hyatt-opening-utah/\\d+/",
+      "/topic/operations/",
+      "/topic/technology/",
+      "/topic/consumer-trends/",
+      "/topic/workforce/",
+      "/topic/regulations/"
     ],
     "pattern_stats": {
       "/topic/development/": {
-        "tested": 3,
-        "leads": 2,
-        "total_quality": 1.12,
-        "usa_caribbean": 2
+        "tested": 5,
+        "leads": 4,
+        "total_quality": 2.45,
+        "usa_caribbean": 4
       },
       "/news/[^/]+/\\d+/": {
-        "tested": 111,
-        "leads": 29,
-        "total_quality": 17.49,
-        "usa_caribbean": 29
+        "tested": 175,
+        "leads": 39,
+        "total_quality": 23.630000000000006,
+        "usa_caribbean": 39
       },
       "/news/ihg-ruby-hotels-chicago-debut/\\d+/": {
-        "tested": 3,
-        "leads": 3,
-        "total_quality": 1.7999999999999998,
-        "usa_caribbean": 3
+        "tested": 5,
+        "leads": 5,
+        "total_quality": 3.0999999999999996,
+        "usa_caribbean": 5
       },
       "/news/ihg-six-senses-resort-utah/\\d+/": {
-        "tested": 3,
+        "tested": 5,
         "leads": 1,
         "total_quality": 0.51,
         "usa_caribbean": 1
       },
       "/news/top-hotel-openings-2026/\\d+/": {
-        "tested": 3,
-        "leads": 3,
-        "total_quality": 1.7271428571428569,
-        "usa_caribbean": 3
+        "tested": 5,
+        "leads": 5,
+        "total_quality": 2.936587301587301,
+        "usa_caribbean": 5
       },
       "/what-we-are-reading": {
-        "tested": 3,
+        "tested": 5,
         "leads": 0,
         "total_quality": 0.0,
         "usa_caribbean": 0
@@ -749,13 +760,13 @@
         "usa_caribbean": 0
       },
       "/topic/brands/": {
-        "tested": 3,
-        "leads": 2,
-        "total_quality": 1.12,
-        "usa_caribbean": 2
+        "tested": 5,
+        "leads": 4,
+        "total_quality": 2.4050000000000002,
+        "usa_caribbean": 4
       },
       "/topic/finances-deals/": {
-        "tested": 3,
+        "tested": 5,
         "leads": 0,
         "total_quality": 0.0,
         "usa_caribbean": 0
@@ -783,14 +794,80 @@
         "leads": 0,
         "total_quality": 0.0,
         "usa_caribbean": 0
+      },
+      "/article/[^/]+": {
+        "tested": 2,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/article/\\d+/[^/]+": {
+        "tested": 2,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/milwaukee/news/\\d+/01/\\d+/[^/]+": {
+        "tested": 2,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/releases/[^/]+": {
+        "tested": 2,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/news/family-travel-hotel-business/\\d+/": {
+        "tested": 2,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/news/grand-hyatt-opening-utah/\\d+/": {
+        "tested": 2,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/topic/operations/": {
+        "tested": 2,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/topic/technology/": {
+        "tested": 2,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/topic/consumer-trends/": {
+        "tested": 2,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/topic/workforce/": {
+        "tested": 2,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/topic/regulations/": {
+        "tested": 2,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
       }
     },
-    "lead_yield_rate": 0.26666666666666666,
+    "lead_yield_rate": 0.232,
     "usa_caribbean_rate": 1.0,
     "avg_confidence": 0.0,
     "first_tested": "2026-01-30T11:57:36.970456",
-    "last_tested": "2026-01-30T13:17:48.334289",
-    "last_updated": "2026-01-30T13:17:48.334289",
+    "last_tested": "2026-02-02T14:14:15.768529",
+    "last_updated": "2026-02-02T14:14:15.768529",
     "recommended_max_pages": 50,
     "recommended_priority": 10,
     "is_worth_scraping": true,
@@ -1036,19 +1113,19 @@
     "name": "Marriott News",
     "domain": "news.marriott.com",
     "entry_url": "https://news.marriott.com/news/",
-    "total_urls_tested": 30,
-    "urls_with_leads": 0,
-    "urls_without_leads": 30,
-    "total_leads_found": 0,
-    "usa_caribbean_leads": 0,
+    "total_urls_tested": 60,
+    "urls_with_leads": 1,
+    "urls_without_leads": 59,
+    "total_leads_found": 1,
+    "usa_caribbean_leads": 1,
     "gold_patterns": [],
     "junk_patterns": [
       "/news/\\d+/01/\\d+/[^/]+",
-      "/news/\\d+/12/\\d+/[^/]+"
+      "/news/\\d+/12/\\d+/[^/]+",
+      "/news"
     ],
     "maybe_patterns": [
       "/news/",
-      "/news",
       "/news/\\d+/11/\\d+/[^/]+",
       "/news/\\d+/10/\\d+/[^/]+",
       "/leadership",
@@ -1057,37 +1134,37 @@
     ],
     "pattern_stats": {
       "/news/": {
-        "tested": 1,
+        "tested": 2,
         "leads": 0,
         "total_quality": 0.0,
         "usa_caribbean": 0
       },
       "/news/\\d+/01/\\d+/[^/]+": {
-        "tested": 11,
+        "tested": 22,
         "leads": 0,
         "total_quality": 0.0,
         "usa_caribbean": 0
       },
       "/news/\\d+/12/\\d+/[^/]+": {
-        "tested": 7,
+        "tested": 14,
         "leads": 0,
         "total_quality": 0.0,
         "usa_caribbean": 0
       },
       "/news": {
-        "tested": 4,
+        "tested": 11,
         "leads": 0,
         "total_quality": 0.0,
         "usa_caribbean": 0
       },
       "/news/\\d+/11/\\d+/[^/]+": {
-        "tested": 2,
-        "leads": 0,
-        "total_quality": 0.0,
-        "usa_caribbean": 0
+        "tested": 4,
+        "leads": 1,
+        "total_quality": 0.53,
+        "usa_caribbean": 1
       },
       "/news/\\d+/10/\\d+/[^/]+": {
-        "tested": 2,
+        "tested": 4,
         "leads": 0,
         "total_quality": 0.0,
         "usa_caribbean": 0
@@ -1111,14 +1188,14 @@
         "usa_caribbean": 0
       }
     },
-    "lead_yield_rate": 0.0,
-    "usa_caribbean_rate": 0.0,
+    "lead_yield_rate": 0.016666666666666666,
+    "usa_caribbean_rate": 1.0,
     "avg_confidence": 0.0,
     "first_tested": "2026-01-30T13:22:35.275712",
-    "last_tested": "2026-01-30T13:22:35.275712",
-    "last_updated": "2026-01-30T13:22:35.275712",
+    "last_tested": "2026-02-02T14:37:03.596797",
+    "last_updated": "2026-02-02T14:37:03.596797",
     "recommended_max_pages": 20,
-    "recommended_priority": 4,
+    "recommended_priority": 8,
     "is_worth_scraping": false,
     "notes": []
   },
@@ -1126,28 +1203,32 @@
     "name": "Orange Studio",
     "domain": "theorangestudio.com",
     "entry_url": "https://www.theorangestudio.com/hotel-openings",
-    "total_urls_tested": 42,
-    "urls_with_leads": 4,
-    "urls_without_leads": 38,
-    "total_leads_found": 4,
-    "usa_caribbean_leads": 0,
+    "total_urls_tested": 152,
+    "urls_with_leads": 7,
+    "urls_without_leads": 145,
+    "total_leads_found": 7,
+    "usa_caribbean_leads": 3,
     "gold_patterns": [
-      "/en/news/\\d+/[^/]+"
+      "/news-releases/\\d+/new-four-seasons-in-amaala/",
+      "/news-releases/\\d+/new-four-seasons-in-taipei/"
     ],
-    "junk_patterns": [],
+    "junk_patterns": [
+      "/emea/releases/[^/]+",
+      "/releases/[^/]+",
+      "/news-releases/\\d+/[^/]+/",
+      "/news-releases/\\d+/[^/]+",
+      "/news/[^/]+"
+    ],
     "maybe_patterns": [
       "/hotel-openings",
-      "/emea/releases/[^/]+",
       "/en/pressrelease/details/19805",
-      "/news-releases/\\d+/new-four-seasons-in-amaala/",
       "/news-releases/\\d+/new-four-seasons-in-venice/",
       "/news-releases/\\d+/new-four-seasons-in-red-sea/",
       "/news-releases/\\d+/new-four-seasons-in-belize/",
-      "/news-releases/\\d+/new-four-seasons-in-taipei/",
-      "/releases/[^/]+",
       "/en/corporate/media-center/press-releases/\\d+/six-senses-lisbon-announcement",
       "/en/press/ruby-expansion-rotterdam",
       "/en/development/upcoming-openings/poiana-brasov-ski-resort",
+      "/en/news/\\d+/[^/]+",
       "/news-releases",
       "/hotel-press-kits",
       "/trending-now",
@@ -1156,175 +1237,176 @@
       "/content/fourseasons_pressroom/en/forms/influencer.html",
       "/content/fourseasons_pressroom/printView.html",
       "/corporate-bios/bart-carnahan.html",
-      "/news-releases/\\d+/[^/]+/",
       "/news-releases/\\d+/new-four-seasons-in-neom/",
       "/news-releases/\\d+/new-four-seasons-in-diriyah/",
-      "/news-releases/\\d+/[^/]+",
       "/news-releases/\\d+/strategic-growth-and-expansion",
       "/content/fourseasons_pressroom/en/sitemap.html",
       "/venice/hotel-news/\\d+/reservations-live",
       "/de/venice/hotel-news/\\d+/reservations-live-5",
-      "/venice"
+      "/venice",
+      "/es/venice/hotel-news/\\d+/reservations-live-4",
+      "/news/hotel-openings-in-2024",
+      "/news-releases/\\d+/new-four-seasons-in-amaala"
     ],
     "pattern_stats": {
       "/hotel-openings": {
-        "tested": 1,
-        "leads": 0,
-        "total_quality": 0.0,
-        "usa_caribbean": 0
+        "tested": 17,
+        "leads": 3,
+        "total_quality": 2.13,
+        "usa_caribbean": 3
       },
       "/emea/releases/[^/]+": {
-        "tested": 2,
+        "tested": 8,
         "leads": 0,
         "total_quality": 0.0,
         "usa_caribbean": 0
       },
       "/en/pressrelease/details/19805": {
-        "tested": 1,
+        "tested": 4,
         "leads": 0,
         "total_quality": 0.0,
         "usa_caribbean": 0
       },
       "/news-releases/\\d+/new-four-seasons-in-amaala/": {
-        "tested": 1,
+        "tested": 3,
         "leads": 1,
         "total_quality": 0.53,
         "usa_caribbean": 0
       },
       "/news-releases/\\d+/new-four-seasons-in-venice/": {
-        "tested": 1,
+        "tested": 3,
         "leads": 0,
         "total_quality": 0.0,
         "usa_caribbean": 0
       },
       "/news-releases/\\d+/new-four-seasons-in-red-sea/": {
-        "tested": 1,
+        "tested": 3,
         "leads": 0,
         "total_quality": 0.0,
         "usa_caribbean": 0
       },
       "/news-releases/\\d+/new-four-seasons-in-belize/": {
-        "tested": 1,
+        "tested": 3,
         "leads": 0,
         "total_quality": 0.0,
         "usa_caribbean": 0
       },
       "/news-releases/\\d+/new-four-seasons-in-taipei/": {
-        "tested": 1,
+        "tested": 3,
         "leads": 1,
         "total_quality": 0.59,
         "usa_caribbean": 0
       },
       "/releases/[^/]+": {
-        "tested": 2,
+        "tested": 6,
         "leads": 0,
         "total_quality": 0.0,
         "usa_caribbean": 0
       },
       "/en/corporate/media-center/press-releases/\\d+/six-senses-lisbon-announcement": {
-        "tested": 1,
+        "tested": 3,
         "leads": 0,
         "total_quality": 0.0,
         "usa_caribbean": 0
       },
       "/en/press/ruby-expansion-rotterdam": {
-        "tested": 1,
+        "tested": 3,
         "leads": 0,
         "total_quality": 0.0,
         "usa_caribbean": 0
       },
       "/en/development/upcoming-openings/poiana-brasov-ski-resort": {
-        "tested": 1,
+        "tested": 3,
         "leads": 0,
         "total_quality": 0.0,
         "usa_caribbean": 0
       },
       "/en/news/\\d+/[^/]+": {
-        "tested": 3,
+        "tested": 9,
         "leads": 1,
         "total_quality": 0.55,
         "usa_caribbean": 0
       },
       "/news-releases": {
-        "tested": 1,
+        "tested": 3,
         "leads": 0,
         "total_quality": 0.0,
         "usa_caribbean": 0
       },
       "/hotel-press-kits": {
-        "tested": 1,
+        "tested": 3,
         "leads": 0,
         "total_quality": 0.0,
         "usa_caribbean": 0
       },
       "/trending-now": {
-        "tested": 1,
+        "tested": 3,
         "leads": 0,
         "total_quality": 0.0,
         "usa_caribbean": 0
       },
       "/press-contacts": {
-        "tested": 1,
+        "tested": 3,
         "leads": 0,
         "total_quality": 0.0,
         "usa_caribbean": 0
       },
       "/corporate": {
-        "tested": 1,
+        "tested": 3,
         "leads": 0,
         "total_quality": 0.0,
         "usa_caribbean": 0
       },
       "/content/fourseasons_pressroom/en/forms/influencer.html": {
-        "tested": 1,
+        "tested": 3,
         "leads": 0,
         "total_quality": 0.0,
         "usa_caribbean": 0
       },
       "/content/fourseasons_pressroom/printView.html": {
-        "tested": 5,
+        "tested": 15,
         "leads": 1,
         "total_quality": 0.5,
         "usa_caribbean": 0
       },
       "/corporate-bios/bart-carnahan.html": {
-        "tested": 1,
+        "tested": 3,
         "leads": 0,
         "total_quality": 0.0,
         "usa_caribbean": 0
       },
       "/news-releases/\\d+/[^/]+/": {
-        "tested": 3,
+        "tested": 9,
         "leads": 0,
         "total_quality": 0.0,
         "usa_caribbean": 0
       },
       "/news-releases/\\d+/new-four-seasons-in-neom/": {
-        "tested": 1,
-        "leads": 0,
-        "total_quality": 0.0,
-        "usa_caribbean": 0
-      },
-      "/news-releases/\\d+/new-four-seasons-in-diriyah/": {
-        "tested": 1,
-        "leads": 0,
-        "total_quality": 0.0,
-        "usa_caribbean": 0
-      },
-      "/news-releases/\\d+/[^/]+": {
         "tested": 3,
         "leads": 0,
         "total_quality": 0.0,
         "usa_caribbean": 0
       },
+      "/news-releases/\\d+/new-four-seasons-in-diriyah/": {
+        "tested": 3,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/news-releases/\\d+/[^/]+": {
+        "tested": 9,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
       "/news-releases/\\d+/strategic-growth-and-expansion": {
-        "tested": 1,
+        "tested": 3,
         "leads": 0,
         "total_quality": 0.0,
         "usa_caribbean": 0
       },
       "/content/fourseasons_pressroom/en/sitemap.html": {
-        "tested": 1,
+        "tested": 3,
         "leads": 0,
         "total_quality": 0.0,
         "usa_caribbean": 0
@@ -1336,27 +1418,798 @@
         "usa_caribbean": 0
       },
       "/de/venice/hotel-news/\\d+/reservations-live-5": {
-        "tested": 1,
+        "tested": 3,
         "leads": 0,
         "total_quality": 0.0,
         "usa_caribbean": 0
       },
       "/venice": {
+        "tested": 3,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/es/venice/hotel-news/\\d+/reservations-live-4": {
+        "tested": 2,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/news/[^/]+": {
+        "tested": 6,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/news/hotel-openings-in-2024": {
+        "tested": 2,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/news-releases/\\d+/new-four-seasons-in-amaala": {
         "tested": 1,
         "leads": 0,
         "total_quality": 0.0,
         "usa_caribbean": 0
       }
     },
-    "lead_yield_rate": 0.09523809523809523,
-    "usa_caribbean_rate": 0.0,
+    "lead_yield_rate": 0.046052631578947366,
+    "usa_caribbean_rate": 0.42857142857142855,
     "avg_confidence": 0.0,
     "first_tested": "2026-01-30T13:25:38.109861",
-    "last_tested": "2026-01-30T13:25:38.109861",
-    "last_updated": "2026-01-30T13:25:38.109861",
+    "last_tested": "2026-02-02T16:31:32.932805",
+    "last_updated": "2026-02-02T16:31:32.932805",
+    "recommended_max_pages": 20,
+    "recommended_priority": 8,
+    "is_worth_scraping": false,
+    "notes": []
+  },
+  "South Florida Business Journal": {
+    "name": "South Florida Business Journal",
+    "domain": "bizjournals.com",
+    "entry_url": "https://www.bizjournals.com/southflorida/news/industry/hotels",
+    "total_urls_tested": 80,
+    "urls_with_leads": 0,
+    "urls_without_leads": 80,
+    "total_leads_found": 0,
+    "usa_caribbean_leads": 0,
+    "gold_patterns": [],
+    "junk_patterns": [],
+    "maybe_patterns": [
+      "/southflorida/news/industry/hotels",
+      "/southflorida/news/industry/undefined",
+      "/southflorida/news/industry/southflorida",
+      "/southflorida/news/\\d+/02/\\d+/[^/]+",
+      "/southflorida/news/commercial-real-estate",
+      "/southflorida/news/banking-and-financial-services",
+      "/southflorida/news/technology",
+      "/southflorida/news/residential-real-estate",
+      "/southflorida/news/food-and-lifestyle",
+      "/southflorida/news/career-and-workplace",
+      "/southflorida/news/career-and-workplace/diversity-equity-and-inclusion",
+      "/southflorida/news/education",
+      "/southflorida/news/energy",
+      "/southflorida/news/government-and-regulations",
+      "/southflorida/news/health-care",
+      "/southflorida/news/manufacturing",
+      "/southflorida/news/media-and-marketing",
+      "/southflorida/news/philanthropy-and-nonprofits",
+      "/southflorida/news/professional-services",
+      "/southflorida/news/retailing",
+      "/southflorida/news/sports",
+      "/southflorida/news/transportation",
+      "/southflorida/news/travel-and-tourism",
+      "/southflorida/news/feature/the-wealth-edition",
+      "/southflorida/news/feature/[^/]+",
+      "/southflorida/news/feature/florida-business-minds/2022",
+      "/",
+      "/albany",
+      "/albuquerque",
+      "/atlanta",
+      "/undefined",
+      "/triad",
+      "/jacksonville",
+      "/southflorida",
+      "/orlando",
+      "/rhodeisland",
+      "/triangle",
+      "/tampabay",
+      "/southflorida/login",
+      "/southflorida/news",
+      "/southflorida/datacenter",
+      "/southflorida/inno",
+      "/southflorida/event",
+      "/southflorida/40-under-40",
+      "/southflorida/best-places-to-work",
+      "/southflorida/women-of-influence",
+      "/southflorida/nomination",
+      "/southflorida/subscribe",
+      "/bizjournals/special-report/health-care-innovation",
+      "/bizjournals/special-report/business-of-travel",
+      "/bizjournals/special-report/top-hospitals",
+      "/southflorida/feature/crane-watch"
+    ],
+    "pattern_stats": {
+      "/southflorida/news/industry/hotels": {
+        "tested": 3,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/southflorida/news/industry/undefined": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/southflorida/news/industry/southflorida": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/southflorida/news/\\d+/02/\\d+/[^/]+": {
+        "tested": 3,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/southflorida/news/commercial-real-estate": {
+        "tested": 2,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/southflorida/news/banking-and-financial-services": {
+        "tested": 2,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/southflorida/news/technology": {
+        "tested": 2,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/southflorida/news/residential-real-estate": {
+        "tested": 2,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/southflorida/news/food-and-lifestyle": {
+        "tested": 2,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/southflorida/news/career-and-workplace": {
+        "tested": 2,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/southflorida/news/career-and-workplace/diversity-equity-and-inclusion": {
+        "tested": 2,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/southflorida/news/education": {
+        "tested": 2,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/southflorida/news/energy": {
+        "tested": 2,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/southflorida/news/government-and-regulations": {
+        "tested": 2,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/southflorida/news/health-care": {
+        "tested": 2,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/southflorida/news/manufacturing": {
+        "tested": 2,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/southflorida/news/media-and-marketing": {
+        "tested": 2,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/southflorida/news/philanthropy-and-nonprofits": {
+        "tested": 2,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/southflorida/news/professional-services": {
+        "tested": 2,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/southflorida/news/retailing": {
+        "tested": 2,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/southflorida/news/sports": {
+        "tested": 2,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/southflorida/news/transportation": {
+        "tested": 2,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/southflorida/news/travel-and-tourism": {
+        "tested": 3,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/southflorida/news/feature/the-wealth-edition": {
+        "tested": 2,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/southflorida/news/feature/[^/]+": {
+        "tested": 2,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/southflorida/news/feature/florida-business-minds/2022": {
+        "tested": 2,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/": {
+        "tested": 2,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/albany": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/albuquerque": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/atlanta": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/undefined": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/triad": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/jacksonville": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/southflorida": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/orlando": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/rhodeisland": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/triangle": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/tampabay": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/southflorida/login": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/southflorida/news": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/southflorida/datacenter": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/southflorida/inno": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/southflorida/event": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/southflorida/40-under-40": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/southflorida/best-places-to-work": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/southflorida/women-of-influence": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/southflorida/nomination": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/southflorida/subscribe": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/bizjournals/special-report/health-care-innovation": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/bizjournals/special-report/business-of-travel": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/bizjournals/special-report/top-hospitals": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/southflorida/feature/crane-watch": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      }
+    },
+    "lead_yield_rate": 0.0,
+    "usa_caribbean_rate": 0.0,
+    "avg_confidence": 0.0,
+    "first_tested": "2026-02-02T14:19:26.805407",
+    "last_tested": "2026-02-02T14:31:11.982253",
+    "last_updated": "2026-02-02T14:31:11.982253",
     "recommended_max_pages": 20,
     "recommended_priority": 4,
-    "is_worth_scraping": true,
+    "is_worth_scraping": false,
+    "notes": []
+  },
+  "Four Seasons New Openings": {
+    "name": "Four Seasons New Openings",
+    "domain": "fourseasons.com",
+    "entry_url": "https://www.fourseasons.com/newopenings/",
+    "total_urls_tested": 215,
+    "urls_with_leads": 8,
+    "urls_without_leads": 207,
+    "total_leads_found": 8,
+    "usa_caribbean_leads": 6,
+    "gold_patterns": [
+      "/newopenings/",
+      "/news-releases/\\d+/new-four-seasons-in-tropicalia"
+    ],
+    "junk_patterns": [
+      "/news-releases/\\d+/new-four-seasons-in-belize",
+      "/news-releases/\\d+/new-four-seasons-in-telluride",
+      "/news-releases/\\d+/new-four-seasons-in-madinah",
+      "/news-releases/\\d+/new-four-seasons-in-gstaad",
+      "/news-releases/\\d+/four-seasons-expands-in-egypt",
+      "/news-releases/\\d+/new-four-seasons-in-porto-heli",
+      "/news-releases/\\d+/new-four-seasons-in-zanzibar",
+      "/news-releases/\\d+/new-four-seasons-in-diriyah",
+      "/news-releases/\\d+/new-four-seasons-in-neom",
+      "/news-releases/\\d+/new-four-seasons-in-muscat"
+    ],
+    "maybe_patterns": [
+      "/news-releases/\\d+/[^/]+",
+      "/news-releases/\\d+/new-four-seasons-in-hanoi",
+      "/news-releases/\\d+/new-four-seasons-in-taipei",
+      "/news-releases/\\d+/new-four-seasons-in-okinawa",
+      "/news-releases/\\d+/new-four-seasons-in-shanghai",
+      "/news-releases/\\d+/new-four-seasons-in-xian",
+      "/news-releases/\\d+/new-four-seasons-in-melbourne",
+      "/find_a_hotel_or_resort",
+      "/",
+      "/villa-residence-rentals",
+      "/residences/private_residences",
+      "/dining",
+      "/privatejet",
+      "/meetings_and_events",
+      "/weddings",
+      "/campaigns/corporate/winter-travel",
+      "/magazine",
+      "/esg",
+      "/dining/discover-dining",
+      "/dining/award-winning-dining",
+      "/dining/breakfast",
+      "/dining/beverage",
+      "/campaigns/corporate/winter-travel/americas",
+      "/campaigns/corporate/winter-travel/europe-middle-east-africa",
+      "/campaigns/corporate/winter-travel/asia-pacific",
+      "/puertorico",
+      "/naplesbeachclub",
+      "/rabat",
+      "/hangzhoucentre",
+      "/mallorca",
+      "/osaka",
+      "/residences/private_residences/orlando-florian-park",
+      "/redseashuraisland",
+      "/cartagena",
+      "/amaalaredsea"
+    ],
+    "pattern_stats": {
+      "/newopenings/": {
+        "tested": 5,
+        "leads": 3,
+        "total_quality": 2.14625,
+        "usa_caribbean": 3
+      },
+      "/news-releases/\\d+/new-four-seasons-in-belize": {
+        "tested": 5,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/news-releases/\\d+/[^/]+": {
+        "tested": 19,
+        "leads": 3,
+        "total_quality": 2.04,
+        "usa_caribbean": 3
+      },
+      "/news-releases/\\d+/new-four-seasons-in-tropicalia": {
+        "tested": 5,
+        "leads": 2,
+        "total_quality": 1.4,
+        "usa_caribbean": 0
+      },
+      "/news-releases/\\d+/new-four-seasons-in-telluride": {
+        "tested": 5,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/news-releases/\\d+/new-four-seasons-in-madinah": {
+        "tested": 5,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/news-releases/\\d+/new-four-seasons-in-gstaad": {
+        "tested": 5,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/news-releases/\\d+/four-seasons-expands-in-egypt": {
+        "tested": 5,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/news-releases/\\d+/new-four-seasons-in-porto-heli": {
+        "tested": 5,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/news-releases/\\d+/new-four-seasons-in-zanzibar": {
+        "tested": 5,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/news-releases/\\d+/new-four-seasons-in-diriyah": {
+        "tested": 5,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/news-releases/\\d+/new-four-seasons-in-neom": {
+        "tested": 5,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/news-releases/\\d+/new-four-seasons-in-muscat": {
+        "tested": 5,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/news-releases/\\d+/new-four-seasons-in-hanoi": {
+        "tested": 4,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/news-releases/\\d+/new-four-seasons-in-taipei": {
+        "tested": 4,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/news-releases/\\d+/new-four-seasons-in-okinawa": {
+        "tested": 4,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/news-releases/\\d+/new-four-seasons-in-shanghai": {
+        "tested": 4,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/news-releases/\\d+/new-four-seasons-in-xian": {
+        "tested": 4,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/news-releases/\\d+/new-four-seasons-in-melbourne": {
+        "tested": 4,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/find_a_hotel_or_resort": {
+        "tested": 4,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/": {
+        "tested": 4,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/villa-residence-rentals": {
+        "tested": 4,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/residences/private_residences": {
+        "tested": 4,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/dining": {
+        "tested": 4,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/privatejet": {
+        "tested": 4,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/meetings_and_events": {
+        "tested": 4,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/weddings": {
+        "tested": 4,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/campaigns/corporate/winter-travel": {
+        "tested": 4,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/magazine": {
+        "tested": 4,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/esg": {
+        "tested": 4,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/dining/discover-dining": {
+        "tested": 4,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/dining/award-winning-dining": {
+        "tested": 4,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/dining/breakfast": {
+        "tested": 4,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/dining/beverage": {
+        "tested": 4,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/campaigns/corporate/winter-travel/americas": {
+        "tested": 4,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/campaigns/corporate/winter-travel/europe-middle-east-africa": {
+        "tested": 4,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/campaigns/corporate/winter-travel/asia-pacific": {
+        "tested": 4,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/puertorico": {
+        "tested": 4,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/naplesbeachclub": {
+        "tested": 4,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/rabat": {
+        "tested": 4,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/hangzhoucentre": {
+        "tested": 4,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/mallorca": {
+        "tested": 4,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/osaka": {
+        "tested": 4,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/residences/private_residences/orlando-florian-park": {
+        "tested": 4,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/redseashuraisland": {
+        "tested": 4,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/cartagena": {
+        "tested": 4,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/amaalaredsea": {
+        "tested": 4,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      }
+    },
+    "lead_yield_rate": 0.037209302325581395,
+    "usa_caribbean_rate": 0.75,
+    "avg_confidence": 0.0,
+    "first_tested": "2026-02-02T14:48:25.876978",
+    "last_tested": "2026-02-02T16:50:20.070836",
+    "last_updated": "2026-02-02T16:50:20.070836",
+    "recommended_max_pages": 20,
+    "recommended_priority": 8,
+    "is_worth_scraping": false,
     "notes": []
   }
 }

@@ -8,6 +8,7 @@ Run with:
 """
 
 import logging
+import re
 from datetime import datetime, timezone, timedelta
 from typing import Optional, List
 from contextlib import asynccontextmanager
@@ -48,6 +49,8 @@ class LeadBase(BaseModel):
     room_count: Optional[int] = None
     hotel_type: Optional[str] = None
     brand: Optional[str] = None
+    brand_tier: Optional[str] = None
+    location_type: Optional[str] = None
     hotel_website: Optional[str] = None
     description: Optional[str] = None
     notes: Optional[str] = None
@@ -69,12 +72,14 @@ class LeadUpdate(BaseModel):
     contact_title: Optional[str] = None
     notes: Optional[str] = None
     lead_score: Optional[int] = None
+    rejection_reason: Optional[str] = None
 
 
 class LeadResponse(LeadBase):
     """Schema for lead response"""
     id: int
     lead_score: Optional[int] = None
+    score_breakdown: Optional[dict] = None
     status: str
     source_url: Optional[str] = None
     source_site: Optional[str] = None
@@ -97,25 +102,37 @@ class LeadListResponse(BaseModel):
 class SourceBase(BaseModel):
     """Base source schema"""
     name: str
-    url: str
+    base_url: str
+    source_type: Optional[str] = "aggregator"
+    priority: Optional[int] = 5
     scrape_frequency: Optional[str] = "daily"
+    use_playwright: Optional[bool] = False
     is_active: Optional[bool] = True
     notes: Optional[str] = None
 
+
 class SourceCreate(SourceBase):
     """Schema for creating a source"""
-    pass
+    entry_urls: Optional[List[str]] = None
+
 
 class SourceResponse(BaseModel):
     """Schema for source response"""
-    id: str  # UUID as string
+    id: int
     name: str
-    url: str
+    base_url: str
+    source_type: Optional[str] = None
+    priority: Optional[int] = None
+    entry_urls: Optional[List[str]] = None
     scrape_frequency: Optional[str] = None
+    use_playwright: Optional[bool] = False
     is_active: bool
     last_scraped_at: Optional[datetime] = None
+    last_success_at: Optional[datetime] = None
     leads_found: Optional[int] = 0
     success_rate: Optional[float] = None
+    consecutive_failures: Optional[int] = 0
+    health_status: Optional[str] = None
     notes: Optional[str] = None
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
@@ -134,6 +151,9 @@ class ScrapeLogResponse(BaseModel):
     status: str
     urls_scraped: int = 0
     leads_found: int = 0
+    leads_new: int = 0
+    leads_duplicate: int = 0
+    leads_skipped: int = 0
     
     class Config:
         from_attributes = True
@@ -145,9 +165,12 @@ class StatsResponse(BaseModel):
     new_leads: int
     approved_leads: int
     pending_leads: int
-    bad_leads: int
+    rejected_leads: int
+    hot_leads: int
+    warm_leads: int
     total_sources: int
     active_sources: int
+    healthy_sources: int
     leads_today: int
     leads_this_week: int
 
@@ -256,11 +279,26 @@ async def get_stats(db: AsyncSession = Depends(get_db)):
     )
     pending_leads = result.scalar() or 0
     
-    # Bad leads
+    # Rejected leads
     result = await db.execute(
-        select(func.count(PotentialLead.id)).where(PotentialLead.status == "bad")
+        select(func.count(PotentialLead.id)).where(PotentialLead.status.in_(["rejected", "bad"]))
     )
-    bad_leads = result.scalar() or 0
+    rejected_leads = result.scalar() or 0
+    
+    # Hot leads (score >= 70)
+    result = await db.execute(
+        select(func.count(PotentialLead.id)).where(PotentialLead.lead_score >= 70)
+    )
+    hot_leads = result.scalar() or 0
+    
+    # Warm leads (score 50-69)
+    result = await db.execute(
+        select(func.count(PotentialLead.id)).where(
+            PotentialLead.lead_score >= 50,
+            PotentialLead.lead_score < 70
+        )
+    )
+    warm_leads = result.scalar() or 0
     
     # Total sources
     result = await db.execute(select(func.count(Source.id)))
@@ -271,6 +309,12 @@ async def get_stats(db: AsyncSession = Depends(get_db)):
         select(func.count(Source.id)).where(Source.is_active == True)
     )
     active_sources = result.scalar() or 0
+    
+    # Healthy sources
+    result = await db.execute(
+        select(func.count(Source.id)).where(Source.health_status == "healthy")
+    )
+    healthy_sources = result.scalar() or 0
     
     # Leads today
     result = await db.execute(
@@ -289,9 +333,12 @@ async def get_stats(db: AsyncSession = Depends(get_db)):
         new_leads=new_leads,
         approved_leads=approved_leads,
         pending_leads=pending_leads,
-        bad_leads=bad_leads,
+        rejected_leads=rejected_leads,
+        hot_leads=hot_leads,
+        warm_leads=warm_leads,
         total_sources=total_sources,
         active_sources=active_sources,
+        healthy_sources=healthy_sources,
         leads_today=leads_today,
         leads_this_week=leads_this_week
     )
@@ -308,6 +355,8 @@ async def list_leads(
     status: Optional[str] = None,
     min_score: Optional[int] = None,
     state: Optional[str] = None,
+    location_type: Optional[str] = None,
+    brand_tier: Optional[str] = None,
     search: Optional[str] = None,
     db: AsyncSession = Depends(get_db)
 ):
@@ -325,6 +374,12 @@ async def list_leads(
     if state:
         query = query.where(PotentialLead.state.ilike(f"%{state}%"))
         count_query = count_query.where(PotentialLead.state.ilike(f"%{state}%"))
+    if location_type:
+        query = query.where(PotentialLead.location_type == location_type)
+        count_query = count_query.where(PotentialLead.location_type == location_type)
+    if brand_tier:
+        query = query.where(PotentialLead.brand_tier == brand_tier)
+        count_query = count_query.where(PotentialLead.brand_tier == brand_tier)
     if search:
         search_filter = (
             PotentialLead.hotel_name.ilike(f"%{search}%") |
@@ -338,11 +393,121 @@ async def list_leads(
     result = await db.execute(count_query)
     total = result.scalar() or 0
     
-    # Apply pagination and ordering
+    # Apply pagination and ordering - HIGH SCORES FIRST
     offset = (page - 1) * per_page
     query = query.order_by(
-        PotentialLead.lead_score.desc().nullsfirst(),
+        PotentialLead.lead_score.desc().nullslast(),
         PotentialLead.created_at.desc()
+    ).offset(offset).limit(per_page)
+    
+    result = await db.execute(query)
+    leads = result.scalars().all()
+    
+    pages = (total + per_page - 1) // per_page if total > 0 else 1
+    
+    return LeadListResponse(
+        leads=[LeadResponse.model_validate(lead) for lead in leads],
+        total=total,
+        page=page,
+        per_page=per_page,
+        pages=pages
+    )
+
+
+@app.get("/leads/hot", response_model=LeadListResponse, tags=["Leads"])
+async def get_hot_leads(
+    page: int = Query(1, ge=1),
+    per_page: int = Query(20, ge=1, le=100),
+    db: AsyncSession = Depends(get_db)
+):
+    """Get hot leads (score >= 70) - ready for outreach"""
+    query = select(PotentialLead).where(
+        PotentialLead.lead_score >= 70,
+        PotentialLead.status == "new"
+    )
+    count_query = select(func.count(PotentialLead.id)).where(
+        PotentialLead.lead_score >= 70,
+        PotentialLead.status == "new"
+    )
+    
+    result = await db.execute(count_query)
+    total = result.scalar() or 0
+    
+    offset = (page - 1) * per_page
+    query = query.order_by(
+        PotentialLead.lead_score.desc()
+    ).offset(offset).limit(per_page)
+    
+    result = await db.execute(query)
+    leads = result.scalars().all()
+    
+    pages = (total + per_page - 1) // per_page if total > 0 else 1
+    
+    return LeadListResponse(
+        leads=[LeadResponse.model_validate(lead) for lead in leads],
+        total=total,
+        page=page,
+        per_page=per_page,
+        pages=pages
+    )
+
+
+@app.get("/leads/florida", response_model=LeadListResponse, tags=["Leads"])
+async def get_florida_leads(
+    page: int = Query(1, ge=1),
+    per_page: int = Query(20, ge=1, le=100),
+    db: AsyncSession = Depends(get_db)
+):
+    """Get Florida leads - your primary market"""
+    query = select(PotentialLead).where(
+        PotentialLead.location_type == "florida"
+    )
+    count_query = select(func.count(PotentialLead.id)).where(
+        PotentialLead.location_type == "florida"
+    )
+    
+    result = await db.execute(count_query)
+    total = result.scalar() or 0
+    
+    offset = (page - 1) * per_page
+    query = query.order_by(
+        PotentialLead.lead_score.desc().nullslast()
+    ).offset(offset).limit(per_page)
+    
+    result = await db.execute(query)
+    leads = result.scalars().all()
+    
+    pages = (total + per_page - 1) // per_page if total > 0 else 1
+    
+    return LeadListResponse(
+        leads=[LeadResponse.model_validate(lead) for lead in leads],
+        total=total,
+        page=page,
+        per_page=per_page,
+        pages=pages
+    )
+
+
+@app.get("/leads/caribbean", response_model=LeadListResponse, tags=["Leads"])
+async def get_caribbean_leads(
+    page: int = Query(1, ge=1),
+    per_page: int = Query(20, ge=1, le=100),
+    db: AsyncSession = Depends(get_db)
+):
+    """Get Caribbean leads"""
+    query = select(PotentialLead).where(
+        PotentialLead.location_type == "caribbean"
+    )
+    count_query = select(func.count(PotentialLead.id)).where(
+        PotentialLead.location_type == "caribbean"
+    )
+    
+    result = await db.execute(count_query)
+    total = result.scalar() or 0
+    
+    offset = (page - 1) * per_page
+    query = query.order_by(
+        PotentialLead.lead_score.desc().nullslast()
     ).offset(offset).limit(per_page)
     
     result = await db.execute(query)
@@ -377,7 +542,7 @@ async def get_lead(lead_id: int, db: AsyncSession = Depends(get_db)):
 async def create_lead(lead_data: LeadCreate, db: AsyncSession = Depends(get_db)):
     """Create a new lead manually"""
     # Normalize hotel name for deduplication
-    normalized_name = lead_data.hotel_name.lower().strip()
+    normalized_name = re.sub(r'[^a-z0-9\s]', '', lead_data.hotel_name.lower()).strip()
     
     lead = PotentialLead(
         hotel_name=lead_data.hotel_name,
@@ -393,6 +558,8 @@ async def create_lead(lead_data: LeadCreate, db: AsyncSession = Depends(get_db))
         room_count=lead_data.room_count,
         hotel_type=lead_data.hotel_type,
         brand=lead_data.brand,
+        brand_tier=lead_data.brand_tier,
+        location_type=lead_data.location_type,
         hotel_website=lead_data.hotel_website,
         description=lead_data.description,
         notes=lead_data.notes,
@@ -406,7 +573,7 @@ async def create_lead(lead_data: LeadCreate, db: AsyncSession = Depends(get_db))
     await db.commit()
     await db.refresh(lead)
     
-    logger.info(f"Created lead: {lead.hotel_name} (ID: {lead.id})")
+    logger.info(f"Created lead: {lead.hotel_name} (ID: {lead.id}, Score: {lead.lead_score})")
     
     return LeadResponse.model_validate(lead)
 
@@ -438,7 +605,7 @@ async def update_lead(lead_id: int, updates: LeadUpdate, db: AsyncSession = Depe
 
 @app.post("/leads/{lead_id}/approve", response_model=LeadResponse, tags=["Leads"])
 async def approve_lead(lead_id: int, db: AsyncSession = Depends(get_db)):
-    """Approve a lead"""
+    """Approve a lead - ready for CRM push"""
     result = await db.execute(
         select(PotentialLead).where(PotentialLead.id == lead_id)
     )
@@ -459,7 +626,11 @@ async def approve_lead(lead_id: int, db: AsyncSession = Depends(get_db)):
 
 
 @app.post("/leads/{lead_id}/reject", response_model=LeadResponse, tags=["Leads"])
-async def reject_lead(lead_id: int, reason: Optional[str] = None, db: AsyncSession = Depends(get_db)):
+async def reject_lead(
+    lead_id: int, 
+    reason: Optional[str] = Query(None, description="Rejection reason: duplicate, budget_brand, international, old_opening, bad_data"),
+    db: AsyncSession = Depends(get_db)
+):
     """Reject a lead"""
     result = await db.execute(
         select(PotentialLead).where(PotentialLead.id == lead_id)
@@ -469,14 +640,15 @@ async def reject_lead(lead_id: int, reason: Optional[str] = None, db: AsyncSessi
     if not lead:
         raise HTTPException(status_code=404, detail="Lead not found")
     
-    lead.status = "bad"
+    lead.status = "rejected"
+    lead.rejection_reason = reason
     lead.notes = f"{lead.notes or ''}\nRejected: {reason or 'No reason given'}".strip()
     lead.updated_at = datetime.now(timezone.utc)
     
     await db.commit()
     await db.refresh(lead)
     
-    logger.info(f"Rejected lead: {lead.hotel_name} (ID: {lead.id})")
+    logger.info(f"Rejected lead: {lead.hotel_name} (ID: {lead.id}, Reason: {reason})")
     
     return LeadResponse.model_validate(lead)
 
@@ -506,34 +678,55 @@ async def delete_lead(lead_id: int, db: AsyncSession = Depends(get_db)):
 # -----------------------------------------------------------------------------
 
 @app.get("/sources", response_model=List[SourceResponse], tags=["Sources"])
-async def list_sources(active_only: bool = False, db: AsyncSession = Depends(get_db)):
+async def list_sources(
+    active_only: bool = False,
+    source_type: Optional[str] = None,
+    min_priority: Optional[int] = None,
+    db: AsyncSession = Depends(get_db)
+):
     """List all scraping sources"""
     query = select(Source)
     
     if active_only:
         query = query.where(Source.is_active == True)
+    if source_type:
+        query = query.where(Source.source_type == source_type)
+    if min_priority:
+        query = query.where(Source.priority >= min_priority)
     
-    query = query.order_by(Source.name)
+    query = query.order_by(Source.priority.desc(), Source.name)
     
     result = await db.execute(query)
     sources = result.scalars().all()
     
-    return [
-        SourceResponse(
-            id=str(source.id),
-            name=source.name,
-            url=source.url,
-            scrape_frequency=source.scrape_frequency,
-            is_active=source.is_active,
-            last_scraped_at=source.last_scraped_at,
-            leads_found=source.leads_found,
-            success_rate=float(source.success_rate) if source.success_rate else None,
-            notes=source.notes,
-            created_at=source.created_at,
-            updated_at=source.updated_at
-        )
-        for source in sources
-    ]
+    return [SourceResponse.model_validate(source) for source in sources]
+
+
+@app.get("/sources/healthy", response_model=List[SourceResponse], tags=["Sources"])
+async def list_healthy_sources(db: AsyncSession = Depends(get_db)):
+    """List healthy sources ready for scraping"""
+    query = select(Source).where(
+        Source.is_active == True,
+        Source.health_status.in_(["healthy", "new", "degraded"])
+    ).order_by(Source.priority.desc())
+    
+    result = await db.execute(query)
+    sources = result.scalars().all()
+    
+    return [SourceResponse.model_validate(source) for source in sources]
+
+
+@app.get("/sources/problems", response_model=List[SourceResponse], tags=["Sources"])
+async def list_problem_sources(db: AsyncSession = Depends(get_db)):
+    """List sources with issues (failing/dead)"""
+    query = select(Source).where(
+        Source.health_status.in_(["failing", "dead"])
+    ).order_by(Source.consecutive_failures.desc())
+    
+    result = await db.execute(query)
+    sources = result.scalars().all()
+    
+    return [SourceResponse.model_validate(source) for source in sources]
 
 
 @app.post("/sources", response_model=SourceResponse, tags=["Sources"])
@@ -541,7 +734,7 @@ async def create_source(source_data: SourceCreate, db: AsyncSession = Depends(ge
     """Create a new scraping source"""
     # Check for duplicate URL
     result = await db.execute(
-        select(Source).where(Source.url == source_data.url)
+        select(Source).where(Source.base_url == source_data.base_url)
     )
     existing = result.scalar_one_or_none()
     if existing:
@@ -549,10 +742,15 @@ async def create_source(source_data: SourceCreate, db: AsyncSession = Depends(ge
     
     source = Source(
         name=source_data.name,
-        url=source_data.url,
+        base_url=source_data.base_url,
+        source_type=source_data.source_type,
+        priority=source_data.priority,
+        entry_urls=source_data.entry_urls or [source_data.base_url],
         scrape_frequency=source_data.scrape_frequency,
+        use_playwright=source_data.use_playwright,
         is_active=source_data.is_active,
-        notes=source_data.notes
+        notes=source_data.notes,
+        health_status="new"
     )
     
     db.add(source)
@@ -561,20 +759,7 @@ async def create_source(source_data: SourceCreate, db: AsyncSession = Depends(ge
     
     logger.info(f"Created source: {source.name} (ID: {source.id})")
     
-    # Return with string ID
-    return SourceResponse(
-        id=str(source.id),
-        name=source.name,
-        url=source.url,
-        scrape_frequency=source.scrape_frequency,
-        is_active=source.is_active,
-        last_scraped_at=source.last_scraped_at,
-        leads_found=source.leads_found,
-        success_rate=float(source.success_rate) if source.success_rate else None,
-        notes=source.notes,
-        created_at=source.created_at,
-        updated_at=source.updated_at
-    )
+    return SourceResponse.model_validate(source)
 
 
 @app.post("/sources/{source_id}/toggle", response_model=SourceResponse, tags=["Sources"])
@@ -589,11 +774,36 @@ async def toggle_source(source_id: int, db: AsyncSession = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Source not found")
     
     source.is_active = not source.is_active
+    source.updated_at = datetime.now(timezone.utc)
+    
     await db.commit()
     await db.refresh(source)
     
     status = "activated" if source.is_active else "deactivated"
     logger.info(f"Source {status}: {source.name} (ID: {source.id})")
+    
+    return SourceResponse.model_validate(source)
+
+
+@app.post("/sources/{source_id}/reset-health", response_model=SourceResponse, tags=["Sources"])
+async def reset_source_health(source_id: int, db: AsyncSession = Depends(get_db)):
+    """Reset a source's health status (after fixing issues)"""
+    result = await db.execute(
+        select(Source).where(Source.id == source_id)
+    )
+    source = result.scalar_one_or_none()
+    
+    if not source:
+        raise HTTPException(status_code=404, detail="Source not found")
+    
+    source.health_status = "new"
+    source.consecutive_failures = 0
+    source.updated_at = datetime.now(timezone.utc)
+    
+    await db.commit()
+    await db.refresh(source)
+    
+    logger.info(f"Reset health for source: {source.name} (ID: {source.id})")
     
     return SourceResponse.model_validate(source)
 
@@ -626,6 +836,7 @@ async def delete_source(source_id: int, db: AsyncSession = Depends(get_db)):
 async def get_scrape_logs(
     limit: int = Query(20, ge=1, le=100),
     source_id: Optional[int] = None,
+    status: Optional[str] = None,
     db: AsyncSession = Depends(get_db)
 ):
     """Get recent scrape logs"""
@@ -633,6 +844,8 @@ async def get_scrape_logs(
     
     if source_id:
         query = query.where(ScrapeLog.source_id == source_id)
+    if status:
+        query = query.where(ScrapeLog.status == status)
     
     query = query.order_by(ScrapeLog.started_at.desc()).limit(limit)
     

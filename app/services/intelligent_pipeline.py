@@ -39,6 +39,20 @@ import httpx
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+# Import custom handlers for site-specific extraction
+try:
+    from app.services.custom_handlers import (
+        has_custom_handler, 
+        get_handler, 
+        extract_with_handler,
+        ExtractedLead as HandlerExtractedLead
+    )
+    CUSTOM_HANDLERS_AVAILABLE = True
+    logger.info("✅ Custom site handlers loaded")
+except ImportError:
+    CUSTOM_HANDLERS_AVAILABLE = False
+    logger.warning("⚠️ Custom handlers not available - using AI extraction only")
+
 
 # =============================================================================
 # CONFIGURATION
@@ -373,6 +387,31 @@ class ExtractedLead:
     # Quality
     confidence_score: float = 0.0
     qualification_score: int = 0  # 0-100
+    
+    def to_dict(self) -> dict:
+        """Convert to dictionary for JSON serialization"""
+        return {
+            'hotel_name': self.hotel_name,
+            'brand': self.brand,
+            'property_type': self.property_type,
+            'city': self.city,
+            'state': self.state,
+            'country': self.country,
+            'opening_date': self.opening_date,
+            'opening_status': self.opening_status,
+            'room_count': self.room_count,
+            'management_company': self.management_company,
+            'developer': self.developer,
+            'contact_name': self.contact_name,
+            'contact_title': self.contact_title,
+            'contact_email': self.contact_email,
+            'contact_phone': self.contact_phone,
+            'source_url': self.source_url,
+            'source_name': self.source_name,
+            'extracted_at': self.extracted_at,
+            'confidence_score': self.confidence_score,
+            'qualification_score': self.qualification_score,
+        }
 
 
 class LeadExtractor:
@@ -1216,7 +1255,62 @@ class IntelligentPipeline:
         extraction_start = time.time()
         
         all_leads = []
+        
+        # Check for custom handlers first (site-specific extraction)
+        custom_handler_urls = set()
+        if CUSTOM_HANDLERS_AVAILABLE:
+            for page in pages:
+                url = page.get('url', '')
+                content = page.get('content', '') or page.get('text', '')
+                
+                if has_custom_handler(url):
+                    custom_handler_urls.add(url)
+                    handler = get_handler(url)
+                    logger.info(f"🔧 Using custom handler: {handler.name} for {url[:50]}...")
+                    
+                    try:
+                        handler_leads = await handler.extract(content, url)
+                        
+                        # Convert handler leads to pipeline ExtractedLead format
+                        for hl in handler_leads:
+                            lead = ExtractedLead(
+                                hotel_name=hl.hotel_name or '',
+                                brand=hl.brand or '',
+                                property_type=hl.property_type or '',
+                                city=hl.city or '',
+                                state=hl.state or '',
+                                country=hl.country or '',
+                                opening_date=hl.opening_date or str(hl.opening_year) if hl.opening_year else '',
+                                opening_status='announced',
+                                room_count=hl.room_count or 0,
+                                management_company='',
+                                developer='',
+                                contact_name=hl.contact_name or '',
+                                contact_title='',
+                                contact_email=hl.contact_email or '',
+                                contact_phone=hl.contact_phone or '',
+                                source_url=url,
+                                source_name=page.get('source', source_name),
+                                extracted_at=datetime.now().isoformat()
+                            )
+                            all_leads.append(lead)
+                        
+                        logger.info(f"   ✅ Custom handler extracted {len(handler_leads)} leads")
+                        
+                        # Record learning (pass empty list - learning happens after qualification)
+                        self.learner.record(url, True, [])
+                        
+                    except Exception as e:
+                        logger.error(f"   ❌ Custom handler failed: {e}")
+        
+        # Process remaining relevant pages with AI extraction
         for page in relevant_pages:
+            url = page['url']
+            
+            # Skip if already processed by custom handler
+            if url in custom_handler_urls:
+                continue
+            
             leads = await self.extractor.extract(
                 page['url'], 
                 page['content'],

@@ -345,9 +345,11 @@ class SmartDeduplicator:
         # Start with name similarity
         name_sim = self._name_similarity(lead1.hotel_name, lead2.hotel_name)
         
-        # Location boost
-        location_match = self._locations_match(lead1, lead2)
-        if location_match:
+        # CRITICAL: If both have locations and they're DIFFERENT, reduce similarity significantly
+        # This prevents merging "Four Seasons Jacksonville" with "Four Seasons Coconut Grove"
+        if self._locations_clearly_different(lead1, lead2):
+            name_sim *= 0.4  # Heavily penalize different locations
+        elif self._locations_match(lead1, lead2):
             name_sim += self.LOCATION_BOOST
         
         # Brand boost
@@ -355,6 +357,34 @@ class SmartDeduplicator:
             name_sim += self.BRAND_BOOST
         
         return min(name_sim, 1.0)  # Cap at 1.0
+    
+    def _locations_clearly_different(self, lead1: MergedLead, lead2: MergedLead) -> bool:
+        """
+        Check if two leads have clearly different locations.
+        Returns True if they're definitely different places.
+        """
+        # If both have cities and they're different
+        if lead1.city and lead2.city:
+            city1 = lead1.city.lower().strip()
+            city2 = lead2.city.lower().strip()
+            if city1 != city2 and city1 not in city2 and city2 not in city1:
+                return True
+        
+        # If both have states and they're different
+        if lead1.state and lead2.state:
+            state1 = lead1.state.lower().strip()
+            state2 = lead2.state.lower().strip()
+            if state1 != state2:
+                return True
+        
+        # If both have countries and they're different
+        if lead1.country and lead2.country:
+            country1 = lead1.country.lower().strip()
+            country2 = lead2.country.lower().strip()
+            if country1 != country2:
+                return True
+        
+        return False
     
     def _name_similarity(self, name1: str, name2: str) -> float:
         """Calculate name similarity using multiple methods"""

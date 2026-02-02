@@ -123,6 +123,7 @@ class SourceConfig:
     """Configuration for a specific source"""
     name: str
     url: str
+    additional_urls: List[str] = field(default_factory=list)  # Extra URLs to scrape
     crawler_type: CrawlerType = CrawlerType.HTTPX
     priority: int = 5
     frequency: str = "daily"
@@ -757,8 +758,13 @@ class DeepCrawler:
         results: List[ScrapeResult] = []
         visited: Set[str] = set()
         
-        # Initialize queue with source URL (depth 0)
+        # Initialize queue with source URL and any additional URLs (depth 0)
         to_visit: List[Tuple[str, int]] = [(source.url, 0)]
+        
+        # Add additional URLs if configured
+        if hasattr(source, 'additional_urls') and source.additional_urls:
+            for extra_url in source.additional_urls:
+                to_visit.append((extra_url, 0))
         
         # Reset filter stats for this crawl
         self._filter_stats = {
@@ -1157,9 +1163,13 @@ class ScrapingEngine:
                 else:
                     crawler = CrawlerType.HTTPX
                 
+                # Get additional URLs if configured
+                additional = getattr(tuning, 'additional_urls', []) or []
+                
                 self._sources[name] = SourceConfig(
                     name=tuning.name,
                     url=tuning.entry_url,
+                    additional_urls=additional,
                     crawler_type=crawler,
                     priority=tuning.priority,
                     follow_links=True,

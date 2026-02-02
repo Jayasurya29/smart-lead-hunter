@@ -4,8 +4,8 @@ SMART LEAD HUNTER - Application Configuration
 Loads settings from .env file with FREE AI stack support
 
 AI Providers (in order of priority):
-1. Groq API (FREE - Llama 3.3 70B)
-2. Ollama Local (FREE - any model)
+1. Google Gemini (PRIMARY - $300 free credits)
+2. Ollama Local (BACKUP - runs locally, unlimited)
 """
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from functools import lru_cache
@@ -29,10 +29,10 @@ class Settings(BaseSettings):
     # AI EXTRACTION - FREE STACK
     # -------------------------------------------------------------------------
     
-    # Groq API (PRIMARY - FREE tier, no card required)
-    # Get your key at: https://console.groq.com/
-    groq_api_key: Optional[str] = None
-    groq_model: str = "llama-3.3-70b-versatile"  # Best free model
+    # Google Gemini (PRIMARY - $300 free credits, best quality)
+    # Get your key at: https://aistudio.google.com/apikey
+    gemini_api_key: Optional[str] = None
+    gemini_model: str = "gemini-2.0-flash"
     
     # Ollama (BACKUP - runs locally, unlimited)
     ollama_url: str = "http://localhost:11434"
@@ -87,9 +87,9 @@ class Settings(BaseSettings):
     # -------------------------------------------------------------------------
     
     @property
-    def has_groq(self) -> bool:
-        """Check if Groq API is configured"""
-        return bool(self.groq_api_key and self.groq_api_key != "your-free-groq-api-key-here")
+    def has_gemini(self) -> bool:
+        """Check if Gemini API is configured"""
+        return bool(self.gemini_api_key and len(self.gemini_api_key) > 10)
     
     @property
     def has_insightly(self) -> bool:
@@ -101,17 +101,19 @@ class Settings(BaseSettings):
         import httpx
         
         status = {
-            "groq": {
-                "configured": self.has_groq,
-                "model": self.groq_model,
-                "available": False,
-                "cost": "$0 (free tier)"
+            "gemini": {
+                "configured": self.has_gemini,
+                "model": self.gemini_model,
+                "available": self.has_gemini,
+                "cost": "$0 (free credits)",
+                "priority": 1
             },
             "ollama": {
                 "configured": True,
                 "model": self.ollama_model,
                 "available": False,
-                "cost": "$0 (local)"
+                "cost": "$0 (local)",
+                "priority": 2
             }
         }
         
@@ -122,10 +124,14 @@ class Settings(BaseSettings):
         except:
             pass
         
-        # Groq is available if configured (it's a cloud service)
-        status["groq"]["available"] = self.has_groq
-        
         return status
+    
+    def get_best_ai_provider(self) -> str:
+        """Get the best available AI provider"""
+        if self.has_gemini:
+            return "gemini"
+        else:
+            return "ollama"
 
 
 @lru_cache()
@@ -156,23 +162,25 @@ def print_config_status():
     
     print("\n🤖 AI EXTRACTION (FREE STACK)")
     
-    # Groq status
-    groq = ai_status["groq"]
-    groq_icon = "✅" if groq["available"] else "❌"
-    print(f"   {groq_icon} Groq API ({groq['model']})")
-    print(f"      Configured: {groq['configured']}")
-    print(f"      Cost: {groq['cost']}")
-    if not groq["configured"]:
-        print(f"      ⚠️  Get FREE key at: https://console.groq.com/")
+    # Gemini status (PRIMARY)
+    gemini = ai_status["gemini"]
+    gemini_icon = "✅" if gemini["available"] else "❌"
+    print(f"   {gemini_icon} Gemini API ({gemini['model']}) - PRIMARY")
+    print(f"      Configured: {gemini['configured']}")
+    print(f"      Cost: {gemini['cost']}")
+    if not gemini["configured"]:
+        print(f"      ⚠️  Get FREE key at: https://aistudio.google.com/apikey")
     
-    # Ollama status
+    # Ollama status (BACKUP)
     ollama = ai_status["ollama"]
     ollama_icon = "✅" if ollama["available"] else "⚠️"
-    print(f"   {ollama_icon} Ollama Local ({ollama['model']})")
+    print(f"   {ollama_icon} Ollama Local ({ollama['model']}) - BACKUP")
     print(f"      Running: {ollama['available']}")
     print(f"      Cost: {ollama['cost']}")
     if not ollama["available"]:
         print(f"      ℹ️  Start with: ollama serve")
+    
+    print(f"\n   🎯 Best Available: {s.get_best_ai_provider().upper()}")
     
     print("\n📤 CRM")
     insightly_icon = "✅" if s.has_insightly else "⚠️"

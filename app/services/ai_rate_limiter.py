@@ -1,12 +1,12 @@
 """
 SMART LEAD HUNTER - AI RATE LIMITER
 ===================================
-Intelligent rate limiting for AI API calls (Groq + Ollama).
+Intelligent rate limiting for AI API calls (Gemini + Ollama).
 
 PROBLEM:
-- Groq has aggressive rate limits (429 Too Many Requests)
-- Constantly hitting Groq when rate limited wastes time
-- Need smart fallback to Ollama when Groq is unavailable
+- Gemini has rate limits (429 Too Many Requests)
+- Constantly hitting Gemini when rate limited wastes time
+- Need smart fallback to Ollama when Gemini is unavailable
 
 SOLUTION:
 - Track rate limit state per provider
@@ -41,7 +41,7 @@ logger = logging.getLogger(__name__)
 
 class AIProvider(Enum):
     """Available AI providers"""
-    GROQ = "groq"
+    GEMINI = "gemini"
     OLLAMA = "ollama"
 
 
@@ -75,8 +75,8 @@ class AIRateLimiter:
     """
     
     # Configuration
-    MIN_DELAY_GROQ = 1.0          # Minimum seconds between Groq requests
-    MIN_DELAY_OLLAMA = 0.5        # Minimum seconds between Ollama requests
+    MIN_DELAY_GEMINI = 4.0        # Minimum seconds between Gemini requests (free tier ~15 RPM)
+    MIN_DELAY_OLLAMA = 0.5        # Minimum seconds between Ollama requests (local, fast)
     INITIAL_COOLDOWN = 60.0       # Initial cooldown after rate limit (seconds)
     MAX_COOLDOWN = 300.0          # Maximum cooldown (5 minutes)
     COOLDOWN_MULTIPLIER = 1.5     # Multiply cooldown on repeated rate limits
@@ -85,19 +85,19 @@ class AIRateLimiter:
     def __init__(self):
         """Initialize rate limiter with provider states"""
         self._providers = {
-            AIProvider.GROQ: ProviderState(name="Groq"),
+            AIProvider.GEMINI: ProviderState(name="Gemini"),
             AIProvider.OLLAMA: ProviderState(name="Ollama"),
         }
         self._current_cooldown = {
-            AIProvider.GROQ: self.INITIAL_COOLDOWN,
+            AIProvider.GEMINI: self.INITIAL_COOLDOWN,
             AIProvider.OLLAMA: self.INITIAL_COOLDOWN,
         }
         self._lock = asyncio.Lock()
-        self._groq_disabled_until = 0.0  # Extended disable for Groq
+        self._gemini_disabled_until = 0.0  # Extended disable for Gemini
     
     async def get_available_provider(
         self, 
-        preferred: AIProvider = AIProvider.GROQ
+        preferred: AIProvider = AIProvider.GEMINI
     ) -> Optional[AIProvider]:
         """
         Get the best available provider for a request.
@@ -111,11 +111,11 @@ class AIRateLimiter:
         async with self._lock:
             now = time.time()
             
-            # Check if Groq is in extended cooldown
-            if now < self._groq_disabled_until:
-                remaining = int(self._groq_disabled_until - now)
+            # Check if Gemini is in extended cooldown
+            if now < self._gemini_disabled_until:
+                remaining = int(self._gemini_disabled_until - now)
                 if remaining % 30 == 0:  # Log every 30 seconds
-                    logger.info(f"⏳ Groq cooldown: {remaining}s remaining, using Ollama")
+                    logger.info(f"⏳ Gemini cooldown: {remaining}s remaining, using Ollama")
                 return AIProvider.OLLAMA if self._providers[AIProvider.OLLAMA].is_ready() else None
             
             # Try preferred provider first
@@ -123,18 +123,18 @@ class AIRateLimiter:
                 return preferred
             
             # Try other provider
-            other = AIProvider.OLLAMA if preferred == AIProvider.GROQ else AIProvider.GROQ
+            other = AIProvider.OLLAMA if preferred == AIProvider.GEMINI else AIProvider.GEMINI
             if self._providers[other].is_ready():
                 return other
             
             # Both in cooldown - check which has shorter wait
-            groq_wait = max(0, self._providers[AIProvider.GROQ].cooldown_until - now)
+            gemini_wait = max(0, self._providers[AIProvider.GEMINI].cooldown_until - now)
             ollama_wait = max(0, self._providers[AIProvider.OLLAMA].cooldown_until - now)
             
-            if groq_wait <= ollama_wait and groq_wait > 0:
-                logger.info(f"⏳ Waiting {groq_wait:.1f}s for Groq cooldown...")
-                await asyncio.sleep(groq_wait)
-                return AIProvider.GROQ
+            if gemini_wait <= ollama_wait and gemini_wait > 0:
+                logger.info(f"⏳ Waiting {gemini_wait:.1f}s for Gemini cooldown...")
+                await asyncio.sleep(gemini_wait)
+                return AIProvider.GEMINI
             elif ollama_wait > 0:
                 logger.info(f"⏳ Waiting {ollama_wait:.1f}s for Ollama cooldown...")
                 await asyncio.sleep(ollama_wait)
@@ -153,7 +153,7 @@ class AIRateLimiter:
             now = time.time()
             state = self._providers[provider]
             
-            min_delay = self.MIN_DELAY_GROQ if provider == AIProvider.GROQ else self.MIN_DELAY_OLLAMA
+            min_delay = self.MIN_DELAY_GEMINI if provider == AIProvider.GEMINI else self.MIN_DELAY_OLLAMA
             
             if state.last_request > 0:
                 elapsed = now - state.last_request
@@ -204,12 +204,12 @@ class AIRateLimiter:
             f"(consecutive errors: {state.consecutive_errors})"
         )
         
-        # If Groq has too many consecutive errors, disable for longer
-        if provider == AIProvider.GROQ and state.consecutive_errors >= 3:
+        # If Gemini has too many consecutive errors, disable for longer
+        if provider == AIProvider.GEMINI and state.consecutive_errors >= 3:
             extended_cooldown = 120.0  # 2 minutes
-            self._groq_disabled_until = time.time() + extended_cooldown
+            self._gemini_disabled_until = time.time() + extended_cooldown
             logger.warning(
-                f"🚫 Groq disabled for {extended_cooldown:.0f}s due to repeated rate limits. "
+                f"🚫 Gemini disabled for {extended_cooldown:.0f}s due to repeated rate limits. "
                 f"Using Ollama exclusively."
             )
     
@@ -251,7 +251,7 @@ class AIRateLimiter:
             provider.is_available = True
             provider.cooldown_until = 0.0
             provider.consecutive_errors = 0
-        self._groq_disabled_until = 0.0
+        self._gemini_disabled_until = 0.0
 
 
 # Singleton instance

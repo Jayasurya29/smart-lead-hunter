@@ -369,13 +369,13 @@ class SourceTester:
         
         # Save report
         report_path = self.output_dir / f"source_test_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt"
-        with open(report_path, 'w') as f:
+        with open(report_path, 'w', encoding='utf-8') as f:
             f.write(report_text)
         
         # Save JSON results
         json_path = self.output_dir / f"source_test_results_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
-        with open(json_path, 'w') as f:
-            json.dump({name: r.to_dict() for name, r in self.results.items()}, f, indent=2)
+        with open(json_path, 'w', encoding='utf-8') as f:
+            json.dump({name: r.to_dict() for name, r in self.results.items()}, f, indent=2, ensure_ascii=False)
         
         print(report_text)
         print(f"\n📁 Report saved to: {report_path}")

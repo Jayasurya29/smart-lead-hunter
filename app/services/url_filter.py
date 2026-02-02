@@ -448,28 +448,33 @@ class URLFilter:
         # CARIBBEAN SOURCES
         # -------------------------------------------------------------------------
         'caribjournal.com': {
+            # TARGETED APPROACH: Only allow hotel article URLs
             'block': [
-                r'/destination/',        # Destination landing pages - low lead quality
                 r'/tag/',
                 r'/author/',
-                r'/page/\d+',
-                r'/wp-admin/',
-                r'/contact',
-                r'/about',
-                r'/advertise',
-                r'/all-inclusive/$',     # Category index
-                r'/travel/$',            # Category index
-                r'/news/$',              # Category index
-                r'/eat-play/',           # Food/entertainment - not hotels
-                r'/digest/',             # Newsletter
-                r'/cj-invest-news/$',    # News index
+                r'/destination/',              # Destination pages - low quality
+                r'/cj-invest-news/',           # Investment section
+                r'/cj-invest/',                # Investment portal
+                r'/cji-',                      # CJI media kit, contact
+                r'/cta-',                      # CTA media kit, contact
+                r'/caribbean-travel-advisor/', # Travel advisor
+                r'/caribbean/$',               # Caribbean index
+                r'/memberful',                 # Login/auth
+                r'-cheap-flights',             # Flight deals
+                r'-hiking-',                   # Hiking
+                r'-wedding-',                  # Wedding
+                r'-cruise',                    # Cruise
+                r'lamborghini',                # Cars
             ],
-            # IMPORTANT: Allow entry points (overrides global blocks)
+            # REQUIRE: URLs must match one of these patterns (allowlist approach)
+            'require': [
+                r'/category/hotels',          # Entry page
+                r'/\d{4}/\d{2}/\d{2}/',       # Article URLs (YYYY/MM/DD) - THE GOLD
+            ],
+            # Allow patterns override global blocks
             'allow_patterns': [
-                r'caribjournal\.com/$',       # Homepage
-                r'/category/hotels/',         # Hotels category
-                r'/\d{4}/\d{2}/\d{2}/',       # Date-based article URLs - THE GOLD!
-                r'/cj-invest/',               # Investment news
+                r'/category/hotels',          # Entry + pagination
+                r'/\d{4}/\d{2}/\d{2}/',       # Articles
             ]
         },
         'caribbeanhotelandtourism.com': {
@@ -495,14 +500,53 @@ class URLFilter:
         # -------------------------------------------------------------------------
         'bizjournals.com': {
             'block': [
-                r'/bizwomen/',
-                r'/events/',
-                r'/people/',
-                r'/lists/',
-                r'/subscribe/',
-                r'/page/\d+',
-                r'/account/',
-                r'/apps/',
+                # Block ALL other BizJournals cities - only allow southflorida/orlando/tampabay/jacksonville
+                r'bizjournals\.com/albany', r'bizjournals\.com/albuquerque',
+                r'bizjournals\.com/atlanta', r'bizjournals\.com/austin',
+                r'bizjournals\.com/baltimore', r'bizjournals\.com/birmingham',
+                r'bizjournals\.com/boston', r'bizjournals\.com/buffalo',
+                r'bizjournals\.com/charlotte', r'bizjournals\.com/chicago',
+                r'bizjournals\.com/cincinnati', r'bizjournals\.com/cleveland',
+                r'bizjournals\.com/columbus', r'bizjournals\.com/dallas',
+                r'bizjournals\.com/dayton', r'bizjournals\.com/denver',
+                r'bizjournals\.com/detroit', r'bizjournals\.com/houston',
+                r'bizjournals\.com/indianapolis', r'bizjournals\.com/kansascity',
+                r'bizjournals\.com/losangeles', r'bizjournals\.com/louisville',
+                r'bizjournals\.com/memphis', r'bizjournals\.com/milwaukee',
+                r'bizjournals\.com/minneapolis', r'bizjournals\.com/nashville',
+                r'bizjournals\.com/newyork', r'bizjournals\.com/pacific',
+                r'bizjournals\.com/philadelphia', r'bizjournals\.com/phoenix',
+                r'bizjournals\.com/pittsburgh', r'bizjournals\.com/portland',
+                r'bizjournals\.com/raleigh', r'bizjournals\.com/richmond',
+                r'bizjournals\.com/sacramento', r'bizjournals\.com/sanantonio',
+                r'bizjournals\.com/sanfrancisco', r'bizjournals\.com/sanjose',
+                r'bizjournals\.com/seattle', r'bizjournals\.com/stlouis',
+                r'bizjournals\.com/twincities', r'bizjournals\.com/washington',
+                r'bizjournals\.com/wichita',
+                # Block non-hotel industry categories
+                r'/news/banking', r'/news/technology', r'/news/health-care',
+                r'/news/retail', r'/news/manufacturing', r'/news/energy',
+                r'/news/education', r'/news/government', r'/news/professional',
+                r'/news/media', r'/news/philanthropy', r'/news/sports',
+                r'/news/transportation', r'/news/food-and-lifestyle',
+                r'/news/career', r'/news/residential-real-estate',
+                r'/news/commercial-real-estate', r'/news/feature/',
+                # Block junk
+                r'/undefined', r'/null',
+                r'/bizwomen/', r'/events/', r'/people/', r'/lists/',
+                r'/subscribe/', r'/page/\d+', r'/account/', r'/apps/',
+                r'/about/', r'/contact/', r'/advertise/', r'/help/',
+            ],
+            # Only allow Florida BizJournals hotel article URLs
+            'allow_patterns': [
+                r'/southflorida/news/\d{4}/\d{2}/\d{2}/.*\.html',
+                r'/orlando/news/\d{4}/\d{2}/\d{2}/.*\.html',
+                r'/tampabay/news/\d{4}/\d{2}/\d{2}/.*\.html',
+                r'/jacksonville/news/\d{4}/\d{2}/\d{2}/.*\.html',
+                r'/southflorida/news/industry/hotels',
+                r'/orlando/news/industry/hotels',
+                r'/tampabay/news/industry/hotels',
+                r'/jacksonville/news/industry/hotels',
             ],
         },
         # -------------------------------------------------------------------------
