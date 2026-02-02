@@ -1,276 +1,360 @@
--- ============================================================================
--- SMART LEAD HUNTER - MAJOR HOTEL CHAIN NEWSROOM SOURCES
--- Verified Press Release URLs for New Hotel Opening Announcements
--- Last Updated: January 30, 2026
--- ============================================================================
-
--- IMPORTANT: These are the OFFICIAL newsroom URLs for major hotel chains
--- Each chain owns multiple brands under one corporate umbrella
--- These URLs announce new hotel openings, groundbreakings, and expansions
-
--- ============================================================================
--- TIER 1: MARRIOTT INTERNATIONAL (30+ brands)
--- Brands: Ritz-Carlton, St. Regis, W Hotels, EDITION, JW Marriott, 
---         Luxury Collection, Westin, Sheraton, Marriott, Renaissance,
---         Autograph Collection, Tribute Portfolio, Courtyard, Aloft, Moxy
--- ============================================================================
-
-INSERT INTO sources (name, url, category, scrape_frequency, is_active, notes) VALUES
-('Marriott News Center', 'https://news.marriott.com/', 'chain_newsroom', 'daily', true, 
- 'PRIMARY - Main corporate newsroom for all 30+ Marriott brands including Ritz-Carlton, St. Regis, W Hotels'),
-
-('Marriott Media Centre EMEA', 'https://marriott.pressarea.com/pressrelease?keywords=Opening', 'chain_newsroom', 'weekly', true,
- 'Europe/Middle East/Africa regional newsroom - filter by Opening keyword'),
-
-('Marriott Investor Relations', 'https://marriott.gcs-web.com/news-releases', 'chain_newsroom', 'weekly', true,
- 'Financial press releases with quarterly development pipeline updates'),
-
-('Marriott New Openings Page', 'https://www.marriott.com/en-us/marriott-brands/portfolio/openings.mi', 'chain_newsroom', 'weekly', true,
- 'Consumer-facing new hotel openings list - good for confirmed openings'),
-
--- ============================================================================
--- TIER 2: HILTON WORLDWIDE (24 brands)
--- Brands: Waldorf Astoria, Conrad, LXR, NoMad, Signia, Canopy, Curio,
---         Tapestry, DoubleTree, Embassy Suites, Hilton, Hilton Garden Inn
--- ============================================================================
-
-('Hilton Stories Main', 'https://stories.hilton.com/', 'chain_newsroom', 'daily', true,
- 'PRIMARY - Main newsroom for all 24 Hilton brands including Waldorf Astoria, Conrad'),
-
-('Hilton Press Releases', 'https://stories.hilton.com/releases', 'chain_newsroom', 'daily', true,
- 'Direct press releases feed - all brands'),
-
-('Hilton New Openings 2026', 'https://stories.hilton.com/releases/new-hilton-openings-in-2026', 'chain_newsroom', 'monthly', true,
- 'Annual new openings roundup - updated each year'),
-
-('Hilton Luxury Hot List', 'https://stories.hilton.com/releases/hiltons-luxury-lifestyle-hot-list-2025-year-in-review-2026-strategic-expansion', 'chain_newsroom', 'monthly', true,
- 'Luxury and lifestyle brand openings - Waldorf, Conrad, LXR, NoMad'),
-
--- ============================================================================
--- TIER 3: HYATT HOTELS CORPORATION (25+ brands)
--- Brands: Park Hyatt, Alila, Miraval, Andaz, Thompson, The Standard,
---         Grand Hyatt, Hyatt Regency, Hyatt Ziva, Hyatt Zilara, Secrets, Dreams
--- ============================================================================
-
-('Hyatt Newsroom', 'https://newsroom.hyatt.com/news-releases', 'chain_newsroom', 'daily', true,
- 'PRIMARY - Main newsroom for all Hyatt brands including Park Hyatt, Alila, Thompson'),
-
-('Hyatt Investor News', 'https://investors.hyatt.com/news/investor-news/default.aspx', 'chain_newsroom', 'weekly', true,
- 'Financial press releases with development pipeline data'),
-
--- ============================================================================
--- TIER 4: IHG HOTELS & RESORTS (20 brands)
--- Brands: Six Senses, Regent, InterContinental, Vignette, Kimpton,
---         Hotel Indigo, voco, Crowne Plaza, Holiday Inn, Staybridge Suites
--- ============================================================================
-
-('IHG News Releases', 'https://www.ihgplc.com/en/news-and-media/news-releases', 'chain_newsroom', 'daily', true,
- 'PRIMARY - Main newsroom for all IHG brands including Six Senses, Regent, InterContinental, Kimpton'),
-
-('IHG News & Media Main', 'https://www.ihgplc.com/news-and-media', 'chain_newsroom', 'daily', true,
- 'Corporate news hub - all announcements'),
-
-('IHG Development News', 'https://development.ihg.com/resources/news-releases', 'chain_newsroom', 'weekly', true,
- 'Development-focused news for owners and developers'),
-
-('IHG Owners Association', 'https://www.owners.org/resources/news-and-events', 'chain_newsroom', 'weekly', true,
- 'Franchisee news - often has early development announcements'),
-
--- ============================================================================
--- TIER 5: ACCOR (45+ brands including Ennismore)
--- Brands: Orient Express, Raffles, Fairmont, Sofitel, MGallery, Pullman,
---         Swissôtel, Mövenpick, Novotel, Delano, Mondrian, SLS, Hyde
--- ============================================================================
-
-('Accor News & Stories', 'https://group.accor.com/en/news-stories', 'chain_newsroom', 'daily', true,
- 'PRIMARY - Main newsroom for all 45+ Accor brands including Raffles, Fairmont, Sofitel'),
-
-('Accor Pressroom', 'https://press.accor.com/', 'chain_newsroom', 'daily', true,
- 'Direct press releases - all brands'),
-
-('Accor 2026 Openings', 'https://group.accor.com/en/news-stories/accor-2026-openings', 'chain_newsroom', 'monthly', true,
- 'Annual openings roundup'),
-
-('Accor 2025 Openings', 'https://group.accor.com/en/news-stories/accor-hotel-openings-2025', 'chain_newsroom', 'monthly', true,
- 'Previous year openings - reference'),
-
--- ============================================================================
--- TIER 6: WYNDHAM HOTELS & RESORTS (25 brands)
--- Brands: Wyndham Grand, Registry Collection, Dolce, Trademark,
---         Wyndham, Wyndham Garden, La Quinta, Days Inn (EXCLUDE budget)
--- ============================================================================
-
-('Wyndham News & Media', 'https://corporate.wyndhamhotels.com/news-media/', 'chain_newsroom', 'daily', true,
- 'PRIMARY - Main newsroom for Wyndham brands - focus on Wyndham Grand, Registry Collection'),
-
-('Wyndham News Releases', 'https://corporate.wyndhamhotels.com/news-releases/', 'chain_newsroom', 'daily', true,
- 'Direct press releases archive'),
-
-('Wyndham Investor Relations', 'https://investor.wyndhamhotels.com/news-events/press-releases', 'chain_newsroom', 'weekly', true,
- 'Financial press releases with development updates'),
-
-('Wyndham Business News', 'https://www.wyndhambusiness.com/news-and-events/', 'chain_newsroom', 'weekly', true,
- 'B2B news for corporate travel'),
-
--- ============================================================================
--- TIER 7: FOUR SEASONS (Single ultra-luxury brand)
--- HIGH PRIORITY - Major uniform opportunity
--- ============================================================================
-
-('Four Seasons Press Room', 'https://press.fourseasons.com/', 'chain_newsroom', 'daily', true,
- 'PRIMARY - Ultra-luxury single brand - HIGH PRIORITY for uniform sales'),
-
-('Four Seasons News Releases', 'https://press.fourseasons.com/news-releases/', 'chain_newsroom', 'daily', true,
- 'Direct press releases'),
-
-('Four Seasons 2026 Travel', 'https://press.fourseasons.com/news-releases/2025/where-to-travel-in-2026/', 'chain_newsroom', 'monthly', true,
- 'Annual openings and renovations guide'),
-
-('Four Seasons New Openings', 'https://www.fourseasons.com/newopenings/', 'chain_newsroom', 'weekly', true,
- 'Consumer-facing new openings page'),
-
-('PR Newswire Four Seasons', 'https://www.prnewswire.com/news/four-seasons-hotels-and-resorts/', 'aggregator', 'daily', true,
- 'Aggregated press releases - backup source'),
-
--- ============================================================================
--- TIER 8: BWH HOTELS (Best Western - 18 brands)
--- Focus on WorldHotels luxury segment only
--- ============================================================================
-
-('BWH Press Releases', 'https://www.bestwestern.com/en_US/about/press-media.html', 'chain_newsroom', 'weekly', true,
- 'Main newsroom - focus on WorldHotels Luxury, Elite brands only'),
-
--- ============================================================================
--- TIER 9: LUXURY INDEPENDENT BRANDS
--- HIGH PRIORITY - Ultra-luxury independent chains
--- ============================================================================
-
-('Aman New Developments', 'https://www.aman.com/new-developments', 'chain_newsroom', 'weekly', true,
- 'HIGH PRIORITY - Ultra-luxury Aman resorts - pipeline includes Miami Beach, Beverly Hills'),
-
-('Aman Trade News', 'https://www.aman.com/trade-professionals/new-noteworthy', 'chain_newsroom', 'weekly', true,
- 'Trade professional updates'),
-
-('Rosewood Media', 'https://www.rosewoodhotels.com/en/media', 'chain_newsroom', 'weekly', true,
- 'HIGH PRIORITY - Ultra-luxury Rosewood Hotels - 54 properties, 30+ in development'),
-
-('Rosewood Hotel Group', 'https://www.rosewoodhotelgroup.com/en-us/news-and-media', 'chain_newsroom', 'weekly', true,
- 'Corporate newsroom including New World Hotels'),
-
-('Loews Hotels Press', 'https://www.loewshotels.com/press/press-releases/press-categories/press-releases', 'chain_newsroom', 'weekly', true,
- 'FLORIDA PRIORITY - Properties in Miami Beach, Orlando - luxury American chain'),
-
--- ============================================================================
--- TIER 10: PR AGGREGATORS (Backup Sources)
--- Use to catch releases that may not appear on brand newsrooms
--- ============================================================================
-
-('PR Newswire Marriott', 'https://www.prnewswire.com/news/marriott-international,-inc./', 'aggregator', 'weekly', true,
- 'Marriott press releases aggregator'),
-
-('PR Newswire Hyatt', 'https://www.prnewswire.com/search/news/?keyword=hyatt+hotels+opening', 'aggregator', 'weekly', true,
- 'Hyatt press releases aggregator'),
-
-('PR Newswire IHG', 'https://www.prnewswire.com/news/intercontinental-hotels-group-(ihg)/', 'aggregator', 'weekly', true,
- 'IHG press releases aggregator'),
-
-('PR Newswire Wyndham', 'https://www.prnewswire.com/news/wyndham-hotels-&-resorts/', 'aggregator', 'weekly', true,
- 'Wyndham press releases aggregator'),
-
-('PR Newswire Accor', 'https://www.prnewswire.com/search/news/?keyword=accor+hotel+opening', 'aggregator', 'weekly', true,
- 'Accor press releases aggregator'),
-
-('PR Newswire Rosewood', 'https://www.prnewswire.com/search/news/?keyword=rosewood+hotel+opening', 'aggregator', 'weekly', true,
- 'Rosewood press releases aggregator');
-
--- ============================================================================
--- BRAND REFERENCE TABLE
--- Maps major chains to their luxury/target brands for filtering
--- ============================================================================
-
-/*
-BRAND PRIORITY REFERENCE (Focus for Smart Lead Hunter):
-
-MARRIOTT INTERNATIONAL:
-  - LUXURY: Ritz-Carlton, St. Regis, W Hotels, EDITION, JW Marriott, Luxury Collection
-  - UPPER: Westin, Sheraton, Marriott Hotels, Renaissance, Autograph Collection
-  - SKIP: Courtyard, Fairfield, Moxy (mid-scale)
-
-HILTON WORLDWIDE:
-  - LUXURY: Waldorf Astoria, Conrad, LXR Hotels, NoMad, Signia
-  - UPPER: Canopy, Curio Collection, Tapestry, DoubleTree, Embassy Suites
-  - SKIP: Hampton, Tru, Home2 (mid-scale/budget)
-
-HYATT:
-  - LUXURY: Park Hyatt, Alila, Miraval, Andaz, Thompson, The Standard
-  - UPPER: Grand Hyatt, Hyatt Regency, Hyatt Centric
-  - RESORTS: Hyatt Ziva, Hyatt Zilara, Secrets, Dreams (Caribbean focus!)
-  - SKIP: Hyatt Place, Hyatt House (mid-scale)
-
-IHG:
-  - LUXURY: Six Senses, Regent, InterContinental
-  - UPPER: Vignette, Kimpton, Hotel Indigo, voco, Crowne Plaza
-  - SKIP: Holiday Inn, Holiday Inn Express (mid-scale)
-
-ACCOR:
-  - LUXURY: Orient Express, Raffles, Fairmont, Sofitel Legend
-  - UPPER: Sofitel, MGallery, Pullman, Swissôtel
-  - LIFESTYLE: Delano, Mondrian, SLS, Hyde, 21c (Ennismore)
-  - SKIP: Novotel, Mercure, ibis (mid-scale/budget)
-
-WYNDHAM:
-  - LUXURY: Wyndham Grand, Registry Collection, Dolce
-  - UPPER: Trademark Collection, Wyndham
-  - SKIP: Days Inn, Super 8, La Quinta, Microtel (budget)
-
-INDEPENDENTS (ALL HIGH PRIORITY):
-  - Four Seasons
-  - Aman Resorts
-  - Rosewood Hotels
-  - Loews Hotels
-*/
-
--- ============================================================================
--- SCRAPING NOTES
--- ============================================================================
-
-/*
-SCRAPING STRATEGY:
-
-1. DAILY SCRAPE (High Volume):
-   - Marriott News Center
-   - Hilton Stories
-   - Hyatt Newsroom
-   - IHG News Releases
-   - Accor News & Stories
-   - Wyndham News Releases
-   - Four Seasons Press Room
-
-2. WEEKLY SCRAPE (Supplemental):
-   - Regional newsrooms (EMEA, APAC, Africa)
-   - Investor relations pages
-   - PR Newswire aggregators
-   - Luxury independents (Aman, Rosewood, Loews)
-
-3. MONTHLY SCRAPE (Annual Roundups):
-   - Annual "New Openings" pages
-   - Luxury hot lists
-   - Pipeline announcements
-
-KEY EXTRACTION TARGETS:
-   - Hotel name
-   - Brand
-   - Location (City, State/Province, Country)
-   - Opening date (or "Coming Soon" / Year)
-   - Room count
-   - Property type (Resort, Hotel, All-Inclusive)
-   - Contact information (if available)
-   - Source URL
-
-FILTERING RULES:
-   - INCLUDE: Florida, Caribbean, Bahamas locations
-   - INCLUDE: Luxury and upper-upscale brands
-   - EXCLUDE: Budget brands (Days Inn, Super 8, etc.)
-   - EXCLUDE: International locations outside Americas
-   - EXCLUDE: Press releases about renovations (unless major expansion)
-*/
+-- =============================================================================
+-- SMART LEAD HUNTER - SEED SOURCES
+-- =============================================================================
+-- 64 verified hotel news sources with exact "gold" URLs
+-- Run AFTER schema.sql
+-- =============================================================================
+
+
+-- =============================================================================
+-- MARRIOTT BRANDS (8 sources)
+-- =============================================================================
+
+INSERT INTO sources (name, base_url, source_type, priority, entry_urls, scrape_frequency, use_playwright, is_active, notes) VALUES
+('Marriott News - All Brands', 'https://news.marriott.com/news/', 'chain_newsroom', 10, 
+ ARRAY['https://news.marriott.com/news/', 'https://news.marriott.com/'], 'daily', true, true,
+ 'Main Marriott newsroom - covers ALL 30+ brands. Look for: NOW OPEN, DEBUTS, WELCOMES GUESTS.'),
+('Marriott - Ritz-Carlton', 'https://news.marriott.com/brands/the-ritz-carlton/', 'chain_newsroom', 10,
+ ARRAY['https://news.marriott.com/brands/the-ritz-carlton/', 'https://news.marriott.com/news/'], 'daily', true, true,
+ 'Ritz-Carlton specific. Tier 2 Luxury - high uniform spend.'),
+('Marriott - St. Regis', 'https://news.marriott.com/brands/st-regis/', 'chain_newsroom', 10,
+ ARRAY['https://news.marriott.com/brands/st-regis/', 'https://news.marriott.com/news/'], 'daily', true, true,
+ 'St. Regis specific. Tier 2 Luxury.'),
+('Marriott - W Hotels', 'https://news.marriott.com/brands/w-hotels/', 'chain_newsroom', 9,
+ ARRAY['https://news.marriott.com/brands/w-hotels/', 'https://news.marriott.com/news/'], 'daily', true, true,
+ 'W Hotels specific. Tier 3 Upper Upscale lifestyle.'),
+('Marriott - EDITION', 'https://news.marriott.com/brands/edition/', 'chain_newsroom', 9,
+ ARRAY['https://news.marriott.com/brands/edition/', 'https://news.marriott.com/news/'], 'daily', true, true,
+ 'EDITION Hotels. Tier 2 Luxury boutique.'),
+('Marriott - JW Marriott', 'https://news.marriott.com/brands/jw-marriott/', 'chain_newsroom', 9,
+ ARRAY['https://news.marriott.com/brands/jw-marriott/', 'https://news.marriott.com/news/'], 'daily', true, true,
+ 'JW Marriott specific. Tier 3 Upper Upscale.'),
+('Marriott - Luxury Collection', 'https://news.marriott.com/brands/the-luxury-collection/', 'chain_newsroom', 9,
+ ARRAY['https://news.marriott.com/brands/the-luxury-collection/', 'https://news.marriott.com/news/'], 'daily', true, true,
+ 'Luxury Collection. Tier 2 Luxury independents.'),
+('Marriott - Autograph Collection', 'https://news.marriott.com/brands/autograph-collection/', 'chain_newsroom', 8,
+ ARRAY['https://news.marriott.com/brands/autograph-collection/', 'https://news.marriott.com/news/'], 'weekly', true, true,
+ 'Autograph Collection. Tier 4 Upscale boutique.')
+ON CONFLICT (base_url) DO UPDATE SET
+    name = EXCLUDED.name, priority = EXCLUDED.priority, entry_urls = EXCLUDED.entry_urls,
+    notes = EXCLUDED.notes, updated_at = NOW();
+
+
+-- =============================================================================
+-- HILTON BRANDS (9 sources)
+-- =============================================================================
+
+INSERT INTO sources (name, base_url, source_type, priority, entry_urls, scrape_frequency, use_playwright, is_active, notes) VALUES
+('Hilton Stories - All Brands', 'https://stories.hilton.com/releases', 'chain_newsroom', 10,
+ ARRAY['https://stories.hilton.com/releases', 'https://stories.hilton.com/'], 'daily', true, true,
+ 'Main Hilton newsroom - ALL 24 brands. Filter by Latest Openings tag.'),
+('Hilton - Waldorf Astoria', 'https://stories.hilton.com/releases?brand=waldorf-astoria', 'chain_newsroom', 10,
+ ARRAY['https://stories.hilton.com/releases?brand=waldorf-astoria', 'https://stories.hilton.com/releases'], 'daily', true, true,
+ 'Waldorf Astoria specific. Tier 2 Luxury - ultra high spend.'),
+('Hilton - Conrad', 'https://stories.hilton.com/releases?brand=conrad', 'chain_newsroom', 10,
+ ARRAY['https://stories.hilton.com/releases?brand=conrad', 'https://stories.hilton.com/releases'], 'daily', true, true,
+ 'Conrad Hotels. Tier 2 Luxury - growing fast.'),
+('Hilton - LXR', 'https://stories.hilton.com/releases?brand=lxr', 'chain_newsroom', 9,
+ ARRAY['https://stories.hilton.com/releases?brand=lxr', 'https://stories.hilton.com/releases'], 'daily', true, true,
+ 'LXR Hotels & Resorts. Tier 2 Luxury collection.'),
+('Hilton - Curio Collection', 'https://stories.hilton.com/releases?brand=curio', 'chain_newsroom', 8,
+ ARRAY['https://stories.hilton.com/releases?brand=curio', 'https://stories.hilton.com/releases'], 'weekly', true, true,
+ 'Curio Collection. Tier 4 Upscale boutique.'),
+('Hilton - Canopy', 'https://stories.hilton.com/releases?brand=canopy', 'chain_newsroom', 8,
+ ARRAY['https://stories.hilton.com/releases?brand=canopy', 'https://stories.hilton.com/releases'], 'weekly', true, true,
+ 'Canopy by Hilton. Tier 4 Upscale lifestyle.'),
+('Hilton - Tempo', 'https://stories.hilton.com/releases?brand=tempo', 'chain_newsroom', 7,
+ ARRAY['https://stories.hilton.com/releases?brand=tempo', 'https://stories.hilton.com/releases'], 'weekly', true, true,
+ 'Tempo by Hilton. Newer lifestyle brand.'),
+('Hilton - 2025 Openings', 'https://stories.hilton.com/growth-development/new-hilton-openings-in-2025', 'chain_newsroom', 8,
+ ARRAY['https://stories.hilton.com/growth-development/new-hilton-openings-in-2025'], 'monthly', true, true,
+ 'GOLD PAGE - Annual roundup. Check for 2026 version.'),
+('Hilton - 2026 Openings', 'https://stories.hilton.com/releases/new-hilton-openings-in-2026', 'chain_newsroom', 10,
+ ARRAY['https://stories.hilton.com/releases/new-hilton-openings-in-2026', 'https://stories.hilton.com/releases'], 'monthly', true, true,
+ 'GOLD PAGE - 2026 annual roundup.')
+ON CONFLICT (base_url) DO UPDATE SET
+    name = EXCLUDED.name, priority = EXCLUDED.priority, entry_urls = EXCLUDED.entry_urls,
+    notes = EXCLUDED.notes, updated_at = NOW();
+
+
+-- =============================================================================
+-- HYATT BRANDS (2 sources)
+-- =============================================================================
+
+INSERT INTO sources (name, base_url, source_type, priority, entry_urls, scrape_frequency, use_playwright, is_active, notes) VALUES
+('Hyatt Newsroom - All Brands', 'https://newsroom.hyatt.com/news-releases', 'chain_newsroom', 10,
+ ARRAY['https://newsroom.hyatt.com/news-releases', 'https://newsroom.hyatt.com/'], 'daily', true, true,
+ 'Main Hyatt newsroom - ALL 25+ brands. Park Hyatt, Andaz, Grand Hyatt, Thompson.'),
+('Hyatt Newsroom - Homepage', 'https://newsroom.hyatt.com/', 'chain_newsroom', 8,
+ ARRAY['https://newsroom.hyatt.com/'], 'weekly', true, true,
+ 'Hyatt homepage - featured stories fallback.')
+ON CONFLICT (base_url) DO UPDATE SET
+    name = EXCLUDED.name, priority = EXCLUDED.priority, entry_urls = EXCLUDED.entry_urls,
+    notes = EXCLUDED.notes, updated_at = NOW();
+
+
+-- =============================================================================
+-- IHG BRANDS (2 sources)
+-- =============================================================================
+
+INSERT INTO sources (name, base_url, source_type, priority, entry_urls, scrape_frequency, use_playwright, is_active, notes) VALUES
+('IHG Newsroom - All Brands', 'https://www.ihgplc.com/en/news-and-media/news-releases', 'chain_newsroom', 10,
+ ARRAY['https://www.ihgplc.com/en/news-and-media/news-releases', 'https://www.ihgplc.com/news-and-media'], 'daily', true, true,
+ 'Main IHG newsroom - InterContinental, Kimpton, Regent, Six Senses, Vignette.'),
+('IHG News & Media', 'https://www.ihgplc.com/news-and-media', 'chain_newsroom', 7,
+ ARRAY['https://www.ihgplc.com/news-and-media'], 'weekly', true, true,
+ 'IHG media landing page fallback.')
+ON CONFLICT (base_url) DO UPDATE SET
+    name = EXCLUDED.name, priority = EXCLUDED.priority, entry_urls = EXCLUDED.entry_urls,
+    notes = EXCLUDED.notes, updated_at = NOW();
+
+
+-- =============================================================================
+-- ACCOR / ENNISMORE BRANDS (3 sources)
+-- =============================================================================
+
+INSERT INTO sources (name, base_url, source_type, priority, entry_urls, scrape_frequency, use_playwright, is_active, notes) VALUES
+('Accor News Stories', 'https://group.accor.com/en/news-medias/news-stories', 'chain_newsroom', 9,
+ ARRAY['https://group.accor.com/en/news-medias/news-stories', 'https://group.accor.com/en/news-medias/press-releases'], 'daily', true, true,
+ 'Accor newsroom - 45+ brands: Raffles, Fairmont, Sofitel, SLS, Delano.'),
+('Accor Press Releases', 'https://group.accor.com/en/news-medias/press-releases', 'chain_newsroom', 9,
+ ARRAY['https://group.accor.com/en/news-medias/press-releases'], 'daily', true, true,
+ 'Accor official press releases.'),
+('Ennismore News', 'https://ennismore.com/news/', 'chain_newsroom', 9,
+ ARRAY['https://ennismore.com/news/', 'https://ennismore.com/'], 'daily', true, true,
+ 'Ennismore (Accor lifestyle) - SLS, Delano, Mondrian, Hyde, SO/, Mama Shelter.')
+ON CONFLICT (base_url) DO UPDATE SET
+    name = EXCLUDED.name, priority = EXCLUDED.priority, entry_urls = EXCLUDED.entry_urls,
+    notes = EXCLUDED.notes, updated_at = NOW();
+
+
+-- =============================================================================
+-- LUXURY INDEPENDENT BRANDS (14 sources) - HIGH PRIORITY
+-- =============================================================================
+
+INSERT INTO sources (name, base_url, source_type, priority, entry_urls, scrape_frequency, use_playwright, is_active, notes) VALUES
+('Four Seasons - New Openings', 'https://press.fourseasons.com/search?themes=new_openings', 'luxury_independent', 10,
+ ARRAY['https://press.fourseasons.com/search?themes=new_openings', 'https://press.fourseasons.com/news-releases/', 'https://press.fourseasons.com/'], 'daily', true, true,
+ 'GOLD URL - Four Seasons filtered by New Openings. Tier 2 Luxury. HIGH PRIORITY.'),
+('Four Seasons - News Releases', 'https://press.fourseasons.com/news-releases/', 'luxury_independent', 9,
+ ARRAY['https://press.fourseasons.com/news-releases/', 'https://press.fourseasons.com/'], 'daily', true, true,
+ 'Four Seasons main news feed - all releases.'),
+('Four Seasons - New Hotels Page', 'https://www.fourseasons.com/landing/new-hotels/', 'luxury_independent', 8,
+ ARRAY['https://www.fourseasons.com/landing/new-hotels/'], 'weekly', true, true,
+ 'Consumer-facing new hotels showcase.'),
+('Aman News', 'https://www.aman.com/news', 'luxury_independent', 10,
+ ARRAY['https://www.aman.com/news', 'https://www.aman.com/'], 'daily', true, true,
+ 'Aman Resorts news. Tier 1 ULTRA LUXURY - highest priority.'),
+('Rosewood Media Centre', 'https://www.rosewoodhotelgroup.com/media-centre/press-releases/', 'luxury_independent', 10,
+ ARRAY['https://www.rosewoodhotelgroup.com/media-centre/press-releases/', 'https://www.rosewoodhotelgroup.com/media-centre/'], 'daily', true, true,
+ 'Rosewood Hotels press releases. Tier 1 ULTRA LUXURY.'),
+('Auberge Resorts Press', 'https://aubergeresorts.com/press/', 'luxury_independent', 9,
+ ARRAY['https://aubergeresorts.com/press/', 'https://aubergeresorts.com/'], 'daily', true, true,
+ 'Auberge Resorts Collection. Tier 2 Luxury.'),
+('Montage Hotels Press', 'https://www.montagehotels.com/press/', 'luxury_independent', 9,
+ ARRAY['https://www.montagehotels.com/press/', 'https://www.montagehotels.com/'], 'daily', true, true,
+ 'Montage Hotels & Resorts. Tier 2 Luxury - US focused.'),
+('Oetker Collection Press', 'https://www.oetkercollection.com/press/', 'luxury_independent', 9,
+ ARRAY['https://www.oetkercollection.com/press/', 'https://www.oetkercollection.com/'], 'weekly', true, true,
+ 'Oetker Collection. Tier 1 ULTRA LUXURY.'),
+('Belmond Press', 'https://www.belmond.com/press-releases', 'luxury_independent', 9,
+ ARRAY['https://www.belmond.com/press-releases', 'https://www.belmond.com/'], 'weekly', true, true,
+ 'Belmond (LVMH). Tier 1 ULTRA LUXURY.'),
+('Mandarin Oriental News', 'https://www.mandarinoriental.com/en/media-centre', 'luxury_independent', 10,
+ ARRAY['https://www.mandarinoriental.com/en/media-centre', 'https://www.mandarinoriental.com/'], 'daily', true, true,
+ 'Mandarin Oriental. Tier 1 ULTRA LUXURY.'),
+('Peninsula Hotels News', 'https://www.peninsula.com/en/newsroom', 'luxury_independent', 9,
+ ARRAY['https://www.peninsula.com/en/newsroom', 'https://www.peninsula.com/'], 'weekly', true, true,
+ 'The Peninsula Hotels. Tier 1 ULTRA LUXURY.'),
+('Loews Hotels Press', 'https://www.loewshotels.com/press-room', 'luxury_independent', 8,
+ ARRAY['https://www.loewshotels.com/press-room', 'https://www.loewshotels.com/'], 'weekly', true, true,
+ 'Loews Hotels & Co. Tier 4 Upscale - US focused.'),
+('SH Hotels News', 'https://www.shhotels.com/news/', 'luxury_independent', 9,
+ ARRAY['https://www.shhotels.com/news/', 'https://www.shhotels.com/'], 'daily', true, true,
+ 'SH Hotels - 1 Hotels, Baccarat, Treehouse. Tier 2-3 Luxury/Lifestyle.'),
+('Opal Collection Newsroom', 'https://www.opalcollection.com/newsroom/', 'luxury_independent', 8,
+ ARRAY['https://www.opalcollection.com/newsroom/', 'https://www.opalcollection.com/'], 'weekly', true, true,
+ 'Opal Collection - FLORIDA FOCUSED luxury. High relevance.')
+ON CONFLICT (base_url) DO UPDATE SET
+    name = EXCLUDED.name, priority = EXCLUDED.priority, entry_urls = EXCLUDED.entry_urls,
+    notes = EXCLUDED.notes, updated_at = NOW();
+
+
+-- =============================================================================
+-- AGGREGATORS - CRITICAL CURATED SOURCES (3 sources)
+-- =============================================================================
+
+INSERT INTO sources (name, base_url, source_type, priority, entry_urls, scrape_frequency, use_playwright, is_active, notes) VALUES
+('The Orange Studio - Hotel Openings', 'https://www.theorangestudio.com/hotel-openings', 'aggregator', 10,
+ ARRAY['https://www.theorangestudio.com/hotel-openings', 'https://www.theorangestudio.com/news', 'https://www.theorangestudio.com/'], 'daily', true, true,
+ 'CRITICAL - Curated luxury/lifestyle hotel openings. Filter for USA/Caribbean.'),
+('The Orange Studio - 2025 Openings', 'https://www.theorangestudio.com/news/exciting-hotel-openings-in-2025', 'aggregator', 9,
+ ARRAY['https://www.theorangestudio.com/news/exciting-hotel-openings-in-2025'], 'weekly', true, true,
+ 'Annual roundup. Check for 2026 version.'),
+('The Orange Studio - Beach Resorts', 'https://www.theorangestudio.com/news/2025s-most-anticipated-beach-resort-openings', 'aggregator', 9,
+ ARRAY['https://www.theorangestudio.com/news/2025s-most-anticipated-beach-resort-openings'], 'monthly', true, true,
+ 'Beach resort openings - high relevance for Caribbean.')
+ON CONFLICT (base_url) DO UPDATE SET
+    name = EXCLUDED.name, priority = EXCLUDED.priority, entry_urls = EXCLUDED.entry_urls,
+    notes = EXCLUDED.notes, updated_at = NOW();
+
+
+-- =============================================================================
+-- CARIBBEAN SPECIFIC (3 sources) - HIGH PRIORITY
+-- =============================================================================
+
+INSERT INTO sources (name, base_url, source_type, priority, entry_urls, scrape_frequency, use_playwright, is_active, notes) VALUES
+('Caribbean Journal - Hotels', 'https://www.caribjournal.com/category/hotels/', 'caribbean', 10,
+ ARRAY['https://www.caribjournal.com/category/hotels/', 'https://www.caribjournal.com/'], 'daily', true, true,
+ 'BEST Caribbean hotel news source. All islands covered. HIGH PRIORITY.'),
+('Caribbean Journal - Homepage', 'https://www.caribjournal.com/', 'caribbean', 8,
+ ARRAY['https://www.caribjournal.com/'], 'daily', true, true,
+ 'Caribbean Journal homepage - featured stories fallback.'),
+('CHTA News', 'https://www.caribbeanhotelandtourism.com/news/', 'caribbean', 8,
+ ARRAY['https://www.caribbeanhotelandtourism.com/news/', 'https://www.caribbeanhotelandtourism.com/'], 'weekly', true, true,
+ 'Caribbean Hotel & Tourism Association - industry news.')
+ON CONFLICT (base_url) DO UPDATE SET
+    name = EXCLUDED.name, priority = EXCLUDED.priority, entry_urls = EXCLUDED.entry_urls,
+    notes = EXCLUDED.notes, updated_at = NOW();
+
+
+-- =============================================================================
+-- FLORIDA SPECIFIC (4 sources) - HIGH PRIORITY
+-- =============================================================================
+
+INSERT INTO sources (name, base_url, source_type, priority, entry_urls, scrape_frequency, use_playwright, is_active, notes) VALUES
+('Visit Florida Press', 'https://www.visitflorida.com/en-us/media/press-releases.html', 'florida', 9,
+ ARRAY['https://www.visitflorida.com/en-us/media/press-releases.html'], 'weekly', true, true,
+ 'Official Florida tourism press releases. HIGH PRIORITY.'),
+('Miami CVB Press Room', 'https://www.miamiandbeaches.com/travel-trade/press-room', 'florida', 9,
+ ARRAY['https://www.miamiandbeaches.com/travel-trade/press-room'], 'weekly', true, true,
+ 'Greater Miami CVB - Miami-Dade hotel developments.'),
+('South Florida Biz Journal - Hotels', 'https://www.bizjournals.com/southflorida/news/real-estate/hotel', 'florida', 8,
+ ARRAY['https://www.bizjournals.com/southflorida/news/real-estate/hotel'], 'weekly', false, true,
+ 'South Florida hotel real estate news.'),
+('Orlando Biz Journal - Hotels', 'https://www.bizjournals.com/orlando/news/real-estate/hotel', 'florida', 8,
+ ARRAY['https://www.bizjournals.com/orlando/news/real-estate/hotel'], 'weekly', false, true,
+ 'Orlando hotel real estate - theme park corridor.')
+ON CONFLICT (base_url) DO UPDATE SET
+    name = EXCLUDED.name, priority = EXCLUDED.priority, entry_urls = EXCLUDED.entry_urls,
+    notes = EXCLUDED.notes, updated_at = NOW();
+
+
+-- =============================================================================
+-- INDUSTRY NEWS (7 sources)
+-- =============================================================================
+
+INSERT INTO sources (name, base_url, source_type, priority, entry_urls, scrape_frequency, use_playwright, is_active, notes) VALUES
+('Hospitality Net - News', 'https://www.hospitalitynet.org/news/', 'industry', 8,
+ ARRAY['https://www.hospitalitynet.org/news/'], 'daily', false, true,
+ 'Major hospitality industry news aggregator. High volume.'),
+('Hotel News Resource - Openings', 'https://www.hotelnewsresource.com/topics/Openings.html', 'industry', 9,
+ ARRAY['https://www.hotelnewsresource.com/topics/Openings.html', 'https://www.hotelnewsresource.com/'], 'daily', false, true,
+ 'GOLD URL - Filtered for hotel openings specifically.'),
+('Hotel News Resource - Florida', 'https://www.hotelnewsresource.com/topics/Florida.html', 'industry', 9,
+ ARRAY['https://www.hotelnewsresource.com/topics/Florida.html'], 'daily', false, true,
+ 'GOLD URL - Florida specific hotel news. High relevance.'),
+('Hotel Dive - News', 'https://www.hoteldive.com/news/', 'industry', 8,
+ ARRAY['https://www.hoteldive.com/news/'], 'daily', true, true,
+ 'Hotel industry deep dive - development pipeline news.'),
+('Hotel Management - News', 'https://www.hotelmanagement.net/news', 'industry', 8,
+ ARRAY['https://www.hotelmanagement.net/news'], 'daily', true, true,
+ 'Hotel management industry news.'),
+('Skift - Hotels', 'https://skift.com/hotels/', 'industry', 7,
+ ARRAY['https://skift.com/hotels/'], 'daily', true, true,
+ 'Skift travel intelligence - hotels section.'),
+('CoStar - Hospitality', 'https://www.costar.com/hospitality', 'industry', 7,
+ ARRAY['https://www.costar.com/hospitality'], 'weekly', true, true,
+ 'CoStar commercial real estate - hospitality. May require login.')
+ON CONFLICT (base_url) DO UPDATE SET
+    name = EXCLUDED.name, priority = EXCLUDED.priority, entry_urls = EXCLUDED.entry_urls,
+    notes = EXCLUDED.notes, updated_at = NOW();
+
+
+-- =============================================================================
+-- TRAVEL PUBLICATIONS (6 sources)
+-- =============================================================================
+
+INSERT INTO sources (name, base_url, source_type, priority, entry_urls, scrape_frequency, use_playwright, is_active, notes) VALUES
+('Travel + Leisure - Hotels', 'https://www.travelandleisure.com/hotels-resorts', 'travel_pub', 7,
+ ARRAY['https://www.travelandleisure.com/hotels-resorts'], 'weekly', true, true,
+ 'Travel + Leisure hotel coverage - consumer perspective.'),
+('Conde Nast Traveler - Hotels', 'https://www.cntraveler.com/hotels', 'travel_pub', 7,
+ ARRAY['https://www.cntraveler.com/hotels'], 'weekly', true, true,
+ 'CNT hotel coverage - luxury focus.'),
+('Forbes Travel Guide - News', 'https://www.forbestravelguide.com/news', 'travel_pub', 7,
+ ARRAY['https://www.forbestravelguide.com/news'], 'weekly', true, true,
+ 'Forbes Travel Guide - 5-star focus.'),
+('Travel Pulse - Hotels', 'https://www.travelpulse.com/news/hotels-resorts', 'travel_pub', 6,
+ ARRAY['https://www.travelpulse.com/news/hotels-resorts'], 'weekly', false, true,
+ 'Travel industry news - hotels section.'),
+('Luxury Travel Advisor - News', 'https://www.luxurytraveladvisor.com/news', 'travel_pub', 7,
+ ARRAY['https://www.luxurytraveladvisor.com/news'], 'weekly', true, true,
+ 'Luxury travel trade news.'),
+('Northstar Meetings - Hotels', 'https://www.northstarmeetingsgroup.com/news/hotels-resorts', 'travel_pub', 6,
+ ARRAY['https://www.northstarmeetingsgroup.com/news/hotels-resorts'], 'weekly', false, true,
+ 'Meetings industry - hotel news.')
+ON CONFLICT (base_url) DO UPDATE SET
+    name = EXCLUDED.name, priority = EXCLUDED.priority, entry_urls = EXCLUDED.entry_urls,
+    notes = EXCLUDED.notes, updated_at = NOW();
+
+
+-- =============================================================================
+-- PR WIRE SERVICES (3 sources)
+-- =============================================================================
+
+INSERT INTO sources (name, base_url, source_type, priority, entry_urls, scrape_frequency, use_playwright, is_active, notes) VALUES
+('PR Newswire - Travel/Hospitality', 'https://www.prnewswire.com/news-releases/travel-hospitality-latest-news/travel-hospitality-list/', 'pr_wire', 7,
+ ARRAY['https://www.prnewswire.com/news-releases/travel-hospitality-latest-news/travel-hospitality-list/'], 'daily', false, true,
+ 'PR Newswire travel/hospitality releases. Filter for openings.'),
+('Business Wire - Travel/Hospitality', 'https://www.businesswire.com/portal/site/home/news/industries/travel-hospitality/', 'pr_wire', 7,
+ ARRAY['https://www.businesswire.com/portal/site/home/news/industries/travel-hospitality/'], 'daily', false, true,
+ 'Business Wire travel/hospitality releases.'),
+('GlobeNewswire - Hospitality', 'https://www.globenewswire.com/en/search/tag/hospitality', 'pr_wire', 6,
+ ARRAY['https://www.globenewswire.com/en/search/tag/hospitality'], 'weekly', false, true,
+ 'GlobeNewswire hospitality tag.')
+ON CONFLICT (base_url) DO UPDATE SET
+    name = EXCLUDED.name, priority = EXCLUDED.priority, entry_urls = EXCLUDED.entry_urls,
+    notes = EXCLUDED.notes, updated_at = NOW();
+
+
+-- =============================================================================
+-- WYNDHAM (1 source - upscale only)
+-- =============================================================================
+
+INSERT INTO sources (name, base_url, source_type, priority, entry_urls, scrape_frequency, use_playwright, is_active, notes) VALUES
+('Wyndham News & Media', 'https://corporate.wyndhamhotels.com/news-media/', 'chain_newsroom', 7,
+ ARRAY['https://corporate.wyndhamhotels.com/news-media/', 'https://corporate.wyndhamhotels.com/'], 'weekly', true, true,
+ 'Wyndham newsroom - focus on Wyndham Grand, Registry Collection only. Skip budget brands.')
+ON CONFLICT (base_url) DO UPDATE SET
+    name = EXCLUDED.name, priority = EXCLUDED.priority, entry_urls = EXCLUDED.entry_urls,
+    notes = EXCLUDED.notes, updated_at = NOW();
+
+
+-- =============================================================================
+-- SUMMARY
+-- =============================================================================
+
+SELECT '✅ Sources seeded successfully!' as status;
+
+SELECT 
+    source_type,
+    COUNT(*) as count,
+    SUM(CASE WHEN priority >= 9 THEN 1 ELSE 0 END) as high_priority
+FROM sources 
+WHERE is_active = true
+GROUP BY source_type
+ORDER BY count DESC;
+
+SELECT 
+    'TOTAL' as metric,
+    COUNT(*) as value
+FROM sources WHERE is_active = true
+UNION ALL
+SELECT 'Daily scrape', COUNT(*) FROM sources WHERE scrape_frequency = 'daily' AND is_active = true
+UNION ALL
+SELECT 'Weekly scrape', COUNT(*) FROM sources WHERE scrape_frequency = 'weekly' AND is_active = true
+UNION ALL
+SELECT 'Priority 10', COUNT(*) FROM sources WHERE priority = 10 AND is_active = true
+UNION ALL
+SELECT 'Priority 9', COUNT(*) FROM sources WHERE priority = 9 AND is_active = true;
