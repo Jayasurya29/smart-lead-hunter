@@ -1,0 +1,326 @@
+<!-- Simple Scrape Progress Modal -->
+<div id="scrape-modal" 
+     class="fixed inset-0 z-50 hidden"
+     x-data="simpleScrapeController()"
+     @open-scrape-modal.window="openModal()">
+    
+    <!-- Backdrop -->
+    <div class="absolute inset-0 bg-gray-500 bg-opacity-75 transition-opacity" @click="closeModal()"></div>
+    
+    <!-- Modal -->
+    <div class="absolute inset-0 flex items-center justify-center p-4">
+        <div class="bg-white rounded-lg shadow-xl max-w-md w-full overflow-hidden" @click.stop>
+            
+            <!-- Header -->
+            <div class="px-6 py-4 border-b border-gray-200">
+                <div class="flex items-center justify-between">
+                    <h3 class="text-lg font-semibold text-gray-900 flex items-center">
+                        <template x-if="status === 'running'">
+                            <svg class="animate-spin mr-3 h-5 w-5 text-brand-600" fill="none" viewBox="0 0 24 24">
+                                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                            </svg>
+                        </template>
+                        <template x-if="status === 'complete'">
+                            <svg class="mr-3 h-5 w-5 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                            </svg>
+                        </template>
+                        <template x-if="status === 'error'">
+                            <svg class="mr-3 h-5 w-5 text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                            </svg>
+                        </template>
+                        <span x-text="title"></span>
+                    </h3>
+                    <button @click="closeModal()" class="text-gray-400 hover:text-gray-600" x-show="status !== 'running'">
+                        <svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+                        </svg>
+                    </button>
+                </div>
+            </div>
+            
+            <!-- Body -->
+            <div class="px-6 py-4">
+                <!-- Progress indicator -->
+                <template x-if="status === 'running'">
+                    <div>
+                        <div class="flex justify-between text-sm text-gray-600 mb-2">
+                            <span x-text="message"></span>
+                            <span x-text="elapsedTime + 's'"></span>
+                        </div>
+                        <div class="w-full bg-gray-200 rounded-full h-2 mb-4">
+                            <div class="bg-brand-600 h-2 rounded-full transition-all duration-500 animate-pulse" style="width: 100%"></div>
+                        </div>
+                        <p class="text-sm text-gray-500 text-center">This may take a few minutes...</p>
+                    </div>
+                </template>
+                
+                <!-- Complete state -->
+                <template x-if="status === 'complete'">
+                    <div class="text-center">
+                        <div class="grid grid-cols-3 gap-4 mb-4">
+                            <div class="bg-gray-50 rounded-lg p-3">
+                                <div class="text-2xl font-bold text-gray-900" x-text="results.pages || 0"></div>
+                                <div class="text-xs text-gray-500">Pages</div>
+                            </div>
+                            <div class="bg-green-50 rounded-lg p-3">
+                                <div class="text-2xl font-bold text-green-600" x-text="results.leads || 0"></div>
+                                <div class="text-xs text-gray-500">Leads Found</div>
+                            </div>
+                            <div class="bg-blue-50 rounded-lg p-3">
+                                <div class="text-2xl font-bold text-blue-600" x-text="results.new || 0"></div>
+                                <div class="text-xs text-gray-500">New Leads</div>
+                            </div>
+                        </div>
+                        <p class="text-sm text-gray-600" x-text="'Completed in ' + elapsedTime + ' seconds'"></p>
+                    </div>
+                </template>
+                
+                <!-- Error state -->
+                <template x-if="status === 'error'">
+                    <div class="text-center">
+                        <p class="text-red-600 mb-2" x-text="errorMessage"></p>
+                        <p class="text-sm text-gray-500">Please check the server logs for more details.</p>
+                    </div>
+                </template>
+            </div>
+            
+            <!-- Footer -->
+            <div class="px-6 py-4 bg-gray-50 border-t border-gray-200 flex justify-end space-x-3">
+                <button x-show="status === 'running'" 
+                        @click="closeModal()"
+                        class="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50">
+                    Run in Background
+                </button>
+                <button x-show="status !== 'running'" 
+                        @click="closeModal()"
+                        class="px-4 py-2 text-sm font-medium text-white bg-brand-600 border border-transparent rounded-md hover:bg-brand-700">
+                    Close
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+function simpleScrapeController() {
+    return {
+        status: 'idle', // idle, running, complete, error
+        title: 'Starting Scrape...',
+        message: 'Initializing...',
+        elapsedTime: 0,
+        timer: null,
+        scrapeId: null,
+        errorMessage: '',
+        results: {
+            pages: 0,
+            leads: 0,
+            new: 0
+        },
+        
+        openModal() {
+            // Show modal
+            document.getElementById('scrape-modal').classList.remove('hidden');
+            
+            // Reset state
+            this.status = 'running';
+            this.title = 'Scraping in Progress...';
+            this.message = 'Starting scraper...';
+            this.elapsedTime = 0;
+            this.scrapeId = null;
+            this.errorMessage = '';
+            this.results = { pages: 0, leads: 0, new: 0 };
+            
+            // Start timer
+            this.timer = setInterval(() => {
+                this.elapsedTime++;
+                // Update message based on time
+                if (this.elapsedTime > 5) this.message = 'Fetching hotel sources...';
+                if (this.elapsedTime > 15) this.message = 'Extracting lead data...';
+                if (this.elapsedTime > 30) this.message = 'Processing leads...';
+                if (this.elapsedTime > 60) this.message = 'Still working...';
+                if (this.elapsedTime > 120) this.message = 'Almost done...';
+            }, 1000);
+            
+            // Call the scrape endpoint
+            this.runScrape();
+        },
+        
+        async runScrape() {
+            try {
+                // Use the correct endpoint: /api/dashboard/scrape
+                const response = await fetch('/api/dashboard/scrape', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    }
+                });
+                
+                const data = await response.json();
+                console.log('Scrape response:', data);
+                
+                if (response.ok) {
+                    // Check if it returned a scrape_id (async task)
+                    if (data.scrape_id) {
+                        this.scrapeId = data.scrape_id;
+                        this.message = 'Scrape started...';
+                        // Connect to SSE stream for real-time updates
+                        this.connectToStream();
+                    } else if (data.task_id) {
+                        this.scrapeId = data.task_id;
+                        this.message = 'Scrape queued...';
+                        this.connectToStream();
+                    } else if (data.status === 'completed' || data.status === 'success') {
+                        // Completed immediately
+                        this.handleComplete(data);
+                    } else {
+                        // Unknown response, assume it started
+                        this.message = data.message || 'Scrape in progress...';
+                        this.connectToStream();
+                    }
+                } else {
+                    this.handleError(data.detail || data.message || 'Scrape failed');
+                }
+            } catch (error) {
+                console.error('Scrape error:', error);
+                this.handleError(error.message || 'Connection error');
+            }
+        },
+        
+        connectToStream() {
+            // Connect to SSE endpoint for real-time updates
+            try {
+                const eventSource = new EventSource('/api/dashboard/scrape/stream');
+                
+                eventSource.onmessage = (event) => {
+                    try {
+                        const data = JSON.parse(event.data);
+                        console.log('SSE message:', data);
+                        this.handleStreamEvent(data);
+                    } catch (e) {
+                        console.log('SSE raw:', event.data);
+                    }
+                };
+                
+                eventSource.onerror = (error) => {
+                    console.log('SSE connection closed or error');
+                    eventSource.close();
+                    // If we're still running after SSE closes, poll instead
+                    if (this.status === 'running' && this.elapsedTime > 5) {
+                        // SSE might have ended normally, check if complete
+                        setTimeout(() => {
+                            if (this.status === 'running') {
+                                this.handleComplete({
+                                    message: 'Scrape finished',
+                                    pages: this.results.pages,
+                                    leads: this.results.leads,
+                                    new: this.results.new
+                                });
+                            }
+                        }, 2000);
+                    }
+                };
+                
+                // Store reference to close later
+                this.eventSource = eventSource;
+            } catch (e) {
+                console.log('SSE not supported, continuing without real-time updates');
+            }
+        },
+        
+        handleStreamEvent(data) {
+            switch(data.type) {
+                case 'started':
+                    this.scrapeId = data.scrape_id;
+                    this.message = 'Scrape started...';
+                    break;
+                    
+                case 'info':
+                    this.message = data.message || 'Processing...';
+                    break;
+                    
+                case 'source_start':
+                    this.message = `Scraping: ${data.source || 'source'}`;
+                    break;
+                    
+                case 'source_complete':
+                    this.message = `Completed: ${data.source || 'source'}`;
+                    break;
+                    
+                case 'leads_found':
+                    this.results.leads = data.total_saved || data.found || this.results.leads + 1;
+                    this.results.new = data.saved || this.results.new;
+                    this.message = `Found ${this.results.leads} leads...`;
+                    break;
+                    
+                case 'url_start':
+                    this.message = `Fetching: ${(data.url || '').substring(0, 40)}...`;
+                    break;
+                    
+                case 'complete':
+                case 'finished':
+                    this.handleComplete(data.stats || data);
+                    if (this.eventSource) this.eventSource.close();
+                    break;
+                    
+                case 'error':
+                    this.handleError(data.message || 'Scrape error');
+                    if (this.eventSource) this.eventSource.close();
+                    break;
+                    
+                case 'cancelled':
+                    this.handleError('Scrape was cancelled');
+                    if (this.eventSource) this.eventSource.close();
+                    break;
+            }
+        },
+        
+        handleComplete(data) {
+            clearInterval(this.timer);
+            this.status = 'complete';
+            this.title = 'Scrape Complete!';
+            
+            // Extract results from various response formats
+            this.results = {
+                pages: data.pages_scraped || data.urls_scraped || data.pages || this.results.pages || 0,
+                leads: data.leads_found || data.total_leads || data.leads || this.results.leads || 0,
+                new: data.new_leads || data.leads_saved || data.new || this.results.new || 0
+            };
+            
+            // Refresh the dashboard data
+            if (typeof htmx !== 'undefined') {
+                htmx.ajax('GET', '/api/dashboard/stats', '#stats-container');
+                htmx.ajax('GET', '/api/dashboard/leads', '#lead-list-container');
+            }
+            
+            // Show toast
+            if (typeof showToast === 'function') {
+                showToast(`Scrape complete! Found ${this.results.new} new leads.`, 'success');
+            }
+        },
+        
+        handleError(message) {
+            clearInterval(this.timer);
+            this.status = 'error';
+            this.title = 'Scrape Failed';
+            this.errorMessage = message;
+        },
+        
+        closeModal() {
+            document.getElementById('scrape-modal').classList.add('hidden');
+            if (this.eventSource) {
+                this.eventSource.close();
+            }
+            if (this.status === 'running') {
+                // Let it run in background, just close modal
+                if (typeof showToast === 'function') {
+                    showToast('Scrape running in background...', 'info');
+                }
+            }
+            clearInterval(this.timer);
+        }
+    }
+}
+</script>

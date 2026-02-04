@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(ls:*)",
+      "Bash(dir:*)",
+      "Bash(python:*)",
+      "Bash(docker-compose up:*)",
+      "Bash(timeout 15 uvicorn:*)",
+      "Bash(uvicorn app.main:app:*)",
+      "Bash(ping:*)",
+      "Bash(curl:*)"
+    ]
+  }
+}

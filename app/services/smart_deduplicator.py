@@ -74,6 +74,9 @@ class MergedLead:
     # Quality metrics
     confidence_score: float = 0.0
     qualification_score: int = 0
+
+    # Key insights from article
+    key_insights: str = ""
     
     # Source tracking
     source_urls: List[str] = field(default_factory=list)
@@ -105,6 +108,7 @@ class MergedLead:
             'contact_phone': self.contact_phone,
             'confidence_score': self.confidence_score,
             'qualification_score': self.qualification_score,
+            'key_insights': self.key_insights,
             'source_urls': self.source_urls,
             'source_names': self.source_names,
             'merged_from_count': self.merged_from_count,
@@ -290,6 +294,7 @@ class SmartDeduplicator:
             contact_phone=str(data.get('contact_phone', '') or '').strip(),
             confidence_score=float(data.get('confidence_score', 0) or 0),
             qualification_score=int(data.get('qualification_score', 0) or 0),
+            key_insights=str(data.get('key_insights', '') or '').strip(),
             source_urls=[source_url] if source_url else [],
             source_names=[source_name] if source_name else [],
             merged_from_count=1,

@@ -8,7 +8,7 @@ The main entry point that coordinates all components:
 3. DEDUPLICATION - Removes duplicates
 4. SCORING - Ranks leads by quality
 5. LEARNING SYSTEM - Learns which URLs produce leads
-6. EXPORT - Saves to database/files
+6. SAVE TO DATABASE - Automatically saves leads for dashboard
 
 Usage:
     python -m app.services.orchestrator
@@ -21,10 +21,18 @@ Usage:
 import asyncio
 import json
 import logging
+import re
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+
+from sqlalchemy import select
+
+# Database imports for saving leads
+from app.database import async_session
+from app.models import PotentialLead
+from app.services.scorer import calculate_lead_score
 
 # Configure logging
 logging.basicConfig(
@@ -78,6 +86,10 @@ class PipelineStats:
     leads_extracted: int = 0
     leads_after_dedup: int = 0
     
+    # Database stats
+    leads_saved: int = 0
+    leads_skipped_duplicates: int = 0
+    
     # Quality stats
     high_quality_leads: int = 0  # Score >= 0.7
     medium_quality_leads: int = 0  # Score 0.4-0.7
@@ -102,6 +114,8 @@ class PipelineStats:
             "pages_processed": self.pages_processed,
             "leads_extracted": self.leads_extracted,
             "leads_after_dedup": self.leads_after_dedup,
+            "leads_saved": self.leads_saved,
+            "leads_skipped_duplicates": self.leads_skipped_duplicates,
             "high_quality_leads": self.high_quality_leads,
             "medium_quality_leads": self.medium_quality_leads,
             "low_quality_leads": self.low_quality_leads,
@@ -120,13 +134,12 @@ class LeadHunterOrchestrator:
     - Web scraping
     - AI extraction
     - Lead processing
-    - Data export
+    - Database saving
     
     Usage:
         orchestrator = LeadHunterOrchestrator()
         await orchestrator.initialize()
         leads = await orchestrator.run()
-        await orchestrator.export_leads(leads, "leads.json")
     """
     
     def __init__(
@@ -136,7 +149,8 @@ class LeadHunterOrchestrator:
         output_dir: str = "./output",
         max_concurrent_scrapes: int = 5,
         max_concurrent_extractions: int = 3,
-        use_intelligent_pipeline: bool = True,  # NEW: Use smart classification
+        use_intelligent_pipeline: bool = True,
+        save_to_database: bool = True,  # NEW: Auto-save to database
     ):
         self.gemini_api_key = gemini_api_key
         self.use_ollama = use_ollama
@@ -144,10 +158,11 @@ class LeadHunterOrchestrator:
         self.max_concurrent_scrapes = max_concurrent_scrapes
         self.max_concurrent_extractions = max_concurrent_extractions
         self.use_intelligent_pipeline = use_intelligent_pipeline and INTELLIGENT_PIPELINE_AVAILABLE
+        self.save_to_database = save_to_database
         
         self.scraping_engine = None
         self.extraction_pipeline = None
-        self.intelligent_pipeline = None  # NEW
+        self.intelligent_pipeline = None
         self.deduplicator = None
         
         self.stats = PipelineStats()
@@ -354,19 +369,21 @@ class LeadHunterOrchestrator:
                         contact_phone=lead.contact_phone,
                         source_url=lead.source_urls[0] if lead.source_urls else '',
                         source_name=lead.source_names[0] if lead.source_names else '',
-                        # NEW: Store ALL source URLs for merged leads
                         source_urls=' | '.join(lead.source_urls) if lead.source_urls else '',
                         source_names=' | '.join(lead.source_names) if lead.source_names else '',
                         merged_from_count=lead.merged_from_count,
                         confidence_score=lead.confidence_score,
+                        key_insights=lead.key_insights if hasattr(lead, 'key_insights') else '',
                     )
-                    # Store merged info in key_insights
                     if lead.merged_from_count > 1:
-                        legacy_lead.key_insights = f"Merged from {lead.merged_from_count} sources"
+                        # Keep actual key_insights, add merge note at end
+                        if legacy_lead.key_insights:
+                            legacy_lead.key_insights = f"{legacy_lead.key_insights}\n\n📎 Merged from {lead.merged_from_count} sources"
+                        else:
+                            legacy_lead.key_insights = f"Merged from {lead.merged_from_count} sources"
                     
                     unique_leads.append(legacy_lead)
                     
-                    # Contact stats
                     if lead.contact_email:
                         self.stats.leads_with_email += 1
                     if lead.contact_phone:
@@ -374,25 +391,21 @@ class LeadHunterOrchestrator:
                     if lead.contact_name:
                         self.stats.leads_with_contact_name += 1
                 
-                # Update dedup stats
                 self.stats.leads_after_dedup = len(unique_leads)
                 dedup_stats = self.deduplicator.get_stats()
                 logger.info(f"   ✅ {dedup_stats['duplicates_found']} duplicates merged")
                 logger.info(f"   📊 {len(unique_leads)} unique leads after smart dedup")
                 
-                # Recalculate quality stats based on merged leads
                 self.stats.high_quality_leads = len([l for l in merged_leads if l.qualification_score >= 70])
                 self.stats.medium_quality_leads = len([l for l in merged_leads if 40 <= l.qualification_score < 70])
                 self.stats.low_quality_leads = len([l for l in merged_leads if l.qualification_score < 40])
                 
             else:
-                # Fallback: no smart dedup, just use qualified leads from pipeline
                 self.stats.leads_after_dedup = pipeline_result.leads_qualified
                 self.stats.high_quality_leads = pipeline_result.leads_high_quality
                 self.stats.medium_quality_leads = pipeline_result.leads_medium_quality
                 self.stats.low_quality_leads = pipeline_result.leads_low_quality
                 
-                # Convert intelligent pipeline leads to our format
                 from app.services.lead_extraction_pipeline import ExtractedLead as LegacyLead
                 unique_leads = []
                 for lead in pipeline_result.final_leads:
@@ -417,7 +430,6 @@ class LeadHunterOrchestrator:
                     )
                     unique_leads.append(legacy_lead)
                     
-                    # Contact stats
                     if lead.contact_email:
                         self.stats.leads_with_email += 1
                     if lead.contact_phone:
@@ -464,15 +476,12 @@ class LeadHunterOrchestrator:
                 f"from {self.stats.pages_processed} pages"
             )
             
-            # PHASE 3: SMART DEDUPLICATION (Legacy)
             logger.info("\n🔄 PHASE 3: SMART DEDUPLICATING...")
             
             if self.smart_dedup and SMART_DEDUP_AVAILABLE:
-                # Convert leads to dicts for smart deduplication
                 leads_for_dedup = [lead.to_dict() if hasattr(lead, 'to_dict') else lead.__dict__ for lead in all_leads]
                 merged_leads = self.deduplicator.deduplicate(leads_for_dedup)
                 
-                # Convert back to ExtractedLead format
                 from app.services.lead_extraction_pipeline import ExtractedLead as LegacyLead
                 unique_leads = []
                 for lead in merged_leads:
@@ -493,20 +502,23 @@ class LeadHunterOrchestrator:
                         contact_phone=lead.contact_phone,
                         source_url=lead.source_urls[0] if lead.source_urls else '',
                         source_name=lead.source_names[0] if lead.source_names else '',
-                        # NEW: Store ALL source URLs for merged leads
                         source_urls=' | '.join(lead.source_urls) if lead.source_urls else '',
                         source_names=' | '.join(lead.source_names) if lead.source_names else '',
                         merged_from_count=lead.merged_from_count,
                         confidence_score=lead.confidence_score,
+                        key_insights=lead.key_insights if hasattr(lead, 'key_insights') else '',
                     )
                     if lead.merged_from_count > 1:
-                        legacy_lead.key_insights = f"Merged from {lead.merged_from_count} sources"
+                        # Keep actual key_insights, add merge note at end
+                        if legacy_lead.key_insights:
+                            legacy_lead.key_insights = f"{legacy_lead.key_insights}\n\n📎 Merged from {lead.merged_from_count} sources"
+                        else:
+                            legacy_lead.key_insights = f"Merged from {lead.merged_from_count} sources"
                     unique_leads.append(legacy_lead)
                 
                 dedup_stats = self.deduplicator.get_stats()
                 logger.info(f"   ✅ {dedup_stats['duplicates_found']} duplicates merged")
             else:
-                # Fallback to simple dedup
                 unique_leads = self.deduplicator.deduplicate(all_leads)
             
             self.stats.leads_after_dedup = len(unique_leads)
@@ -516,7 +528,6 @@ class LeadHunterOrchestrator:
                 f"(removed {self.stats.leads_extracted - self.stats.leads_after_dedup} duplicates)"
             )
             
-            # Update stats for legacy mode
             for lead in unique_leads:
                 if lead.confidence_score >= 0.7:
                     self.stats.high_quality_leads += 1
@@ -546,7 +557,13 @@ class LeadHunterOrchestrator:
         
         # Convert to dicts and sort by score
         lead_dicts = [lead.to_dict() for lead in unique_leads]
-        lead_dicts.sort(key=lambda x: -x["confidence_score"])
+        lead_dicts.sort(key=lambda x: -x.get("confidence_score", 0))
+        
+        # PHASE 6: SAVE TO DATABASE (NEW!)
+        if self.save_to_database:
+            db_result = await self.save_leads_to_database(lead_dicts)
+            self.stats.leads_saved = db_result['saved']
+            self.stats.leads_skipped_duplicates = db_result['duplicates']
         
         logger.info("\n" + "=" * 60)
         logger.info("PIPELINE COMPLETE")
@@ -554,6 +571,163 @@ class LeadHunterOrchestrator:
         self._print_summary()
         
         return lead_dicts
+    
+    async def save_leads_to_database(self, leads: list) -> dict:
+        """
+        Save extracted leads to the database automatically.
+        
+        Args:
+            leads: List of lead dictionaries from the pipeline
+            
+        Returns:
+            dict with counts: {'saved': X, 'duplicates': Y, 'errors': Z}
+        """
+        logger.info(f"\n💾 PHASE 6: SAVING {len(leads)} LEADS TO DATABASE...")
+        
+        saved = 0
+        duplicates = 0
+        errors = 0
+        
+        def normalize_name(name: str) -> str:
+            if not name:
+                return ""
+            return re.sub(r'[^a-z0-9\s]', '', name.lower()).strip()
+        
+        def extract_year(opening_date: str) -> int:
+            if not opening_date:
+                return None
+            match = re.search(r'20\d{2}', str(opening_date))
+            return int(match.group()) if match else None
+        
+        def determine_location_type(state: str, country: str) -> str:
+            country = country or "USA"
+            country_lower = country.lower()
+            state_lower = (state or "").lower()
+            
+            caribbean = ['jamaica', 'bahamas', 'aruba', 'barbados', 'bermuda', 
+                         'cayman', 'turks', 'virgin islands', 'puerto rico',
+                         'st. lucia', 'antigua', 'dominican', 'haiti', 'cuba']
+            
+            if any(c in country_lower for c in caribbean):
+                return "caribbean"
+            
+            if country_lower in ('usa', 'united states', 'us', 'america'):
+                if 'florida' in state_lower or state_lower == 'fl':
+                    return "florida"
+                return "usa"
+            
+            return "international"
+        
+        async with async_session() as db:
+            for lead_dict in leads:
+                try:
+                    hotel_name = (lead_dict.get('hotel_name') or '').strip()
+                    if not hotel_name:
+                        errors += 1
+                        continue
+                    
+                    normalized_name = normalize_name(hotel_name)
+                    
+                    # Check for existing lead with same normalized name
+                    result = await db.execute(
+                        select(PotentialLead).where(
+                            PotentialLead.hotel_name_normalized == normalized_name
+                        )
+                    )
+                    existing = result.scalars().first()
+                    
+                    if existing:
+                        duplicates += 1
+                        continue
+                    
+                    # Prepare data
+                    state = (lead_dict.get('state') or '').strip() or None
+                    country = (lead_dict.get('country') or '').strip() or 'USA'
+                    opening_date = (lead_dict.get('opening_date') or '').strip() or None
+                    location_type = determine_location_type(state, country)
+                    
+                    room_count = None
+                    room_str = lead_dict.get('room_count')
+                    if room_str:
+                        try:
+                            room_count = int(float(room_str))
+                            if room_count == 0:
+                                room_count = None
+                        except:
+                            pass
+                    
+                    # Create lead object
+                    lead = PotentialLead(
+                        hotel_name=hotel_name,
+                        hotel_name_normalized=normalized_name,
+                        brand=(lead_dict.get('brand') or '').strip() or None,
+                        brand_tier=(lead_dict.get('brand_tier') or '').strip() or None,
+                        hotel_type=(lead_dict.get('hotel_type') or '').strip() or None,
+                        city=(lead_dict.get('city') or '').strip() or None,
+                        state=state,
+                        country=country,
+                        location_type=location_type,
+                        opening_date=opening_date,
+                        opening_year=extract_year(opening_date),
+                        room_count=room_count,
+                        contact_name=(lead_dict.get('contact_name') or '').strip() or None,
+                        contact_title=(lead_dict.get('contact_title') or '').strip() or None,
+                        contact_email=(lead_dict.get('contact_email') or '').strip() or None,
+                        contact_phone=(lead_dict.get('contact_phone') or '').strip() or None,
+                        description=(lead_dict.get('key_insights') or '').strip() or None,  # Key insights from article
+                        source_url=(lead_dict.get('source_url') or '').strip() or None,
+                        source_site=(lead_dict.get('source_name') or '').strip() or None,
+                        status='new',
+                        scraped_at=datetime.now(timezone.utc),
+                        created_at=datetime.now(timezone.utc),
+                    )
+                    
+                    # Calculate score using the scorer
+                    score_result = calculate_lead_score(
+                        hotel_name=lead.hotel_name,
+                        city=lead.city,
+                        state=lead.state,
+                        country=lead.country,
+                        opening_date=lead.opening_date,
+                        room_count=lead.room_count,
+                        contact_name=lead.contact_name,
+                        contact_email=lead.contact_email,
+                        contact_phone=lead.contact_phone,
+                        brand=lead.brand,
+                    )
+                    
+                    # Skip if scorer says don't save
+                    if not score_result['should_save']:
+                        logger.info(f"   ⏭️  Skipped: {hotel_name} - {score_result['skip_reason']}")
+                        duplicates += 1
+                        continue
+                    
+                    lead.lead_score = score_result['total_score']
+                    lead.score_breakdown = score_result['breakdown']
+                    lead.brand_tier = score_result.get('brand_tier') or lead.brand_tier
+                    lead.location_type = score_result.get('location_type') or lead.location_type
+                    lead.opening_year = score_result.get('opening_year') or lead.opening_year
+                    
+                    db.add(lead)
+                    saved += 1
+                    
+                    quality = "🔴 HOT" if lead.lead_score >= 70 else "🟠 WARM" if lead.lead_score >= 50 else "🔵 COOL"
+                    logger.info(f"   {quality} [{lead.lead_score}] {hotel_name}")
+                    
+                except Exception as e:
+                    logger.error(f"   ❌ Error saving {lead_dict.get('hotel_name', 'unknown')}: {e}")
+                    errors += 1
+            
+            # Commit all leads
+            await db.commit()
+        
+        logger.info(f"\n✅ DATABASE SAVE COMPLETE:")
+        logger.info(f"   💾 Saved: {saved} new leads")
+        logger.info(f"   ⏭️  Duplicates skipped: {duplicates}")
+        if errors > 0:
+            logger.info(f"   ❌ Errors: {errors}")
+        
+        return {'saved': saved, 'duplicates': duplicates, 'errors': errors}
     
     def _print_summary(self):
         """Print pipeline summary"""
@@ -575,6 +749,10 @@ class LeadHunterOrchestrator:
    Leads extracted: {s.leads_extracted}
    After smart dedup: {s.leads_after_dedup}
 
+💾 DATABASE:
+   Saved to database: {s.leads_saved}
+   Duplicates skipped: {s.leads_skipped_duplicates}
+
 ⭐ QUALITY:
    High quality (70+): {s.high_quality_leads}
    Medium quality (40-69): {s.medium_quality_leads}
@@ -585,19 +763,16 @@ class LeadHunterOrchestrator:
    With phone: {s.leads_with_phone}
    With name: {s.leads_with_contact_name}
 ──────────────────────────────────────────
+🎉 Leads are now available in the dashboard!
 """)
     
     def _record_learnings(self, scrape_results: Dict, leads: List):
-        """
-        Record learnings about which URLs produced leads.
-        This helps the system learn and improve over time.
-        """
+        """Record learnings about which URLs produced leads."""
         if not LEARNING_AVAILABLE:
             return
         
         learning_system = SourceLearningSystem()
         
-        # Build URL -> lead mapping
         url_to_leads = {}
         for lead in leads:
             source_url = lead.source_url if hasattr(lead, 'source_url') else ''
@@ -606,7 +781,6 @@ class LeadHunterOrchestrator:
                     url_to_leads[source_url] = []
                 url_to_leads[source_url].append(lead)
         
-        # Record results for each scraped URL
         for source_name, results in scrape_results.items():
             for result in results:
                 if not result.success:
@@ -616,18 +790,15 @@ class LeadHunterOrchestrator:
                 leads_from_url = url_to_leads.get(url, [])
                 produced_lead = len(leads_from_url) > 0
                 
-                # Get lead details
                 lead_quality = None
                 lead_location = None
                 
                 if leads_from_url:
-                    # Average quality of leads from this URL
                     qualities = [l.confidence_score for l in leads_from_url 
                                 if hasattr(l, 'confidence_score') and l.confidence_score]
                     if qualities:
                         lead_quality = sum(qualities) / len(qualities)
                     
-                    # Determine location category
                     for lead in leads_from_url:
                         country = lead.country if hasattr(lead, 'country') else ''
                         state = lead.state if hasattr(lead, 'state') else ''
@@ -646,7 +817,6 @@ class LeadHunterOrchestrator:
                         else:
                             lead_location = 'International'
                 
-                # Record
                 learning_system.record_result(
                     source_name=source_name,
                     url=url,
@@ -656,7 +826,6 @@ class LeadHunterOrchestrator:
                     response_time_ms=result.crawl_time_ms if hasattr(result, 'crawl_time_ms') else 0
                 )
         
-        # Save learnings
         learning_system.save()
         logger.info("📚 Learnings recorded")
     
@@ -666,17 +835,7 @@ class LeadHunterOrchestrator:
         filename: str = "leads.json",
         format: str = "json"
     ) -> str:
-        """
-        Export leads to file.
-        
-        Args:
-            leads: List of lead dictionaries
-            filename: Output filename
-            format: "json" or "csv"
-        
-        Returns:
-            Path to output file
-        """
+        """Export leads to file (optional - leads are already in database)."""
         output_path = self.output_dir / filename
         
         if format == "json":
@@ -746,6 +905,11 @@ async def main():
         help="Disable deep crawling"
     )
     parser.add_argument(
+        "--no-save",
+        action="store_true",
+        help="Don't save to database (export only)"
+    )
+    parser.add_argument(
         "--test",
         action="store_true",
         help="Run quick test on 3 sources"
@@ -753,7 +917,6 @@ async def main():
     
     args = parser.parse_args()
     
-    # Load environment variables
     import os
     try:
         from dotenv import load_dotenv
@@ -774,7 +937,6 @@ async def main():
 ╚══════════════════════════════════════════════════════════════════╝
 """)
     
-    # Show AI status
     if gemini_api_key:
         print(f"🤖 AI: Gemini (PRIMARY) + Ollama (BACKUP)")
     else:
@@ -784,14 +946,14 @@ async def main():
     orchestrator = LeadHunterOrchestrator(
         gemini_api_key=gemini_api_key,
         output_dir=args.output,
-        use_ollama=True
+        use_ollama=True,
+        save_to_database=not args.no_save,
     )
     
     try:
         await orchestrator.initialize()
         
         if args.test:
-            # Quick test mode
             logger.info("🧪 Running in TEST MODE (3 sources, no deep crawl)")
             sources = list(orchestrator.scraping_engine._sources.keys())[:3]
             leads = await orchestrator.run(
@@ -805,7 +967,7 @@ async def main():
                 deep_crawl=not args.no_deep
             )
         
-        # Export results
+        # Export to files (optional backup)
         if leads:
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             
@@ -821,7 +983,7 @@ async def main():
                 format="csv"
             )
             
-            print(f"\n📁 Files saved to {args.output}/")
+            print(f"\n📁 Backup files saved to {args.output}/")
             print(f"   • {json_path}")
             print(f"   • {csv_path}")
         

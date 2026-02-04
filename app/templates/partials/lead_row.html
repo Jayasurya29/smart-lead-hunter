@@ -1,0 +1,141 @@
+<!-- Single Lead Row -->
+<tr id="lead-row-{{ lead.id }}"
+    class="lead-row cursor-pointer hover:bg-blue-50 transition-colors duration-150"
+    hx-get="/api/dashboard/leads/{{ lead.id }}"
+    hx-target="#detail-panel"
+    hx-swap="innerHTML">
+    <!-- Score -->
+    <td class="px-3 py-3 whitespace-nowrap">
+        {% if lead.lead_score is not none %}
+        <span class="inline-flex items-center justify-center w-9 h-9 rounded-full text-sm font-bold
+            {% if lead.lead_score >= 70 %}bg-red-100 text-red-700 ring-2 ring-red-500
+            {% elif lead.lead_score >= 50 %}bg-orange-100 text-orange-700 ring-2 ring-orange-400
+            {% elif lead.lead_score >= 30 %}bg-yellow-100 text-yellow-700 ring-2 ring-yellow-400
+            {% else %}bg-gray-100 text-gray-600 ring-1 ring-gray-300{% endif %}">
+            {{ lead.lead_score }}
+        </span>
+        {% else %}
+        <span class="text-gray-400 text-sm">--</span>
+        {% endif %}
+    </td>
+
+    <!-- Hotel Name -->
+    <td class="px-3 py-3">
+        <div class="text-sm font-semibold text-gray-900 truncate max-w-[200px]" title="{{ lead.hotel_name }}">
+            {{ lead.hotel_name }}
+        </div>
+        <div class="flex items-center gap-2 mt-0.5">
+            {% if lead.room_count %}
+            <span class="text-xs text-gray-500">{{ lead.room_count }} rooms</span>
+            {% endif %}
+        </div>
+    </td>
+
+    <!-- Brand -->
+    <td class="px-3 py-3 whitespace-nowrap">
+        {% if lead.brand %}
+        <div class="text-sm text-gray-900 truncate max-w-[100px]" title="{{ lead.brand }}">{{ lead.brand }}</div>
+        {% if lead.brand_tier %}
+        <span class="inline-flex items-center mt-0.5 px-1.5 py-0.5 rounded text-xs font-medium
+            {% if lead.brand_tier == 'tier1_ultra_luxury' %}bg-purple-100 text-purple-700
+            {% elif lead.brand_tier == 'tier2_luxury' %}bg-indigo-100 text-indigo-700
+            {% elif lead.brand_tier == 'tier3_upper_upscale' %}bg-blue-100 text-blue-700
+            {% elif lead.brand_tier == 'tier4_upscale' %}bg-cyan-100 text-cyan-700
+            {% else %}bg-gray-100 text-gray-600{% endif %}">
+            {% if lead.brand_tier == 'tier1_ultra_luxury' %}Ultra Lux
+            {% elif lead.brand_tier == 'tier2_luxury' %}Luxury
+            {% elif lead.brand_tier == 'tier3_upper_upscale' %}Upper Up
+            {% elif lead.brand_tier == 'tier4_upscale' %}Upscale
+            {% else %}{{ lead.brand_tier }}{% endif %}
+        </span>
+        {% endif %}
+        {% else %}
+        <span class="text-gray-400 text-sm">Unknown</span>
+        {% endif %}
+    </td>
+
+    <!-- Location -->
+    <td class="px-3 py-3 whitespace-nowrap">
+        {% if lead.location_type %}
+        <span class="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium
+            {% if lead.location_type == 'florida' %}bg-green-100 text-green-700
+            {% elif lead.location_type == 'caribbean' %}bg-blue-100 text-blue-700
+            {% elif lead.location_type == 'usa' %}bg-indigo-100 text-indigo-700
+            {% else %}bg-gray-100 text-gray-600{% endif %}">
+            {% if lead.location_type == 'florida' %}🌴 FL
+            {% elif lead.location_type == 'caribbean' %}🏝️ Carib
+            {% elif lead.location_type == 'usa' %}🇺🇸 USA
+            {% else %}🌍 Intl{% endif %}
+        </span>
+        {% else %}
+        <span class="text-gray-400 text-xs">--</span>
+        {% endif %}
+    </td>
+
+    <!-- Opening Date -->
+    <td class="px-3 py-3 whitespace-nowrap text-sm text-gray-900">
+        {% if lead.opening_date %}{{ lead.opening_date }}{% else %}<span class="text-gray-400">TBD</span>{% endif %}
+    </td>
+
+    <!-- Contact -->
+    <td class="px-3 py-3">
+        {% if lead.contact_email %}
+        <span class="text-xs text-green-600">✓ Email</span>
+        {% elif lead.contact_phone %}
+        <span class="text-xs text-green-600">✓ Phone</span>
+        {% elif lead.contact_name %}
+        <span class="text-xs text-yellow-600">Name only</span>
+        {% else %}
+        <span class="text-xs text-gray-400">None</span>
+        {% endif %}
+    </td>
+
+    <!-- Status -->
+    <td class="px-3 py-3 whitespace-nowrap">
+        {% if lead.status == 'new' %}
+        <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold bg-blue-100 text-blue-800">
+            New
+        </span>
+        {% elif lead.status == 'approved' %}
+        <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold bg-green-100 text-green-800">
+            ✓ Approved
+        </span>
+        {% elif lead.status == 'rejected' %}
+        <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold bg-red-100 text-red-800">
+            ✗ Rejected
+        </span>
+        {% elif lead.status == 'pushed' %}
+        <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold bg-purple-100 text-purple-800">
+            In CRM
+        </span>
+        {% endif %}
+    </td>
+
+    <!-- Quick Actions -->
+    <td class="px-3 py-3 whitespace-nowrap" onclick="event.stopPropagation()">
+        {% if lead.status == 'new' %}
+        <div class="flex space-x-1">
+            <button hx-post="/api/dashboard/leads/{{ lead.id }}/approve"
+                    hx-target="#lead-row-{{ lead.id }}"
+                    hx-swap="outerHTML"
+                    class="p-1 rounded text-green-600 hover:bg-green-100"
+                    title="Approve">
+                <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
+                </svg>
+            </button>
+            <button hx-post="/api/dashboard/leads/{{ lead.id }}/reject"
+                    hx-target="#lead-row-{{ lead.id }}"
+                    hx-swap="outerHTML"
+                    class="p-1 rounded text-red-600 hover:bg-red-100"
+                    title="Reject">
+                <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+                </svg>
+            </button>
+        </div>
+        {% else %}
+        <span class="text-gray-300">—</span>
+        {% endif %}
+    </td>
+</tr>

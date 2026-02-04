@@ -681,74 +681,75 @@
     "name": "Hotel Dive",
     "domain": "hoteldive.com",
     "entry_url": "https://www.hoteldive.com/topic/development/",
-    "total_urls_tested": 250,
-    "urls_with_leads": 58,
-    "urls_without_leads": 192,
-    "total_leads_found": 58,
-    "usa_caribbean_leads": 58,
+    "total_urls_tested": 751,
+    "urls_with_leads": 123,
+    "urls_without_leads": 628,
+    "total_leads_found": 123,
+    "usa_caribbean_leads": 120,
     "gold_patterns": [
       "/topic/development/",
       "/news/ihg-ruby-hotels-chicago-debut/\\d+/",
+      "/news/ihg-six-senses-resort-utah/\\d+/",
       "/news/top-hotel-openings-2026/\\d+/",
-      "/topic/brands/"
+      "/topic/brands/",
+      "/releases/[^/]+"
     ],
     "junk_patterns": [
       "/what-we-are-reading",
-      "/topic/finances-deals/",
-      "/en/news-and-media/news-releases/\\d+/[^/]+"
+      "/en/news-and-media/news-releases/\\d+/[^/]+",
+      "/news/family-travel-hotel-business/\\d+/",
+      "/news/grand-hyatt-opening-utah/\\d+/",
+      "/topic/consumer-trends/",
+      "/news/choice-hotels-q3-2025-earnings/\\d+/"
     ],
     "maybe_patterns": [
       "/news/[^/]+/\\d+/",
-      "/news/ihg-six-senses-resort-utah/\\d+/",
       "/news/accor-hotels-q3-2025-earnings/\\d+/",
+      "/topic/finances-deals/",
       "/news/\\d+\\.html",
       "/news/ihg-acquires-ruby-q4-earnings/\\d+/",
       "/news/ihg-brings-ruby-brand-to-us/\\d+/",
       "/article/[^/]+",
       "/article/\\d+/[^/]+",
       "/milwaukee/news/\\d+/01/\\d+/[^/]+",
-      "/releases/[^/]+",
-      "/news/family-travel-hotel-business/\\d+/",
-      "/news/grand-hyatt-opening-utah/\\d+/",
       "/topic/operations/",
       "/topic/technology/",
-      "/topic/consumer-trends/",
       "/topic/workforce/",
       "/topic/regulations/"
     ],
     "pattern_stats": {
       "/topic/development/": {
-        "tested": 5,
-        "leads": 4,
-        "total_quality": 2.45,
-        "usa_caribbean": 4
+        "tested": 16,
+        "leads": 9,
+        "total_quality": 5.627440476190476,
+        "usa_caribbean": 9
       },
       "/news/[^/]+/\\d+/": {
-        "tested": 175,
-        "leads": 39,
-        "total_quality": 23.630000000000006,
-        "usa_caribbean": 39
+        "tested": 555,
+        "leads": 75,
+        "total_quality": 46.089999999999975,
+        "usa_caribbean": 75
       },
       "/news/ihg-ruby-hotels-chicago-debut/\\d+/": {
-        "tested": 5,
-        "leads": 5,
-        "total_quality": 3.0999999999999996,
-        "usa_caribbean": 5
+        "tested": 15,
+        "leads": 13,
+        "total_quality": 8.3,
+        "usa_caribbean": 11
       },
       "/news/ihg-six-senses-resort-utah/\\d+/": {
-        "tested": 5,
-        "leads": 1,
-        "total_quality": 0.51,
-        "usa_caribbean": 1
-      },
-      "/news/top-hotel-openings-2026/\\d+/": {
-        "tested": 5,
-        "leads": 5,
-        "total_quality": 2.936587301587301,
+        "tested": 15,
+        "leads": 6,
+        "total_quality": 3.5599999999999996,
         "usa_caribbean": 5
       },
+      "/news/top-hotel-openings-2026/\\d+/": {
+        "tested": 15,
+        "leads": 7,
+        "total_quality": 4.14547619047619,
+        "usa_caribbean": 7
+      },
       "/what-we-are-reading": {
-        "tested": 5,
+        "tested": 15,
         "leads": 0,
         "total_quality": 0.0,
         "usa_caribbean": 0
@@ -760,16 +761,16 @@
         "usa_caribbean": 0
       },
       "/topic/brands/": {
-        "tested": 5,
-        "leads": 4,
-        "total_quality": 2.4050000000000002,
-        "usa_caribbean": 4
+        "tested": 15,
+        "leads": 6,
+        "total_quality": 3.6650000000000005,
+        "usa_caribbean": 6
       },
       "/topic/finances-deals/": {
-        "tested": 5,
-        "leads": 0,
-        "total_quality": 0.0,
-        "usa_caribbean": 0
+        "tested": 15,
+        "leads": 3,
+        "total_quality": 1.7400000000000002,
+        "usa_caribbean": 3
       },
       "/news/\\d+\\.html": {
         "tested": 3,
@@ -814,19 +815,19 @@
         "usa_caribbean": 0
       },
       "/releases/[^/]+": {
-        "tested": 2,
-        "leads": 0,
-        "total_quality": 0.0,
-        "usa_caribbean": 0
+        "tested": 12,
+        "leads": 4,
+        "total_quality": 2.4,
+        "usa_caribbean": 4
       },
       "/news/family-travel-hotel-business/\\d+/": {
-        "tested": 2,
+        "tested": 12,
         "leads": 0,
         "total_quality": 0.0,
         "usa_caribbean": 0
       },
       "/news/grand-hyatt-opening-utah/\\d+/": {
-        "tested": 2,
+        "tested": 12,
         "leads": 0,
         "total_quality": 0.0,
         "usa_caribbean": 0
@@ -844,7 +845,7 @@
         "usa_caribbean": 0
       },
       "/topic/consumer-trends/": {
-        "tested": 2,
+        "tested": 12,
         "leads": 0,
         "total_quality": 0.0,
         "usa_caribbean": 0
@@ -860,16 +861,22 @@
         "leads": 0,
         "total_quality": 0.0,
         "usa_caribbean": 0
+      },
+      "/news/choice-hotels-q3-2025-earnings/\\d+/": {
+        "tested": 10,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
       }
     },
-    "lead_yield_rate": 0.232,
-    "usa_caribbean_rate": 1.0,
+    "lead_yield_rate": 0.16378162450066577,
+    "usa_caribbean_rate": 0.975609756097561,
     "avg_confidence": 0.0,
     "first_tested": "2026-01-30T11:57:36.970456",
-    "last_tested": "2026-02-02T14:14:15.768529",
-    "last_updated": "2026-02-02T14:14:15.768529",
-    "recommended_max_pages": 50,
-    "recommended_priority": 10,
+    "last_tested": "2026-02-03T16:54:11.302492",
+    "last_updated": "2026-02-03T16:54:11.302492",
+    "recommended_max_pages": 30,
+    "recommended_priority": 8,
     "is_worth_scraping": true,
     "notes": []
   },
@@ -2210,6 +2217,72 @@
     "recommended_max_pages": 20,
     "recommended_priority": 8,
     "is_worth_scraping": false,
+    "notes": []
+  },
+  "Hospitality Net": {
+    "name": "Hospitality Net",
+    "domain": "hospitalitynet.org",
+    "entry_url": "https://www.hospitalitynet.org/news/global.html",
+    "total_urls_tested": 1,
+    "urls_with_leads": 0,
+    "urls_without_leads": 1,
+    "total_leads_found": 0,
+    "usa_caribbean_leads": 0,
+    "gold_patterns": [],
+    "junk_patterns": [],
+    "maybe_patterns": [
+      "/news/global.html"
+    ],
+    "pattern_stats": {
+      "/news/global.html": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      }
+    },
+    "lead_yield_rate": 0.0,
+    "usa_caribbean_rate": 0.0,
+    "avg_confidence": 0.0,
+    "first_tested": "2026-02-03T12:25:31.501370",
+    "last_tested": "2026-02-03T12:25:31.501370",
+    "last_updated": "2026-02-03T12:25:31.501370",
+    "recommended_max_pages": 20,
+    "recommended_priority": 4,
+    "is_worth_scraping": true,
+    "notes": []
+  },
+  "LODGING Magazine": {
+    "name": "LODGING Magazine",
+    "domain": "lodgingmagazine.com",
+    "entry_url": "https://lodgingmagazine.com/category/industrynews/",
+    "total_urls_tested": 1,
+    "urls_with_leads": 0,
+    "urls_without_leads": 1,
+    "total_leads_found": 0,
+    "usa_caribbean_leads": 0,
+    "gold_patterns": [],
+    "junk_patterns": [],
+    "maybe_patterns": [
+      "/category/industrynews/"
+    ],
+    "pattern_stats": {
+      "/category/industrynews/": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      }
+    },
+    "lead_yield_rate": 0.0,
+    "usa_caribbean_rate": 0.0,
+    "avg_confidence": 0.0,
+    "first_tested": "2026-02-03T12:25:31.501370",
+    "last_tested": "2026-02-03T12:25:31.501370",
+    "last_updated": "2026-02-03T12:25:31.501370",
+    "recommended_max_pages": 20,
+    "recommended_priority": 4,
+    "is_worth_scraping": true,
     "notes": []
   }
 }

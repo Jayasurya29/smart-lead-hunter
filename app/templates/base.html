@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full bg-gray-100">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}Smart Lead Hunter{% endblock %}</title>
+
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        'brand': {
+                            50: '#f0f9ff',
+                            100: '#e0f2fe',
+                            500: '#0ea5e9',
+                            600: '#0284c7',
+                            700: '#0369a1',
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+
+    <!-- HTMX -->
+    <script src="https://unpkg.com/htmx.org@1.9.10"></script>
+
+    <!-- Alpine.js for small interactions -->
+    <script defer src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js"></script>
+
+    <style>
+        /* Hide elements before Alpine.js initializes */
+        [x-cloak] { display: none !important; }
+
+        /* HTMX loading indicator */
+        .htmx-request .htmx-indicator {
+            display: inline-block;
+        }
+        .htmx-indicator {
+            display: none;
+        }
+
+        /* Smooth transitions for HTMX swaps */
+        .htmx-swapping {
+            opacity: 0;
+            transition: opacity 0.2s ease-out;
+        }
+
+        /* Row highlight on hover */
+        .lead-row:hover {
+            background-color: #f0f9ff;
+        }
+
+        /* Slide-in animation for detail panel */
+        @keyframes slideIn {
+            from { transform: translateX(100%); opacity: 0; }
+            to { transform: translateX(0); opacity: 1; }
+        }
+        .slide-in {
+            animation: slideIn 0.3s ease-out;
+        }
+    </style>
+</head>
+<body class="h-full">
+    <div class="min-h-full">
+        <!-- Navigation -->
+        <nav class="bg-white shadow-sm border-b border-gray-200">
+            <div class="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+                <div class="flex h-16 justify-between">
+                    <div class="flex">
+                        <div class="flex flex-shrink-0 items-center">
+                            <a href="/dashboard" class="text-xl font-bold text-brand-600">Smart Lead Hunter</a>
+                        </div>
+                        <div class="hidden sm:ml-8 sm:flex sm:space-x-8">
+                            <a href="/dashboard"
+                               class="nav-link inline-flex items-center border-b-2 px-1 pt-1 text-sm font-medium {% if not request.query_params.get('view') and not request.query_params.get('location_type') %}border-brand-500 text-gray-900{% else %}border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700{% endif %}">
+                                Dashboard
+                            </a>
+                            <a href="/dashboard?view=hot"
+                               class="nav-link inline-flex items-center border-b-2 px-1 pt-1 text-sm font-medium {% if request.query_params.get('view') == 'hot' %}border-brand-500 text-gray-900{% else %}border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700{% endif %}">
+                                Hot Leads
+                            </a>
+                            <a href="/dashboard?location_type=florida"
+                               class="nav-link inline-flex items-center border-b-2 px-1 pt-1 text-sm font-medium {% if request.query_params.get('location_type') == 'florida' %}border-brand-500 text-gray-900{% else %}border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700{% endif %}">
+                                Florida
+                            </a>
+                            <a href="/dashboard?location_type=caribbean"
+                               class="nav-link inline-flex items-center border-b-2 px-1 pt-1 text-sm font-medium {% if request.query_params.get('location_type') == 'caribbean' %}border-brand-500 text-gray-900{% else %}border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700{% endif %}">
+                                Caribbean
+                            </a>
+                        </div>
+                    </div>
+                    <div class="flex items-center">
+                        <span class="text-sm text-gray-500">J.A. Uniforms</span>
+                    </div>
+                </div>
+            </div>
+        </nav>
+
+        <!-- Main Content -->
+        <main class="py-6">
+            {% block content %}{% endblock %}
+        </main>
+    </div>
+
+    <!-- Toast notifications container -->
+    <div id="toast-container" class="fixed bottom-4 right-4 z-50 space-y-2"></div>
+
+    <script>
+        // Toast notification helper
+        function showToast(message, type = 'success') {
+            const container = document.getElementById('toast-container');
+            const colors = {
+                success: 'bg-green-500',
+                error: 'bg-red-500',
+                info: 'bg-blue-500',
+                warning: 'bg-yellow-500'
+            };
+
+            const toast = document.createElement('div');
+            toast.className = `${colors[type]} text-white px-6 py-3 rounded-lg shadow-lg transform transition-all duration-300 translate-y-0 opacity-100`;
+            toast.textContent = message;
+            container.appendChild(toast);
+
+            setTimeout(() => {
+                toast.classList.add('opacity-0', 'translate-y-2');
+                setTimeout(() => toast.remove(), 300);
+            }, 3000);
+        }
+
+        // Listen for HTMX events
+        document.body.addEventListener('htmx:afterSwap', function(evt) {
+            // Handle toast messages from response headers
+            const toast = evt.detail.xhr.getResponseHeader('HX-Trigger');
+            if (toast) {
+                try {
+                    const data = JSON.parse(toast);
+                    if (data.showToast) {
+                        showToast(data.showToast.message, data.showToast.type);
+                    }
+                } catch (e) {}
+            }
+        });
+    </script>
+</body>
+</html>

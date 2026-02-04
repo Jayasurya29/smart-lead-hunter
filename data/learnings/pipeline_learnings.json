@@ -849,247 +849,13 @@
   ],
   "hoteldive.com": [
     {
-      "url": "https://www.hoteldive.com/news/four-seasons-luxury-hotel-residences-park-city-utah/735358/",
-      "domain": "hoteldive.com",
-      "url_pattern": "https://www.hoteldive.com/news/SLUG/ID/",
-      "was_relevant": true,
-      "lead_count": 0,
-      "lead_quality_avg": 0,
-      "timestamp": "2026-02-02T14:08:02.680253"
-    },
-    {
-      "url": "https://www.hoteldive.com/news/grand-hyatt-opening-utah/733714/",
+      "url": "https://www.hoteldive.com/news/hilton-autocamp-partner-outdoor-experiential-stays/708733/",
       "domain": "hoteldive.com",
       "url_pattern": "https://www.hoteldive.com/news/SLUG/ID/",
       "was_relevant": false,
       "lead_count": 0,
       "lead_quality_avg": 0,
-      "timestamp": "2026-02-02T14:08:03.819645"
-    },
-    {
-      "url": "https://www.hoteldive.com/news/hilton-developing-waldorf-astoria-texas-hill-country/743695/",
-      "domain": "hoteldive.com",
-      "url_pattern": "https://www.hoteldive.com/news/SLUG/ID/",
-      "was_relevant": true,
-      "lead_count": 0,
-      "lead_quality_avg": 0,
-      "timestamp": "2026-02-02T14:08:05.256796"
-    },
-    {
-      "url": "https://www.hoteldive.com/topic/brands/",
-      "domain": "hoteldive.com",
-      "url_pattern": "https://www.hoteldive.com/topic/brands/",
-      "was_relevant": true,
-      "lead_count": 0,
-      "lead_quality_avg": 0,
-      "timestamp": "2026-02-02T14:08:06.546114"
-    },
-    {
-      "url": "https://www.hoteldive.com/news/hotel-occupancy-revpar-decline-2025/810212/",
-      "domain": "hoteldive.com",
-      "url_pattern": "https://www.hoteldive.com/news/SLUG/ID/",
-      "was_relevant": false,
-      "lead_count": 0,
-      "lead_quality_avg": 0,
-      "timestamp": "2026-02-02T14:08:07.523095"
-    },
-    {
-      "url": "https://www.hoteldive.com/news/lifestyle-luxury-brand-acquisition-/724975/",
-      "domain": "hoteldive.com",
-      "url_pattern": "https://www.hoteldive.com/news/SLUG/ID/",
-      "was_relevant": false,
-      "lead_count": 0,
-      "lead_quality_avg": 0,
-      "timestamp": "2026-02-02T14:08:08.760625"
-    },
-    {
-      "url": "https://www.hoteldive.com/news/peregrine-hospitality-appoints-chief-operating-officer/810221/",
-      "domain": "hoteldive.com",
-      "url_pattern": "https://www.hoteldive.com/news/SLUG/ID/",
-      "was_relevant": false,
-      "lead_count": 0,
-      "lead_quality_avg": 0,
-      "timestamp": "2026-02-02T14:08:09.647020"
-    },
-    {
-      "url": "https://www.hoteldive.com/topic/operations/",
-      "domain": "hoteldive.com",
-      "url_pattern": "https://www.hoteldive.com/topic/operations/",
-      "was_relevant": false,
-      "lead_count": 0,
-      "lead_quality_avg": 0,
-      "timestamp": "2026-02-02T14:08:10.855760"
-    },
-    {
-      "url": "https://www.hoteldive.com/topic/technology/",
-      "domain": "hoteldive.com",
-      "url_pattern": "https://www.hoteldive.com/topic/technology/",
-      "was_relevant": false,
-      "lead_count": 0,
-      "lead_quality_avg": 0,
-      "timestamp": "2026-02-02T14:08:12.414792"
-    },
-    {
-      "url": "https://www.hoteldive.com/topic/consumer-trends/",
-      "domain": "hoteldive.com",
-      "url_pattern": "https://www.hoteldive.com/topic/consumer-trends/",
-      "was_relevant": true,
-      "lead_count": 0,
-      "lead_quality_avg": 0,
-      "timestamp": "2026-02-02T14:08:13.871104"
-    },
-    {
-      "url": "https://www.hoteldive.com/topic/workforce/",
-      "domain": "hoteldive.com",
-      "url_pattern": "https://www.hoteldive.com/topic/workforce/",
-      "was_relevant": false,
-      "lead_count": 0,
-      "lead_quality_avg": 0,
-      "timestamp": "2026-02-02T14:08:15.340163"
-    },
-    {
-      "url": "https://www.hoteldive.com/topic/finances-deals/",
-      "domain": "hoteldive.com",
-      "url_pattern": "https://www.hoteldive.com/topic/finances-deals/",
-      "was_relevant": true,
-      "lead_count": 0,
-      "lead_quality_avg": 0,
-      "timestamp": "2026-02-02T14:08:16.902446"
-    },
-    {
-      "url": "https://www.hoteldive.com/topic/regulations/",
-      "domain": "hoteldive.com",
-      "url_pattern": "https://www.hoteldive.com/topic/regulations/",
-      "was_relevant": false,
-      "lead_count": 0,
-      "lead_quality_avg": 0,
-      "timestamp": "2026-02-02T14:08:17.935400"
-    },
-    {
-      "url": "https://www.hoteldive.com/topic/development/",
-      "domain": "hoteldive.com",
-      "url_pattern": "https://www.hoteldive.com/topic/development/",
-      "was_relevant": true,
-      "lead_count": 13,
-      "lead_quality_avg": 0.0,
-      "timestamp": "2026-02-02T14:08:24.261570"
-    },
-    {
-      "url": "https://www.hoteldive.com/news/hilton-waldorf-astoria-resort-development-deer-valley-utah/811075/",
-      "domain": "hoteldive.com",
-      "url_pattern": "https://www.hoteldive.com/news/SLUG/ID/",
-      "was_relevant": true,
-      "lead_count": 1,
-      "lead_quality_avg": 0.0,
-      "timestamp": "2026-02-02T14:08:25.386860"
-    },
-    {
-      "url": "https://www.hoteldive.com/news/hotel-industry-trends-forecast-2026/811017/",
-      "domain": "hoteldive.com",
-      "url_pattern": "https://www.hoteldive.com/news/SLUG/ID/",
-      "was_relevant": true,
-      "lead_count": 1,
-      "lead_quality_avg": 0.0,
-      "timestamp": "2026-02-02T14:08:26.516243"
-    },
-    {
-      "url": "https://www.hoteldive.com/news/hilton-undergraduate-lifestyle-brand-launch-college-town-markets/810918/",
-      "domain": "hoteldive.com",
-      "url_pattern": "https://www.hoteldive.com/news/SLUG/ID/",
-      "was_relevant": true,
-      "lead_count": 1,
-      "lead_quality_avg": 0.0,
-      "timestamp": "2026-02-02T14:08:27.747983"
-    },
-    {
-      "url": "https://www.hoteldive.com/news/ihg-ruby-hotels-chicago-debut/810588/",
-      "domain": "hoteldive.com",
-      "url_pattern": "https://www.hoteldive.com/news/SLUG/ID/",
-      "was_relevant": true,
-      "lead_count": 1,
-      "lead_quality_avg": 0.0,
-      "timestamp": "2026-02-02T14:08:29.176986"
-    },
-    {
-      "url": "https://www.hoteldive.com/news/hotel-construction-pipeline-q4-2025/810587/",
-      "domain": "hoteldive.com",
-      "url_pattern": "https://www.hoteldive.com/news/SLUG/ID/",
-      "was_relevant": true,
-      "lead_count": 0,
-      "lead_quality_avg": 0,
-      "timestamp": "2026-02-02T14:08:33.344283"
-    },
-    {
-      "url": "https://www.hoteldive.com/news/ihg-six-senses-resort-utah/810467/",
-      "domain": "hoteldive.com",
-      "url_pattern": "https://www.hoteldive.com/news/SLUG/ID/",
-      "was_relevant": true,
-      "lead_count": 1,
-      "lead_quality_avg": 0.0,
-      "timestamp": "2026-02-02T14:08:34.676089"
-    },
-    {
-      "url": "https://www.hoteldive.com/news/top-hotel-openings-2026/810298/",
-      "domain": "hoteldive.com",
-      "url_pattern": "https://www.hoteldive.com/news/SLUG/ID/",
-      "was_relevant": true,
-      "lead_count": 9,
-      "lead_quality_avg": 0.0,
-      "timestamp": "2026-02-02T14:08:38.125631"
-    },
-    {
-      "url": "https://www.hoteldive.com/news/new-york-city-phoenix-hotel-openings-2026/810079/",
-      "domain": "hoteldive.com",
-      "url_pattern": "https://www.hoteldive.com/news/SLUG/ID/",
-      "was_relevant": true,
-      "lead_count": 1,
-      "lead_quality_avg": 0.0,
-      "timestamp": "2026-02-02T14:08:39.178000"
-    },
-    {
-      "url": "https://www.hoteldive.com/news/outbound-hotels-park-city-2027-waterton-barings/809588/",
-      "domain": "hoteldive.com",
-      "url_pattern": "https://www.hoteldive.com/news/SLUG/ID/",
-      "was_relevant": true,
-      "lead_count": 1,
-      "lead_quality_avg": 0.0,
-      "timestamp": "2026-02-02T14:08:40.533091"
-    },
-    {
-      "url": "https://www.hoteldive.com/news/ritz-carlton-hotel-development-indianapolis/809199/",
-      "domain": "hoteldive.com",
-      "url_pattern": "https://www.hoteldive.com/news/SLUG/ID/",
-      "was_relevant": true,
-      "lead_count": 1,
-      "lead_quality_avg": 0.0,
-      "timestamp": "2026-02-02T14:08:41.652596"
-    },
-    {
-      "url": "https://www.hoteldive.com/news/one-beverly-hills-vertical-construction/807320/",
-      "domain": "hoteldive.com",
-      "url_pattern": "https://www.hoteldive.com/news/SLUG/ID/",
-      "was_relevant": true,
-      "lead_count": 1,
-      "lead_quality_avg": 0.0,
-      "timestamp": "2026-02-02T14:08:42.723094"
-    },
-    {
-      "url": "https://www.hoteldive.com/what-we-are-reading",
-      "domain": "hoteldive.com",
-      "url_pattern": "https://www.hoteldive.com/what-we-are-reading",
-      "was_relevant": true,
-      "lead_count": 1,
-      "lead_quality_avg": 0.0,
-      "timestamp": "2026-02-02T14:08:44.258393"
-    },
-    {
-      "url": "https://www.hoteldive.com/news/hilton-canopy-deer-valley-ski-resort-utah/743140/",
-      "domain": "hoteldive.com",
-      "url_pattern": "https://www.hoteldive.com/news/SLUG/ID/",
-      "was_relevant": true,
-      "lead_count": 1,
-      "lead_quality_avg": 0.0,
-      "timestamp": "2026-02-02T14:08:47.026403"
+      "timestamp": "2026-02-03T16:00:09.586113"
     },
     {
       "url": "https://www.hoteldive.com/news/hilton-debuts-upscale-outset-collection-brand/801970/",
@@ -1098,52 +864,43 @@
       "was_relevant": true,
       "lead_count": 0,
       "lead_quality_avg": 0,
-      "timestamp": "2026-02-02T14:08:49.379688"
+      "timestamp": "2026-02-03T16:00:11.122398"
     },
     {
       "url": "https://www.hoteldive.com/news/four-seasons-luxury-hotel-residences-park-city-utah/735358/",
       "domain": "hoteldive.com",
       "url_pattern": "https://www.hoteldive.com/news/SLUG/ID/",
       "was_relevant": true,
-      "lead_count": 1,
-      "lead_quality_avg": 0.0,
-      "timestamp": "2026-02-02T14:08:50.490209"
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-02-03T16:00:12.556662"
+    },
+    {
+      "url": "https://www.hoteldive.com/news/grand-hyatt-opening-utah/733714/",
+      "domain": "hoteldive.com",
+      "url_pattern": "https://www.hoteldive.com/news/SLUG/ID/",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-02-03T16:00:14.117270"
     },
     {
       "url": "https://www.hoteldive.com/news/hilton-developing-waldorf-astoria-texas-hill-country/743695/",
       "domain": "hoteldive.com",
       "url_pattern": "https://www.hoteldive.com/news/SLUG/ID/",
       "was_relevant": true,
-      "lead_count": 1,
-      "lead_quality_avg": 0.0,
-      "timestamp": "2026-02-02T14:08:51.876900"
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-02-03T16:00:15.535953"
     },
     {
-      "url": "https://www.hoteldive.com/topic/brands/",
+      "url": "https://www.hoteldive.com/news/hotel-occupancy-revpar-decline-2025/810212/",
       "domain": "hoteldive.com",
-      "url_pattern": "https://www.hoteldive.com/topic/brands/",
-      "was_relevant": true,
-      "lead_count": 9,
-      "lead_quality_avg": 0.0,
-      "timestamp": "2026-02-02T14:08:55.687502"
-    },
-    {
-      "url": "https://www.hoteldive.com/topic/consumer-trends/",
-      "domain": "hoteldive.com",
-      "url_pattern": "https://www.hoteldive.com/topic/consumer-trends/",
-      "was_relevant": true,
-      "lead_count": 1,
-      "lead_quality_avg": 0.0,
-      "timestamp": "2026-02-02T14:08:56.710181"
-    },
-    {
-      "url": "https://www.hoteldive.com/topic/finances-deals/",
-      "domain": "hoteldive.com",
-      "url_pattern": "https://www.hoteldive.com/topic/finances-deals/",
-      "was_relevant": true,
-      "lead_count": 1,
-      "lead_quality_avg": 0.0,
-      "timestamp": "2026-02-02T14:08:57.992447"
+      "url_pattern": "https://www.hoteldive.com/news/SLUG/ID/",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-02-03T16:00:17.174381"
     },
     {
       "url": "https://www.hoteldive.com/topic/development/",
@@ -1152,7 +909,25 @@
       "was_relevant": true,
       "lead_count": 0,
       "lead_quality_avg": 0,
-      "timestamp": "2026-02-02T14:12:31.997094"
+      "timestamp": "2026-02-03T16:10:10.940479"
+    },
+    {
+      "url": "https://www.hoteldive.com/news/us-hotel-investment-climbed-to-24b-in-2025-jll/811205/",
+      "domain": "hoteldive.com",
+      "url_pattern": "https://www.hoteldive.com/news/SLUG/ID/",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-02-03T16:10:12.091580"
+    },
+    {
+      "url": "https://www.hoteldive.com/news/choice-hotels-everhome-suites-extended-stay-openings/811153/",
+      "domain": "hoteldive.com",
+      "url_pattern": "https://www.hoteldive.com/news/SLUG/ID/",
+      "was_relevant": true,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-02-03T16:10:13.441051"
     },
     {
       "url": "https://www.hoteldive.com/news/hilton-waldorf-astoria-resort-development-deer-valley-utah/811075/",
@@ -1161,7 +936,7 @@
       "was_relevant": true,
       "lead_count": 0,
       "lead_quality_avg": 0,
-      "timestamp": "2026-02-02T14:12:33.293067"
+      "timestamp": "2026-02-03T16:10:14.786557"
     },
     {
       "url": "https://www.hoteldive.com/news/hotel-industry-trends-forecast-2026/811017/",
@@ -1170,7 +945,7 @@
       "was_relevant": true,
       "lead_count": 0,
       "lead_quality_avg": 0,
-      "timestamp": "2026-02-02T14:12:34.504544"
+      "timestamp": "2026-02-03T16:10:16.068125"
     },
     {
       "url": "https://www.hoteldive.com/news/accor-names-chief-franchise-officer-premium-midscale-economy/810922/",
@@ -1179,7 +954,7 @@
       "was_relevant": false,
       "lead_count": 0,
       "lead_quality_avg": 0,
-      "timestamp": "2026-02-02T14:12:35.430110"
+      "timestamp": "2026-02-03T16:10:17.287994"
     },
     {
       "url": "https://www.hoteldive.com/news/hilton-undergraduate-lifestyle-brand-launch-college-town-markets/810918/",
@@ -1188,16 +963,16 @@
       "was_relevant": true,
       "lead_count": 0,
       "lead_quality_avg": 0,
-      "timestamp": "2026-02-02T14:12:36.623655"
+      "timestamp": "2026-02-03T16:10:19.007862"
     },
     {
       "url": "https://www.hoteldive.com/news/ian-schrager-highgate-public-brand-partnership/810689/",
       "domain": "hoteldive.com",
       "url_pattern": "https://www.hoteldive.com/news/SLUG/ID/",
-      "was_relevant": true,
+      "was_relevant": false,
       "lead_count": 0,
       "lead_quality_avg": 0,
-      "timestamp": "2026-02-02T14:12:38.367585"
+      "timestamp": "2026-02-03T16:10:20.572546"
     },
     {
       "url": "https://www.hoteldive.com/news/ihg-ruby-hotels-chicago-debut/810588/",
@@ -1206,7 +981,7 @@
       "was_relevant": true,
       "lead_count": 0,
       "lead_quality_avg": 0,
-      "timestamp": "2026-02-02T14:12:39.450312"
+      "timestamp": "2026-02-03T16:10:21.917466"
     },
     {
       "url": "https://www.hoteldive.com/news/hotel-construction-pipeline-q4-2025/810587/",
@@ -1215,7 +990,7 @@
       "was_relevant": true,
       "lead_count": 0,
       "lead_quality_avg": 0,
-      "timestamp": "2026-02-02T14:12:40.962538"
+      "timestamp": "2026-02-03T16:10:23.310688"
     },
     {
       "url": "https://www.hoteldive.com/news/ihg-six-senses-resort-utah/810467/",
@@ -1224,7 +999,7 @@
       "was_relevant": true,
       "lead_count": 0,
       "lead_quality_avg": 0,
-      "timestamp": "2026-02-02T14:12:42.361629"
+      "timestamp": "2026-02-03T16:10:24.469197"
     },
     {
       "url": "https://www.hoteldive.com/news/top-hotel-openings-2026/810298/",
@@ -1233,7 +1008,7 @@
       "was_relevant": true,
       "lead_count": 0,
       "lead_quality_avg": 0,
-      "timestamp": "2026-02-02T14:12:43.349694"
+      "timestamp": "2026-02-03T16:10:25.533849"
     },
     {
       "url": "https://www.hoteldive.com/news/wyndham-reside-partnership-apartment-hotel-opening/810218/",
@@ -1242,7 +1017,7 @@
       "was_relevant": false,
       "lead_count": 0,
       "lead_quality_avg": 0,
-      "timestamp": "2026-02-02T14:12:45.002625"
+      "timestamp": "2026-02-03T16:10:27.164175"
     },
     {
       "url": "https://www.hoteldive.com/news/new-york-city-phoenix-hotel-openings-2026/810079/",
@@ -1251,7 +1026,7 @@
       "was_relevant": true,
       "lead_count": 0,
       "lead_quality_avg": 0,
-      "timestamp": "2026-02-02T14:12:46.211041"
+      "timestamp": "2026-02-03T16:10:28.300203"
     },
     {
       "url": "https://www.hoteldive.com/news/ihg-appoints-mark-sergot-chief-development-officer-americas-region/809806/",
@@ -1260,7 +1035,7 @@
       "was_relevant": false,
       "lead_count": 0,
       "lead_quality_avg": 0,
-      "timestamp": "2026-02-02T14:12:47.585552"
+      "timestamp": "2026-02-03T16:10:29.651480"
     },
     {
       "url": "https://www.hoteldive.com/news/hilton-debuts-apartment-collection-brand/809718/",
@@ -1269,7 +1044,7 @@
       "was_relevant": false,
       "lead_count": 0,
       "lead_quality_avg": 0,
-      "timestamp": "2026-02-02T14:12:48.893622"
+      "timestamp": "2026-02-03T16:10:31.065723"
     },
     {
       "url": "https://www.hoteldive.com/news/hotel-development-trends-2026-forecast/809599/",
@@ -1278,7 +1053,7 @@
       "was_relevant": false,
       "lead_count": 0,
       "lead_quality_avg": 0,
-      "timestamp": "2026-02-02T14:12:50.287914"
+      "timestamp": "2026-02-03T16:10:32.463956"
     },
     {
       "url": "https://www.hoteldive.com/news/outbound-hotels-park-city-2027-waterton-barings/809588/",
@@ -1287,7 +1062,7 @@
       "was_relevant": true,
       "lead_count": 0,
       "lead_quality_avg": 0,
-      "timestamp": "2026-02-02T14:12:51.327105"
+      "timestamp": "2026-02-03T16:10:33.573775"
     },
     {
       "url": "https://www.hoteldive.com/news/ritz-carlton-hotel-development-indianapolis/809199/",
@@ -1296,7 +1071,7 @@
       "was_relevant": true,
       "lead_count": 0,
       "lead_quality_avg": 0,
-      "timestamp": "2026-02-02T14:12:52.623911"
+      "timestamp": "2026-02-03T16:10:34.788629"
     },
     {
       "url": "https://www.hoteldive.com/news/top-hospitality-industry-trends-2026/808959/",
@@ -1305,7 +1080,7 @@
       "was_relevant": false,
       "lead_count": 0,
       "lead_quality_avg": 0,
-      "timestamp": "2026-02-02T14:12:53.913536"
+      "timestamp": "2026-02-03T16:10:36.048959"
     },
     {
       "url": "https://www.hoteldive.com/news/hospitality-industry-executive-appointments-q4-2025/808640/",
@@ -1314,7 +1089,7 @@
       "was_relevant": false,
       "lead_count": 0,
       "lead_quality_avg": 0,
-      "timestamp": "2026-02-02T14:12:55.250479"
+      "timestamp": "2026-02-03T16:10:37.355605"
     },
     {
       "url": "https://www.hoteldive.com/news/apple-hospitality-motto-hilton-nashville-downtown/808592/",
@@ -1323,7 +1098,7 @@
       "was_relevant": false,
       "lead_count": 0,
       "lead_quality_avg": 0,
-      "timestamp": "2026-02-02T14:12:56.494650"
+      "timestamp": "2026-02-03T16:10:38.550614"
     },
     {
       "url": "https://www.hoteldive.com/news/omni-fort-lauderdale-hotel-opening/808495/",
@@ -1332,7 +1107,7 @@
       "was_relevant": false,
       "lead_count": 0,
       "lead_quality_avg": 0,
-      "timestamp": "2026-02-02T14:12:57.732985"
+      "timestamp": "2026-02-03T16:10:39.861704"
     },
     {
       "url": "https://www.hoteldive.com/news/hospitality-industry-executive-interviews-2025/808370/",
@@ -1341,7 +1116,7 @@
       "was_relevant": false,
       "lead_count": 0,
       "lead_quality_avg": 0,
-      "timestamp": "2026-02-02T14:12:59.026416"
+      "timestamp": "2026-02-03T16:10:41.168506"
     },
     {
       "url": "https://www.hoteldive.com/news/hotel-casinos-hard-rock-resorts-world-ballys-new-york/808239/",
@@ -1350,7 +1125,7 @@
       "was_relevant": false,
       "lead_count": 0,
       "lead_quality_avg": 0,
-      "timestamp": "2026-02-02T14:13:00.611343"
+      "timestamp": "2026-02-03T16:10:42.613128"
     },
     {
       "url": "https://www.hoteldive.com/news/hyatt-appoints-jason-ballard-global-brand-leader-essentials/808107/",
@@ -1359,34 +1134,106 @@
       "was_relevant": false,
       "lead_count": 0,
       "lead_quality_avg": 0,
-      "timestamp": "2026-02-02T14:13:02.232784"
-    },
-    {
-      "url": "https://www.hoteldive.com/news/hotel-technology-design-guest-experience/807874/",
-      "domain": "hoteldive.com",
-      "url_pattern": "https://www.hoteldive.com/news/SLUG/ID/",
-      "was_relevant": false,
-      "lead_count": 0,
-      "lead_quality_avg": 0,
-      "timestamp": "2026-02-02T14:13:03.422410"
-    },
-    {
-      "url": "https://www.hoteldive.com/news/one-beverly-hills-vertical-construction/807320/",
-      "domain": "hoteldive.com",
-      "url_pattern": "https://www.hoteldive.com/news/SLUG/ID/",
-      "was_relevant": true,
-      "lead_count": 0,
-      "lead_quality_avg": 0,
-      "timestamp": "2026-02-02T14:13:04.726608"
+      "timestamp": "2026-02-03T16:10:44.422557"
     },
     {
       "url": "https://www.hoteldive.com/what-we-are-reading",
       "domain": "hoteldive.com",
       "url_pattern": "https://www.hoteldive.com/what-we-are-reading",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-02-03T16:10:45.773662"
+    },
+    {
+      "url": "https://www.hoteldive.com/news/fed-rate-cut-hotel-investment-trends-/807655/",
+      "domain": "hoteldive.com",
+      "url_pattern": "https://www.hoteldive.com/news/SLUG/ID/",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-02-03T16:10:47.271459"
+    },
+    {
+      "url": "https://www.hoteldive.com/news/fifa-world-cup-2026-booking-volume-adr-increase/808374/",
+      "domain": "hoteldive.com",
+      "url_pattern": "https://www.hoteldive.com/news/SLUG/ID/",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-02-03T16:10:49.582483"
+    },
+    {
+      "url": "https://www.hoteldive.com/news/hotel-industry-performance-2026-costar-tourism-economics/810703/",
+      "domain": "hoteldive.com",
+      "url_pattern": "https://www.hoteldive.com/news/SLUG/ID/",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-02-03T16:10:50.989664"
+    },
+    {
+      "url": "https://www.hoteldive.com/topic/consumer-trends/",
+      "domain": "hoteldive.com",
+      "url_pattern": "https://www.hoteldive.com/topic/consumer-trends/",
       "was_relevant": true,
       "lead_count": 0,
       "lead_quality_avg": 0,
-      "timestamp": "2026-02-02T14:13:09.648672"
+      "timestamp": "2026-02-03T16:10:52.692027"
+    },
+    {
+      "url": "https://www.hoteldive.com/topic/finances-deals/",
+      "domain": "hoteldive.com",
+      "url_pattern": "https://www.hoteldive.com/topic/finances-deals/",
+      "was_relevant": true,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-02-03T16:10:54.056931"
+    },
+    {
+      "url": "https://www.hoteldive.com/news/choice-hotels-everhome-suites-openings/759225/",
+      "domain": "hoteldive.com",
+      "url_pattern": "https://www.hoteldive.com/news/SLUG/ID/",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-02-03T16:10:55.413981"
+    },
+    {
+      "url": "https://www.hoteldive.com/news/choice-hotels-opens-everhome-suites-brand-standard-prototype/716025/",
+      "domain": "hoteldive.com",
+      "url_pattern": "https://www.hoteldive.com/news/SLUG/ID/",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-02-03T16:10:56.529575"
+    },
+    {
+      "url": "https://www.hoteldive.com/news/choice-hotels-extended-stay-everhome-suites-openings/749400/",
+      "domain": "hoteldive.com",
+      "url_pattern": "https://www.hoteldive.com/news/SLUG/ID/",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-02-03T16:10:57.883638"
+    },
+    {
+      "url": "https://www.hoteldive.com/news/choice-hotels-q3-2025-earnings/804758/",
+      "domain": "hoteldive.com",
+      "url_pattern": "https://www.hoteldive.com/news/SLUG/ID/",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-02-03T16:10:59.180488"
+    },
+    {
+      "url": "https://www.hoteldive.com/topic/brands/",
+      "domain": "hoteldive.com",
+      "url_pattern": "https://www.hoteldive.com/topic/brands/",
+      "was_relevant": true,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-02-03T16:11:01.741894"
     },
     {
       "url": "https://www.hoteldive.com/news/hilton-canopy-deer-valley-ski-resort-utah/743140/",
@@ -1395,7 +1242,7 @@
       "was_relevant": true,
       "lead_count": 0,
       "lead_quality_avg": 0,
-      "timestamp": "2026-02-02T14:13:12.310334"
+      "timestamp": "2026-02-03T16:11:04.251545"
     },
     {
       "url": "https://www.hoteldive.com/news/deer-valley-utah-development-hotel-brands/750105/",
@@ -1404,7 +1251,7 @@
       "was_relevant": false,
       "lead_count": 0,
       "lead_quality_avg": 0,
-      "timestamp": "2026-02-02T14:13:13.362236"
+      "timestamp": "2026-02-03T16:11:05.500065"
     },
     {
       "url": "https://www.hoteldive.com/news/family-travel-hotel-business/803721/",
@@ -1413,7 +1260,7 @@
       "was_relevant": false,
       "lead_count": 0,
       "lead_quality_avg": 0,
-      "timestamp": "2026-02-02T14:13:14.558305"
+      "timestamp": "2026-02-03T16:11:06.850817"
     },
     {
       "url": "https://www.hoteldive.com/news/marriott-launches-outdoors-focused-digital-platform-collection-brand/761563/",
@@ -1422,7 +1269,7 @@
       "was_relevant": false,
       "lead_count": 0,
       "lead_quality_avg": 0,
-      "timestamp": "2026-02-02T14:13:15.699973"
+      "timestamp": "2026-02-03T16:11:08.207639"
     },
     {
       "url": "https://www.hoteldive.com/news/hilton-autocamp-partner-outdoor-experiential-stays/708733/",
@@ -1431,7 +1278,7 @@
       "was_relevant": false,
       "lead_count": 0,
       "lead_quality_avg": 0,
-      "timestamp": "2026-02-02T14:13:16.973903"
+      "timestamp": "2026-02-03T16:11:09.566971"
     },
     {
       "url": "https://www.hoteldive.com/news/hilton-debuts-upscale-outset-collection-brand/801970/",
@@ -1440,7 +1287,7 @@
       "was_relevant": true,
       "lead_count": 0,
       "lead_quality_avg": 0,
-      "timestamp": "2026-02-02T14:13:18.227557"
+      "timestamp": "2026-02-03T16:11:11.381527"
     },
     {
       "url": "https://www.hoteldive.com/news/four-seasons-luxury-hotel-residences-park-city-utah/735358/",
@@ -1449,7 +1296,7 @@
       "was_relevant": true,
       "lead_count": 0,
       "lead_quality_avg": 0,
-      "timestamp": "2026-02-02T14:13:19.321064"
+      "timestamp": "2026-02-03T16:11:12.535333"
     },
     {
       "url": "https://www.hoteldive.com/news/grand-hyatt-opening-utah/733714/",
@@ -1458,7 +1305,7 @@
       "was_relevant": false,
       "lead_count": 0,
       "lead_quality_avg": 0,
-      "timestamp": "2026-02-02T14:13:20.840328"
+      "timestamp": "2026-02-03T16:11:13.743737"
     },
     {
       "url": "https://www.hoteldive.com/news/hilton-developing-waldorf-astoria-texas-hill-country/743695/",
@@ -1467,16 +1314,7 @@
       "was_relevant": true,
       "lead_count": 0,
       "lead_quality_avg": 0,
-      "timestamp": "2026-02-02T14:13:22.007780"
-    },
-    {
-      "url": "https://www.hoteldive.com/topic/brands/",
-      "domain": "hoteldive.com",
-      "url_pattern": "https://www.hoteldive.com/topic/brands/",
-      "was_relevant": true,
-      "lead_count": 0,
-      "lead_quality_avg": 0,
-      "timestamp": "2026-02-02T14:13:23.399993"
+      "timestamp": "2026-02-03T16:11:15.251714"
     },
     {
       "url": "https://www.hoteldive.com/news/hotel-occupancy-revpar-decline-2025/810212/",
@@ -1485,133 +1323,88 @@
       "was_relevant": false,
       "lead_count": 0,
       "lead_quality_avg": 0,
-      "timestamp": "2026-02-02T14:13:24.810808"
-    },
-    {
-      "url": "https://www.hoteldive.com/news/lifestyle-luxury-brand-acquisition-/724975/",
-      "domain": "hoteldive.com",
-      "url_pattern": "https://www.hoteldive.com/news/SLUG/ID/",
-      "was_relevant": false,
-      "lead_count": 0,
-      "lead_quality_avg": 0,
-      "timestamp": "2026-02-02T14:13:25.960219"
-    },
-    {
-      "url": "https://www.hoteldive.com/news/peregrine-hospitality-appoints-chief-operating-officer/810221/",
-      "domain": "hoteldive.com",
-      "url_pattern": "https://www.hoteldive.com/news/SLUG/ID/",
-      "was_relevant": false,
-      "lead_count": 0,
-      "lead_quality_avg": 0,
-      "timestamp": "2026-02-02T14:13:27.097174"
-    },
-    {
-      "url": "https://www.hoteldive.com/topic/operations/",
-      "domain": "hoteldive.com",
-      "url_pattern": "https://www.hoteldive.com/topic/operations/",
-      "was_relevant": false,
-      "lead_count": 0,
-      "lead_quality_avg": 0,
-      "timestamp": "2026-02-02T14:13:28.102195"
-    },
-    {
-      "url": "https://www.hoteldive.com/topic/technology/",
-      "domain": "hoteldive.com",
-      "url_pattern": "https://www.hoteldive.com/topic/technology/",
-      "was_relevant": false,
-      "lead_count": 0,
-      "lead_quality_avg": 0,
-      "timestamp": "2026-02-02T14:13:29.349343"
-    },
-    {
-      "url": "https://www.hoteldive.com/topic/consumer-trends/",
-      "domain": "hoteldive.com",
-      "url_pattern": "https://www.hoteldive.com/topic/consumer-trends/",
-      "was_relevant": true,
-      "lead_count": 0,
-      "lead_quality_avg": 0,
-      "timestamp": "2026-02-02T14:13:30.640825"
-    },
-    {
-      "url": "https://www.hoteldive.com/topic/workforce/",
-      "domain": "hoteldive.com",
-      "url_pattern": "https://www.hoteldive.com/topic/workforce/",
-      "was_relevant": false,
-      "lead_count": 0,
-      "lead_quality_avg": 0,
-      "timestamp": "2026-02-02T14:13:32.064225"
-    },
-    {
-      "url": "https://www.hoteldive.com/topic/finances-deals/",
-      "domain": "hoteldive.com",
-      "url_pattern": "https://www.hoteldive.com/topic/finances-deals/",
-      "was_relevant": true,
-      "lead_count": 0,
-      "lead_quality_avg": 0,
-      "timestamp": "2026-02-02T14:13:33.333804"
-    },
-    {
-      "url": "https://www.hoteldive.com/topic/regulations/",
-      "domain": "hoteldive.com",
-      "url_pattern": "https://www.hoteldive.com/topic/regulations/",
-      "was_relevant": false,
-      "lead_count": 0,
-      "lead_quality_avg": 0,
-      "timestamp": "2026-02-02T14:13:34.494306"
+      "timestamp": "2026-02-03T16:11:16.651944"
     },
     {
       "url": "https://www.hoteldive.com/topic/development/",
       "domain": "hoteldive.com",
       "url_pattern": "https://www.hoteldive.com/topic/development/",
       "was_relevant": true,
-      "lead_count": 13,
-      "lead_quality_avg": 0.0,
-      "timestamp": "2026-02-02T14:13:40.069327"
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-02-03T16:50:28.093662"
+    },
+    {
+      "url": "https://www.hoteldive.com/news/us-hotel-investment-climbed-to-24b-in-2025-jll/811205/",
+      "domain": "hoteldive.com",
+      "url_pattern": "https://www.hoteldive.com/news/SLUG/ID/",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-02-03T16:50:29.459025"
+    },
+    {
+      "url": "https://www.hoteldive.com/news/choice-hotels-everhome-suites-extended-stay-openings/811153/",
+      "domain": "hoteldive.com",
+      "url_pattern": "https://www.hoteldive.com/news/SLUG/ID/",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-02-03T16:50:30.850209"
     },
     {
       "url": "https://www.hoteldive.com/news/hilton-waldorf-astoria-resort-development-deer-valley-utah/811075/",
       "domain": "hoteldive.com",
       "url_pattern": "https://www.hoteldive.com/news/SLUG/ID/",
       "was_relevant": true,
-      "lead_count": 1,
-      "lead_quality_avg": 0.0,
-      "timestamp": "2026-02-02T14:13:41.329757"
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-02-03T16:50:31.949646"
     },
     {
       "url": "https://www.hoteldive.com/news/hotel-industry-trends-forecast-2026/811017/",
       "domain": "hoteldive.com",
       "url_pattern": "https://www.hoteldive.com/news/SLUG/ID/",
       "was_relevant": true,
-      "lead_count": 1,
-      "lead_quality_avg": 0.0,
-      "timestamp": "2026-02-02T14:13:42.526565"
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-02-03T16:50:33.384788"
+    },
+    {
+      "url": "https://www.hoteldive.com/news/accor-names-chief-franchise-officer-premium-midscale-economy/810922/",
+      "domain": "hoteldive.com",
+      "url_pattern": "https://www.hoteldive.com/news/SLUG/ID/",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-02-03T16:50:34.552863"
     },
     {
       "url": "https://www.hoteldive.com/news/hilton-undergraduate-lifestyle-brand-launch-college-town-markets/810918/",
       "domain": "hoteldive.com",
       "url_pattern": "https://www.hoteldive.com/news/SLUG/ID/",
       "was_relevant": true,
-      "lead_count": 1,
-      "lead_quality_avg": 0.0,
-      "timestamp": "2026-02-02T14:13:43.593635"
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-02-03T16:50:35.781212"
     },
     {
       "url": "https://www.hoteldive.com/news/ian-schrager-highgate-public-brand-partnership/810689/",
       "domain": "hoteldive.com",
       "url_pattern": "https://www.hoteldive.com/news/SLUG/ID/",
       "was_relevant": true,
-      "lead_count": 1,
-      "lead_quality_avg": 0.0,
-      "timestamp": "2026-02-02T14:13:44.565002"
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-02-03T16:50:37.376682"
     },
     {
       "url": "https://www.hoteldive.com/news/ihg-ruby-hotels-chicago-debut/810588/",
       "domain": "hoteldive.com",
       "url_pattern": "https://www.hoteldive.com/news/SLUG/ID/",
       "was_relevant": true,
-      "lead_count": 1,
-      "lead_quality_avg": 0.0,
-      "timestamp": "2026-02-02T14:13:45.931079"
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-02-03T16:50:38.669016"
     },
     {
       "url": "https://www.hoteldive.com/news/hotel-construction-pipeline-q4-2025/810587/",
@@ -1620,79 +1413,295 @@
       "was_relevant": true,
       "lead_count": 0,
       "lead_quality_avg": 0,
-      "timestamp": "2026-02-02T14:13:49.377505"
+      "timestamp": "2026-02-03T16:50:40.006413"
     },
     {
       "url": "https://www.hoteldive.com/news/ihg-six-senses-resort-utah/810467/",
       "domain": "hoteldive.com",
       "url_pattern": "https://www.hoteldive.com/news/SLUG/ID/",
       "was_relevant": true,
-      "lead_count": 1,
-      "lead_quality_avg": 0.0,
-      "timestamp": "2026-02-02T14:13:50.395951"
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-02-03T16:50:41.141891"
     },
     {
       "url": "https://www.hoteldive.com/news/top-hotel-openings-2026/810298/",
       "domain": "hoteldive.com",
       "url_pattern": "https://www.hoteldive.com/news/SLUG/ID/",
       "was_relevant": true,
-      "lead_count": 9,
-      "lead_quality_avg": 0.0,
-      "timestamp": "2026-02-02T14:13:55.834514"
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-02-03T16:50:42.219199"
+    },
+    {
+      "url": "https://www.hoteldive.com/news/wyndham-reside-partnership-apartment-hotel-opening/810218/",
+      "domain": "hoteldive.com",
+      "url_pattern": "https://www.hoteldive.com/news/SLUG/ID/",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-02-03T16:50:43.855080"
     },
     {
       "url": "https://www.hoteldive.com/news/new-york-city-phoenix-hotel-openings-2026/810079/",
       "domain": "hoteldive.com",
       "url_pattern": "https://www.hoteldive.com/news/SLUG/ID/",
       "was_relevant": true,
-      "lead_count": 1,
-      "lead_quality_avg": 0.0,
-      "timestamp": "2026-02-02T14:13:56.813876"
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-02-03T16:50:44.886612"
+    },
+    {
+      "url": "https://www.hoteldive.com/news/ihg-appoints-mark-sergot-chief-development-officer-americas-region/809806/",
+      "domain": "hoteldive.com",
+      "url_pattern": "https://www.hoteldive.com/news/SLUG/ID/",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-02-03T16:50:46.085200"
+    },
+    {
+      "url": "https://www.hoteldive.com/news/hilton-debuts-apartment-collection-brand/809718/",
+      "domain": "hoteldive.com",
+      "url_pattern": "https://www.hoteldive.com/news/SLUG/ID/",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-02-03T16:50:47.436341"
+    },
+    {
+      "url": "https://www.hoteldive.com/news/hotel-development-trends-2026-forecast/809599/",
+      "domain": "hoteldive.com",
+      "url_pattern": "https://www.hoteldive.com/news/SLUG/ID/",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-02-03T16:50:48.732526"
     },
     {
       "url": "https://www.hoteldive.com/news/outbound-hotels-park-city-2027-waterton-barings/809588/",
       "domain": "hoteldive.com",
       "url_pattern": "https://www.hoteldive.com/news/SLUG/ID/",
       "was_relevant": true,
-      "lead_count": 1,
-      "lead_quality_avg": 0.0,
-      "timestamp": "2026-02-02T14:13:57.990643"
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-02-03T16:50:49.995167"
     },
     {
       "url": "https://www.hoteldive.com/news/ritz-carlton-hotel-development-indianapolis/809199/",
       "domain": "hoteldive.com",
       "url_pattern": "https://www.hoteldive.com/news/SLUG/ID/",
       "was_relevant": true,
-      "lead_count": 1,
-      "lead_quality_avg": 0.0,
-      "timestamp": "2026-02-02T14:13:59.191243"
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-02-03T16:50:51.341495"
     },
     {
-      "url": "https://www.hoteldive.com/news/one-beverly-hills-vertical-construction/807320/",
+      "url": "https://www.hoteldive.com/news/top-hospitality-industry-trends-2026/808959/",
       "domain": "hoteldive.com",
       "url_pattern": "https://www.hoteldive.com/news/SLUG/ID/",
-      "was_relevant": true,
-      "lead_count": 1,
-      "lead_quality_avg": 0.0,
-      "timestamp": "2026-02-02T14:14:00.696924"
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-02-03T16:50:52.510655"
+    },
+    {
+      "url": "https://www.hoteldive.com/news/hospitality-industry-executive-appointments-q4-2025/808640/",
+      "domain": "hoteldive.com",
+      "url_pattern": "https://www.hoteldive.com/news/SLUG/ID/",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-02-03T16:50:53.869881"
+    },
+    {
+      "url": "https://www.hoteldive.com/news/apple-hospitality-motto-hilton-nashville-downtown/808592/",
+      "domain": "hoteldive.com",
+      "url_pattern": "https://www.hoteldive.com/news/SLUG/ID/",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-02-03T16:50:55.450621"
+    },
+    {
+      "url": "https://www.hoteldive.com/news/omni-fort-lauderdale-hotel-opening/808495/",
+      "domain": "hoteldive.com",
+      "url_pattern": "https://www.hoteldive.com/news/SLUG/ID/",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-02-03T16:50:56.729577"
+    },
+    {
+      "url": "https://www.hoteldive.com/news/hospitality-industry-executive-interviews-2025/808370/",
+      "domain": "hoteldive.com",
+      "url_pattern": "https://www.hoteldive.com/news/SLUG/ID/",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-02-03T16:50:57.689917"
+    },
+    {
+      "url": "https://www.hoteldive.com/news/hotel-casinos-hard-rock-resorts-world-ballys-new-york/808239/",
+      "domain": "hoteldive.com",
+      "url_pattern": "https://www.hoteldive.com/news/SLUG/ID/",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-02-03T16:50:58.864963"
+    },
+    {
+      "url": "https://www.hoteldive.com/news/hyatt-appoints-jason-ballard-global-brand-leader-essentials/808107/",
+      "domain": "hoteldive.com",
+      "url_pattern": "https://www.hoteldive.com/news/SLUG/ID/",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-02-03T16:51:00.545958"
     },
     {
       "url": "https://www.hoteldive.com/what-we-are-reading",
       "domain": "hoteldive.com",
       "url_pattern": "https://www.hoteldive.com/what-we-are-reading",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-02-03T16:51:02.064638"
+    },
+    {
+      "url": "https://www.hoteldive.com/news/fed-rate-cut-hotel-investment-trends-/807655/",
+      "domain": "hoteldive.com",
+      "url_pattern": "https://www.hoteldive.com/news/SLUG/ID/",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-02-03T16:51:03.203756"
+    },
+    {
+      "url": "https://www.hoteldive.com/news/fifa-world-cup-2026-booking-volume-adr-increase/808374/",
+      "domain": "hoteldive.com",
+      "url_pattern": "https://www.hoteldive.com/news/SLUG/ID/",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-02-03T16:51:05.346228"
+    },
+    {
+      "url": "https://www.hoteldive.com/news/hotel-industry-performance-2026-costar-tourism-economics/810703/",
+      "domain": "hoteldive.com",
+      "url_pattern": "https://www.hoteldive.com/news/SLUG/ID/",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-02-03T16:51:06.532680"
+    },
+    {
+      "url": "https://www.hoteldive.com/topic/consumer-trends/",
+      "domain": "hoteldive.com",
+      "url_pattern": "https://www.hoteldive.com/topic/consumer-trends/",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-02-03T16:51:08.069145"
+    },
+    {
+      "url": "https://www.hoteldive.com/topic/finances-deals/",
+      "domain": "hoteldive.com",
+      "url_pattern": "https://www.hoteldive.com/topic/finances-deals/",
       "was_relevant": true,
-      "lead_count": 1,
-      "lead_quality_avg": 0.0,
-      "timestamp": "2026-02-02T14:14:02.152577"
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-02-03T16:51:09.472627"
+    },
+    {
+      "url": "https://www.hoteldive.com/news/choice-hotels-everhome-suites-openings/759225/",
+      "domain": "hoteldive.com",
+      "url_pattern": "https://www.hoteldive.com/news/SLUG/ID/",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-02-03T16:51:10.949590"
+    },
+    {
+      "url": "https://www.hoteldive.com/news/choice-hotels-opens-everhome-suites-brand-standard-prototype/716025/",
+      "domain": "hoteldive.com",
+      "url_pattern": "https://www.hoteldive.com/news/SLUG/ID/",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-02-03T16:51:12.274104"
+    },
+    {
+      "url": "https://www.hoteldive.com/news/choice-hotels-extended-stay-everhome-suites-openings/749400/",
+      "domain": "hoteldive.com",
+      "url_pattern": "https://www.hoteldive.com/news/SLUG/ID/",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-02-03T16:51:13.727853"
+    },
+    {
+      "url": "https://www.hoteldive.com/news/choice-hotels-q3-2025-earnings/804758/",
+      "domain": "hoteldive.com",
+      "url_pattern": "https://www.hoteldive.com/news/SLUG/ID/",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-02-03T16:51:14.992998"
+    },
+    {
+      "url": "https://www.hoteldive.com/topic/brands/",
+      "domain": "hoteldive.com",
+      "url_pattern": "https://www.hoteldive.com/topic/brands/",
+      "was_relevant": true,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-02-03T16:51:17.114311"
     },
     {
       "url": "https://www.hoteldive.com/news/hilton-canopy-deer-valley-ski-resort-utah/743140/",
       "domain": "hoteldive.com",
       "url_pattern": "https://www.hoteldive.com/news/SLUG/ID/",
       "was_relevant": true,
-      "lead_count": 1,
-      "lead_quality_avg": 0.0,
-      "timestamp": "2026-02-02T14:14:04.398917"
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-02-03T16:51:19.912841"
+    },
+    {
+      "url": "https://www.hoteldive.com/news/deer-valley-utah-development-hotel-brands/750105/",
+      "domain": "hoteldive.com",
+      "url_pattern": "https://www.hoteldive.com/news/SLUG/ID/",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-02-03T16:51:21.669775"
+    },
+    {
+      "url": "https://www.hoteldive.com/news/family-travel-hotel-business/803721/",
+      "domain": "hoteldive.com",
+      "url_pattern": "https://www.hoteldive.com/news/SLUG/ID/",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-02-03T16:51:22.839702"
+    },
+    {
+      "url": "https://www.hoteldive.com/news/marriott-launches-outdoors-focused-digital-platform-collection-brand/761563/",
+      "domain": "hoteldive.com",
+      "url_pattern": "https://www.hoteldive.com/news/SLUG/ID/",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-02-03T16:51:24.077723"
+    },
+    {
+      "url": "https://www.hoteldive.com/news/hilton-autocamp-partner-outdoor-experiential-stays/708733/",
+      "domain": "hoteldive.com",
+      "url_pattern": "https://www.hoteldive.com/news/SLUG/ID/",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-02-03T16:51:25.390434"
     },
     {
       "url": "https://www.hoteldive.com/news/hilton-debuts-upscale-outset-collection-brand/801970/",
@@ -1701,52 +1710,43 @@
       "was_relevant": true,
       "lead_count": 0,
       "lead_quality_avg": 0,
-      "timestamp": "2026-02-02T14:14:06.875005"
+      "timestamp": "2026-02-03T16:51:26.909190"
     },
     {
       "url": "https://www.hoteldive.com/news/four-seasons-luxury-hotel-residences-park-city-utah/735358/",
       "domain": "hoteldive.com",
       "url_pattern": "https://www.hoteldive.com/news/SLUG/ID/",
       "was_relevant": true,
-      "lead_count": 1,
-      "lead_quality_avg": 0.0,
-      "timestamp": "2026-02-02T14:14:08.042743"
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-02-03T16:51:28.117235"
+    },
+    {
+      "url": "https://www.hoteldive.com/news/grand-hyatt-opening-utah/733714/",
+      "domain": "hoteldive.com",
+      "url_pattern": "https://www.hoteldive.com/news/SLUG/ID/",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-02-03T16:51:29.573537"
     },
     {
       "url": "https://www.hoteldive.com/news/hilton-developing-waldorf-astoria-texas-hill-country/743695/",
       "domain": "hoteldive.com",
       "url_pattern": "https://www.hoteldive.com/news/SLUG/ID/",
       "was_relevant": true,
-      "lead_count": 1,
-      "lead_quality_avg": 0.0,
-      "timestamp": "2026-02-02T14:14:09.421905"
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-02-03T16:51:31.337561"
     },
     {
-      "url": "https://www.hoteldive.com/topic/brands/",
+      "url": "https://www.hoteldive.com/news/hotel-occupancy-revpar-decline-2025/810212/",
       "domain": "hoteldive.com",
-      "url_pattern": "https://www.hoteldive.com/topic/brands/",
-      "was_relevant": true,
-      "lead_count": 9,
-      "lead_quality_avg": 0.0,
-      "timestamp": "2026-02-02T14:14:13.233832"
-    },
-    {
-      "url": "https://www.hoteldive.com/topic/consumer-trends/",
-      "domain": "hoteldive.com",
-      "url_pattern": "https://www.hoteldive.com/topic/consumer-trends/",
-      "was_relevant": true,
-      "lead_count": 1,
-      "lead_quality_avg": 0.0,
-      "timestamp": "2026-02-02T14:14:14.452663"
-    },
-    {
-      "url": "https://www.hoteldive.com/topic/finances-deals/",
-      "domain": "hoteldive.com",
-      "url_pattern": "https://www.hoteldive.com/topic/finances-deals/",
-      "was_relevant": true,
-      "lead_count": 1,
-      "lead_quality_avg": 0.0,
-      "timestamp": "2026-02-02T14:14:15.737591"
+      "url_pattern": "https://www.hoteldive.com/news/SLUG/ID/",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-02-03T16:51:32.388516"
     }
   ],
   "customerexperiencedive.com": [
@@ -1805,6 +1805,15 @@
       "lead_count": 0,
       "lead_quality_avg": 0,
       "timestamp": "2026-01-30T13:16:55.241091"
+    },
+    {
+      "url": "https://www.hospitalitynet.org/news/global.html",
+      "domain": "hospitalitynet.org",
+      "url_pattern": "https://www.hospitalitynet.org/news/global.html",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-02-03T12:25:23.581683"
     }
   ],
   "ihgplc.com": [
@@ -4083,6 +4092,114 @@
       "lead_count": 0,
       "lead_quality_avg": 0,
       "timestamp": "2026-02-02T16:23:20.845489"
+    },
+    {
+      "url": "https://stories.hilton.com/releases/waldorf-astoria-hotels-resorts-coming-to-deer-valley-east-village-park-city-utah",
+      "domain": "stories.hilton.com",
+      "url_pattern": "https://stories.hilton.com/releases/waldorf-astoria-hotels-resorts-coming-to-deer-valley-east-village-park-city-utah",
+      "was_relevant": true,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-02-03T12:28:16.190626"
+    },
+    {
+      "url": "https://stories.hilton.com/releases/waldorf-astoria-hotels-resorts-coming-to-deer-valley-east-village-park-city-utah",
+      "domain": "stories.hilton.com",
+      "url_pattern": "https://stories.hilton.com/releases/waldorf-astoria-hotels-resorts-coming-to-deer-valley-east-village-park-city-utah",
+      "was_relevant": true,
+      "lead_count": 1,
+      "lead_quality_avg": 0.0,
+      "timestamp": "2026-02-03T12:28:56.528315"
+    },
+    {
+      "url": "https://stories.hilton.com/releases/waldorf-astoria-hotels-resorts-coming-to-deer-valley-east-village-park-city-utah",
+      "domain": "stories.hilton.com",
+      "url_pattern": "https://stories.hilton.com/releases/waldorf-astoria-hotels-resorts-coming-to-deer-valley-east-village-park-city-utah",
+      "was_relevant": true,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-02-03T12:50:31.948493"
+    },
+    {
+      "url": "https://stories.hilton.com/releases/waldorf-astoria-hotels-resorts-coming-to-deer-valley-east-village-park-city-utah",
+      "domain": "stories.hilton.com",
+      "url_pattern": "https://stories.hilton.com/releases/waldorf-astoria-hotels-resorts-coming-to-deer-valley-east-village-park-city-utah",
+      "was_relevant": true,
+      "lead_count": 1,
+      "lead_quality_avg": 0.0,
+      "timestamp": "2026-02-03T12:51:13.701052"
+    },
+    {
+      "url": "https://stories.hilton.com/releases/waldorf-astoria-hotels-resorts-coming-to-deer-valley-east-village-park-city-utah",
+      "domain": "stories.hilton.com",
+      "url_pattern": "https://stories.hilton.com/releases/waldorf-astoria-hotels-resorts-coming-to-deer-valley-east-village-park-city-utah",
+      "was_relevant": true,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-02-03T14:15:07.213172"
+    },
+    {
+      "url": "https://stories.hilton.com/releases/waldorf-astoria-hotels-resorts-coming-to-deer-valley-east-village-park-city-utah",
+      "domain": "stories.hilton.com",
+      "url_pattern": "https://stories.hilton.com/releases/waldorf-astoria-hotels-resorts-coming-to-deer-valley-east-village-park-city-utah",
+      "was_relevant": true,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-02-03T14:19:22.352875"
+    },
+    {
+      "url": "https://stories.hilton.com/releases/waldorf-astoria-hotels-resorts-coming-to-deer-valley-east-village-park-city-utah",
+      "domain": "stories.hilton.com",
+      "url_pattern": "https://stories.hilton.com/releases/waldorf-astoria-hotels-resorts-coming-to-deer-valley-east-village-park-city-utah",
+      "was_relevant": true,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-02-03T14:48:08.920071"
+    },
+    {
+      "url": "https://stories.hilton.com/releases/waldorf-astoria-hotels-resorts-coming-to-deer-valley-east-village-park-city-utah",
+      "domain": "stories.hilton.com",
+      "url_pattern": "https://stories.hilton.com/releases/waldorf-astoria-hotels-resorts-coming-to-deer-valley-east-village-park-city-utah",
+      "was_relevant": true,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-02-03T15:13:28.680127"
+    },
+    {
+      "url": "https://stories.hilton.com/releases/waldorf-astoria-hotels-resorts-coming-to-deer-valley-east-village-park-city-utah",
+      "domain": "stories.hilton.com",
+      "url_pattern": "https://stories.hilton.com/releases/waldorf-astoria-hotels-resorts-coming-to-deer-valley-east-village-park-city-utah",
+      "was_relevant": true,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-02-03T15:48:05.593123"
+    },
+    {
+      "url": "https://stories.hilton.com/releases/waldorf-astoria-hotels-resorts-coming-to-deer-valley-east-village-park-city-utah",
+      "domain": "stories.hilton.com",
+      "url_pattern": "https://stories.hilton.com/releases/waldorf-astoria-hotels-resorts-coming-to-deer-valley-east-village-park-city-utah",
+      "was_relevant": true,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-02-03T16:00:02.085667"
+    },
+    {
+      "url": "https://stories.hilton.com/releases/waldorf-astoria-hotels-resorts-coming-to-deer-valley-east-village-park-city-utah",
+      "domain": "stories.hilton.com",
+      "url_pattern": "https://stories.hilton.com/releases/waldorf-astoria-hotels-resorts-coming-to-deer-valley-east-village-park-city-utah",
+      "was_relevant": true,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-02-03T16:11:02.993396"
+    },
+    {
+      "url": "https://stories.hilton.com/releases/waldorf-astoria-hotels-resorts-coming-to-deer-valley-east-village-park-city-utah",
+      "domain": "stories.hilton.com",
+      "url_pattern": "https://stories.hilton.com/releases/waldorf-astoria-hotels-resorts-coming-to-deer-valley-east-village-park-city-utah",
+      "was_relevant": true,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-02-03T16:51:18.367104"
     }
   ],
   "marriott-international.pressarea.com": [
@@ -6025,6 +6142,201 @@
       "lead_count": 0,
       "lead_quality_avg": 0,
       "timestamp": "2026-02-02T16:50:00.379215"
+    }
+  ],
+  "lodgingmagazine.com": [
+    {
+      "url": "https://lodgingmagazine.com/category/industrynews/",
+      "domain": "lodgingmagazine.com",
+      "url_pattern": "https://lodgingmagazine.com/category/industrynews/",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-02-03T12:25:26.796943"
+    }
+  ],
+  "cfodive.com": [
+    {
+      "url": "https://www.cfodive.com/news/fed-holds-main-rate-steady-highlighting-signs-of-job-market-stability/810771/",
+      "domain": "cfodive.com",
+      "url_pattern": "https://www.cfodive.com/news/SLUG/ID/",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-02-03T12:28:00.789302"
+    },
+    {
+      "url": "https://www.cfodive.com/news/fed-holds-main-rate-steady-highlighting-signs-of-job-market-stability/810771/",
+      "domain": "cfodive.com",
+      "url_pattern": "https://www.cfodive.com/news/SLUG/ID/",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-02-03T12:50:17.614793"
+    },
+    {
+      "url": "https://www.cfodive.com/news/fed-holds-main-rate-steady-highlighting-signs-of-job-market-stability/810771/",
+      "domain": "cfodive.com",
+      "url_pattern": "https://www.cfodive.com/news/SLUG/ID/",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-02-03T14:14:51.829413"
+    },
+    {
+      "url": "https://www.cfodive.com/news/fed-holds-main-rate-steady-highlighting-signs-of-job-market-stability/810771/",
+      "domain": "cfodive.com",
+      "url_pattern": "https://www.cfodive.com/news/SLUG/ID/",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-02-03T14:19:06.462751"
+    },
+    {
+      "url": "https://www.cfodive.com/news/fed-holds-main-rate-steady-highlighting-signs-of-job-market-stability/810771/",
+      "domain": "cfodive.com",
+      "url_pattern": "https://www.cfodive.com/news/SLUG/ID/",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-02-03T14:47:52.722696"
+    },
+    {
+      "url": "https://www.cfodive.com/news/fed-holds-main-rate-steady-highlighting-signs-of-job-market-stability/810771/",
+      "domain": "cfodive.com",
+      "url_pattern": "https://www.cfodive.com/news/SLUG/ID/",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-02-03T15:13:12.723013"
+    },
+    {
+      "url": "https://www.cfodive.com/news/fed-holds-main-rate-steady-highlighting-signs-of-job-market-stability/810771/",
+      "domain": "cfodive.com",
+      "url_pattern": "https://www.cfodive.com/news/SLUG/ID/",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-02-03T15:47:50.536924"
+    },
+    {
+      "url": "https://www.cfodive.com/news/fed-holds-main-rate-steady-highlighting-signs-of-job-market-stability/810771/",
+      "domain": "cfodive.com",
+      "url_pattern": "https://www.cfodive.com/news/SLUG/ID/",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-02-03T15:59:47.144710"
+    },
+    {
+      "url": "https://www.cfodive.com/news/fed-holds-main-rate-steady-highlighting-signs-of-job-market-stability/810771/",
+      "domain": "cfodive.com",
+      "url_pattern": "https://www.cfodive.com/news/SLUG/ID/",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-02-03T16:10:48.432547"
+    },
+    {
+      "url": "https://www.cfodive.com/news/fed-holds-main-rate-steady-highlighting-signs-of-job-market-stability/810771/",
+      "domain": "cfodive.com",
+      "url_pattern": "https://www.cfodive.com/news/SLUG/ID/",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-02-03T16:51:04.351620"
+    }
+  ],
+  "constructiondive.com": [
+    {
+      "url": "https://www.constructiondive.com/news/data-center-construction-rolls-into-2026/808636/",
+      "domain": "constructiondive.com",
+      "url_pattern": "https://www.constructiondive.com/news/SLUG/ID/",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-02-03T12:28:13.734112"
+    },
+    {
+      "url": "https://www.constructiondive.com/news/data-center-construction-rolls-into-2026/808636/",
+      "domain": "constructiondive.com",
+      "url_pattern": "https://www.constructiondive.com/news/SLUG/ID/",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-02-03T12:50:29.252468"
+    },
+    {
+      "url": "https://www.constructiondive.com/news/data-center-construction-rolls-into-2026/808636/",
+      "domain": "constructiondive.com",
+      "url_pattern": "https://www.constructiondive.com/news/SLUG/ID/",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-02-03T14:15:04.853764"
+    },
+    {
+      "url": "https://www.constructiondive.com/news/data-center-construction-rolls-into-2026/808636/",
+      "domain": "constructiondive.com",
+      "url_pattern": "https://www.constructiondive.com/news/SLUG/ID/",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-02-03T14:19:19.568247"
+    },
+    {
+      "url": "https://www.constructiondive.com/news/data-center-construction-rolls-into-2026/808636/",
+      "domain": "constructiondive.com",
+      "url_pattern": "https://www.constructiondive.com/news/SLUG/ID/",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-02-03T14:48:06.058236"
+    },
+    {
+      "url": "https://www.constructiondive.com/news/data-center-construction-rolls-into-2026/808636/",
+      "domain": "constructiondive.com",
+      "url_pattern": "https://www.constructiondive.com/news/SLUG/ID/",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-02-03T15:13:26.003172"
+    },
+    {
+      "url": "https://www.constructiondive.com/news/data-center-construction-rolls-into-2026/808636/",
+      "domain": "constructiondive.com",
+      "url_pattern": "https://www.constructiondive.com/news/SLUG/ID/",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-02-03T15:48:02.779315"
+    },
+    {
+      "url": "https://www.constructiondive.com/news/data-center-construction-rolls-into-2026/808636/",
+      "domain": "constructiondive.com",
+      "url_pattern": "https://www.constructiondive.com/news/SLUG/ID/",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-02-03T15:59:59.031376"
+    },
+    {
+      "url": "https://www.constructiondive.com/news/data-center-construction-rolls-into-2026/808636/",
+      "domain": "constructiondive.com",
+      "url_pattern": "https://www.constructiondive.com/news/SLUG/ID/",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-02-03T16:11:00.571886"
+    },
+    {
+      "url": "https://www.constructiondive.com/news/data-center-construction-rolls-into-2026/808636/",
+      "domain": "constructiondive.com",
+      "url_pattern": "https://www.constructiondive.com/news/SLUG/ID/",
+      "was_relevant": false,
+      "lead_count": 0,
+      "lead_quality_avg": 0,
+      "timestamp": "2026-02-03T16:51:16.140038"
     }
   ]
 }

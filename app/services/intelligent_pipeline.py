@@ -39,20 +39,6 @@ import httpx
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Import custom handlers for site-specific extraction
-try:
-    from app.services.custom_handlers import (
-        has_custom_handler, 
-        get_handler, 
-        extract_with_handler,
-        ExtractedLead as HandlerExtractedLead
-    )
-    CUSTOM_HANDLERS_AVAILABLE = True
-    logger.info("✅ Custom site handlers loaded")
-except ImportError:
-    CUSTOM_HANDLERS_AVAILABLE = False
-    logger.warning("⚠️ Custom handlers not available - using AI extraction only")
-
 
 # =============================================================================
 # CONFIGURATION
@@ -64,7 +50,7 @@ class PipelineConfig:
     # AI Model settings
     gemini_api_key: str = ""
     classifier_model: str = "gemini-2.5-flash-lite"  # Cheapest for classification
-    extractor_model: str = "gemini-2.5-flash-lite"   # Can upgrade to 2.5-flash if needed
+    extractor_model: str = "gemini-2.5-flash"   # Can upgrade to 2.5-flash if needed
     
     # Thresholds
     relevance_threshold: float = 0.7  # Minimum confidence to extract
@@ -378,6 +364,7 @@ class ExtractedLead:
     contact_title: str = ""
     contact_email: str = ""
     contact_phone: str = ""
+    key_insights: str = ""
     
     # Source
     source_url: str = ""
@@ -406,6 +393,7 @@ class ExtractedLead:
             'contact_title': self.contact_title,
             'contact_email': self.contact_email,
             'contact_phone': self.contact_phone,
+            'key_insights': self.key_insights,
             'source_url': self.source_url,
             'source_name': self.source_name,
             'extracted_at': self.extracted_at,
@@ -424,7 +412,7 @@ class LeadExtractor:
     Cost: ~$0.001 per page
     Speed: 2-3 seconds per page
     """
-    
+
     EXTRACTION_PROMPT = """You are a hotel industry data extraction specialist.
 
 Extract information about the NEW HOTEL OPENING from this article.
@@ -435,11 +423,24 @@ IMPORTANT RULES:
 3. If multiple new hotels are mentioned, extract each separately
 4. Leave fields empty if information is not clearly stated
 5. For opening_date, use format "Month YYYY" or "Q1 2026" or "2026"
+6. For key_insights, extract the MOST IMPORTANT facts a uniform sales person would want to know
+
+KEY INSIGHTS TO CAPTURE (these directly affect uniform orders!):
+- Staff hiring numbers (e.g., "hiring 300 employees" = big uniform order!)
+- Number of restaurants/bars (each needs different uniforms)
+- Spa facilities (spa staff need specific uniforms)
+- Pool/beach staff mentioned
+- Housekeeping team size if mentioned
+- Management company (some have uniform programs)
+- Construction timeline and progress
+- Investment/budget amounts
+- Any unique features affecting staffing
 
 CONTENT:
 ---
 {content}
 ---
+IMPORTANT: The "key_insights" field is REQUIRED for every hotel. Even if specific staffing numbers aren't mentioned, include whatever notable details ARE in the article (investment amount, construction timeline, amenities planned, target market, unique features, etc.)
 
 Respond with a JSON array of hotels (even if just one):
 [
@@ -458,12 +459,14 @@ Respond with a JSON array of hotels (even if just one):
         "contact_name": "Any contact person mentioned",
         "contact_title": "Their job title",
         "contact_email": "Email if found",
-        "contact_phone": "Phone if found"
+        "contact_phone": "Phone if found",
+        "key_insights": "MANDATORY - NEVER LEAVE EMPTY! Extract 2-5 bullet points: • Staff numbers (e.g., 'hiring 300 employees') • F&B outlets count • Spa/amenities • Investment amount • Construction timeline • Target market. Always include whatever details ARE mentioned in the article, even if not all categories apply."
     }}
 ]
 
 Return ONLY the JSON array, no other text."""
-
+    
+    
     def __init__(self, config: PipelineConfig):
         self.config = config
         self.api_key = config.gemini_api_key or os.getenv("GEMINI_API_KEY", "")
@@ -522,6 +525,7 @@ Return ONLY the JSON array, no other text."""
                                     contact_title=hotel.get('contact_title', ''),
                                     contact_email=hotel.get('contact_email', ''),
                                     contact_phone=hotel.get('contact_phone', ''),
+                                    key_insights=hotel.get('key_insights', ''),
                                     source_url=url,
                                     source_name=source_name,
                                     extracted_at=datetime.now().isoformat()
@@ -1253,74 +1257,23 @@ class IntelligentPipeline:
         # === STAGE 3: Extraction ===
         logger.info(f"\n🔍 STAGE 3: Extracting from {len(relevant_pages)} relevant pages...")
         extraction_start = time.time()
-        
+
         all_leads = []
         
-        # Check for custom handlers first (site-specific extraction)
-        custom_handler_urls = set()
-        if CUSTOM_HANDLERS_AVAILABLE:
-            for page in pages:
-                url = page.get('url', '')
-                content = page.get('content', '') or page.get('text', '')
-                
-                if has_custom_handler(url):
-                    custom_handler_urls.add(url)
-                    handler = get_handler(url)
-                    logger.info(f"🔧 Using custom handler: {handler.name} for {url[:50]}...")
-                    
-                    try:
-                        handler_leads = await handler.extract(content, url)
-                        
-                        # Convert handler leads to pipeline ExtractedLead format
-                        for hl in handler_leads:
-                            lead = ExtractedLead(
-                                hotel_name=hl.hotel_name or '',
-                                brand=hl.brand or '',
-                                property_type=hl.property_type or '',
-                                city=hl.city or '',
-                                state=hl.state or '',
-                                country=hl.country or '',
-                                opening_date=hl.opening_date or str(hl.opening_year) if hl.opening_year else '',
-                                opening_status='announced',
-                                room_count=hl.room_count or 0,
-                                management_company='',
-                                developer='',
-                                contact_name=hl.contact_name or '',
-                                contact_title='',
-                                contact_email=hl.contact_email or '',
-                                contact_phone=hl.contact_phone or '',
-                                source_url=url,
-                                source_name=page.get('source', source_name),
-                                extracted_at=datetime.now().isoformat()
-                            )
-                            all_leads.append(lead)
-                        
-                        logger.info(f"   ✅ Custom handler extracted {len(handler_leads)} leads")
-                        
-                        # Record learning (pass empty list - learning happens after qualification)
-                        self.learner.record(url, True, [])
-                        
-                    except Exception as e:
-                        logger.error(f"   ❌ Custom handler failed: {e}")
-        
-        # Process remaining relevant pages with AI extraction
         for page in relevant_pages:
             url = page['url']
+            content = page['content']
+            source = page.get('source', source_name)
             
-            # Skip if already processed by custom handler
-            if url in custom_handler_urls:
-                continue
-            
-            leads = await self.extractor.extract(
-                page['url'], 
-                page['content'],
-                page['source']
-            )
-            all_leads.extend(leads)
-            
-            # Update learning with actual leads
-            self.learner.record(page['url'], True, leads)
-        
+            try:
+                leads = await self.extractor.extract(url, content, source)
+                if leads:
+                    all_leads.extend(leads)
+                    for lead in leads:
+                        logger.info(f"   📝 Extracted: {lead.hotel_name} ({lead.city}, {lead.state})")
+            except Exception as e:
+                logger.warning(f"   ⚠️ Extraction error for {url[:50]}: {e}")
+
         extraction_time = int((time.time() - extraction_start) * 1000)
         logger.info(f"✅ Extracted {len(all_leads)} leads")
         
