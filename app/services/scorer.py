@@ -857,6 +857,173 @@ def quick_score(
 
 
 # =============================================================================
+# LEAD SCORER CLASS (for scraping_tasks.py compatibility)
+# =============================================================================
+
+class LeadScorer:
+    """
+    Lead scoring class - wrapper around scoring functions.
+    
+    Usage:
+        scorer = LeadScorer()
+        breakdown = scorer.score_with_breakdown(hotel_dict)
+        
+        if scorer.is_budget_brand(hotel_dict):
+            print("Skip this one")
+    """
+    
+    def score(self, hotel: Dict) -> int:
+        """
+        Score a hotel and return just the total score.
+        
+        Args:
+            hotel: Dict with hotel_name, city, state, country, opening_date, room_count, etc.
+            
+        Returns:
+            int: Total score (0-100)
+        """
+        result = self.score_with_breakdown(hotel)
+        return result.total
+    
+    def score_with_breakdown(self, hotel: Dict) -> 'ScoreBreakdown':
+        """
+        Score a hotel and return detailed breakdown.
+        
+        Args:
+            hotel: Dict with hotel data
+            
+        Returns:
+            ScoreBreakdown object with all scoring details
+        """
+        # Call the main scoring function
+        result = calculate_lead_score(
+            hotel_name=hotel.get("hotel_name", ""),
+            city=hotel.get("city"),
+            state=hotel.get("state"),
+            country=hotel.get("country"),
+            opening_date=hotel.get("opening_date"),
+            room_count=hotel.get("room_count"),
+            contact_name=hotel.get("contact_name"),
+            contact_email=hotel.get("contact_email"),
+            contact_phone=hotel.get("contact_phone"),
+            project_type=hotel.get("project_type"),
+            description=hotel.get("description"),
+            brand=hotel.get("brand"),
+        )
+        
+        # Convert to ScoreBreakdown object
+        breakdown = result.get("breakdown", {})
+        
+        return ScoreBreakdown(
+            total=result.get("total_score", 0),
+            should_save=result.get("should_save", True),
+            skip_reason=result.get("skip_reason"),
+            score_tier=result.get("score_tier"),
+            brand_tier=result.get("brand_tier"),
+            location_type=result.get("location_type"),
+            opening_year=result.get("opening_year"),
+            # Component scores
+            location=breakdown.get("location", {}).get("points", 0),
+            brand=breakdown.get("brand", {}).get("points", 0),
+            timing=breakdown.get("timing", {}).get("points", 0),
+            room_count=breakdown.get("rooms", {}).get("points", 0),
+            contact=breakdown.get("contact", {}).get("points", 0),
+            new_build=breakdown.get("new_build", {}).get("points", 0),
+            existing_client=breakdown.get("existing_client", {}).get("points", 0),
+        )
+    
+    def is_budget_brand(self, hotel: Dict) -> bool:
+        """Check if hotel is a budget brand (should be skipped)"""
+        hotel_name = hotel.get("hotel_name", "")
+        return should_skip_brand(hotel_name)
+    
+    def should_skip(self, hotel: Dict) -> bool:
+        """Check if hotel should be skipped (budget brand or international)"""
+        # Check brand
+        if self.is_budget_brand(hotel):
+            return True
+        
+        # Check location
+        if should_skip_location(
+            hotel.get("city"),
+            hotel.get("state"),
+            hotel.get("country")
+        ):
+            return True
+        
+        return False
+
+
+class ScoreBreakdown:
+    """
+    Score breakdown object returned by LeadScorer.score_with_breakdown()
+    """
+    def __init__(
+        self,
+        total: int = 0,
+        should_save: bool = True,
+        skip_reason: str = None,
+        score_tier: str = None,
+        brand_tier: str = None,
+        location_type: str = None,
+        opening_year: int = None,
+        location: int = 0,
+        brand: int = 0,
+        timing: int = 0,
+        room_count: int = 0,
+        contact: int = 0,
+        new_build: int = 0,
+        existing_client: int = 0,
+    ):
+        self.total = total
+        self.should_save = should_save
+        self.skip_reason = skip_reason
+        self.score_tier = score_tier
+        self.brand_tier = brand_tier
+        self.location_type = location_type
+        self.opening_year = opening_year
+        self.location = location
+        self.brand = brand
+        self.timing = timing
+        self.room_count = room_count
+        self.contact = contact
+        self.new_build = new_build
+        self.existing_client = existing_client
+    
+    def to_dict(self) -> Dict:
+        """Convert to dictionary for JSON storage"""
+        return {
+            "total": self.total,
+            "should_save": self.should_save,
+            "skip_reason": self.skip_reason,
+            "score_tier": self.score_tier,
+            "brand_tier": self.brand_tier,
+            "location_type": self.location_type,
+            "opening_year": self.opening_year,
+            "location": self.location,
+            "brand": self.brand,
+            "timing": self.timing,
+            "room_count": self.room_count,
+            "contact": self.contact,
+            "new_build": self.new_build,
+            "existing_client": self.existing_client,
+        }
+
+
+# Convenience function for direct import
+def score_lead(hotel: Dict) -> int:
+    """
+    Quick function to score a lead.
+    
+    Usage:
+        from app.services.scorer import score_lead
+        score = score_lead(hotel_dict)
+    """
+    scorer = LeadScorer()
+    return scorer.score(hotel)
+
+
+# =============================================================================
 # UTILITY FUNCTIONS
 # =============================================================================
 
@@ -924,3 +1091,30 @@ if __name__ == "__main__":
         status = "SAVE" if should_save else "SKIP"
         reason = skip_reason or f"Score: {score}"
         print(f"{status:4} | {hotel:40} | {reason}")
+    
+    # Test the LeadScorer class
+    print("\n" + "=" * 70)
+    print("LEADSCORER CLASS TEST")
+    print("=" * 70)
+    
+    scorer = LeadScorer()
+    test_hotel = {
+        "hotel_name": "Four Seasons Miami Beach",
+        "city": "Miami Beach",
+        "state": "Florida",
+        "country": "USA",
+        "opening_date": "2026",
+        "room_count": 200,
+        "contact_email": "sales@fourseasons.com"
+    }
+    
+    breakdown = scorer.score_with_breakdown(test_hotel)
+    print(f"Hotel: {test_hotel['hotel_name']}")
+    print(f"Total Score: {breakdown.total}")
+    print(f"Score Tier: {breakdown.score_tier}")
+    print(f"Should Save: {breakdown.should_save}")
+    print(f"Brand: {breakdown.brand} pts ({breakdown.brand_tier})")
+    print(f"Location: {breakdown.location} pts ({breakdown.location_type})")
+    print(f"Timing: {breakdown.timing} pts")
+    print(f"Rooms: {breakdown.room_count} pts")
+    print(f"Contact: {breakdown.contact} pts")

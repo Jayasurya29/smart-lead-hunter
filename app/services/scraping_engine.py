@@ -1,7 +1,12 @@
 """
-SMART LEAD HUNTER - PRODUCTION SCRAPING ENGINE V2
+SMART LEAD HUNTER - PRODUCTION SCRAPING ENGINE V3
 ==================================================
 A robust, scalable scraping system with comprehensive URL filtering.
+
+CHANGES IN V3:
+- Sources loaded from DATABASE (single source of truth)
+- Patterns loaded from source_config.py
+- Removed dependency on source_tuning.py
 
 FEATURES:
 ✅ Multi-layer URL filtering (blocks junk pages)
@@ -14,12 +19,6 @@ FEATURES:
 ✅ Anti-detection measures
 ✅ Progress tracking and reporting
 ✅ Error recovery and logging
-
-CHANGES IN V2:
-- Integrated URLFilter to block junk URLs BEFORE scraping
-- Enhanced link relevance checking
-- Better logging of blocked URLs
-- Statistics on filtered URLs
 
 Usage:
     engine = ScrapingEngine()
@@ -49,6 +48,32 @@ try:
 except ImportError:
     # Fallback if running standalone
     from url_filter import URLFilter, URLFilterResult
+
+# Import source patterns
+try:
+    from app.services.source_config import (
+        get_patterns_with_default,
+        get_gold_patterns,
+        get_block_patterns,
+        get_link_patterns,
+        get_max_pages,
+        has_patterns,
+        SourcePatterns,
+    )
+except ImportError:
+    # Fallback - define minimal defaults
+    def get_patterns_with_default(name): 
+        return None
+    def get_gold_patterns(name): 
+        return []
+    def get_block_patterns(name): 
+        return []
+    def get_link_patterns(name): 
+        return []
+    def get_max_pages(name): 
+        return 50
+    def has_patterns(name): 
+        return False
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -139,6 +164,10 @@ class SourceConfig:
     max_depth: int = 2
     max_pages: int = 50
     link_patterns: List[str] = field(default_factory=list)
+    
+    # URL filtering patterns (from source_config.py)
+    gold_patterns: List[str] = field(default_factory=list)
+    block_patterns: List[str] = field(default_factory=list)
     
     # Custom settings
     wait_for_selector: Optional[str] = None
@@ -670,7 +699,7 @@ class Crawl4AIScraper:
 
 
 # =============================================================================
-# DEEP CRAWLER V2 (With URL Filtering)
+# DEEP CRAWLER V3 (With URL Filtering + source_config patterns)
 # =============================================================================
 
 class DeepCrawler:
@@ -678,6 +707,7 @@ class DeepCrawler:
     Crawls a source deeply by following links.
     
     V3 IMPROVEMENTS:
+    - Uses patterns from source_config.py
     - SMART SCRAPER SELECTION - Auto-chooses best scraper
     - AUTOMATIC FALLBACK - If HTTPX fails, tries Crawl4AI, then Playwright
     - DOMAIN MEMORY - Remembers which scraper works for each domain
@@ -712,9 +742,38 @@ class DeepCrawler:
             'urls_allowed': 0,
         }
     
-    def _filter_links(self, links: List, base_url: str) -> List[str]:
+    def _should_follow_link(self, url: str, source: SourceConfig) -> bool:
         """
-        Filter links using URLFilter.
+        Check if a link should be followed based on source patterns.
+        Uses gold_patterns and block_patterns from source_config.py
+        """
+        url_lower = url.lower()
+        
+        # Check block patterns first
+        for pattern in source.block_patterns:
+            if re.search(pattern, url_lower):
+                return False
+        
+        # If we have gold patterns, URL must match one
+        if source.gold_patterns:
+            for pattern in source.gold_patterns:
+                if re.search(pattern, url_lower):
+                    return True
+            return False  # Has gold patterns but didn't match any
+        
+        # If we have link patterns (legacy), check those
+        if source.link_patterns:
+            for pattern in source.link_patterns:
+                if re.search(pattern, url_lower):
+                    return True
+            return False
+        
+        # No patterns = allow all (will be filtered by URLFilter)
+        return True
+    
+    def _filter_links(self, links: List, source: SourceConfig) -> List[str]:
+        """
+        Filter links using source patterns + URLFilter.
         
         Returns only links that should be scraped.
         """
@@ -730,8 +789,14 @@ class DeepCrawler:
         
         self._filter_stats['urls_discovered'] += len(clean_links)
         
-        # Use URLFilter to filter and prioritize
-        filtered = self.url_filter.filter_urls(clean_links, base_url)
+        # First pass: source-specific patterns
+        pattern_filtered = []
+        for link in clean_links:
+            if self._should_follow_link(link, source):
+                pattern_filtered.append(link)
+        
+        # Second pass: URLFilter for general junk
+        filtered = self.url_filter.filter_urls(pattern_filtered, source.url)
         
         self._filter_stats['urls_allowed'] += len(filtered)
         self._filter_stats['urls_blocked'] += len(clean_links) - len(filtered)
@@ -748,7 +813,7 @@ class DeepCrawler:
         Deep crawl a source following relevant links.
         
         Args:
-            source: Source configuration
+            source: Source configuration (includes patterns from source_config.py)
             max_depth: Maximum link depth to follow
             max_pages: Maximum pages to scrape
         
@@ -794,14 +859,18 @@ class DeepCrawler:
                 continue
             visited.add(url_normalized)
             
-            # ========== URL FILTERING (NEW IN V2) ==========
-            # Check if URL should be scraped BEFORE making request
-            filter_result = self.url_filter.should_scrape(url, source.url)
-            
-            if not filter_result.should_scrape:
-                logger.debug(f"🚫 Blocked: {url[:60]}... - {filter_result.reason}")
+            # ========== URL FILTERING ==========
+            # Check source-specific patterns
+            if depth > 0 and not self._should_follow_link(url, source):
+                logger.debug(f"🚫 Pattern blocked: {url[:60]}...")
                 continue
-            # ================================================
+            
+            # Check URLFilter for general junk
+            filter_result = self.url_filter.should_scrape(url, source.url)
+            if not filter_result.should_scrape:
+                logger.debug(f"🚫 URLFilter blocked: {url[:60]}... - {filter_result.reason}")
+                continue
+            # ===================================
             
             # Check cache
             cached = await self.cache.get(url)
@@ -811,7 +880,7 @@ class DeepCrawler:
                 
                 # Still process links from cached content
                 if depth < max_depth and source.follow_links:
-                    filtered_links = self._filter_links(cached.links, source.url)
+                    filtered_links = self._filter_links(cached.links, source)
                     for link in filtered_links:
                         link_normalized = link.lower().rstrip('/')
                         if link_normalized not in visited:
@@ -833,8 +902,8 @@ class DeepCrawler:
                 
                 # Follow links if not at max depth
                 if depth < max_depth and source.follow_links:
-                    # Filter links BEFORE adding to queue
-                    filtered_links = self._filter_links(result.links, source.url)
+                    # Filter links using patterns
+                    filtered_links = self._filter_links(result.links, source)
                     
                     for link in filtered_links:
                         link_normalized = link.lower().rstrip('/')
@@ -1052,12 +1121,17 @@ class DeepCrawler:
 
 
 # =============================================================================
-# MAIN SCRAPING ENGINE
+# MAIN SCRAPING ENGINE V3
 # =============================================================================
 
 class ScrapingEngine:
     """
-    Main orchestrator for scraping 73+ sources.
+    Main orchestrator for scraping sources.
+    
+    V3 CHANGES:
+    - Sources loaded from DATABASE
+    - Patterns loaded from source_config.py
+    - No dependency on source_tuning.py
     
     Features:
     - Parallel scraping with rate limiting
@@ -1110,7 +1184,7 @@ class ScrapingEngine:
         if self._initialized:
             return
         
-        logger.info("🚀 Initializing Scraping Engine...")
+        logger.info("🚀 Initializing Scraping Engine V3...")
         
         # Initialize scrapers
         await self.http_scraper.initialize()
@@ -1140,50 +1214,86 @@ class ScrapingEngine:
             self.crawl4ai_scraper
         )
         
-        # Load sources from source_tuning.py
+        # Load sources from DATABASE + patterns from source_config.py
         await self._load_sources()
         
         self._initialized = True
         logger.info(f"✅ Engine initialized with {len(self._sources)} sources")
     
     async def _load_sources(self):
-        """Load source configurations from source_tuning.py"""
-        # Primary: Load from source_tuning.py (our tuned sources)
+        """
+        Load sources from DATABASE + patterns from source_config.py
+        
+        V3 Architecture:
+        - Database = source list + runtime stats
+        - source_config.py = URL patterns (gold, block, link)
+        """
+        sources_loaded = 0
+        
+        # PRIMARY: Load from DATABASE
         try:
-            from app.services.source_tuning import TUNED_SOURCES, CrawlerType as TunedCrawlerType
+            from app.database import async_session
+            from app.models.source import Source
+            from sqlalchemy import select
+
+            async with async_session() as db:
+                result = await db.execute(select(Source).where(Source.is_active == True))
+                db_sources = result.scalars().all()
             
-            for name, tuning in TUNED_SOURCES.items():
-                # Map CrawlerType - use AUTO for smart switching
-                if tuning.crawler_type.value == "auto":
-                    crawler = CrawlerType.AUTO
-                elif tuning.crawler_type.value == "crawl4ai":
-                    crawler = CrawlerType.CRAWL4AI
-                elif tuning.crawler_type.value == "playwright":
+            for src in db_sources:
+                # Get patterns from source_config.py
+                patterns = get_patterns_with_default(src.name)
+                
+                # Determine crawler type
+                if src.use_playwright:
                     crawler = CrawlerType.PLAYWRIGHT
                 else:
-                    crawler = CrawlerType.HTTPX
+                    crawler = CrawlerType.AUTO  # Smart auto-selection
                 
-                # Get additional URLs if configured
-                additional = getattr(tuning, 'additional_urls', []) or []
+                # Get additional entry URLs if available
+                additional_urls = []
+                if hasattr(src, 'entry_urls') and src.entry_urls:
+                    additional_urls = [u for u in src.entry_urls if u != src.base_url]
                 
-                self._sources[name] = SourceConfig(
-                    name=tuning.name,
-                    url=tuning.entry_url,
-                    additional_urls=additional,
+                # Create SourceConfig with patterns
+                self._sources[src.name] = SourceConfig(
+                    name=src.name,
+                    url=src.base_url,
+                    additional_urls=additional_urls,
                     crawler_type=crawler,
-                    priority=tuning.priority,
+                    priority=src.priority or 5,
                     follow_links=True,
-                    max_pages=tuning.max_pages,
-                    link_patterns=tuning.link_patterns if tuning.link_patterns else [r'news|article|release|opening']
+                    max_depth=src.max_depth or 2,
+                    max_pages=patterns.max_pages if patterns else (src.max_depth * 20 if src.max_depth else 50),
+                    # Patterns from source_config.py
+                    gold_patterns=patterns.gold_patterns if patterns else [],
+                    block_patterns=patterns.block_patterns if patterns else [],
+                    link_patterns=patterns.link_patterns if patterns else [],
+                )
+                sources_loaded += 1
+            
+            logger.info(f"✅ Loaded {sources_loaded} sources from DATABASE")
+            
+            # Log sources without patterns
+            sources_without_patterns = [
+                name for name in self._sources.keys() 
+                if not has_patterns(name)
+            ]
+            if sources_without_patterns:
+                logger.warning(
+                    f"⚠️ {len(sources_without_patterns)} sources missing patterns in source_config.py: "
+                    f"{sources_without_patterns[:5]}..."
                 )
             
-            logger.info(f"✅ Loaded {len(TUNED_SOURCES)} tuned sources")
             return
             
         except ImportError as e:
-            logger.warning(f"Could not load tuned sources: {e}")
+            logger.warning(f"⚠️ Database not available: {e}")
+        except Exception as e:
+            logger.warning(f"⚠️ Failed to load from database: {e}")
         
-        # Fallback: Add default sources
+        # FALLBACK: Add hardcoded defaults if database is empty
+        logger.warning("⚠️ Using LAST RESORT: hardcoded default sources")
         self._add_default_sources()
     
     def _add_default_sources(self):
@@ -1196,6 +1306,8 @@ class ScrapingEngine:
                 priority=8,
                 follow_links=True,
                 max_pages=30,
+                gold_patterns=[r'/announcement/\d+/', r'/news/\d+\.html'],
+                block_patterns=[r'/organization/', r'/opinion/', r'/video/'],
                 link_patterns=[r'announcement/\d+', r'news/\d+\.html']
             ),
             SourceConfig(
@@ -1205,6 +1317,8 @@ class ScrapingEngine:
                 priority=10,
                 follow_links=True,
                 max_pages=50,
+                gold_patterns=[r'/news/[a-z0-9-]+/\d+/'],
+                block_patterns=[r'/selfservice/', r'/library/', r'/events/'],
                 link_patterns=[r'/news/[a-z0-9-]+/\d+/']
             ),
             SourceConfig(
@@ -1214,52 +1328,9 @@ class ScrapingEngine:
                 priority=10,
                 follow_links=True,
                 max_pages=50,
+                gold_patterns=[r'/\d{4}/\d{2}/\d{2}/[a-z0-9-]+-hotel', r'/\d{4}/\d{2}/\d{2}/[a-z0-9-]+-resort'],
+                block_patterns=[r'/tag/', r'/author/', r'-cruise'],
                 link_patterns=[r'/\d{4}/\d{2}/\d{2}/[a-z0-9-]+/']
-            ),
-            SourceConfig(
-                name="Marriott News",
-                url="https://news.marriott.com/news/",
-                crawler_type=CrawlerType.PLAYWRIGHT,
-                priority=10,
-                follow_links=True,
-                max_pages=30,
-                link_patterns=[r'/news/\d{4}/\d{2}/']
-            ),
-            SourceConfig(
-                name="Hilton Newsroom",
-                url="https://stories.hilton.com/releases",
-                crawler_type=CrawlerType.HTTPX,
-                priority=10,
-                follow_links=True,
-                max_pages=30,
-                link_patterns=[r'/releases/[a-z0-9-]+']
-            ),
-            SourceConfig(
-                name="Four Seasons Press",
-                url="https://press.fourseasons.com/news-releases/",
-                crawler_type=CrawlerType.HTTPX,
-                priority=10,
-                follow_links=True,
-                max_pages=30,
-                link_patterns=[r'/news-releases/[a-z0-9-]+']
-            ),
-            SourceConfig(
-                name="South Florida Business Journal",
-                url="https://www.bizjournals.com/southflorida/news/industry/hotels",
-                crawler_type=CrawlerType.HTTPX,
-                priority=10,
-                follow_links=True,
-                max_pages=30,
-                link_patterns=[r'/news/\d{4}/\d{2}/\d{2}/']
-            ),
-            SourceConfig(
-                name="Orlando Business Journal",
-                url="https://www.bizjournals.com/orlando/news/industry/hotels",
-                crawler_type=CrawlerType.HTTPX,
-                priority=10,
-                follow_links=True,
-                max_pages=30,
-                link_patterns=[r'/news/\d{4}/\d{2}/\d{2}/']
             ),
         ]
         
@@ -1407,7 +1478,7 @@ class ScrapingEngine:
             "avg_time_per_page": (
                 self._stats["total_time_ms"] / max(1, self._stats["total_scraped"])
             ),
-            "url_filter_stats": self.deep_crawler.url_filter.get_stats()
+            "url_filter_stats": self.deep_crawler.url_filter.get_stats() if self.deep_crawler else {}
         }
     
     def list_sources(self) -> List[Dict[str, Any]]:
@@ -1418,7 +1489,8 @@ class ScrapingEngine:
                 "url": config.url,
                 "priority": config.priority,
                 "crawler": config.crawler_type.value,
-                "frequency": config.frequency
+                "frequency": config.frequency,
+                "has_patterns": bool(config.gold_patterns or config.block_patterns),
             }
             for config in sorted(
                 self._sources.values(),
@@ -1442,7 +1514,7 @@ class ScrapingEngine:
 async def main():
     """Run the scraping engine"""
     print("=" * 70)
-    print("SMART LEAD HUNTER - PRODUCTION SCRAPING ENGINE V2")
+    print("SMART LEAD HUNTER - PRODUCTION SCRAPING ENGINE V3")
     print("=" * 70)
     
     engine = ScrapingEngine()
@@ -1453,7 +1525,8 @@ async def main():
         # List sources
         print(f"\n📚 Loaded {len(engine._sources)} sources:")
         for source in engine.list_sources()[:10]:
-            print(f"   [{source['priority']}] {source['name']}")
+            patterns_status = "✓ patterns" if source['has_patterns'] else "⚠ no patterns"
+            print(f"   [{source['priority']}] {source['name']} ({patterns_status})")
         if len(engine._sources) > 10:
             print(f"   ... and {len(engine._sources) - 10} more\n")
         

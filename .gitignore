@@ -1,52 +1,73 @@
-# Environment variables
-.env
+# =============================================================================
+# SMART LEAD HUNTER - .gitignore
+# =============================================================================
 
-# Python
+# --- Python ---
 __pycache__/
 *.py[cod]
 *$py.class
 *.so
-.Python
-.venv/
-venv/
-ENV/
+*.egg-info/
+dist/
+build/
+*.egg
 
-# IDE
+# --- Virtual Environment ---
+venv/
+.venv/
+env/
+
+# --- Environment Variables (SECRETS - NEVER COMMIT) ---
+.env
+.env.local
+.env.production
+
+# --- IDE / Editor ---
 .vscode/
 .idea/
 *.swp
 *.swo
+*~
+.claude/
 
-# Logs
-logs/
-*.log
+# --- Output Files (generated data) ---
+output/*.csv
+output/*.json
+output/*.xlsx
+!output/.gitkeep
 
-# Database
+# --- Learning Data (generated at runtime) ---
+data/learnings/*.json
+!data/learnings/.gitkeep
+
+# --- Database ---
 *.db
+*.sqlite
 *.sqlite3
 
-# Testing
-.pytest_cache/
-.coverage
-htmlcov/
+# --- Logs ---
+*.log
+logs/
 
-# OS
+# --- OS Files ---
 .DS_Store
 Thumbs.db
+desktop.ini
+nul
 
-# Playwright
-playwright-report/
-test-results/
+# --- Test artifacts ---
+test_gold_urls.py
+check_sources.py
+test_source.py
+htmlcov/
+.coverage
+.pytest_cache/
 
-# Celery
-celerybeat-schedule
-celerybeat.pid
+# --- Temp files ---
+*.tmp
+*.bak
+*.oldb
 
-# Ollama model files
+# --- Container/OCI artifacts (Ollama, Docker) ---
 blobs/
 manifests/
-
-# Ollama model files
-blobs/
-manifests/
-commands.txt

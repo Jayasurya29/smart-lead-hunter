@@ -1259,7 +1259,7 @@ async def process_content_for_sse(text: str, source_url: str, source_site: str) 
     stats = {"leads_found": 0, "leads_saved": 0, "leads_skipped": 0, "errors": []}
 
     try:
-        from app.services.lead_extraction_pipeline import LeadExtractionPipeline
+        from app.services.intelligent_pipeline import IntelligentPipeline as LeadExtractionPipeline
         from app.services.scorer import LeadScorer
 
         pipeline = LeadExtractionPipeline()

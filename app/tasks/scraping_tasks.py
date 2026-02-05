@@ -33,7 +33,7 @@ from sqlalchemy.orm import Session
 from app.tasks.celery_app import celery_app, BaseTask
 from app.database import async_session
 from app.models import PotentialLead, Source, ScrapeLog
-from app.services.lead_extraction_pipeline import LeadExtractionPipeline
+from app.services.intelligent_pipeline import LeadExtractionPipeline 
 from app.services.scorer import score_lead, LeadScorer
 
 logger = logging.getLogger(__name__)
@@ -108,6 +108,10 @@ async def save_lead_to_db(hotel: Dict) -> Optional[int]:
                 opening_date=hotel.get("opening_date"),
                 room_count=hotel.get("room_count"),
                 description=hotel.get("description"),
+                key_insights=hotel.get("key_insights"),
+                management_company=hotel.get("management_company"),
+                developer=hotel.get("developer"),
+                owner=hotel.get("owner"),
                 lead_score=hotel.get("lead_score"),
                 score_breakdown=hotel.get("score_breakdown"),
                 source_url=hotel.get("source_url"),

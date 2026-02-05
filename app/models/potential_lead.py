@@ -43,6 +43,14 @@ class PotentialLead(Base):
     room_count = Column(Integer)
     description = Column(Text)
     
+    # Key Insights - IMPORTANT for sales team!
+    key_insights = Column(Text)  # Bullet points of important info
+    
+    # Stakeholders
+    management_company = Column(String(200))
+    developer = Column(String(200))
+    owner = Column(String(200))
+    
     # Scoring (0-100)
     lead_score = Column(Integer, CheckConstraint('lead_score >= 0 AND lead_score <= 100'))
     score_breakdown = Column(JSONB)  # {"location": 30, "brand": 25, "timing": 20, ...}
@@ -84,25 +92,61 @@ class PotentialLead(Base):
     def to_dict(self):
         """Convert to dictionary for API responses"""
         return {
+            # Identity
             "id": self.id,
             "hotel_name": self.hotel_name,
             "brand": self.brand,
             "brand_tier": self.brand_tier,
             "hotel_type": self.hotel_type,
+            "hotel_website": self.hotel_website,
+            
+            # Location
             "city": self.city,
             "state": self.state,
             "country": self.country,
             "location_type": self.location_type,
+            
+            # Project Details
             "opening_date": self.opening_date,
             "opening_year": self.opening_year,
             "room_count": self.room_count,
-            "lead_score": self.lead_score,
-            "score_breakdown": self.score_breakdown,
+            "description": self.description,
+            
+            # Key Insights - THE IMPORTANT STUFF!
+            "key_insights": self.key_insights,
+            
+            # Stakeholders
+            "management_company": self.management_company,
+            "developer": self.developer,
+            "owner": self.owner,
+            
+            # Contact
             "contact_name": self.contact_name,
+            "contact_title": self.contact_title,
             "contact_email": self.contact_email,
             "contact_phone": self.contact_phone,
-            "status": self.status,
+            
+            # Scoring
+            "lead_score": self.lead_score,
+            "score_breakdown": self.score_breakdown,
+            "estimated_revenue": self.estimated_revenue,
+            
+            # Source
             "source_url": self.source_url,
             "source_site": self.source_site,
-            "created_at": self.created_at.isoformat() if self.created_at else None
+            "source_id": self.source_id,
+            
+            # Workflow
+            "status": self.status,
+            "claimed_by": self.claimed_by,
+            "rejection_reason": self.rejection_reason,
+            "notes": self.notes,
+            
+            # CRM
+            "insightly_id": self.insightly_id,
+            
+            # Timestamps
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "updated_at": self.updated_at.isoformat() if self.updated_at else None,
+            "scraped_at": self.scraped_at.isoformat() if self.scraped_at else None,
         }

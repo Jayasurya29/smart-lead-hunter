@@ -1,7 +1,13 @@
 """
-SMART LEAD HUNTER - INTELLIGENT DEDUPLICATION SERVICE
-======================================================
+SMART LEAD HUNTER - INTELLIGENT DEDUPLICATION SERVICE V2
+=========================================================
 Fuzzy matching and smart merging of hotel leads.
+
+CHANGES IN V2:
+- Uses rapidfuzz (10x faster) with difflib fallback
+- Simplified code
+- Better key_insights preservation
+- Async database comparison
 
 PROBLEM:
 - Same hotel appears from multiple sources with slightly different names
@@ -16,15 +22,10 @@ SOLUTION:
 5. Source tracking - keep all source URLs
 
 Usage:
-    from app.services.smart_deduplicator import SmartDeduplicator
+    from app.services.smart_deduplicator import SmartDeduplicator, deduplicate_leads
     
     dedup = SmartDeduplicator()
-    
-    # Deduplicate a list of leads
     unique_leads = dedup.deduplicate(raw_leads)
-    
-    # Check against database
-    new_leads = await dedup.filter_existing(unique_leads)
 """
 
 import re
@@ -32,8 +33,14 @@ import logging
 from dataclasses import dataclass, field
 from typing import List, Dict, Optional, Set, Tuple, Any
 from datetime import datetime
-from difflib import SequenceMatcher
-import json
+
+# Try rapidfuzz first (10x faster), fall back to difflib
+try:
+    from rapidfuzz import fuzz
+    USING_RAPIDFUZZ = True
+except ImportError:
+    from difflib import SequenceMatcher
+    USING_RAPIDFUZZ = False
 
 logger = logging.getLogger(__name__)
 
@@ -71,14 +78,16 @@ class MergedLead:
     contact_email: str = ""
     contact_phone: str = ""
     
+    # Key insights from article - IMPORTANT for sales!
+    key_insights: str = ""
+    
     # Quality metrics
     confidence_score: float = 0.0
     qualification_score: int = 0
-
-    # Key insights from article
-    key_insights: str = ""
     
     # Source tracking
+    source_url: str = ""  # Primary source
+    source_name: str = ""  # Primary source name
     source_urls: List[str] = field(default_factory=list)
     source_names: List[str] = field(default_factory=list)
     merged_from_count: int = 1
@@ -106,9 +115,11 @@ class MergedLead:
             'contact_title': self.contact_title,
             'contact_email': self.contact_email,
             'contact_phone': self.contact_phone,
+            'key_insights': self.key_insights,
             'confidence_score': self.confidence_score,
             'qualification_score': self.qualification_score,
-            'key_insights': self.key_insights,
+            'source_url': self.source_urls[0] if self.source_urls else self.source_url,
+            'source_name': self.source_names[0] if self.source_names else self.source_name,
             'source_urls': self.source_urls,
             'source_names': self.source_names,
             'merged_from_count': self.merged_from_count,
@@ -125,52 +136,13 @@ class SmartDeduplicator:
     """
     Intelligent deduplication service for hotel leads.
     
-    Features:
-    - Fuzzy name matching with configurable threshold
-    - Location-aware matching
-    - Smart merge keeping best data from each source
-    - Brand normalization
-    - Source URL tracking
+    Uses rapidfuzz for 10x faster fuzzy matching (falls back to difflib).
     """
     
     # Similarity thresholds
-    NAME_SIMILARITY_THRESHOLD = 0.75  # 75% similar names = potential match
-    LOCATION_BOOST = 0.15  # Add 15% if location matches
-    BRAND_BOOST = 0.10  # Add 10% if brand matches
-    
-    # Brand variations to normalize
-    BRAND_ALIASES = {
-        'four seasons': ['four seasons', 'fs', '4 seasons'],
-        'ritz-carlton': ['ritz-carlton', 'ritz carlton', 'the ritz-carlton', 'ritz'],
-        'st. regis': ['st. regis', 'st regis', 'saint regis'],
-        'waldorf astoria': ['waldorf astoria', 'waldorf', 'the waldorf'],
-        'conrad': ['conrad', 'conrad hotels'],
-        'jw marriott': ['jw marriott', 'jw', 'j.w. marriott'],
-        'w hotels': ['w hotels', 'w hotel', 'w'],
-        'hilton': ['hilton', 'hilton hotels'],
-        'marriott': ['marriott', 'marriott hotels'],
-        'hyatt': ['hyatt', 'hyatt hotels'],
-        'ihg': ['ihg', 'ihg hotels', 'intercontinental hotels group'],
-        'six senses': ['six senses', '6 senses'],
-        'aman': ['aman', 'amanresorts'],
-        'rosewood': ['rosewood', 'rosewood hotels'],
-        'mandarin oriental': ['mandarin oriental', 'mandarin'],
-        'peninsula': ['peninsula', 'the peninsula'],
-        'park hyatt': ['park hyatt'],
-        'grand hyatt': ['grand hyatt'],
-        'andaz': ['andaz'],
-        'thompson': ['thompson', 'thompson hotels'],
-        'edition': ['edition', 'the edition'],
-        'autograph': ['autograph', 'autograph collection'],
-        'curio': ['curio', 'curio collection'],
-        'tribute': ['tribute', 'tribute portfolio'],
-        'tapestry': ['tapestry', 'tapestry collection'],
-        'graduate': ['graduate', 'graduate hotels'],
-        'motto': ['motto', 'motto by hilton'],
-        'canopy': ['canopy', 'canopy by hilton'],
-        'tempo': ['tempo', 'tempo by hilton'],
-        'spark': ['spark', 'spark by hilton'],
-    }
+    DEFAULT_THRESHOLD = 0.75
+    LOCATION_BOOST = 0.15
+    BRAND_BOOST = 0.10
     
     # State abbreviations
     STATE_ABBREVS = {
@@ -188,21 +160,24 @@ class SmartDeduplicator:
         'vermont': 'VT', 'virginia': 'VA', 'washington': 'WA', 'west virginia': 'WV',
         'wisconsin': 'WI', 'wyoming': 'WY', 'district of columbia': 'DC',
     }
-    
-    # Reverse mapping
     ABBREV_TO_STATE = {v: k.title() for k, v in STATE_ABBREVS.items()}
     
-    def __init__(self, name_threshold: float = 0.75):
-        self.name_threshold = name_threshold
+    def __init__(self, threshold: float = DEFAULT_THRESHOLD):
+        self.threshold = threshold
         self._stats = {
             'total_input': 0,
             'duplicates_found': 0,
             'merges_performed': 0,
             'unique_output': 0
         }
+        
+        if USING_RAPIDFUZZ:
+            logger.info("✅ Using rapidfuzz for fast fuzzy matching")
+        else:
+            logger.info("⚠️ rapidfuzz not available, using difflib (slower)")
     
     # =========================================================================
-    # MAIN DEDUPLICATION
+    # MAIN API
     # =========================================================================
     
     def deduplicate(self, leads: List[Any]) -> List[MergedLead]:
@@ -220,368 +195,29 @@ class SmartDeduplicator:
         
         self._stats['total_input'] = len(leads)
         
-        # Convert all leads to a common format
-        normalized_leads = [self._normalize_lead(lead) for lead in leads]
+        # Normalize all leads
+        normalized = [self._normalize_lead(lead) for lead in leads]
         
-        # Group potential duplicates
-        groups = self._group_similar_leads(normalized_leads)
+        # Group similar leads
+        groups = self._group_similar(normalized)
         
-        # Merge each group into a single lead
-        merged_leads = []
+        # Merge each group
+        merged = []
         for group in groups:
             if len(group) > 1:
-                merged = self._merge_leads(group)
+                result = self._merge_group(group)
                 self._stats['merges_performed'] += 1
                 self._stats['duplicates_found'] += len(group) - 1
             else:
-                merged = group[0]
-            merged_leads.append(merged)
+                result = group[0]
+            merged.append(result)
         
-        self._stats['unique_output'] = len(merged_leads)
+        self._stats['unique_output'] = len(merged)
         
-        logger.info(f"🔄 Deduplication: {len(leads)} → {len(merged_leads)} unique leads")
-        logger.info(f"   Found {self._stats['duplicates_found']} duplicates, performed {self._stats['merges_performed']} merges")
-        
-        return merged_leads
-    
-    # =========================================================================
-    # NORMALIZATION
-    # =========================================================================
-    
-    def _normalize_lead(self, lead: Any) -> MergedLead:
-        """Convert any lead format to MergedLead"""
-        # Handle dict
-        if isinstance(lead, dict):
-            data = lead
-        # Handle dataclass/object
-        elif hasattr(lead, '__dict__'):
-            data = lead.__dict__ if not hasattr(lead, 'to_dict') else lead.to_dict()
-        else:
-            data = {}
-        
-        # Normalize state
-        state = str(data.get('state', '') or '').strip()
-        state = self._normalize_state(state)
-        
-        # Normalize country
-        country = str(data.get('country', '') or '').strip()
-        country = self._normalize_country(country)
-        
-        # Normalize brand
-        brand = str(data.get('brand', '') or '').strip()
-        brand = self._normalize_brand(brand)
-        
-        # Get source URL
-        source_url = data.get('source_url', '') or ''
-        source_name = data.get('source_name', '') or ''
-        
-        return MergedLead(
-            hotel_name=str(data.get('hotel_name', '') or '').strip(),
-            brand=brand,
-            city=str(data.get('city', '') or '').strip(),
-            state=state,
-            country=country,
-            opening_date=str(data.get('opening_date', '') or '').strip(),
-            opening_status=str(data.get('opening_status', '') or '').strip(),
-            room_count=int(data.get('room_count', 0) or 0),
-            property_type=str(data.get('property_type', data.get('hotel_type', '')) or '').strip(),
-            management_company=str(data.get('management_company', '') or '').strip(),
-            developer=str(data.get('developer', '') or '').strip(),
-            owner=str(data.get('owner', '') or '').strip(),
-            contact_name=str(data.get('contact_name', '') or '').strip(),
-            contact_title=str(data.get('contact_title', '') or '').strip(),
-            contact_email=str(data.get('contact_email', '') or '').strip(),
-            contact_phone=str(data.get('contact_phone', '') or '').strip(),
-            confidence_score=float(data.get('confidence_score', 0) or 0),
-            qualification_score=int(data.get('qualification_score', 0) or 0),
-            key_insights=str(data.get('key_insights', '') or '').strip(),
-            source_urls=[source_url] if source_url else [],
-            source_names=[source_name] if source_name else [],
-            merged_from_count=1,
-            first_seen=datetime.now().isoformat(),
-            last_updated=datetime.now().isoformat(),
-        )
-    
-    def _normalize_state(self, state: str) -> str:
-        """Normalize state to full name"""
-        state_lower = state.lower().strip()
-        
-        # If it's an abbreviation, convert to full name
-        if state.upper() in self.ABBREV_TO_STATE:
-            return self.ABBREV_TO_STATE[state.upper()]
-        
-        # If it's a full name, title case it
-        if state_lower in self.STATE_ABBREVS:
-            return state_lower.title()
-        
-        return state.title() if state else ""
-    
-    def _normalize_country(self, country: str) -> str:
-        """Normalize country name"""
-        country_lower = country.lower().strip()
-        
-        # US variations
-        if country_lower in ['us', 'usa', 'united states', 'united states of america', 'america']:
-            return 'USA'
-        
-        return country.title() if country else "USA"
-    
-    def _normalize_brand(self, brand: str) -> str:
-        """Normalize brand name"""
-        brand_lower = brand.lower().strip()
-        
-        for canonical, aliases in self.BRAND_ALIASES.items():
-            if brand_lower in aliases:
-                return canonical.title()
-        
-        return brand.title() if brand else ""
-    
-    # =========================================================================
-    # SIMILARITY MATCHING
-    # =========================================================================
-    
-    def _calculate_similarity(self, lead1: MergedLead, lead2: MergedLead) -> float:
-        """
-        Calculate similarity score between two leads.
-        
-        Returns:
-            Float between 0 and 1 (1 = identical)
-        """
-        # Start with name similarity
-        name_sim = self._name_similarity(lead1.hotel_name, lead2.hotel_name)
-        
-        # CRITICAL: If both have locations and they're DIFFERENT, reduce similarity significantly
-        # This prevents merging "Four Seasons Jacksonville" with "Four Seasons Coconut Grove"
-        if self._locations_clearly_different(lead1, lead2):
-            name_sim *= 0.4  # Heavily penalize different locations
-        elif self._locations_match(lead1, lead2):
-            name_sim += self.LOCATION_BOOST
-        
-        # Brand boost
-        if lead1.brand and lead2.brand and lead1.brand.lower() == lead2.brand.lower():
-            name_sim += self.BRAND_BOOST
-        
-        return min(name_sim, 1.0)  # Cap at 1.0
-    
-    def _locations_clearly_different(self, lead1: MergedLead, lead2: MergedLead) -> bool:
-        """
-        Check if two leads have clearly different locations.
-        Returns True if they're definitely different places.
-        """
-        # If both have cities and they're different
-        if lead1.city and lead2.city:
-            city1 = lead1.city.lower().strip()
-            city2 = lead2.city.lower().strip()
-            if city1 != city2 and city1 not in city2 and city2 not in city1:
-                return True
-        
-        # If both have states and they're different
-        if lead1.state and lead2.state:
-            state1 = lead1.state.lower().strip()
-            state2 = lead2.state.lower().strip()
-            if state1 != state2:
-                return True
-        
-        # If both have countries and they're different
-        if lead1.country and lead2.country:
-            country1 = lead1.country.lower().strip()
-            country2 = lead2.country.lower().strip()
-            if country1 != country2:
-                return True
-        
-        return False
-    
-    def _name_similarity(self, name1: str, name2: str) -> float:
-        """Calculate name similarity using multiple methods"""
-        if not name1 or not name2:
-            return 0.0
-        
-        # Normalize names
-        n1 = self._normalize_name(name1)
-        n2 = self._normalize_name(name2)
-        
-        # Exact match after normalization
-        if n1 == n2:
-            return 1.0
-        
-        # One contains the other
-        if n1 in n2 or n2 in n1:
-            return 0.9
-        
-        # Sequence matching (Levenshtein-like)
-        seq_ratio = SequenceMatcher(None, n1, n2).ratio()
-        
-        # Token matching (word overlap)
-        tokens1 = set(n1.split())
-        tokens2 = set(n2.split())
-        if tokens1 and tokens2:
-            token_overlap = len(tokens1 & tokens2) / max(len(tokens1), len(tokens2))
-        else:
-            token_overlap = 0
-        
-        # Weighted average
-        return (seq_ratio * 0.6) + (token_overlap * 0.4)
-    
-    def _normalize_name(self, name: str) -> str:
-        """Normalize hotel name for comparison"""
-        name = name.lower().strip()
-        
-        # Remove common suffixes
-        suffixes = [
-            'hotel', 'hotels', 'resort', 'resorts', 'spa', 'suites', 'suite',
-            'inn', 'lodge', 'collection', 'by hilton', 'by marriott', 'by hyatt',
-            'by ihg', 'a luxury collection', 'autograph collection'
-        ]
-        for suffix in suffixes:
-            name = name.replace(suffix, '').strip()
-        
-        # Remove punctuation
-        name = re.sub(r'[^\w\s]', '', name)
-        
-        # Remove extra whitespace
-        name = ' '.join(name.split())
-        
-        return name
-    
-    def _locations_match(self, lead1: MergedLead, lead2: MergedLead) -> bool:
-        """Check if two leads have matching locations"""
-        # State match
-        if lead1.state and lead2.state:
-            if lead1.state.lower() == lead2.state.lower():
-                return True
-        
-        # City match
-        if lead1.city and lead2.city:
-            city1 = lead1.city.lower().strip()
-            city2 = lead2.city.lower().strip()
-            if city1 == city2 or city1 in city2 or city2 in city1:
-                return True
-        
-        return False
-    
-    # =========================================================================
-    # GROUPING
-    # =========================================================================
-    
-    def _group_similar_leads(self, leads: List[MergedLead]) -> List[List[MergedLead]]:
-        """Group similar leads together"""
-        if not leads:
-            return []
-        
-        # Track which leads have been grouped
-        grouped = set()
-        groups = []
-        
-        for i, lead1 in enumerate(leads):
-            if i in grouped:
-                continue
-            
-            # Start a new group with this lead
-            group = [lead1]
-            grouped.add(i)
-            
-            # Find all similar leads
-            for j, lead2 in enumerate(leads):
-                if j in grouped or i == j:
-                    continue
-                
-                similarity = self._calculate_similarity(lead1, lead2)
-                if similarity >= self.name_threshold:
-                    group.append(lead2)
-                    grouped.add(j)
-                    logger.debug(f"   Match ({similarity:.2f}): '{lead1.hotel_name}' ≈ '{lead2.hotel_name}'")
-            
-            groups.append(group)
-        
-        return groups
-    
-    # =========================================================================
-    # MERGING
-    # =========================================================================
-    
-    def _merge_leads(self, leads: List[MergedLead]) -> MergedLead:
-        """
-        Merge multiple leads into one, keeping best data from each.
-        
-        Strategy:
-        - For text fields: prefer non-empty, longer values
-        - For numbers: prefer non-zero, larger values
-        - For contacts: prefer complete info
-        - For sources: combine all
-        """
-        if not leads:
-            return MergedLead()
-        
-        if len(leads) == 1:
-            return leads[0]
-        
-        # Sort by confidence (highest first) to prefer better sources
-        leads = sorted(leads, key=lambda x: x.confidence_score, reverse=True)
-        
-        # Start with the highest confidence lead as base
-        merged = MergedLead()
-        
-        # Merge text fields (prefer non-empty, longer)
-        merged.hotel_name = self._best_text([l.hotel_name for l in leads])
-        merged.brand = self._best_text([l.brand for l in leads])
-        merged.city = self._best_text([l.city for l in leads])
-        merged.state = self._best_text([l.state for l in leads])
-        merged.country = self._best_text([l.country for l in leads]) or "USA"
-        merged.opening_date = self._best_text([l.opening_date for l in leads])
-        merged.opening_status = self._best_text([l.opening_status for l in leads])
-        merged.property_type = self._best_text([l.property_type for l in leads])
-        merged.management_company = self._best_text([l.management_company for l in leads])
-        merged.developer = self._best_text([l.developer for l in leads])
-        merged.owner = self._best_text([l.owner for l in leads])
-        
-        # Merge numeric fields (prefer non-zero, larger)
-        merged.room_count = max([l.room_count for l in leads])
-        merged.confidence_score = max([l.confidence_score for l in leads])
-        merged.qualification_score = max([l.qualification_score for l in leads])
-        
-        # Merge contact info (prefer complete)
-        merged.contact_name = self._best_text([l.contact_name for l in leads])
-        merged.contact_title = self._best_text([l.contact_title for l in leads])
-        merged.contact_email = self._best_text([l.contact_email for l in leads])
-        merged.contact_phone = self._best_text([l.contact_phone for l in leads])
-        
-        # Combine all source URLs (unique)
-        all_urls = []
-        all_names = []
-        for lead in leads:
-            for url in lead.source_urls:
-                if url and url not in all_urls:
-                    all_urls.append(url)
-            for name in lead.source_names:
-                if name and name not in all_names:
-                    all_names.append(name)
-        
-        merged.source_urls = all_urls
-        merged.source_names = all_names
-        merged.merged_from_count = len(leads)
-        
-        # Timestamps
-        merged.first_seen = min([l.first_seen for l in leads if l.first_seen] or [datetime.now().isoformat()])
-        merged.last_updated = datetime.now().isoformat()
-        
-        logger.info(f"   📎 Merged {len(leads)} leads → '{merged.hotel_name}' (from {len(all_urls)} sources)")
+        logger.info(f"🔄 Deduplication: {len(leads)} → {len(merged)} unique leads")
+        logger.info(f"   Found {self._stats['duplicates_found']} duplicates")
         
         return merged
-    
-    def _best_text(self, values: List[str]) -> str:
-        """Select the best text value (non-empty, longer preferred)"""
-        # Filter to non-empty values
-        valid = [v for v in values if v and v.strip()]
-        
-        if not valid:
-            return ""
-        
-        # Prefer longer values (usually more complete)
-        return max(valid, key=len)
-    
-    # =========================================================================
-    # DATABASE COMPARISON
-    # =========================================================================
     
     async def filter_existing(
         self, 
@@ -591,17 +227,12 @@ class SmartDeduplicator:
         """
         Filter out leads that already exist in database.
         
-        Args:
-            leads: New leads to check
-            existing_leads: List of existing leads from database
-        
         Returns:
             Tuple of (new_leads, existing_matches)
         """
         if not existing_leads:
             return leads, []
         
-        # Normalize existing leads for comparison
         existing_normalized = [self._normalize_lead(e) for e in existing_leads]
         
         new_leads = []
@@ -612,8 +243,8 @@ class SmartDeduplicator:
             
             for existing in existing_normalized:
                 similarity = self._calculate_similarity(lead, existing)
-                if similarity >= self.name_threshold:
-                    logger.info(f"   ⚠️  Already exists: '{lead.hotel_name}' ≈ '{existing.hotel_name}' ({similarity:.2f})")
+                if similarity >= self.threshold:
+                    logger.info(f"   ⚠️ Already exists: '{lead.hotel_name}' ≈ '{existing.hotel_name}' ({similarity:.2f})")
                     existing_matches.append(lead)
                     is_existing = True
                     break
@@ -628,6 +259,253 @@ class SmartDeduplicator:
     def get_stats(self) -> Dict[str, int]:
         """Get deduplication statistics"""
         return self._stats.copy()
+    
+    # =========================================================================
+    # NORMALIZATION
+    # =========================================================================
+    
+    def _normalize_lead(self, lead: Any) -> MergedLead:
+        """Convert any lead format to MergedLead"""
+        # Handle dict
+        if isinstance(lead, dict):
+            data = lead
+        elif hasattr(lead, 'to_dict'):
+            data = lead.to_dict()
+        elif hasattr(lead, '__dict__'):
+            data = lead.__dict__
+        else:
+            data = {}
+        
+        # Normalize state
+        state = str(data.get('state', '') or '').strip()
+        if state.upper() in self.ABBREV_TO_STATE:
+            state = self.ABBREV_TO_STATE[state.upper()]
+        elif state.lower() in self.STATE_ABBREVS:
+            state = state.title()
+        else:
+            state = state.title() if state else ""
+        
+        # Normalize country
+        country = str(data.get('country', '') or '').strip()
+        if country.lower() in ['us', 'usa', 'united states', 'america']:
+            country = 'USA'
+        else:
+            country = country.title() if country else "USA"
+        
+        # Get source info
+        source_url = data.get('source_url', '') or ''
+        source_name = data.get('source_name', '') or ''
+        
+        return MergedLead(
+            hotel_name=str(data.get('hotel_name', '') or '').strip(),
+            brand=str(data.get('brand', '') or '').strip(),
+            city=str(data.get('city', '') or '').strip(),
+            state=state,
+            country=country,
+            opening_date=str(data.get('opening_date', '') or '').strip(),
+            opening_status=str(data.get('opening_status', '') or '').strip(),
+            room_count=int(data.get('room_count', 0) or 0),
+            property_type=str(data.get('property_type', data.get('hotel_type', '')) or '').strip(),
+            management_company=str(data.get('management_company', '') or '').strip(),
+            developer=str(data.get('developer', '') or '').strip(),
+            owner=str(data.get('owner', '') or '').strip(),
+            contact_name=str(data.get('contact_name', '') or '').strip(),
+            contact_title=str(data.get('contact_title', '') or '').strip(),
+            contact_email=str(data.get('contact_email', '') or '').strip(),
+            contact_phone=str(data.get('contact_phone', '') or '').strip(),
+            key_insights=str(data.get('key_insights', '') or '').strip(),
+            confidence_score=float(data.get('confidence_score', 0) or 0),
+            qualification_score=int(data.get('qualification_score', 0) or 0),
+            source_url=source_url,
+            source_name=source_name,
+            source_urls=[source_url] if source_url else [],
+            source_names=[source_name] if source_name else [],
+            merged_from_count=1,
+            first_seen=datetime.now().isoformat(),
+            last_updated=datetime.now().isoformat(),
+        )
+    
+    # =========================================================================
+    # SIMILARITY
+    # =========================================================================
+    
+    def _name_similarity(self, name1: str, name2: str) -> float:
+        """Calculate name similarity (0-1)"""
+        if not name1 or not name2:
+            return 0.0
+        
+        # Normalize names
+        n1 = self._clean_name(name1)
+        n2 = self._clean_name(name2)
+        
+        if n1 == n2:
+            return 1.0
+        
+        if n1 in n2 or n2 in n1:
+            return 0.9
+        
+        # Use rapidfuzz if available (returns 0-100)
+        if USING_RAPIDFUZZ:
+            return fuzz.ratio(n1, n2) / 100.0
+        else:
+            return SequenceMatcher(None, n1, n2).ratio()
+    
+    def _clean_name(self, name: str) -> str:
+        """Normalize hotel name for comparison"""
+        name = name.lower().strip()
+        
+        # Remove common suffixes
+        for suffix in ['hotel', 'hotels', 'resort', 'resorts', 'spa', 'suites', 
+                       'suite', 'inn', 'lodge', 'collection', 'by hilton', 
+                       'by marriott', 'by hyatt', 'by ihg']:
+            name = name.replace(suffix, '').strip()
+        
+        # Remove punctuation
+        name = re.sub(r'[^\w\s]', '', name)
+        
+        # Collapse whitespace
+        name = ' '.join(name.split())
+        
+        return name
+    
+    def _locations_match(self, lead1: MergedLead, lead2: MergedLead) -> bool:
+        """Check if locations match"""
+        if lead1.state and lead2.state:
+            if lead1.state.lower() == lead2.state.lower():
+                return True
+        
+        if lead1.city and lead2.city:
+            c1, c2 = lead1.city.lower(), lead2.city.lower()
+            if c1 == c2 or c1 in c2 or c2 in c1:
+                return True
+        
+        return False
+    
+    def _locations_different(self, lead1: MergedLead, lead2: MergedLead) -> bool:
+        """Check if locations are clearly different"""
+        # Different cities
+        if lead1.city and lead2.city:
+            c1, c2 = lead1.city.lower().strip(), lead2.city.lower().strip()
+            if c1 != c2 and c1 not in c2 and c2 not in c1:
+                return True
+        
+        # Different states
+        if lead1.state and lead2.state:
+            if lead1.state.lower() != lead2.state.lower():
+                return True
+        
+        return False
+    
+    def _calculate_similarity(self, lead1: MergedLead, lead2: MergedLead) -> float:
+        """Calculate overall similarity between two leads"""
+        # Start with name similarity
+        sim = self._name_similarity(lead1.hotel_name, lead2.hotel_name)
+        
+        # Location penalty/boost
+        if self._locations_different(lead1, lead2):
+            sim *= 0.4  # Heavy penalty for different locations
+        elif self._locations_match(lead1, lead2):
+            sim += self.LOCATION_BOOST
+        
+        # Brand boost
+        if lead1.brand and lead2.brand:
+            if lead1.brand.lower() == lead2.brand.lower():
+                sim += self.BRAND_BOOST
+        
+        return min(sim, 1.0)
+    
+    # =========================================================================
+    # GROUPING & MERGING
+    # =========================================================================
+    
+    def _group_similar(self, leads: List[MergedLead]) -> List[List[MergedLead]]:
+        """Group similar leads together"""
+        grouped = set()
+        groups = []
+        
+        for i, lead1 in enumerate(leads):
+            if i in grouped:
+                continue
+            
+            group = [lead1]
+            grouped.add(i)
+            
+            for j, lead2 in enumerate(leads):
+                if j in grouped or i == j:
+                    continue
+                
+                sim = self._calculate_similarity(lead1, lead2)
+                if sim >= self.threshold:
+                    group.append(lead2)
+                    grouped.add(j)
+                    logger.debug(f"   Match ({sim:.2f}): '{lead1.hotel_name}' ≈ '{lead2.hotel_name}'")
+            
+            groups.append(group)
+        
+        return groups
+    
+    def _merge_group(self, leads: List[MergedLead]) -> MergedLead:
+        """Merge a group of similar leads into one"""
+        if len(leads) == 1:
+            return leads[0]
+        
+        # Sort by confidence
+        leads = sorted(leads, key=lambda x: x.confidence_score, reverse=True)
+        
+        def best_text(values: List[str]) -> str:
+            """Pick best non-empty value (longer preferred)"""
+            valid = [v for v in values if v and v.strip()]
+            return max(valid, key=len) if valid else ""
+        
+        merged = MergedLead()
+        
+        # Text fields - prefer longer values
+        merged.hotel_name = best_text([l.hotel_name for l in leads])
+        merged.brand = best_text([l.brand for l in leads])
+        merged.city = best_text([l.city for l in leads])
+        merged.state = best_text([l.state for l in leads])
+        merged.country = best_text([l.country for l in leads]) or "USA"
+        merged.opening_date = best_text([l.opening_date for l in leads])
+        merged.opening_status = best_text([l.opening_status for l in leads])
+        merged.property_type = best_text([l.property_type for l in leads])
+        merged.management_company = best_text([l.management_company for l in leads])
+        merged.developer = best_text([l.developer for l in leads])
+        merged.owner = best_text([l.owner for l in leads])
+        merged.contact_name = best_text([l.contact_name for l in leads])
+        merged.contact_title = best_text([l.contact_title for l in leads])
+        merged.contact_email = best_text([l.contact_email for l in leads])
+        merged.contact_phone = best_text([l.contact_phone for l in leads])
+        merged.key_insights = best_text([l.key_insights for l in leads])
+        
+        # Numeric fields - prefer max
+        merged.room_count = max(l.room_count for l in leads)
+        merged.confidence_score = max(l.confidence_score for l in leads)
+        merged.qualification_score = max(l.qualification_score for l in leads)
+        
+        # Combine sources
+        all_urls = []
+        all_names = []
+        for lead in leads:
+            for url in lead.source_urls:
+                if url and url not in all_urls:
+                    all_urls.append(url)
+            for name in lead.source_names:
+                if name and name not in all_names:
+                    all_names.append(name)
+        
+        merged.source_urls = all_urls
+        merged.source_names = all_names
+        merged.source_url = all_urls[0] if all_urls else ""
+        merged.source_name = all_names[0] if all_names else ""
+        merged.merged_from_count = len(leads)
+        
+        # Timestamps
+        merged.first_seen = min(l.first_seen for l in leads if l.first_seen)
+        merged.last_updated = datetime.now().isoformat()
+        
+        logger.info(f"   📎 Merged {len(leads)} → '{merged.hotel_name}' (from {len(all_urls)} sources)")
+        
+        return merged
 
 
 # =============================================================================
@@ -635,18 +513,8 @@ class SmartDeduplicator:
 # =============================================================================
 
 def deduplicate_leads(leads: List[Any], threshold: float = 0.75) -> List[MergedLead]:
-    """
-    Convenience function to deduplicate leads.
-    
-    Args:
-        leads: List of lead objects/dicts
-        threshold: Similarity threshold (0-1)
-    
-    Returns:
-        List of unique MergedLead objects
-    """
-    dedup = SmartDeduplicator(name_threshold=threshold)
-    return dedup.deduplicate(leads)
+    """Convenience function to deduplicate leads"""
+    return SmartDeduplicator(threshold=threshold).deduplicate(leads)
 
 
 # =============================================================================
@@ -654,98 +522,61 @@ def deduplicate_leads(leads: List[Any], threshold: float = 0.75) -> List[MergedL
 # =============================================================================
 
 if __name__ == "__main__":
-    # Test with your Six Senses example
+    # Test with Six Senses example
     test_leads = [
         {
             "hotel_name": "Six Senses South Carolina Islands",
             "brand": "Six Senses",
-            "city": "",
             "state": "South Carolina",
-            "country": "USA",
             "opening_date": "2026",
-            "developer": "Whitestone Resources",
-            "source_url": "https://www.hoteldive.com/news/six-senses-opens-south-carolina-resort/708852/"
+            "source_url": "https://hoteldive.com/news/1"
         },
         {
             "hotel_name": "Six Senses Camp Korongo",
             "brand": "Six Senses",
-            "city": "",
             "state": "Utah",
-            "country": "US",
             "opening_date": "2026",
-            "source_url": "https://www.hoteldive.com/topic/development/"
+            "source_url": "https://hoteldive.com/news/2"
         },
         {
             "hotel_name": "Six Senses Camp Korongo",
             "brand": "Six Senses",
             "city": "Kanab",
             "state": "Utah",
-            "country": "USA",
             "opening_date": "2029",
-            "developer": "Canyon Global Partners",
-            "management_company": "IHG Hotels & Resorts",
-            "source_url": "https://www.hoteldive.com/news/ihg-six-senses-resort-utah/810467/"
+            "key_insights": "• 77 rooms planned\n• IHG management",
+            "source_url": "https://hoteldive.com/news/3"
         },
         {
-            "hotel_name": "Six Senses Camp Korongo",
+            "hotel_name": "Six Senses Camp Korongo Utah",
             "brand": "Six Senses",
-            "city": "",
             "state": "Utah",
-            "country": "US",
-            "source_url": "https://www.hoteldive.com/topic/brands/"
-        },
-        {
-            "hotel_name": "Six Senses RiverStone Estate",
-            "brand": "Six Senses",
-            "city": "Foxburg",
-            "state": "Pennsylvania",
-            "country": "USA",
-            "opening_date": "2028",
-            "room_count": 77,
-            "management_company": "IHG Hotels & Resorts",
-            "source_url": "https://www.hoteldive.com/news/six-senses-pennsylvania-expansion/727462/"
-        },
-        {
-            "hotel_name": "Six Senses Telluride",
-            "brand": "Six Senses",
-            "city": "Telluride",
-            "state": "Colorado",
-            "country": "USA",
-            "opening_date": "2028",
-            "room_count": 77,
-            "developer": "The Vault Home Collection",
-            "source_url": "https://www.hoteldive.com/news/ihgs-six-senses-heads-to-colorado-mountains/725345/"
+            "source_url": "https://hoteldive.com/news/4"
         },
     ]
     
     print("\n" + "="*70)
     print("SMART DEDUPLICATION TEST")
     print("="*70)
+    print(f"Using: {'rapidfuzz' if USING_RAPIDFUZZ else 'difflib'}")
     
     print(f"\n📥 Input: {len(test_leads)} leads")
     for lead in test_leads:
         print(f"   • {lead['hotel_name']} ({lead.get('state', 'Unknown')})")
     
     # Run deduplication
-    dedup = SmartDeduplicator()
-    unique_leads = dedup.deduplicate(test_leads)
+    unique = deduplicate_leads(test_leads)
     
-    print(f"\n📤 Output: {len(unique_leads)} unique leads")
+    print(f"\n📤 Output: {len(unique)} unique leads")
     print("-"*70)
     
-    for lead in unique_leads:
+    for lead in unique:
         print(f"\n🏨 {lead.hotel_name}")
-        print(f"   Brand: {lead.brand}")
-        print(f"   Location: {lead.city}, {lead.state}, {lead.country}")
+        print(f"   Location: {lead.city}, {lead.state}")
         print(f"   Opening: {lead.opening_date}")
-        print(f"   Rooms: {lead.room_count}")
-        print(f"   Developer: {lead.developer}")
-        print(f"   Management: {lead.management_company}")
+        print(f"   Key Insights: {lead.key_insights[:50]}..." if lead.key_insights else "   Key Insights: None")
         print(f"   Merged from: {lead.merged_from_count} sources")
-        print(f"   Source URLs:")
         for url in lead.source_urls:
             print(f"      • {url}")
     
     print("\n" + "="*70)
-    print("STATS:", dedup.get_stats())
-    print("="*70)

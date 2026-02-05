@@ -681,10 +681,10 @@
     "name": "Hotel Dive",
     "domain": "hoteldive.com",
     "entry_url": "https://www.hoteldive.com/topic/development/",
-    "total_urls_tested": 751,
-    "urls_with_leads": 123,
-    "urls_without_leads": 628,
-    "total_leads_found": 123,
+    "total_urls_tested": 854,
+    "urls_with_leads": 133,
+    "urls_without_leads": 721,
+    "total_leads_found": 133,
     "usa_caribbean_leads": 120,
     "gold_patterns": [
       "/topic/development/",
@@ -696,6 +696,7 @@
     ],
     "junk_patterns": [
       "/what-we-are-reading",
+      "/news/accor-hotels-q3-2025-earnings/\\d+/",
       "/en/news-and-media/news-releases/\\d+/[^/]+",
       "/news/family-travel-hotel-business/\\d+/",
       "/news/grand-hyatt-opening-utah/\\d+/",
@@ -704,7 +705,6 @@
     ],
     "maybe_patterns": [
       "/news/[^/]+/\\d+/",
-      "/news/accor-hotels-q3-2025-earnings/\\d+/",
       "/topic/finances-deals/",
       "/news/\\d+\\.html",
       "/news/ihg-acquires-ruby-q4-earnings/\\d+/",
@@ -719,32 +719,32 @@
     ],
     "pattern_stats": {
       "/topic/development/": {
-        "tested": 16,
-        "leads": 9,
+        "tested": 21,
+        "leads": 10,
         "total_quality": 5.627440476190476,
         "usa_caribbean": 9
       },
       "/news/[^/]+/\\d+/": {
-        "tested": 555,
-        "leads": 75,
+        "tested": 639,
+        "leads": 81,
         "total_quality": 46.089999999999975,
         "usa_caribbean": 75
       },
       "/news/ihg-ruby-hotels-chicago-debut/\\d+/": {
-        "tested": 15,
-        "leads": 13,
+        "tested": 17,
+        "leads": 14,
         "total_quality": 8.3,
         "usa_caribbean": 11
       },
       "/news/ihg-six-senses-resort-utah/\\d+/": {
-        "tested": 15,
-        "leads": 6,
+        "tested": 17,
+        "leads": 7,
         "total_quality": 3.5599999999999996,
         "usa_caribbean": 5
       },
       "/news/top-hotel-openings-2026/\\d+/": {
-        "tested": 15,
-        "leads": 7,
+        "tested": 17,
+        "leads": 8,
         "total_quality": 4.14547619047619,
         "usa_caribbean": 7
       },
@@ -755,7 +755,7 @@
         "usa_caribbean": 0
       },
       "/news/accor-hotels-q3-2025-earnings/\\d+/": {
-        "tested": 3,
+        "tested": 5,
         "leads": 0,
         "total_quality": 0.0,
         "usa_caribbean": 0
@@ -821,13 +821,13 @@
         "usa_caribbean": 4
       },
       "/news/family-travel-hotel-business/\\d+/": {
-        "tested": 12,
+        "tested": 14,
         "leads": 0,
         "total_quality": 0.0,
         "usa_caribbean": 0
       },
       "/news/grand-hyatt-opening-utah/\\d+/": {
-        "tested": 12,
+        "tested": 14,
         "leads": 0,
         "total_quality": 0.0,
         "usa_caribbean": 0
@@ -863,18 +863,18 @@
         "usa_caribbean": 0
       },
       "/news/choice-hotels-q3-2025-earnings/\\d+/": {
-        "tested": 10,
+        "tested": 12,
         "leads": 0,
         "total_quality": 0.0,
         "usa_caribbean": 0
       }
     },
-    "lead_yield_rate": 0.16378162450066577,
-    "usa_caribbean_rate": 0.975609756097561,
+    "lead_yield_rate": 0.1557377049180328,
+    "usa_caribbean_rate": 0.9022556390977443,
     "avg_confidence": 0.0,
     "first_tested": "2026-01-30T11:57:36.970456",
-    "last_tested": "2026-02-03T16:54:11.302492",
-    "last_updated": "2026-02-03T16:54:11.302492",
+    "last_tested": "2026-02-04T13:15:55.177503",
+    "last_updated": "2026-02-04T13:15:55.177503",
     "recommended_max_pages": 30,
     "recommended_priority": 8,
     "is_worth_scraping": true,
@@ -2223,9 +2223,9 @@
     "name": "Hospitality Net",
     "domain": "hospitalitynet.org",
     "entry_url": "https://www.hospitalitynet.org/news/global.html",
-    "total_urls_tested": 1,
+    "total_urls_tested": 2,
     "urls_with_leads": 0,
-    "urls_without_leads": 1,
+    "urls_without_leads": 2,
     "total_leads_found": 0,
     "usa_caribbean_leads": 0,
     "gold_patterns": [],
@@ -2235,7 +2235,7 @@
     ],
     "pattern_stats": {
       "/news/global.html": {
-        "tested": 1,
+        "tested": 2,
         "leads": 0,
         "total_quality": 0.0,
         "usa_caribbean": 0
@@ -2245,8 +2245,8 @@
     "usa_caribbean_rate": 0.0,
     "avg_confidence": 0.0,
     "first_tested": "2026-02-03T12:25:31.501370",
-    "last_tested": "2026-02-03T12:25:31.501370",
-    "last_updated": "2026-02-03T12:25:31.501370",
+    "last_tested": "2026-02-04T11:42:53.770828",
+    "last_updated": "2026-02-04T11:42:53.770828",
     "recommended_max_pages": 20,
     "recommended_priority": 4,
     "is_worth_scraping": true,
@@ -2280,6 +2280,230 @@
     "first_tested": "2026-02-03T12:25:31.501370",
     "last_tested": "2026-02-03T12:25:31.501370",
     "last_updated": "2026-02-03T12:25:31.501370",
+    "recommended_max_pages": 20,
+    "recommended_priority": 4,
+    "is_worth_scraping": true,
+    "notes": []
+  },
+  "Marriott News - All Brands": {
+    "name": "Marriott News - All Brands",
+    "domain": "news.marriott.com",
+    "entry_url": "https://news.marriott.com/news/",
+    "total_urls_tested": 31,
+    "urls_with_leads": 1,
+    "urls_without_leads": 30,
+    "total_leads_found": 1,
+    "usa_caribbean_leads": 0,
+    "gold_patterns": [],
+    "junk_patterns": [
+      "/news/\\d+/01/\\d+/[^/]+",
+      "/news/\\d+/11/\\d+/[^/]+"
+    ],
+    "maybe_patterns": [
+      "/news/",
+      "/",
+      "/news/\\d+/02/\\d+/[^/]+",
+      "/news/\\d+/12/\\d+/[^/]+",
+      "/news/\\d+/10/\\d+/[^/]+"
+    ],
+    "pattern_stats": {
+      "/news/": {
+        "tested": 2,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/news/\\d+/02/\\d+/[^/]+": {
+        "tested": 2,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/news/\\d+/01/\\d+/[^/]+": {
+        "tested": 11,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/news/\\d+/12/\\d+/[^/]+": {
+        "tested": 5,
+        "leads": 1,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/news/\\d+/11/\\d+/[^/]+": {
+        "tested": 9,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/news/\\d+/10/\\d+/[^/]+": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      }
+    },
+    "lead_yield_rate": 0.03225806451612903,
+    "usa_caribbean_rate": 0.0,
+    "avg_confidence": 0.0,
+    "first_tested": "2026-02-04T11:46:01.587055",
+    "last_tested": "2026-02-04T14:40:12.118535",
+    "last_updated": "2026-02-04T14:40:12.118535",
+    "recommended_max_pages": 20,
+    "recommended_priority": 4,
+    "is_worth_scraping": false,
+    "notes": []
+  },
+  "Four Seasons - New Hotels Page": {
+    "name": "Four Seasons - New Hotels Page",
+    "domain": "fourseasons.com",
+    "entry_url": "https://www.fourseasons.com/landing/new-hotels/",
+    "total_urls_tested": 1,
+    "urls_with_leads": 0,
+    "urls_without_leads": 1,
+    "total_leads_found": 0,
+    "usa_caribbean_leads": 0,
+    "gold_patterns": [],
+    "junk_patterns": [],
+    "maybe_patterns": [
+      "/landing/new-hotels/"
+    ],
+    "pattern_stats": {
+      "/landing/new-hotels/": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      }
+    },
+    "lead_yield_rate": 0.0,
+    "usa_caribbean_rate": 0.0,
+    "avg_confidence": 0.0,
+    "first_tested": "2026-02-04T14:33:25.530418",
+    "last_tested": "2026-02-04T14:33:25.530418",
+    "last_updated": "2026-02-04T14:33:25.530418",
+    "recommended_max_pages": 20,
+    "recommended_priority": 4,
+    "is_worth_scraping": true,
+    "notes": []
+  },
+  "South Florida Biz Journal - Hotels": {
+    "name": "South Florida Biz Journal - Hotels",
+    "domain": "bizjournals.com",
+    "entry_url": "https://www.bizjournals.com/southflorida/news/real-estate/hotel",
+    "total_urls_tested": 9,
+    "urls_with_leads": 0,
+    "urls_without_leads": 9,
+    "total_leads_found": 0,
+    "usa_caribbean_leads": 0,
+    "gold_patterns": [],
+    "junk_patterns": [],
+    "maybe_patterns": [
+      "/southflorida/news/real-estate/hotel",
+      "/southflorida/news/\\d+/02/\\d+/[^/]+",
+      "/southflorida/news/travel-and-tourism",
+      "/southflorida/news/\\d+/01/\\d+/[^/]+",
+      "/southflorida/news/\\d+/12/\\d+/[^/]+",
+      "/southflorida/news/\\d+/11/\\d+/[^/]+",
+      "/southflorida/news/subscribers"
+    ],
+    "pattern_stats": {
+      "/southflorida/news/real-estate/hotel": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/southflorida/news/\\d+/02/\\d+/[^/]+": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/southflorida/news/travel-and-tourism": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/southflorida/news/\\d+/01/\\d+/[^/]+": {
+        "tested": 2,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/southflorida/news/\\d+/12/\\d+/[^/]+": {
+        "tested": 2,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/southflorida/news/\\d+/11/\\d+/[^/]+": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/southflorida/news/subscribers": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      }
+    },
+    "lead_yield_rate": 0.0,
+    "usa_caribbean_rate": 0.0,
+    "avg_confidence": 0.0,
+    "first_tested": "2026-02-04T14:35:39.156777",
+    "last_tested": "2026-02-04T14:35:39.157784",
+    "last_updated": "2026-02-04T14:35:39.157784",
+    "recommended_max_pages": 20,
+    "recommended_priority": 4,
+    "is_worth_scraping": true,
+    "notes": []
+  },
+  "Hyatt Newsroom - All Brands": {
+    "name": "Hyatt Newsroom - All Brands",
+    "domain": "newsroom.hyatt.com",
+    "entry_url": "https://newsroom.hyatt.com/news-releases",
+    "total_urls_tested": 2,
+    "urls_with_leads": 0,
+    "urls_without_leads": 2,
+    "total_leads_found": 0,
+    "usa_caribbean_leads": 0,
+    "gold_patterns": [],
+    "junk_patterns": [],
+    "maybe_patterns": [
+      "/news-releases",
+      "/"
+    ],
+    "pattern_stats": {
+      "/news-releases": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      }
+    },
+    "lead_yield_rate": 0.0,
+    "usa_caribbean_rate": 0.0,
+    "avg_confidence": 0.0,
+    "first_tested": "2026-02-04T14:40:57.162458",
+    "last_tested": "2026-02-04T14:40:57.162458",
+    "last_updated": "2026-02-04T14:40:57.162458",
     "recommended_max_pages": 20,
     "recommended_priority": 4,
     "is_worth_scraping": true,

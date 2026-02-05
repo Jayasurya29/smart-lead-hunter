@@ -1,8 +1,8 @@
 # =============================================================================
-# SMART LEAD HUNTER - REQUIREMENTS (WITH CRAWL4AI)
+# SMART LEAD HUNTER - REQUIREMENTS
 # =============================================================================
-# Production-ready scraping system for 73+ hotel news sources
-# Last Updated: January 2026
+# Hotel lead generation system with AI extraction
+# Last Updated: February 2026
 # =============================================================================
 
 # =============================================================================
@@ -14,7 +14,6 @@ pydantic>=2.5.0
 pydantic-settings>=2.1.0
 python-multipart>=0.0.6
 jinja2>=3.1.2
-aiofiles>=23.2.1
 
 # =============================================================================
 # DATABASE
@@ -28,39 +27,32 @@ alembic>=1.13.1
 # =============================================================================
 # WEB SCRAPING - TRIPLE ENGINE SYSTEM
 # =============================================================================
-# HTTPX - Fast async HTTP client (for simple static sites)
+# HTTPX - Fast async HTTP client (PRIMARY - for simple static sites)
 httpx>=0.25.2
 
-# Playwright - Browser automation (for JavaScript-heavy sites)
-playwright>=1.41.0
-
-# Crawl4AI - SMART CRAWLER (PRIMARY - best for most sites!)
-# Features: caching, parallel scraping, anti-detection, markdown output
+# Crawl4AI - Smart crawler with caching & anti-detection (FALLBACK 1)
 crawl4ai>=0.3.0
+
+# Playwright - Browser automation (FALLBACK 2 - for JS-heavy sites)
+playwright>=1.41.0
 
 # BeautifulSoup - HTML parsing
 beautifulsoup4>=4.12.3
 
-# lxml - Fast HTML/XML parser (crawl4ai needs >=5.3)
-lxml>=5.3.0
+# lxml - Fast HTML/XML parser
+lxml>=5.1.0
 
-# aiohttp - Async HTTP (crawl4ai dependency)
-aiohttp>=3.9.0
-
-# aiofiles - Async file I/O (crawl4ai needs >=24.1)
-aiofiles>=24.1.0
+# aiofiles - Async file I/O (crawl4ai dependency)
+aiofiles>=23.2.1
 
 # =============================================================================
-# AI EXTRACTION - 100% FREE STACK
+# AI EXTRACTION - FREE STACK
 # =============================================================================
-# Groq API - FREE tier (Llama 3.3 70B)
-groq>=0.4.0
+# Google Gemini (PRIMARY - free tier available)
+google-generativeai>=0.4.0
 
-# Ollama - LOCAL AI (unlimited)
+# Ollama (BACKUP - runs locally, unlimited, free)
 ollama>=0.1.6
-
-# OpenAI client - For OpenRouter fallback
-openai>=1.0.0
 
 # =============================================================================
 # NLP & TEXT PROCESSING
@@ -86,7 +78,6 @@ sentence-transformers>=2.2.2
 # =============================================================================
 celery>=5.3.4
 redis>=5.0.1
-celery-redbeat>=2.1.1
 
 # =============================================================================
 # UTILITIES
@@ -98,7 +89,6 @@ tqdm>=4.66.0
 # =============================================================================
 # LOGGING & OUTPUT
 # =============================================================================
-structlog>=24.1.0
 rich>=13.7.0
 
 # =============================================================================
@@ -106,12 +96,11 @@ rich>=13.7.0
 # =============================================================================
 pytest>=7.4.0
 pytest-asyncio>=0.23.0
-pytest-cov>=4.1.0
 
 # =============================================================================
 # POST-INSTALL COMMANDS
 # =============================================================================
-# 
+#
 # 1. Install Playwright browser:
 #    playwright install chromium
 #
@@ -121,18 +110,20 @@ pytest-cov>=4.1.0
 # 3. Download spaCy model:
 #    python -m spacy download en_core_web_sm
 #
-# 4. Get FREE Groq API key:
-#    https://console.groq.com/
-#    Add to .env: GROQ_API_KEY=gsk_xxxxx
+# 4. Get FREE Gemini API key:
+#    https://aistudio.google.com/apikey
+#    Add to .env: GEMINI_API_KEY=your-key
 #
 # =============================================================================
-# SCRAPING STRATEGY
+# SCRAPING STRATEGY (Auto-fallback)
 # =============================================================================
 #
-# PRIMARY:   Crawl4AI  - Smart, cached, parallel (80% of sites)
-# SECONDARY: Playwright - Direct browser control (JS-heavy sites)
-# TERTIARY:  HTTPX     - Simple fast HTTP (static sites)
+#   1. HTTPX (fast, simple)
+#      ↓ if blocked/fails
+#   2. Crawl4AI (smart, cached, anti-detection)
+#      ↓ if fails
+#   3. Playwright (full browser)
 #
-# The scraping_engine.py automatically picks the best one!
+# The scraping_engine.py handles this automatically!
 #
 # =============================================================================

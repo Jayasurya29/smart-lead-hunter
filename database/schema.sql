@@ -80,6 +80,14 @@ CREATE TABLE IF NOT EXISTS potential_leads (
     opening_year INTEGER,                            -- Extracted year for filtering
     room_count INTEGER,
     description TEXT,
+     -- Key Insights (for sales team)
+    key_insights TEXT,
+    
+    -- Stakeholders
+    management_company VARCHAR(200),
+    developer VARCHAR(200),
+    owner VARCHAR(200),
+
     
     -- Scoring (0-100)
     lead_score INTEGER CHECK (lead_score >= 0 AND lead_score <= 100),
