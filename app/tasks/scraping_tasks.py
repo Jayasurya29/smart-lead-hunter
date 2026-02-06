@@ -34,6 +34,7 @@ from app.database import async_session
 from app.models import PotentialLead, Source, ScrapeLog
 from app.services.intelligent_pipeline import LeadExtractionPipeline 
 from app.services.scorer import score_lead, LeadScorer
+from app.services.utils import normalize_hotel_name
 
 logger = logging.getLogger(__name__)
 
@@ -144,7 +145,8 @@ async def _save_lead_impl(
     commit: bool = True,
 ) -> Optional[int]:
     """Internal implementation for save_lead_to_db."""
-    normalized_name = (hotel.get("hotel_name") or "").lower().strip()
+    # Use shared normalization (matches orchestrator's logic)
+    normalized_name = normalize_hotel_name(hotel.get("hotel_name") or "")
     
     result = await session.execute(
         select(PotentialLead).where(
@@ -255,6 +257,47 @@ async def update_source_stats(source_id: int, leads_found: int):
 # SCRAPING LOGIC
 # =============================================================================
 
+# Shared Playwright browser instance — avoids 1-3s launch overhead per URL.
+# Created once per worker, reused across all scrape_url_async calls.
+_playwright_instance = None
+_playwright_browser = None
+_playwright_lock = asyncio.Lock()
+
+
+async def _get_shared_browser():
+    """Get or create a shared Playwright browser instance."""
+    global _playwright_instance, _playwright_browser
+    async with _playwright_lock:
+        if _playwright_browser is None or not _playwright_browser.is_connected():
+            try:
+                from playwright.async_api import async_playwright
+                _playwright_instance = await async_playwright().start()
+                _playwright_browser = await _playwright_instance.chromium.launch(headless=True)
+                logger.info("Shared Playwright browser launched")
+            except ImportError:
+                logger.warning("Playwright not available")
+                return None
+    return _playwright_browser
+
+
+async def _close_shared_browser():
+    """Close shared browser on worker shutdown."""
+    global _playwright_instance, _playwright_browser
+    async with _playwright_lock:
+        if _playwright_browser:
+            try:
+                await _playwright_browser.close()
+            except Exception:
+                pass
+            _playwright_browser = None
+        if _playwright_instance:
+            try:
+                await _playwright_instance.stop()
+            except Exception:
+                pass
+            _playwright_instance = None
+
+
 async def scrape_url_async(url: str, use_playwright: bool = False) -> Optional[str]:
     """
     Scrape a single URL and return text content.
@@ -271,30 +314,29 @@ async def scrape_url_async(url: str, use_playwright: bool = False) -> Optional[s
     - Retry logic with engine fallback
     
     Keeping for now to avoid breaking changes mid-sprint. Target removal: Phase 4.
+    
+    H-07 FIX: Uses shared browser instance instead of launching a new browser per URL.
+    For 20 URLs, saves 20-60 seconds of browser startup overhead.
     """
     import httpx
     from bs4 import BeautifulSoup
     
     try:
         if use_playwright:
-            try:
-                from playwright.async_api import async_playwright
-                
-                async with async_playwright() as p:
-                    browser = await p.chromium.launch(headless=True)
-                    page = await browser.new_page()
+            browser = await _get_shared_browser()
+            if browser:
+                page = await browser.new_page()
+                try:
                     await page.goto(url, wait_until="networkidle", timeout=30000)
                     await asyncio.sleep(2)
                     content = await page.content()
-                    await browser.close()
                     
                     soup = BeautifulSoup(content, "lxml")
                     for tag in soup(['script', 'style', 'nav', 'footer']):
                         tag.decompose()
                     return soup.get_text(' ', strip=True)
-                    
-            except ImportError:
-                logger.warning("Playwright not available, falling back to httpx")
+                finally:
+                    await page.close()  # Close page, keep browser alive
         
         async with httpx.AsyncClient(
             timeout=30.0,

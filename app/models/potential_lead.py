@@ -3,8 +3,13 @@ Potential Lead model - stores scraped leads before pushing to Insightly
 """
 from sqlalchemy import Column, String, Integer, DateTime, Text, CheckConstraint, Numeric, ForeignKey
 from sqlalchemy.dialects.postgresql import JSONB
-from pgvector.sqlalchemy import Vector
 from datetime import datetime, timezone
+
+# L2 FIX: Guard pgvector import — makes it optional for dev/test environments
+try:
+    from pgvector.sqlalchemy import Vector
+except ImportError:
+    Vector = None
 
 from app.database import Base
 
@@ -74,8 +79,8 @@ class PotentialLead(Base):
     synced_at = Column(DateTime(timezone=True))
     sync_error = Column(Text)
     
-    # Deduplication
-    embedding = Column(Vector(384))  # For semantic similarity
+    # Deduplication — L2 FIX: Only create Vector column if pgvector is installed
+    embedding = Column(Vector(384)) if Vector is not None else Column(Text)
     duplicate_of_id = Column(Integer, ForeignKey('potential_leads.id'))
     similarity_score = Column(Numeric(5, 4))  # How similar to duplicate (0.0-1.0)
     

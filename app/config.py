@@ -77,8 +77,8 @@ class Settings(BaseSettings):
     # -------------------------------------------------------------------------
     # ENVIRONMENT
     # -------------------------------------------------------------------------
-    environment: str = "development"
-    debug: bool = True
+    environment: str = "production"
+    debug: bool = False
     
     # -------------------------------------------------------------------------
     # PYDANTIC CONFIG

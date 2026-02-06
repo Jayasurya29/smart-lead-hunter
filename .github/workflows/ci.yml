@@ -1,0 +1,73 @@
+# ============================================================
+# SMART LEAD HUNTER — CI Pipeline
+# Fix: T2 (no CI/CD pipeline)
+# ============================================================
+
+name: CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+
+jobs:
+  lint-and-test:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: testpass
+          POSTGRES_DB: smart_lead_hunter_test
+        ports:
+          - 5433:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+          pip install pytest pytest-asyncio pytest-cov ruff pip-audit
+
+      - name: Lint with Ruff
+        run: ruff check app/ --select=E,F,W --ignore=E501
+
+      - name: Security audit (SM3)
+        run: pip-audit --strict --desc || true  # warn but don't fail yet
+
+      - name: Run tests
+        env:
+          DATABASE_URL: postgresql+asyncpg://postgres:testpass@localhost:5433/smart_lead_hunter_test
+          REDIS_URL: redis://localhost:6379/0
+          CELERY_BROKER_URL: redis://localhost:6379/0
+          GEMINI_API_KEY: test-key-not-real
+          ENVIRONMENT: test
+        run: pytest tests/ -v --tb=short --cov=app --cov-report=term-missing
+
+      - name: Build Docker image
+        run: docker build -t smart-lead-hunter:test .

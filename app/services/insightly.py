@@ -556,5 +556,25 @@ class InsightlyClient:
             return {"connected": False, "error": str(e)}
 
 
-# Singleton instance for import convenience
-insightly_client = InsightlyClient()
+# Lazy singleton — avoids initializing before .env is loaded (e.g., Celery worker startup)
+_insightly_client = None
+
+
+def get_insightly_client() -> InsightlyClient:
+    """Get or create the singleton InsightlyClient instance."""
+    global _insightly_client
+    if _insightly_client is None:
+        _insightly_client = InsightlyClient()
+    return _insightly_client
+
+
+# Backward-compatible alias (reads trigger lazy init via __getattr__ won't work for module vars,
+# so callers should migrate to get_insightly_client() — this is kept for existing imports)
+insightly_client = None  # type: ignore
+
+
+def __getattr__(name):
+    """Module-level lazy access: `from insightly_crm import insightly_client`"""
+    if name == "insightly_client":
+        return get_insightly_client()
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

@@ -12,11 +12,16 @@ database_url = settings.database_url.replace(
 )
 
 # Create async engine
+# M6: echo=False always (never log SQL in production — leaks data)
+# PM1: pool_size 5→10 for concurrent scraping
+# R2: max_overflow 10→20 to handle traffic spikes
 engine = create_async_engine(
     database_url,
-    echo=settings.debug,
-    pool_size=5,
-    max_overflow=10
+    echo=False,
+    pool_size=10,
+    max_overflow=20,
+    pool_timeout=30,
+    pool_recycle=3600,
 )
 
 # Create async session factory

@@ -170,7 +170,8 @@ class SourceLearningSystem:
         try:
             parsed = urlparse(url)
             return parsed.netloc.lower().replace('www.', '')
-        except:
+        # M4 FIX: bare except → except Exception (don't catch KeyboardInterrupt/SystemExit)
+        except Exception:
             return ''
     
     def _extract_path_pattern(self, url: str) -> str:
@@ -210,8 +211,9 @@ class SourceLearningSystem:
                     new_parts.append(part)
             
             return '/'.join(new_parts)
-            
-        except:
+        
+        # M4 FIX: bare except → except Exception (don't catch KeyboardInterrupt/SystemExit)
+        except Exception:
             return url
     
     def _get_or_create_learning(self, source_name: str, url: str) -> SourceLearning:

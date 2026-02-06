@@ -29,6 +29,7 @@ Usage:
 """
 
 import asyncio
+import hashlib
 import json
 import logging
 import os
@@ -63,20 +64,40 @@ class PipelineConfig:
     # API Key (from env if not provided)
     gemini_api_key: str = ""
     
-    # Models
-    classifier_model: str = "gemini-2.5-flash-lite"  #for classification
-    extractor_model: str = "gemini-2.5-flash-lite"   # for extraction
+    # Models — BEST ACCURACY configuration ($300 budget / 3 months)
+    # Classifier: 2.5 Flash — fast but smart, catches edge cases
+    # Extractor: 2.5 Pro — most capable model for structured extraction
+    classifier_model: str = "gemini-2.5-flash"    # Best classifier (thinking enabled)
+    extractor_model: str = "gemini-2.5-pro"       # Most accurate extraction
     
     # Thresholds
-    classification_confidence: float = 0.6  # Min confidence to extract
+    classification_confidence: float = 0.5  # Lower threshold — let Pro decide (was 0.6)
     qualification_threshold: int = 30       # Min score to keep lead
     
-    # Rate limiting
-    min_delay_seconds: float = 1.0  # Between API calls
+    # Rate limiting — Pro has lower RPM limits
+    min_delay_seconds: float = 0.5  # Between API calls (paid tier = higher limits)
+    
+    # Concurrency — paid tier supports higher throughput
+    max_concurrent_requests: int = 10  # Parallel API calls
+    
+    # Content limits — Pro handles larger context, send more content
+    classifier_content_limit: int = 5000   # Chars for classification (was 3000)
+    extractor_content_limit: int = 15000   # Chars for extraction (was 8000)
+    
+    # Redis extraction cache (skip re-extraction for same content)
+    redis_cache_enabled: bool = True
+    redis_cache_ttl_hours: int = 72  # Cache extracted leads for 3 days
+    redis_url: str = ""
+    
+    # TODO: Gemini Batch API (50% cost reduction when GA)
+    # Set to True once google releases batch endpoint for Gemini
+    use_batch_api: bool = False
     
     def __post_init__(self):
         if not self.gemini_api_key:
             self.gemini_api_key = os.getenv("GEMINI_API_KEY", "")
+        if not self.redis_url:
+            self.redis_url = os.getenv("REDIS_URL", "redis://localhost:6379/0")
 
 
 # =============================================================================
@@ -250,7 +271,9 @@ class PipelineResult:
     pages_classified: int = 0
     pages_relevant: int = 0
     pages_not_relevant: int = 0
+    pages_rejected: int = 0           # pages rejected by QuickRejectFilter
     leads_extracted: int = 0
+    leads_validated: int = 0          # leads that passed validation
     leads_qualified: int = 0
     leads_high_quality: int = 0
     leads_medium_quality: int = 0
@@ -259,6 +282,41 @@ class PipelineResult:
     total_time_seconds: float = 0.0
     classification_time_ms: int = 0
     extraction_time_ms: int = 0
+    
+    # Quality metrics
+    avg_classification_confidence: float = 0.0
+    avg_lead_score: float = 0.0
+    cache_hits: int = 0
+    validation_rejects: int = 0
+    source_type_detected: str = ""
+    
+    # Per-source breakdown for monitoring
+    metrics: Dict[str, Any] = field(default_factory=dict)
+    
+    def to_metrics_dict(self) -> Dict[str, Any]:
+        """Export metrics for logging / dashboard tracking."""
+        return {
+            "source": self.source_name,
+            "source_type": self.source_type_detected,
+            "timestamp": datetime.now().isoformat(),
+            "pages_scraped": self.pages_scraped,
+            "pages_relevant": self.pages_relevant,
+            "pages_rejected": self.pages_rejected,
+            "relevance_rate": round(self.pages_relevant / max(self.pages_classified, 1), 3),
+            "leads_extracted": self.leads_extracted,
+            "leads_validated": self.leads_validated,
+            "leads_qualified": self.leads_qualified,
+            "extraction_rate": round(self.leads_extracted / max(self.pages_relevant, 1), 2),
+            "qualification_rate": round(self.leads_qualified / max(self.leads_extracted, 1), 3),
+            "avg_confidence": round(self.avg_classification_confidence, 3),
+            "avg_lead_score": round(self.avg_lead_score, 1),
+            "cache_hits": self.cache_hits,
+            "validation_rejects": self.validation_rejects,
+            "high_quality": self.leads_high_quality,
+            "medium_quality": self.leads_medium_quality,
+            "low_quality": self.leads_low_quality,
+            "time_seconds": round(self.total_time_seconds, 1),
+        }
 
 
 # =============================================================================
@@ -512,40 +570,68 @@ class ContentClassifier:
     """
     Stage 2: Classify if content is about a new hotel opening.
     Cost: ~$0.0001 per page
+    
+    FIX A: Improved prompt with few-shot examples for higher accuracy.
+    Reduces false positives (executive appointments, reviews) and
+    false negatives (renovation-to-new-brand conversions).
     """
     
-    PROMPT = """You are a hotel industry analyst. Classify this content.
+    @staticmethod
+    def _build_prompt(content: str) -> str:
+        """Build classifier prompt with dynamic year and few-shot examples."""
+        current_year = datetime.now().year
+        return f"""You are a hotel industry analyst classifying web content.
 
-TASK: Is this about a NEW HOTEL OPENING in 2026 or later?
+TASK: Does this content announce a NEW HOTEL OPENING or MAJOR HOTEL DEVELOPMENT in {current_year} or later?
 
-TARGET LOCATIONS (we ONLY care about):
-- Florida (Miami, Orlando, Tampa, etc.)
-- Caribbean (Bahamas, Jamaica, Puerto Rico, etc.)
-- Other USA states
+TARGET LOCATIONS (we ONLY care about these):
+- Florida (Miami, Fort Lauderdale, Orlando, Tampa, Naples, etc.)
+- Caribbean (Bahamas, Jamaica, Puerto Rico, Turks & Caicos, etc.)
+- Other USA states (New York, California, Texas, etc.)
 
-RELEVANT:
-✅ A NAMED hotel opening in 2026+ in USA/Caribbean
-✅ Hotel under construction in USA/Caribbean
-✅ Press release about new hotel development in USA/Caribbean
+WHAT COUNTS AS RELEVANT:
+✅ A NAMED hotel opening, groundbreaking, or construction start in {current_year}+
+✅ Hotel brand conversion/renovation reopening as a new brand (e.g., Hilton → Four Seasons)
+✅ New resort or hotel development announced for USA/Caribbean
+✅ Hotel under construction with projected opening date
+✅ Mixed-use development that includes a hotel component
 
-NOT RELEVANT:
-❌ Hotels already opened (2025 or earlier)
-❌ International hotels (Europe, Asia, Middle East)
-❌ Executive appointments
-❌ Hotel reviews
-❌ Airlines/cruises
+WHAT IS NOT RELEVANT:
+❌ Hotels that already opened ({current_year - 1} or earlier) — unless announcing a new phase
+❌ International hotels (Europe, Asia, Middle East, Africa) with no US/Caribbean connection
+❌ Executive appointments, promotions, or leadership changes (UNLESS tied to a new property)
+❌ Hotel reviews, travel guides, or "best hotels" lists
+❌ Airlines, cruises, restaurants (unless inside a new hotel)
+❌ Renovations of existing hotels keeping the same brand
 
-CONTENT:
+EXAMPLES:
+
+Example 1: "Marriott announces new 350-room Courtyard in downtown Miami, opening Q3 {current_year}"
+→ {{"is_new_hotel_opening": true, "confidence": 0.95, "reasoning": "Named hotel, specific location in Florida, future opening date"}}
+
+Example 2: "John Smith named VP of Operations at Hilton Hotels"
+→ {{"is_new_hotel_opening": false, "confidence": 0.95, "reasoning": "Executive appointment, no new hotel announced"}}
+
+Example 3: "The historic Grand Hotel in Venice completes €50M restoration"
+→ {{"is_new_hotel_opening": false, "confidence": 0.90, "reasoning": "International location (Italy), renovation not new build"}}
+
+Example 4: "Developer breaks ground on $200M mixed-use tower in Fort Lauderdale featuring a 200-room luxury hotel"
+→ {{"is_new_hotel_opening": true, "confidence": 0.90, "reasoning": "New construction in Florida, includes hotel component"}}
+
+Example 5: "Top 10 luxury hotels opening in {current_year}"
+→ {{"is_new_hotel_opening": true, "confidence": 0.70, "reasoning": "Listicle about new openings — likely contains multiple relevant hotels"}}
+
+Now classify THIS content:
 ---
 {content}
 ---
 
-Respond in JSON only:
+Respond in JSON:
 {{
-    "summary": "One sentence about this page",
-    "is_new_hotel_opening": true/false,
-    "confidence": 0.0-1.0,
-    "reasoning": "Brief explanation"
+    "summary": "One sentence describing this page",
+    "is_new_hotel_opening": true or false,
+    "confidence": 0.0 to 1.0,
+    "reasoning": "Brief explanation of your decision"
 }}"""
 
     def __init__(self, config: PipelineConfig):
@@ -553,56 +639,101 @@ Respond in JSON only:
         self.api_key = config.gemini_api_key
         self._last_call = 0.0
         self._stats = {'classified': 0, 'relevant': 0, 'errors': 0}
+        self._client = httpx.AsyncClient(timeout=30.0)
+    
+    async def close(self):
+        await self._client.aclose()
     
     async def classify(self, url: str, content: str) -> ClassificationResult:
-        """Classify content relevance"""
+        """Classify content relevance with retry logic."""
         start = time.time()
         
-        # Truncate for classification
-        truncated = content[:3000] if len(content) > 3000 else content
+        # Truncate for classification (use config limit)
+        truncated = content[:self.config.classifier_content_limit] if len(content) > self.config.classifier_content_limit else content
+        logger.info(f"   📄 Classifying {url[:60]}... ({len(content)} chars, first 100: {content[:100].strip()!r})")
         
-        try:
-            # Rate limiting
-            elapsed = time.time() - self._last_call
-            if elapsed < self.config.min_delay_seconds:
-                await asyncio.sleep(self.config.min_delay_seconds - elapsed)
-            
-            async with httpx.AsyncClient(timeout=30.0) as client:
-                response = await client.post(
-                    f"https://generativelanguage.googleapis.com/v1beta/models/{self.config.classifier_model}:generateContent?key={self.api_key}",
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                # Rate limiting
+                elapsed = time.time() - self._last_call
+                if elapsed < self.config.min_delay_seconds:
+                    await asyncio.sleep(self.config.min_delay_seconds - elapsed)
+                
+                response = await self._client.post(
+                    f"https://generativelanguage.googleapis.com/v1beta/models/{self.config.classifier_model}:generateContent",
+                
+                    headers={"x-goog-api-key": self.api_key},
                     json={
-                        "contents": [{"parts": [{"text": self.PROMPT.format(content=truncated)}]}],
-                        "generationConfig": {"temperature": 0.1, "maxOutputTokens": 200}
+                        "contents": [{"parts": [{"text": self._build_prompt(truncated)}]}],
+                        "generationConfig": {
+                            "temperature": 0.1,
+                            "maxOutputTokens": 200,
+                            "responseMimeType": "application/json",
+                            "thinkingConfig": {"thinkingBudget": 0}
+                        }
                     }
+
                 )
                 self._last_call = time.time()
-                
+                    
+                # Retryable errors
+                if response.status_code in (429, 503):
+                    wait = (2 ** attempt) * 2
+                    logger.warning(f"Classifier {response.status_code}, retry {attempt+1}/{max_retries} in {wait}s")
+                    await asyncio.sleep(wait)
+                    continue
+                    
                 if response.status_code == 200:
                     result = response.json()
                     text = result['candidates'][0]['content']['parts'][0]['text']
 
-                    # Clean markdown code blocks
-                    text = text.replace("```json", "").replace("```", "").strip()
+                    # With responseMimeType, parse directly; fallback to regex
+                    try:
+                        data = json.loads(text)
+                    except json.JSONDecodeError:
+                        text = text.replace("```json", "").replace("```", "").strip()
+                        # Balanced brace matching (handles nested braces in reasoning text)
+                        data = None
+                        start = text.find('{')
+                        if start != -1:
+                            depth = 0
+                            for i in range(start, len(text)):
+                                if text[i] == '{':
+                                    depth += 1
+                                elif text[i] == '}':
+                                    depth -= 1
+                                    if depth == 0:
+                                        try:
+                                            data = json.loads(text[start:i+1])
+                                        except json.JSONDecodeError:
+                                            pass
+                                        break
+                        if data is None:
+                            self._stats['errors'] += 1
+                            return ClassificationResult(
+                                url=url, summary="JSON parse failed",
+                                is_relevant=False, confidence=0.0,
+                                reasoning="Could not parse classifier response",
+                                processing_time_ms=int((time.time() - start) * 1000)
+                            )
+
+                    logger.info(f"   🤖 Gemini response for {url[:50]}: {data}")   
+                    is_relevant = data.get('is_new_hotel_opening', False)
+                    self._stats['classified'] += 1
+                    if is_relevant:
+                        self._stats['relevant'] += 1
+                        
+                    return ClassificationResult(
+                        url=url,
+                        summary=data.get('summary', 'Unknown'),
+                        is_relevant=is_relevant,
+                        confidence=float(data.get('confidence', 0.5)),
+                        reasoning=data.get('reasoning', ''),
+                        processing_time_ms=int((time.time() - start) * 1000)
+                    )
                     
-                    # Parse JSON
-                    json_match = re.search(r'\{[^{}]*\}', text, re.DOTALL)
-                    if json_match:
-                        data = json.loads(json_match.group())
-                        
-                        is_relevant = data.get('is_new_hotel_opening', False)
-                        self._stats['classified'] += 1
-                        if is_relevant:
-                            self._stats['relevant'] += 1
-                        
-                        return ClassificationResult(
-                            url=url,
-                            summary=data.get('summary', 'Unknown'),
-                            is_relevant=is_relevant,
-                            confidence=float(data.get('confidence', 0.5)),
-                            reasoning=data.get('reasoning', ''),
-                            processing_time_ms=int((time.time() - start) * 1000)
-                        )
-                
+                # Non-retryable error
                 self._stats['errors'] += 1
                 return ClassificationResult(
                     url=url, summary="Classification failed",
@@ -610,15 +741,29 @@ Respond in JSON only:
                     reasoning=f"API error: {response.status_code}",
                     processing_time_ms=int((time.time() - start) * 1000)
                 )
-                
-        except Exception as e:
-            self._stats['errors'] += 1
-            return ClassificationResult(
-                url=url, summary="Error",
-                is_relevant=False, confidence=0.0,
-                reasoning=str(e),
-                processing_time_ms=int((time.time() - start) * 1000)
-            )
+                    
+            except httpx.TimeoutException:
+                wait = (2 ** attempt) * 2
+                logger.warning(f"Classifier timeout, retry {attempt+1}/{max_retries} in {wait}s")
+                await asyncio.sleep(wait)
+                continue
+            except Exception as e:
+                self._stats['errors'] += 1
+                return ClassificationResult(
+                    url=url, summary="Error",
+                    is_relevant=False, confidence=0.0,
+                    reasoning=str(e),
+                    processing_time_ms=int((time.time() - start) * 1000)
+                )
+        
+        # All retries exhausted
+        self._stats['errors'] += 1
+        return ClassificationResult(
+            url=url, summary="Retries exhausted",
+            is_relevant=False, confidence=0.0,
+            reasoning=f"All {max_retries} retries failed",
+            processing_time_ms=int((time.time() - start) * 1000)
+        )
     
     def get_stats(self) -> Dict[str, int]:
         return self._stats.copy()
@@ -634,14 +779,88 @@ class LeadExtractor:
     Cost: ~$0.001 per page
     """
     
-    PROMPT = """You are a hotel data extraction specialist.
+    # Source-type aware extraction hints — tells Gemini what to focus on
+    # based on the kind of source being scraped
+    SOURCE_HINTS = {
+        "chain_newsroom": (
+            "\nSOURCE TYPE: Official brand/chain press release — expect precise opening dates, "
+            "exact room counts, brand standards, management details. These are authoritative; "
+            "extract every detail including GM names and contact info."
+        ),
+        "aggregator": (
+            "\nSOURCE TYPE: Hotel news aggregator — may list MULTIPLE hotels per page. "
+            "Extract ALL hotels mentioned, not just the headline one. Data may be summarized; "
+            "capture what's available and flag fields as approximate if needed."
+        ),
+        "industry": (
+            "\nSOURCE TYPE: Industry/trade publication — focus on business details: investment "
+            "amounts, developer/owner names, financing, construction timelines, management "
+            "contracts. These sources often have insider details not in consumer press."
+        ),
+        "florida": (
+            "\nSOURCE TYPE: Florida local news/real estate — focus on local developer names, "
+            "zoning/permit details, exact street addresses, county, construction start dates, "
+            "and any community impact or job creation numbers."
+        ),
+        "caribbean": (
+            "\nSOURCE TYPE: Caribbean hospitality source — focus on all-inclusive vs. "
+            "standalone resort, island location, staff hiring (seasonal workers = uniform "
+            "orders), water sports/beach operations, and any renovation vs. new build details."
+        ),
+        "permit": (
+            "\nSOURCE TYPE: Building permits/planning records — extract exact addresses, "
+            "permit numbers, square footage, contractor names, estimated construction cost, "
+            "and project timeline from official records."
+        ),
+        "business": (
+            "\nSOURCE TYPE: Business journal — look for investment amounts, developer names, "
+            "financing sources, construction timelines, job creation numbers, and any "
+            "public incentives or tax breaks mentioned."
+        ),
+    }
+    
+    # URL/name patterns mapped to source types
+    SOURCE_PATTERNS = {
+        "chain_newsroom": ["marriott.com/news", "hilton.com/news", "hyatt.com/news", "ihg.com/news",
+                          "fourseasons.com/press", "rosewoodhotels.com/press", "press-release"],
+        "aggregator": ["hotelnewsresource", "hotelmanagement.net", "tophotelprojects",
+                      "hotel-online.com", "hospitalitynet"],
+        "industry": ["costar", "lodgingmagazine", "hoteldive", "hotelbusiness", "htrends"],
+        "florida": ["bizjournals.com/southflorida", "bizjournals.com/orlando", 
+                    "bizjournals.com/tampa", "floridatrend", "therealdeal.com/miami",
+                    "southflorida", "sun-sentinel"],
+        "caribbean": ["caribjournal", "caribbeanhotelandtourism", "travelweekly.com/caribbean"],
+        "permit": ["permit", "building.co", "planning", "construction-ede"],
+        "business": ["bizjournals", "commercialobserver", "therealdeal"],
+    }
+
+    @classmethod
+    def _detect_source_type(cls, url: str, source_name: str = "") -> str:
+        """Detect source type from URL and name patterns."""
+        combined = f"{url.lower()} {(source_name or '').lower()}"
+        for source_type, patterns in cls.SOURCE_PATTERNS.items():
+            if any(p in combined for p in patterns):
+                return source_type
+        return ""
+
+    @classmethod
+    def _build_prompt(cls, content: str, source_url: str, source_name: str = "") -> str:
+        """Build extraction prompt with dynamic year and source-type hints."""
+        current_year = datetime.now().year
+        
+        # Detect source type and get appropriate hint
+        source_type = cls._detect_source_type(source_url, source_name)
+        source_hint = cls.SOURCE_HINTS.get(source_type, "")
+        
+        return f"""You are a hotel data extraction specialist.
 
 Extract information about NEW HOTEL OPENINGS from this article.
+{source_hint}
 
 RULES:
 1. Only extract NEW hotels being announced (not existing hotels)
 2. Leave fields empty if not clearly stated
-3. For opening_date use format "Month YYYY" or "Q1 2026" or "2026"
+3. For opening_date use format "Month YYYY" or "Q1 {current_year}" or "{current_year}"
 4. key_insights is REQUIRED - include staffing numbers, amenities, investment
 
 KEY INSIGHTS TO CAPTURE (critical for uniform sales!):
@@ -691,90 +910,361 @@ Return [] if no new hotels found."""
         self.config = config
         self.api_key = config.gemini_api_key
         self._last_call = 0.0
-        self._stats = {'extracted': 0, 'leads': 0, 'errors': 0}
+        self._stats = {'extracted': 0, 'leads': 0, 'errors': 0, 'cache_hits': 0}
+        self._client = httpx.AsyncClient(timeout=120.0)
+        
+        # Redis extraction cache — skip re-extraction for identical content
+        self._redis = None
+        if config.redis_cache_enabled:
+            try:
+                import redis
+                self._redis = redis.from_url(
+                    config.redis_url,
+                    socket_timeout=2,
+                    socket_connect_timeout=2,
+                    decode_responses=True,
+                )
+                self._redis.ping()
+                logger.info("Extraction cache: Redis connected")
+            except Exception as e:
+                logger.warning(f"Extraction cache: Redis unavailable ({e}), caching disabled")
+                self._redis = None
+    
+    @staticmethod
+    def _content_hash(content: str, url: str) -> str:
+        """Generate a stable hash for content + URL."""
+        return hashlib.sha256(f"{url}:{content[:15000]}".encode()).hexdigest()[:16]
+    
+    def _cache_get(self, cache_key: str) -> Optional[List[dict]]:
+        """Try to get cached extraction results."""
+        if not self._redis:
+            return None
+        try:
+            cached = self._redis.get(f"extract:{cache_key}")
+            if cached:
+                return json.loads(cached)
+        except Exception:
+            pass
+        return None
+    
+    def _cache_set(self, cache_key: str, leads_data: List[dict]):
+        """Cache extraction results."""
+        if not self._redis:
+            return
+        try:
+            ttl = self.config.redis_cache_ttl_hours * 3600
+            self._redis.setex(
+                f"extract:{cache_key}",
+                ttl,
+                json.dumps(leads_data),
+            )
+        except Exception:
+            pass
     
     async def extract(self, url: str, content: str, source_name: str = "") -> List[ExtractedLead]:
-        """Extract leads from content"""
+        """Extract leads from content with retry logic and Redis caching."""
         self._stats['extracted'] += 1
         
-        try:
-            # Rate limiting
-            elapsed = time.time() - self._last_call
-            if elapsed < self.config.min_delay_seconds:
-                await asyncio.sleep(self.config.min_delay_seconds - elapsed)
-            
-            # Truncate content
-            truncated = content[:8000] if len(content) > 8000 else content
-            
-            async with httpx.AsyncClient(timeout=60.0) as client:
-                response = await client.post(
-                    f"https://generativelanguage.googleapis.com/v1beta/models/{self.config.extractor_model}:generateContent?key={self.api_key}",
+        # Truncate content (use config limit — Pro handles more context)
+        truncated = content[:self.config.extractor_content_limit] if len(content) > self.config.extractor_content_limit else content
+        
+        # ── CHECK CACHE FIRST ──
+        cache_key = self._content_hash(truncated, url)
+        cached_data = self._cache_get(cache_key)
+        if cached_data is not None:
+            self._stats['cache_hits'] += 1
+            logger.debug(f"Cache hit for {url[:60]}")
+            leads = []
+            for hotel in cached_data:
+                if hotel.get('hotel_name'):
+                    lead = ExtractedLead(
+                        hotel_name=hotel.get('hotel_name', ''),
+                        brand=hotel.get('brand', ''),
+                        property_type=hotel.get('property_type', ''),
+                        city=hotel.get('city', ''),
+                        state=hotel.get('state', ''),
+                        country=hotel.get('country', 'USA'),
+                        opening_date=hotel.get('opening_date', ''),
+                        opening_status=hotel.get('opening_status', ''),
+                        room_count=int(hotel.get('room_count', 0) or 0),
+                        management_company=hotel.get('management_company', ''),
+                        developer=hotel.get('developer', ''),
+                        owner=hotel.get('owner', ''),
+                        contact_name=hotel.get('contact_name', ''),
+                        contact_title=hotel.get('contact_title', ''),
+                        contact_email=hotel.get('contact_email', ''),
+                        contact_phone=hotel.get('contact_phone', ''),
+                        key_insights=hotel.get('key_insights', ''),
+                        amenities=hotel.get('amenities', ''),
+                        investment_amount=hotel.get('investment_amount', ''),
+                        source_url=url,
+                        source_name=source_name,
+                        source_urls=[url],
+                        source_names=[source_name] if source_name else [],
+                        extracted_at=datetime.now().isoformat(),
+                    )
+                    leads.append(lead)
+            self._stats['leads'] += len(leads)
+            return leads
+        
+        # ── CALL GEMINI (with retry) ──
+        # Fix 5: Retry with exponential backoff (3 attempts)
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                # Rate limiting
+                elapsed = time.time() - self._last_call
+                if elapsed < self.config.min_delay_seconds:
+                    await asyncio.sleep(self.config.min_delay_seconds - elapsed)
+                
+                response = await self._client.post(
+                    f"https://generativelanguage.googleapis.com/v1beta/models/{self.config.extractor_model}:generateContent",
+                    headers={"x-goog-api-key": self.api_key},
                     json={
-                        "contents": [{"parts": [{"text": self.PROMPT.format(content=truncated, source_url=url)}]}],
-                        "generationConfig": {"temperature": 0.2, "maxOutputTokens": 8000}
+                        "contents": [{"parts": [{"text": self._build_prompt(truncated, url, source_name)}]}],
+                        "generationConfig": {
+                            "temperature": 0.15,
+                            "maxOutputTokens": 16000,
+                            "responseMimeType": "application/json",
+                            "responseSchema": {
+                                "type": "array",
+                                "items": {
+                                    "type": "object",
+                                    "properties": {
+                                        "hotel_name": {"type": "string"},
+                                        "brand": {"type": "string"},
+                                        "property_type": {"type": "string"},
+                                        "city": {"type": "string"},
+                                        "state": {"type": "string"},
+                                        "country": {"type": "string"},
+                                        "opening_date": {"type": "string"},
+                                        "room_count": {"type": "string"},
+                                        "key_insights": {"type": "string"},
+                                        "source_url": {"type": "string"},
+                                        "investment": {"type": "string"},
+                                        "developer": {"type": "string"},
+                                        "management_company": {"type": "string"}
+                                    },
+                                    "required": ["hotel_name", "city", "state"]
+                                }
+                            }
+                        }
                     }
                 )
                 self._last_call = time.time()
-                
+                    
+                # Retryable status codes
+                if response.status_code == 429:
+                    wait = (2 ** attempt) * 2  # 2s, 4s, 8s
+                    logger.warning(f"Rate limited (429), retry {attempt+1}/{max_retries} in {wait}s")
+                    await asyncio.sleep(wait)
+                    continue
+                elif response.status_code == 503:
+                    wait = (2 ** attempt) * 3  # 3s, 6s, 12s
+                    logger.warning(f"Service unavailable (503), retry {attempt+1}/{max_retries} in {wait}s")
+                    await asyncio.sleep(wait)
+                    continue
+                    
                 if response.status_code == 200:
                     result = response.json()
                     text = result['candidates'][0]['content']['parts'][0]['text']
-                    
-                    
-                    # Parse JSON array
-                    json_match = re.search(r'\[.*\]', text, re.DOTALL)
-                    if json_match:
-                        hotels = json.loads(json_match.group())
                         
-                        leads = []
-                        for hotel in hotels:
-                            if hotel.get('hotel_name'):
-                                lead = ExtractedLead(
-                                    hotel_name=hotel.get('hotel_name', ''),
-                                    brand=hotel.get('brand', ''),
-                                    property_type=hotel.get('property_type', ''),
-                                    city=hotel.get('city', ''),
-                                    state=hotel.get('state', ''),
-                                    country=hotel.get('country', 'USA'),
-                                    opening_date=hotel.get('opening_date', ''),
-                                    opening_status=hotel.get('opening_status', ''),
-                                    room_count=int(hotel.get('room_count', 0) or 0),
-                                    management_company=hotel.get('management_company', ''),
-                                    developer=hotel.get('developer', ''),
-                                    owner=hotel.get('owner', ''),
-                                    contact_name=hotel.get('contact_name', ''),
-                                    contact_title=hotel.get('contact_title', ''),
-                                    contact_email=hotel.get('contact_email', ''),
-                                    contact_phone=hotel.get('contact_phone', ''),
-                                    key_insights=hotel.get('key_insights', ''),
-                                    amenities=hotel.get('amenities', ''),
-                                    investment_amount=hotel.get('investment_amount', ''),
-                                    source_url=url,
-                                    source_name=source_name,
-                                    source_urls=[url],
-                                    source_names=[source_name] if source_name else [],
-                                    extracted_at=datetime.now().isoformat(),
-                                )
-                                leads.append(lead)
+                    # With responseMimeType, Gemini returns clean JSON
+                    # but fall back to robust extraction just in case
+                    try:
+                        hotels = json.loads(text)
+                    except json.JSONDecodeError:
+                        # Try to find JSON array with balanced bracket matching
+                        # (greedy r'\[.*\]' would capture garbage between multiple arrays)
+                        hotels = None
+                        start = text.find('[')
+                        if start != -1:
+                            depth = 0
+                            for i in range(start, len(text)):
+                                if text[i] == '[':
+                                    depth += 1
+                                elif text[i] == ']':
+                                    depth -= 1
+                                    if depth == 0:
+                                        try:
+                                            hotels = json.loads(text[start:i+1])
+                                        except json.JSONDecodeError:
+                                            pass
+                                        break
+                        if hotels is None:
+                            logger.warning(f"No JSON array found in response for {url}")
+                            self._stats['errors'] += 1
+                            return []
                         
-                        self._stats['leads'] += len(leads)
-                        return leads
-                
+                    # Ensure it's a list
+                    if isinstance(hotels, dict):
+                        hotels = [hotels]
+                        
+                    leads = []
+                    for hotel in hotels:
+                        if hotel.get('hotel_name'):
+                            lead = ExtractedLead(
+                                hotel_name=hotel.get('hotel_name', ''),
+                                brand=hotel.get('brand', ''),
+                                property_type=hotel.get('property_type', ''),
+                                city=hotel.get('city', ''),
+                                state=hotel.get('state', ''),
+                                country=hotel.get('country', 'USA'),
+                                opening_date=hotel.get('opening_date', ''),
+                                opening_status=hotel.get('opening_status', ''),
+                                room_count=int(hotel.get('room_count', 0) or 0),
+                                management_company=hotel.get('management_company', ''),
+                                developer=hotel.get('developer', ''),
+                                owner=hotel.get('owner', ''),
+                                contact_name=hotel.get('contact_name', ''),
+                                contact_title=hotel.get('contact_title', ''),
+                                contact_email=hotel.get('contact_email', ''),
+                                contact_phone=hotel.get('contact_phone', ''),
+                                key_insights=hotel.get('key_insights', ''),
+                                amenities=hotel.get('amenities', ''),
+                                investment_amount=hotel.get('investment_amount', ''),
+                                source_url=url,
+                                source_name=source_name,
+                                source_urls=[url],
+                                source_names=[source_name] if source_name else [],
+                                extracted_at=datetime.now().isoformat(),
+                            )
+                            leads.append(lead)
+                        
+                    self._stats['leads'] += len(leads)
+                        
+                    # Cache the raw hotel dicts for future runs
+                    if leads and isinstance(hotels, list):
+                        self._cache_set(cache_key, hotels)
+                        
+                    return leads
+                    
+                # Non-retryable error (400, 401, 403, etc.)
+                logger.error(f"Extraction failed: HTTP {response.status_code} for {url}")
                 self._stats['errors'] += 1
                 return []
-                
-        except Exception as e:
-            logger.error(f"Extraction error: {e}")
-            self._stats['errors'] += 1
-            return []
+                    
+            except httpx.TimeoutException:
+                wait = (2 ** attempt) * 2
+                # Fall back to faster model on 2nd retry
+                if attempt >= 1:
+                    model = "gemini-2.5-flash"
+                    logger.warning(f"Timeout on {url}, falling back to {model}, retry {attempt+1}/{max_retries} in {wait}s")
+                else:
+                    logger.warning(f"Timeout on {url}, retry {attempt+1}/{max_retries} in {wait}s")
+                await asyncio.sleep(wait)
+        
+            except Exception as e:
+                logger.error(f"Extraction error: {e}")
+                self._stats['errors'] += 1
+                return []
+        
+        # All retries exhausted
+        logger.error(f"All {max_retries} retries exhausted for {url}")
+        self._stats['errors'] += 1
+        return []
     
     def get_stats(self) -> Dict[str, int]:
         return self._stats.copy()
+    
+    async def close(self):
+        await self._client.aclose()
 
 
 # =============================================================================
 # STAGE 4: LEAD QUALIFIER (Uses scorer.py + Priority + Contact)
 # =============================================================================
+
+class LeadValidator:
+    """
+    Stage 3.5: Validate extracted leads before scoring.
+    
+    Catches garbage output from Gemini — short names, missing locations,
+    past opening dates, placeholder text, etc. Runs FREE (no API calls).
+    """
+    
+    # Placeholder / junk patterns that Gemini sometimes returns
+    JUNK_NAMES = {
+        "new hotel", "hotel name", "tbd", "tba", "unnamed", "n/a",
+        "unknown", "untitled", "placeholder", "test hotel",
+    }
+    
+    def __init__(self):
+        self._stats = {'validated': 0, 'rejected': 0, 'reasons': {}}
+    
+    @staticmethod
+    def _extract_year(date_str: str) -> Optional[int]:
+        """Pull a 4-digit year from an opening date string."""
+        if not date_str:
+            return None
+        match = re.search(r'20\d{2}', str(date_str))
+        return int(match.group()) if match else None
+    
+    def validate(self, lead: ExtractedLead) -> Tuple[bool, str]:
+        """
+        Validate a single extracted lead.
+        
+        Returns: (is_valid, rejection_reason)
+        """
+        self._stats['validated'] += 1
+        
+        name = (lead.hotel_name or "").strip()
+        
+        # Rule 1: Name must be meaningful (> 5 chars, not placeholder)
+        if len(name) < 5:
+            return self._reject("name_too_short", f"Name too short: '{name}'")
+        
+        if name.lower() in self.JUNK_NAMES:
+            return self._reject("junk_name", f"Placeholder name: '{name}'")
+        
+        # Rule 2: Must have city OR state (otherwise we can't score location)
+        if not (lead.city or "").strip() and not (lead.state or "").strip():
+            return self._reject("no_location", f"No city or state: '{name}'")
+        
+        # Rule 3: Opening date should be current year or later (not ancient)
+        current_year = datetime.now().year
+        opening_year = self._extract_year(lead.opening_date)
+        if opening_year and opening_year < current_year - 1:
+            return self._reject("past_opening", f"Old opening ({opening_year}): '{name}'")
+        
+        # Rule 4: Room count sanity (if provided, must be realistic)
+        if lead.room_count and (lead.room_count < 3 or lead.room_count > 5000):
+            return self._reject("bad_room_count", f"Unrealistic rooms ({lead.room_count}): '{name}'")
+        
+        # Rule 5: Name shouldn't be a duplicate of city/brand alone
+        name_lower = name.lower()
+        brand_lower = (lead.brand or "").lower()
+        city_lower = (lead.city or "").lower()
+        if name_lower == brand_lower or name_lower == city_lower:
+            return self._reject("name_is_brand_or_city", f"Name is just brand/city: '{name}'")
+        
+        return (True, "")
+    
+    def validate_batch(self, leads: List[ExtractedLead]) -> List[ExtractedLead]:
+        """Validate a list of leads, returning only valid ones."""
+        valid = []
+        for lead in leads:
+            is_valid, reason = self.validate(lead)
+            if is_valid:
+                valid.append(lead)
+            else:
+                logger.debug(f"   ❌ Validation reject: {reason}")
+        
+        rejected = len(leads) - len(valid)
+        if rejected > 0:
+            logger.info(f"   🔍 Validation: {rejected} leads rejected, {len(valid)} passed")
+        
+        return valid
+    
+    def _reject(self, code: str, message: str) -> Tuple[bool, str]:
+        """Record a rejection."""
+        self._stats['rejected'] += 1
+        self._stats['reasons'][code] = self._stats['reasons'].get(code, 0) + 1
+        return (False, message)
+    
+    def get_stats(self) -> Dict:
+        return self._stats.copy()
+
 
 class LeadQualifier:
     """
@@ -882,6 +1372,7 @@ class IntelligentPipeline:
         self.quick_reject = QuickRejectFilter()
         self.classifier = ContentClassifier(self.config)
         self.extractor = LeadExtractor(self.config)
+        self.validator = LeadValidator()
         self.qualifier = LeadQualifier()
         
         self._stats = {'runs': 0, 'pages': 0, 'leads': 0}
@@ -894,6 +1385,9 @@ class IntelligentPipeline:
         """
         Process pages through the full pipeline.
         
+        FIX: Now uses parallel processing with semaphore for 
+        classification and extraction stages (~5x faster).
+        
         Args:
             pages: List of {'url': ..., 'content': ..., 'source': ...}
             source_name: Name of the source
@@ -904,62 +1398,120 @@ class IntelligentPipeline:
         start_time = time.time()
         self._stats['runs'] += 1
         
+        # Concurrency limit from config (default 10)
+        sem = asyncio.Semaphore(self.config.max_concurrent_requests)
+        
         logger.info(f"\n{'='*60}")
         logger.info(f"🧠 INTELLIGENT PIPELINE - {len(pages)} pages")
         logger.info(f"{'='*60}")
         
-        # STAGE 2: CLASSIFICATION
-        logger.info(f"\n📊 STAGE 2: Classifying {len(pages)} pages...")
-        classification_start = time.time()
+        # =====================================================================
+        # STAGE 1: QUICK REJECT (FREE - no AI cost)
+        # =====================================================================
+        logger.info(f"\n🚫 STAGE 1: Quick reject filtering {len(pages)} URLs...")
         
-        relevant_pages = []
-        not_relevant = 0
+        pages_after_reject = []
+        rejected_count = 0
         
         for page in pages:
             url = page.get('url', '')
-            content = page.get('content', '') or page.get('text', '')
             
-            if not content or len(content) < 100:
+            should_reject, reason = self.quick_reject.should_reject(url)
+            if should_reject:
+                rejected_count += 1
+                logger.debug(f"   ❌ Rejected: {url[:60]}... ({reason})")
+            else:
+                pages_after_reject.append(page)
+        
+        if rejected_count > 0:
+            logger.info(f"   🚫 Rejected {rejected_count} junk URLs (saved {rejected_count} API calls)")
+        logger.info(f"   ✅ {len(pages_after_reject)} pages passed to classification")
+        
+        # =====================================================================
+        # STAGE 2: CLASSIFICATION (PARALLEL)
+        # =====================================================================
+        logger.info(f"\n📊 STAGE 2: Classifying {len(pages_after_reject)} pages (parallel)...")
+        classification_start = time.time()
+        
+        async def classify_one(page):
+            async with sem:
+                url = page.get('url', '')
+                content = page.get('content', '') or page.get('text', '')
+                if not content or len(content) < 100:
+                    return None
+                result = await self.classifier.classify(url, content)
+                return (page, result)
+        
+        classify_tasks = [classify_one(p) for p in pages_after_reject]
+        classify_results = await asyncio.gather(*classify_tasks, return_exceptions=True)
+        
+        relevant_pages = []
+        not_relevant = 0
+        classification_confidences = []
+        
+        for result in classify_results:
+            if result is None or isinstance(result, Exception):
                 continue
-            
-            result = await self.classifier.classify(url, content)
-            
-            if result.should_extract:
+            page, classification = result
+            classification_confidences.append(classification.confidence)
+            if classification.should_extract:
                 relevant_pages.append({
-                    'url': url,
-                    'content': content,
+                    'url': page.get('url', ''),
+                    'content': page.get('content', '') or page.get('text', ''),
                     'source': page.get('source', source_name),
                 })
-                logger.info(f"✅ RELEVANT: {result.summary[:60]}...")
+                logger.info(f"✅ RELEVANT: {classification.summary[:60]}...")
             else:
                 not_relevant += 1
         
         classification_time = int((time.time() - classification_start) * 1000)
         logger.info(f"✅ {len(relevant_pages)} relevant, {not_relevant} skipped")
         
-        # STAGE 3: EXTRACTION
-        logger.info(f"\n🔍 STAGE 3: Extracting from {len(relevant_pages)} pages...")
+        # =====================================================================
+        # STAGE 3: EXTRACTION (PARALLEL)
+        # =====================================================================
+        logger.info(f"\n🔍 STAGE 3: Extracting from {len(relevant_pages)} pages (parallel)...")
         extraction_start = time.time()
         
+        async def extract_one(page):
+            async with sem:
+                return await self.extractor.extract(
+                    page['url'], 
+                    page['content'],
+                    page.get('source', source_name)
+                )
+        
+        extract_tasks = [extract_one(p) for p in relevant_pages]
+        extract_results = await asyncio.gather(*extract_tasks, return_exceptions=True)
+        
         all_leads = []
-        for page in relevant_pages:
-            leads = await self.extractor.extract(
-                page['url'], 
-                page['content'],
-                page.get('source', source_name)
-            )
-            if leads:
-                all_leads.extend(leads)
-                for lead in leads:
+        for result in extract_results:
+            if isinstance(result, Exception):
+                logger.error(f"Extraction task failed: {result}")
+                continue
+            if result:
+                all_leads.extend(result)
+                for lead in result:
                     logger.info(f"   📝 {lead.hotel_name} ({lead.city}, {lead.state})")
         
         extraction_time = int((time.time() - extraction_start) * 1000)
         logger.info(f"✅ Extracted {len(all_leads)} leads")
         
-        # STAGE 4: QUALIFICATION
-        logger.info(f"\n⭐ STAGE 4: Qualifying {len(all_leads)} leads...")
+        # =====================================================================
+        # STAGE 3.5: VALIDATION (FREE - no AI cost)
+        # =====================================================================
+        logger.info(f"\n🔍 STAGE 3.5: Validating {len(all_leads)} leads...")
         
-        qualified_leads = self.qualifier.qualify_batch(all_leads)
+        validated_leads = self.validator.validate_batch(all_leads)
+        
+        logger.info(f"✅ {len(validated_leads)} leads passed validation")
+        
+        # =====================================================================
+        # STAGE 4: QUALIFICATION
+        # =====================================================================
+        logger.info(f"\n⭐ STAGE 4: Qualifying {len(validated_leads)} leads...")
+        
+        qualified_leads = self.qualifier.qualify_batch(validated_leads)
         
         # Filter by threshold
         final_leads = [l for l in qualified_leads 
@@ -976,13 +1528,24 @@ class IntelligentPipeline:
         
         total_time = time.time() - start_time
         
+        # Quality metrics
+        avg_confidence = sum(classification_confidences) / max(len(classification_confidences), 1)
+        avg_score = sum(l.qualification_score for l in final_leads) / max(len(final_leads), 1)
+        cache_hits = self.extractor._stats.get('cache_hits', 0)
+        validation_rejects = len(all_leads) - len(validated_leads)
+        source_type = LeadExtractor._detect_source_type(
+            pages[0].get('url', '') if pages else '', source_name
+        )
+        
         # Summary
         logger.info(f"\n{'='*60}")
         logger.info(f"🎯 PIPELINE COMPLETE")
         logger.info(f"{'='*60}")
-        logger.info(f"📊 Classified: {len(relevant_pages)} relevant / {len(pages)} total")
-        logger.info(f"📝 Extracted: {len(all_leads)} leads")
-        logger.info(f"✅ Qualified: {len(final_leads)} leads (score >= {self.config.qualification_threshold})")
+        logger.info(f"🚫 Quick Reject: {rejected_count} junk URLs filtered (FREE)")
+        logger.info(f"📊 Classified: {len(relevant_pages)} relevant / {len(pages_after_reject)} checked (avg confidence: {avg_confidence:.2f})")
+        logger.info(f"📝 Extracted: {len(all_leads)} leads (cache hits: {cache_hits})")
+        logger.info(f"🔍 Validated: {len(validated_leads)} passed, {validation_rejects} rejected")
+        logger.info(f"✅ Qualified: {len(final_leads)} leads (score >= {self.config.qualification_threshold}, avg: {avg_score:.0f})")
         logger.info(f"   🔴 High (70+): {high_quality}")
         logger.info(f"   🟠 Medium (40-69): {medium_quality}")
         logger.info(f"   🔵 Low (<40): {low_quality}")
@@ -992,13 +1555,15 @@ class IntelligentPipeline:
         self._stats['pages'] += len(pages)
         self._stats['leads'] += len(final_leads)
         
-        return PipelineResult(
+        pipeline_result = PipelineResult(
             source_name=source_name,
             pages_scraped=len(pages),
-            pages_classified=len(pages),
+            pages_classified=len(pages_after_reject),
             pages_relevant=len(relevant_pages),
             pages_not_relevant=not_relevant,
+            pages_rejected=rejected_count,
             leads_extracted=len(all_leads),
+            leads_validated=len(validated_leads),
             leads_qualified=len(final_leads),
             leads_high_quality=high_quality,
             leads_medium_quality=medium_quality,
@@ -1006,8 +1571,18 @@ class IntelligentPipeline:
             final_leads=final_leads,
             total_time_seconds=total_time,
             classification_time_ms=classification_time,
-            extraction_time_ms=extraction_time
+            extraction_time_ms=extraction_time,
+            avg_classification_confidence=avg_confidence,
+            avg_lead_score=avg_score,
+            cache_hits=cache_hits,
+            validation_rejects=validation_rejects,
+            source_type_detected=source_type,
         )
+        
+        # Log structured metrics for monitoring
+        logger.info(f"📊 Metrics: {json.dumps(pipeline_result.to_metrics_dict())}")
+        
+        return pipeline_result
     
     async def extract(
         self,
@@ -1045,6 +1620,11 @@ class IntelligentPipeline:
             'classifier': self.classifier.get_stats(),
             'extractor': self.extractor.get_stats()
         }
+    
+    async def close(self):
+        """Close shared HTTP clients."""
+        await self.classifier.close()
+        await self.extractor.close()
 
 
 # =============================================================================

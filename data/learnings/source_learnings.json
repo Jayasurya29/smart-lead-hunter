@@ -681,11 +681,11 @@
     "name": "Hotel Dive",
     "domain": "hoteldive.com",
     "entry_url": "https://www.hoteldive.com/topic/development/",
-    "total_urls_tested": 854,
-    "urls_with_leads": 133,
-    "urls_without_leads": 721,
-    "total_leads_found": 133,
-    "usa_caribbean_leads": 120,
+    "total_urls_tested": 931,
+    "urls_with_leads": 160,
+    "urls_without_leads": 771,
+    "total_leads_found": 160,
+    "usa_caribbean_leads": 147,
     "gold_patterns": [
       "/topic/development/",
       "/news/ihg-ruby-hotels-chicago-debut/\\d+/",
@@ -715,38 +715,39 @@
       "/topic/operations/",
       "/topic/technology/",
       "/topic/workforce/",
-      "/topic/regulations/"
+      "/topic/regulations/",
+      "/news/mgm-resorts-earnings-q4-2025/\\d+/"
     ],
     "pattern_stats": {
       "/topic/development/": {
-        "tested": 21,
-        "leads": 10,
+        "tested": 26,
+        "leads": 14,
         "total_quality": 5.627440476190476,
-        "usa_caribbean": 9
+        "usa_caribbean": 13
       },
       "/news/[^/]+/\\d+/": {
-        "tested": 639,
-        "leads": 81,
+        "tested": 693,
+        "leads": 93,
         "total_quality": 46.089999999999975,
-        "usa_caribbean": 75
+        "usa_caribbean": 87
       },
       "/news/ihg-ruby-hotels-chicago-debut/\\d+/": {
-        "tested": 17,
-        "leads": 14,
+        "tested": 19,
+        "leads": 15,
         "total_quality": 8.3,
-        "usa_caribbean": 11
+        "usa_caribbean": 12
       },
       "/news/ihg-six-senses-resort-utah/\\d+/": {
-        "tested": 17,
+        "tested": 18,
         "leads": 7,
         "total_quality": 3.5599999999999996,
         "usa_caribbean": 5
       },
       "/news/top-hotel-openings-2026/\\d+/": {
-        "tested": 17,
-        "leads": 8,
+        "tested": 28,
+        "leads": 18,
         "total_quality": 4.14547619047619,
-        "usa_caribbean": 7
+        "usa_caribbean": 17
       },
       "/what-we-are-reading": {
         "tested": 15,
@@ -821,13 +822,13 @@
         "usa_caribbean": 4
       },
       "/news/family-travel-hotel-business/\\d+/": {
-        "tested": 14,
+        "tested": 15,
         "leads": 0,
         "total_quality": 0.0,
         "usa_caribbean": 0
       },
       "/news/grand-hyatt-opening-utah/\\d+/": {
-        "tested": 14,
+        "tested": 15,
         "leads": 0,
         "total_quality": 0.0,
         "usa_caribbean": 0
@@ -863,18 +864,24 @@
         "usa_caribbean": 0
       },
       "/news/choice-hotels-q3-2025-earnings/\\d+/": {
-        "tested": 12,
+        "tested": 13,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/news/mgm-resorts-earnings-q4-2025/\\d+/": {
+        "tested": 1,
         "leads": 0,
         "total_quality": 0.0,
         "usa_caribbean": 0
       }
     },
-    "lead_yield_rate": 0.1557377049180328,
-    "usa_caribbean_rate": 0.9022556390977443,
+    "lead_yield_rate": 0.17185821697099893,
+    "usa_caribbean_rate": 0.91875,
     "avg_confidence": 0.0,
     "first_tested": "2026-01-30T11:57:36.970456",
-    "last_tested": "2026-02-04T13:15:55.177503",
-    "last_updated": "2026-02-04T13:15:55.177503",
+    "last_tested": "2026-02-06T16:33:03.176835",
+    "last_updated": "2026-02-06T16:33:03.176835",
     "recommended_max_pages": 30,
     "recommended_priority": 8,
     "is_worth_scraping": true,

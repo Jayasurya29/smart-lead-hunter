@@ -62,7 +62,9 @@ def _brand_matches(brand: str, text: str) -> bool:
             )
         return bool(_brand_patterns[stripped].search(text))
     else:
-        return brand in text
+        # Both sides lowercased for case-insensitive match
+        # (caller typically lowercases text, but be explicit for safety)
+        return brand.lower() in text.lower()
 
 
 # =============================================================================

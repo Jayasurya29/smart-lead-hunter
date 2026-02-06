@@ -130,39 +130,49 @@ class AIRateLimiter:
             # Both in cooldown - check which has shorter wait
             gemini_wait = max(0, self._providers[AIProvider.GEMINI].cooldown_until - now)
             ollama_wait = max(0, self._providers[AIProvider.OLLAMA].cooldown_until - now)
-            
-            if gemini_wait <= ollama_wait and gemini_wait > 0:
-                logger.info(f"⏳ Waiting {gemini_wait:.1f}s for Gemini cooldown...")
-                await asyncio.sleep(gemini_wait)
-                return AIProvider.GEMINI
-            elif ollama_wait > 0:
-                logger.info(f"⏳ Waiting {ollama_wait:.1f}s for Ollama cooldown...")
-                await asyncio.sleep(ollama_wait)
-                return AIProvider.OLLAMA
-            
-            return AIProvider.OLLAMA  # Default fallback
+        
+        # M3 FIX: Sleep OUTSIDE the lock so other providers aren't blocked
+        if gemini_wait <= ollama_wait and gemini_wait > 0:
+            logger.info(f"⏳ Waiting {gemini_wait:.1f}s for Gemini cooldown...")
+            await asyncio.sleep(gemini_wait)
+            return AIProvider.GEMINI
+        elif ollama_wait > 0:
+            logger.info(f"⏳ Waiting {ollama_wait:.1f}s for Ollama cooldown...")
+            await asyncio.sleep(ollama_wait)
+            return AIProvider.OLLAMA
+        
+        return AIProvider.OLLAMA  # Default fallback
     
     async def wait_before_request(self, provider: AIProvider) -> None:
         """
         Wait the minimum required time before making a request.
         
+        M3 FIX: Calculate wait inside lock, sleep outside, then re-acquire
+        to update last_request timestamp.
+        
         Args:
             provider: Provider to wait for
         """
+        # Calculate wait time inside lock
         async with self._lock:
             now = time.time()
             state = self._providers[provider]
-            
             min_delay = self.MIN_DELAY_GEMINI if provider == AIProvider.GEMINI else self.MIN_DELAY_OLLAMA
             
+            wait_time = 0.0
             if state.last_request > 0:
                 elapsed = now - state.last_request
                 if elapsed < min_delay:
                     wait_time = min_delay - elapsed
-                    await asyncio.sleep(wait_time)
-            
-            state.last_request = time.time()
-            state.total_requests += 1
+        
+        # Sleep OUTSIDE the lock
+        if wait_time > 0:
+            await asyncio.sleep(wait_time)
+        
+        # Re-acquire lock to update timestamp
+        async with self._lock:
+            self._providers[provider].last_request = time.time()
+            self._providers[provider].total_requests += 1
     
     def record_success(self, provider: AIProvider) -> None:
         """

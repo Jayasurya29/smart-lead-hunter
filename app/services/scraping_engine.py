@@ -13,8 +13,9 @@ import hashlib
 import logging
 import re
 import time
+from collections import deque
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from enum import Enum
 from typing import Any, Dict, List, Optional, Set, Tuple
 from urllib.parse import urljoin, urlparse
@@ -82,7 +83,7 @@ class ScrapeResult:
     error: Optional[str] = None
     status_code: Optional[int] = None
     content_hash: Optional[str] = None
-    scraped_at: datetime = field(default_factory=datetime.now)
+    scraped_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     crawl_time_ms: int = 0
     crawler_used: str = "unknown"
     is_cached: bool = False
@@ -235,7 +236,7 @@ class HTTPScraper:
             crawl_time = int((time.time() - start_time) * 1000)
             if response.status_code == 200:
                 html = response.text
-                soup = BeautifulSoup(html, 'html.parser')
+                soup = BeautifulSoup(html, 'lxml')
                 for s in soup(["script", "style", "nav", "footer", "header"]): s.decompose()
                 text = soup.get_text(separator="\n", strip=True)
                 title = soup.title.string if soup.title else None
@@ -303,7 +304,7 @@ class PlaywrightScraper:
             await asyncio.sleep(1)
             html = await page.content()
             crawl_time = int((time.time() - start_time) * 1000)
-            soup = BeautifulSoup(html, 'html.parser')
+            soup = BeautifulSoup(html, 'lxml')
             for s in soup(["script", "style", "nav", "footer", "header"]): s.decompose()
             text = soup.get_text(separator="\n", strip=True)
             title = soup.title.string if soup.title else None
@@ -432,13 +433,13 @@ class DeepCrawler:
     async def crawl(self, source: SourceConfig, max_depth: int = 2, max_pages: int = 50) -> List[ScrapeResult]:
         results: List[ScrapeResult] = []
         visited: Set[str] = set()
-        to_visit: List[Tuple[str, int]] = [(source.url, 0)]
+        to_visit: deque = deque([(source.url, 0)])
         if hasattr(source, 'additional_urls') and source.additional_urls:
             for u in source.additional_urls: to_visit.append((u, 0))
         self._filter_stats = {'urls_discovered': 0, 'urls_blocked': 0, 'urls_allowed': 0}
 
         while to_visit and len(results) < max_pages:
-            url, depth = to_visit.pop(0)
+            url, depth = to_visit.popleft()
             if not isinstance(url, str):
                 url = url.get('href') or url.get('url') or url.get('link', '') if isinstance(url, dict) else ''
             if not url: continue

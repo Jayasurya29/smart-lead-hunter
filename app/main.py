@@ -32,10 +32,14 @@ import uuid
 from app.config import settings
 from app.database import get_db, init_db, async_session
 from app.models import PotentialLead, Source, ScrapeLog
+from app.services.utils import normalize_hotel_name
 
 # Global dict to track active scrape jobs and their progress
+# Protected by _scrape_lock for async-safe mutation within a single worker.
+# NOTE: For multi-worker uvicorn (--workers >1), migrate to Redis hash/pub-sub.
 active_scrapes: dict = {}
 scrape_cancellations: set = set()
+_scrape_lock = asyncio.Lock()
 
 # Configure logging
 logging.basicConfig(
@@ -238,6 +242,8 @@ async def lifespan(app: FastAPI):
 # -----------------------------------------------------------------------------
 # FastAPI App
 # -----------------------------------------------------------------------------
+from app.logging_config import setup_logging
+setup_logging()
 
 app = FastAPI(
     title="Smart Lead Hunter",
@@ -264,7 +270,7 @@ app.add_middleware(
     ),
     allow_credentials=True,
     allow_methods=["GET", "POST", "PATCH", "DELETE"],
-    allow_headers=["*"],
+    allow_headers=["Content-Type", "Authorization", "X-Requested-With"],
 )
 
 
@@ -274,6 +280,34 @@ app.add_middleware(
 _rate_limit_store: dict = defaultdict(lambda: {"count": 0, "reset": 0.0})
 _RATE_LIMIT_MAX = 60        # requests per window
 _RATE_LIMIT_WINDOW = 60.0   # seconds
+_RATE_LIMIT_MAX_ENTRIES = 10000  # max tracked IPs before forced eviction
+_rate_limit_last_cleanup = 0.0
+
+
+def _cleanup_rate_limit_store(now: float) -> None:
+    """Evict expired rate limit entries to prevent unbounded memory growth.
+    
+    Runs at most once per window period. Removes entries whose reset time
+    has passed (plus a small buffer).
+    """
+    global _rate_limit_last_cleanup
+    # Only clean up once per window
+    if now - _rate_limit_last_cleanup < _RATE_LIMIT_WINDOW:
+        return
+    _rate_limit_last_cleanup = now
+    
+    expired = [ip for ip, bucket in _rate_limit_store.items()
+               if now > bucket["reset"] + _RATE_LIMIT_WINDOW]
+    for ip in expired:
+        del _rate_limit_store[ip]
+    
+    # Emergency eviction if still too large (e.g., botnet with rotating IPs)
+    if len(_rate_limit_store) > _RATE_LIMIT_MAX_ENTRIES:
+        # Remove oldest entries first
+        sorted_ips = sorted(_rate_limit_store.keys(),
+                           key=lambda ip: _rate_limit_store[ip]["reset"])
+        for ip in sorted_ips[:len(_rate_limit_store) - _RATE_LIMIT_MAX_ENTRIES // 2]:
+            del _rate_limit_store[ip]
 
 
 @app.middleware("http")
@@ -289,8 +323,17 @@ async def rate_limit_middleware(request: Request, call_next):
     if not any(path.startswith(p) for p in ["/leads", "/sources", "/scrape", "/api"]):
         return await call_next(request)
 
-    client_ip = request.client.host if request.client else "unknown"
+    # Get real client IP (handles reverse proxy like nginx/Cloudflare)
+    forwarded = request.headers.get("X-Forwarded-For", "")
+    if forwarded:
+        client_ip = forwarded.split(",")[0].strip()
+    else:
+        client_ip = request.client.host if request.client else "unknown"
     now = time.monotonic()
+    
+    # Periodic eviction of expired entries (prevents memory leak)
+    _cleanup_rate_limit_store(now)
+    
     bucket = _rate_limit_store[client_ip]
 
     # Reset window if expired
@@ -632,8 +675,20 @@ async def get_lead(lead_id: int, db: AsyncSession = Depends(get_db)):
 @app.post("/leads", response_model=LeadResponse, tags=["Leads"])
 async def create_lead(lead_data: LeadCreate, db: AsyncSession = Depends(get_db)):
     """Create a new lead manually"""
-    # Normalize hotel name for deduplication
-    normalized_name = re.sub(r'[^a-z0-9\s]', '', lead_data.hotel_name.lower()).strip()
+    # Use shared normalization (consistent with orchestrator + Celery paths)
+    normalized_name = normalize_hotel_name(lead_data.hotel_name)
+    
+    # Check for duplicate before inserting
+    existing = await db.execute(
+        select(PotentialLead).where(
+            PotentialLead.hotel_name_normalized == normalized_name
+        )
+    )
+    if existing.scalar_one_or_none():
+        raise HTTPException(
+            status_code=409,
+            detail=f"A lead with a similar name already exists: '{lead_data.hotel_name}'"
+        )
     
     lead = PotentialLead(
         hotel_name=lead_data.hotel_name,
@@ -931,7 +986,10 @@ async def get_scrape_logs(
     db: AsyncSession = Depends(get_db)
 ):
     """Get recent scrape logs"""
-    query = select(ScrapeLog)
+    # Single JOIN query instead of N+1 (was: 1 query per log to fetch source name)
+    query = select(ScrapeLog, Source.name.label("source_name")).outerjoin(
+        Source, ScrapeLog.source_id == Source.id
+    )
     
     if source_id:
         query = query.where(ScrapeLog.source_id == source_id)
@@ -941,17 +999,12 @@ async def get_scrape_logs(
     query = query.order_by(ScrapeLog.started_at.desc()).limit(limit)
     
     result = await db.execute(query)
-    logs = result.scalars().all()
+    rows = result.all()
     
     response_list = []
-    for log in logs:
+    for log, src_name in rows:
         log_response = ScrapeLogResponse.model_validate(log)
-        if log.source_id:
-            source_result = await db.execute(
-                select(Source).where(Source.id == log.source_id)
-            )
-            source = source_result.scalar_one_or_none()
-            log_response.source_name = source.name if source else None
+        log_response.source_name = src_name
         response_list.append(log_response)
     
     return response_list
@@ -1232,11 +1285,12 @@ async def dashboard_trigger_scrape(request: Request):
 # -----------------------------------------------------------------------------
 
 @app.get("/api/dashboard/scrape/stream", tags=["Dashboard"])
-async def scrape_with_progress():
+async def scrape_with_progress(request: Request):
     """SSE endpoint for real-time scrape progress using the orchestrator pipeline"""
 
     scrape_id = str(uuid.uuid4())
-    active_scrapes[scrape_id] = {"status": "starting"}
+    async with _scrape_lock:
+        active_scrapes[scrape_id] = {"status": "starting"}
 
     async def event_generator():
         orchestrator = None
@@ -1280,10 +1334,18 @@ async def scrape_with_progress():
             sources_successful = 0
 
             for idx, source in enumerate(sources, 1):
-                # Check for cancellation
-                if scrape_id in scrape_cancellations:
+                # Check for cancellation (async-safe)
+                async with _scrape_lock:
+                    cancelled = scrape_id in scrape_cancellations
+                    if cancelled:
+                        scrape_cancellations.discard(scrape_id)
+                if cancelled:
                     yield f"data: {json.dumps({'type': 'cancelled', 'message': 'Scrape cancelled by user'})}\n\n"
-                    scrape_cancellations.discard(scrape_id)
+                    break
+
+                # Check if client disconnected (stop wasting resources)
+                if await request.is_disconnected():
+                    logger.info(f"Client disconnected during scrape {scrape_id}, stopping pipeline")
                     break
 
                 source_name = source.name
@@ -1429,8 +1491,9 @@ async def scrape_with_progress():
             logger.error(f"Scrape stream error: {e}")
             yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
         finally:
-            active_scrapes.pop(scrape_id, None)
-            scrape_cancellations.discard(scrape_id)
+            async with _scrape_lock:
+                active_scrapes.pop(scrape_id, None)
+                scrape_cancellations.discard(scrape_id)
             # Clean up orchestrator
             if orchestrator:
                 try:
@@ -1452,7 +1515,8 @@ async def scrape_with_progress():
 @app.post("/api/dashboard/scrape/cancel/{scrape_id}", tags=["Dashboard"])
 async def cancel_scrape(scrape_id: str):
     """Cancel an active scrape job"""
-    if scrape_id in active_scrapes:
-        scrape_cancellations.add(scrape_id)
-        return {"status": "cancelling", "message": "Cancellation requested"}
+    async with _scrape_lock:
+        if scrape_id in active_scrapes:
+            scrape_cancellations.add(scrape_id)
+            return {"status": "cancelling", "message": "Cancellation requested"}
     return {"status": "not_found", "message": "Scrape job not found"}

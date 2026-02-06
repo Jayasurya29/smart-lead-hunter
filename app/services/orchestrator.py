@@ -31,6 +31,7 @@ from sqlalchemy import select
 from app.database import async_session
 from app.models import PotentialLead
 from app.services.scorer import calculate_lead_score
+from app.services.utils import normalize_hotel_name
 
 logger = logging.getLogger(__name__)
 
@@ -63,7 +64,7 @@ except ImportError:
 @dataclass
 class PipelineStats:
     """Statistics from a pipeline run"""
-    start_time: datetime = field(default_factory=datetime.now)
+    start_time: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     end_time: Optional[datetime] = None
     
     sources_attempted: int = 0
@@ -342,11 +343,6 @@ class LeadHunterOrchestrator:
         duplicates = 0
         errors = 0
         
-        def normalize_name(name: str) -> str:
-            if not name:
-                return ""
-            return re.sub(r'[^a-z0-9\s]', '', name.lower()).strip()
-        
         def extract_year(opening_date: str) -> int:
             if not opening_date:
                 return None
@@ -364,7 +360,7 @@ class LeadHunterOrchestrator:
                             errors += 1
                             continue
                         
-                        normalized = normalize_name(hotel_name)
+                        normalized = normalize_hotel_name(hotel_name)
                         
                         # Check for existing
                         result = await db.execute(
@@ -458,7 +454,14 @@ class LeadHunterOrchestrator:
     def _print_summary(self):
         """Print summary"""
         s = self.stats
-        duration = (s.end_time - s.start_time).total_seconds() if s.end_time else 0
+        if s.end_time and s.start_time:
+            # Ensure both are timezone-aware or both naive
+            from datetime import timezone
+            end = s.end_time if s.end_time.tzinfo else s.end_time.replace(tzinfo=timezone.utc)
+            start = s.start_time if s.start_time.tzinfo else s.start_time.replace(tzinfo=timezone.utc)
+            duration = (end - start).total_seconds()
+        else:
+            duration = 0
         
         print(f"""
 📊 PIPELINE SUMMARY
