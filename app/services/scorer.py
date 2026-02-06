@@ -5,6 +5,10 @@ Complete scoring system for hotel leads (100 points max)
 
 Last Updated: February 2026
 
+M-07 FIX: Brand matching now uses word-boundary regex for short brand names
+(<=4 chars) to prevent false positives. "Trump International" no longer
+matches "tru" (Tier 5), "The Glorious Hotel" no longer matches "glo", etc.
+
 SCORING BREAKDOWN:
 - Brand Tier:           25 pts (25%) - Quality + uniform variety
 - Location:             20 pts (20%) - Your market = your edge
@@ -24,6 +28,41 @@ SKIP FILTERS (Don't Save):
 from datetime import datetime
 from typing import Optional, Dict, Tuple, List
 import re
+
+
+# =============================================================================
+# M-07: WORD-BOUNDARY BRAND MATCHING
+# =============================================================================
+
+# Threshold: brands with <= this many characters use word-boundary regex
+_SHORT_BRAND_THRESHOLD = 4
+
+# Pre-compiled word-boundary patterns for short brands (built lazily)
+_brand_patterns: Dict[str, re.Pattern] = {}
+
+
+def _brand_matches(brand: str, text: str) -> bool:
+    """M-07: Match a brand name against hotel text with word-boundary
+    awareness for short names.
+
+    For brands <= 4 chars (like "glo", "tru", "riu", "w"), uses \\b
+    word-boundary regex so "Global Luxury Resort" won't match "glo"
+    but "Glo Hotel" will.
+
+    For longer brands (like "four seasons", "ritz-carlton"), uses
+    plain substring matching which is safe and fast.
+    """
+    stripped = brand.strip()
+    if len(stripped) <= _SHORT_BRAND_THRESHOLD:
+        if stripped not in _brand_patterns:
+            # Escape regex special chars, wrap in word boundaries
+            escaped = re.escape(stripped)
+            _brand_patterns[stripped] = re.compile(
+                r'\b' + escaped + r'\b', re.IGNORECASE
+            )
+        return bool(_brand_patterns[stripped].search(text))
+    else:
+        return brand in text
 
 
 # =============================================================================
@@ -77,7 +116,7 @@ TIER3_UPPER_UPSCALE = [
     "intercontinental", "impression by secrets",
     "jw marriott",
     "kimpton",
-    "le meridien", "le meridien",
+    "le meridien",
     "live aqua",
     "mgallery", "mr. c",
     "newbury boston",
@@ -89,7 +128,7 @@ TIER3_UPPER_UPSCALE = [
     "thompson", "tribute portfolio",
     "unbound collection", "unico",
     "vignette collection", "virgin hotels",
-    "w hotel", "w hotels", " w ", "w miami", "w south beach", "w fort lauderdale",
+    "w hotel", "w hotels", "w miami", "w south beach", "w fort lauderdale",
     "w new york", "w los angeles", "w hollywood", "w chicago", "w austin",
     "zemi", "hyatt zilara", "hyatt ziva", "zilara", "ziva",
 ]
@@ -152,33 +191,36 @@ def get_brand_tier(hotel_name: str) -> Tuple[int, str, int]:
     """
     Determine the tier of a hotel based on its name.
 
+    M-07: Uses word-boundary matching for short brand names to prevent
+    false positives (e.g. "Trump" no longer matches "tru").
+
     Returns: (tier_number, tier_name, points)
     """
     name_lower = hotel_name.lower()
 
     # Check Tier 5 FIRST (to filter out budget hotels)
     for brand in TIER5_SKIP:
-        if brand in name_lower:
+        if _brand_matches(brand, name_lower):
             return (5, "Budget/Skip", 0)
 
     # Check Tier 1 (Ultra Luxury)
     for brand in TIER1_ULTRA_LUXURY:
-        if brand in name_lower:
+        if _brand_matches(brand, name_lower):
             return (1, "Ultra Luxury", 25)
 
     # Check Tier 2 (Luxury)
     for brand in TIER2_LUXURY:
-        if brand in name_lower:
+        if _brand_matches(brand, name_lower):
             return (2, "Luxury", 20)
 
     # Check Tier 3 (Upper Upscale)
     for brand in TIER3_UPPER_UPSCALE:
-        if brand in name_lower:
+        if _brand_matches(brand, name_lower):
             return (3, "Upper Upscale", 15)
 
     # Check Tier 4 (Upscale)
     for brand in TIER4_UPSCALE:
-        if brand in name_lower:
+        if _brand_matches(brand, name_lower):
             return (4, "Upscale", 10)
 
     # Unknown brand
@@ -413,6 +455,12 @@ def get_location_score(city: str = None, state: str = None, country: str = None)
     - Strong US Markets: +15 pts, "usa"
     - Other US: +10 pts, "usa"
     - International: SKIP (return -1), "international"
+    
+    FIX: Check US/Caribbean BEFORE international keywords.
+    Previously, "Rome, Georgia, USA" was wrongly skipped because
+    "rome" (an international keyword) was found as a substring before
+    the USA country check ran.  Now, if state or country indicates
+    USA, we skip the international keyword check entirely.
     """
     # Combine all location fields for matching
     location_parts = [
@@ -421,57 +469,66 @@ def get_location_score(city: str = None, state: str = None, country: str = None)
         str(country or "").lower().strip()
     ]
     location_text = " ".join(location_parts)
+    country_lower = str(country or "").lower().strip()
+    state_lower = str(state or "").lower().strip()
 
     # Empty location - can't determine, assume US
     if not location_text.strip() or location_text.strip() == "none":
         return (10, "Unknown - Assume US", "usa")
 
-    # CHECK INTERNATIONAL FIRST - These should be SKIPPED
-    for intl_keyword in INTERNATIONAL_SKIP:
-        if intl_keyword in location_text:
-            return (-1, f"International - SKIP ({intl_keyword})", "international")
+    # ── STEP 1: Determine if this is a known US or Caribbean location ──
+    # Check country field first to avoid international false positives
+    # on US cities with international names (Rome GA, Milan TN, Venice FL, etc.)
+    is_us = (
+        country_lower in ["usa", "us", "united states", "america", "u.s.a.", "u.s."]
+        or state_lower in FLORIDA_KEYWORDS
+        or state_lower in STRONG_US_KEYWORDS
+        or state_lower in OTHER_US_KEYWORDS
+    )
 
-    # Check Florida first (Primary Market - 53% of business)
-    for fl_keyword in FLORIDA_KEYWORDS:
-        if fl_keyword in location_text:
-            return (20, "Florida", "florida")
+    caribbean_countries = [
+        "bahamas", "jamaica", "barbados", "bermuda", "aruba", "curacao",
+        "dominican republic", "puerto rico", "trinidad and tobago",
+        "cayman islands", "turks and caicos", "st. lucia", "antigua",
+        "grenada", "st. kitts", "anguilla", "bvi", "usvi"
+    ]
+    is_caribbean = any(cc in country_lower for cc in caribbean_countries)
 
-    # Check Caribbean (Secondary Market)
+    # ── STEP 2: If US, score by sub-market (skip international check) ──
+    if is_us:
+        # Check Florida first (Primary Market - 53% of business)
+        for fl_keyword in FLORIDA_KEYWORDS:
+            if fl_keyword in location_text:
+                return (20, "Florida", "florida")
+
+        # Check Strong US Markets
+        for us_keyword in STRONG_US_KEYWORDS:
+            if us_keyword in location_text:
+                return (15, "Strong US Market", "usa")
+
+        # Check Other US States
+        for us_keyword in OTHER_US_KEYWORDS:
+            if us_keyword in location_text:
+                return (10, "Other US", "usa")
+
+        # USA but unrecognized sub-market
+        return (10, "USA (unspecified location)", "usa")
+
+    # ── STEP 3: If Caribbean, score as secondary market ──
+    if is_caribbean:
+        return (15, "Caribbean", "caribbean")
+
     for carib_keyword in CARIBBEAN_KEYWORDS:
         if carib_keyword in location_text:
             return (15, "Caribbean", "caribbean")
 
-    # Check Strong US Markets
-    for us_keyword in STRONG_US_KEYWORDS:
-        if us_keyword in location_text:
-            return (15, "Strong US Market", "usa")
+    # ── STEP 4: Check international keywords (only for non-US locations) ──
+    for intl_keyword in INTERNATIONAL_SKIP:
+        if intl_keyword in location_text:
+            return (-1, f"International - SKIP ({intl_keyword})", "international")
 
-    # Check Other US States
-    for us_keyword in OTHER_US_KEYWORDS:
-        if us_keyword in location_text:
-            return (10, "Other US", "usa")
-
-    # FALLBACK - Check country field specifically
-    country_lower = str(country or "").lower().strip()
-
-    # Explicit US country
-    if country_lower in ["usa", "us", "united states", "america", "u.s.a.", "u.s."]:
-        return (10, "USA (unspecified location)", "usa")
-
-    # If country is specified and NOT USA/Caribbean, it's international
+    # ── STEP 5: If country is specified and not matched above, it's international ──
     if country_lower and country_lower not in ["", "none", "null"]:
-        # Check if it's a Caribbean country we might have missed
-        caribbean_countries = [
-            "bahamas", "jamaica", "barbados", "bermuda", "aruba", "curacao",
-            "dominican republic", "puerto rico", "trinidad and tobago",
-            "cayman islands", "turks and caicos", "st. lucia", "antigua",
-            "grenada", "st. kitts", "anguilla", "bvi", "usvi"
-        ]
-        for cc in caribbean_countries:
-            if cc in country_lower:
-                return (15, "Caribbean", "caribbean")
-
-        # Otherwise it's international - SKIP
         return (-1, f"International - SKIP (country: {country})", "international")
 
     # Unknown - give benefit of doubt
@@ -492,6 +549,11 @@ def get_timing_score(opening_date: str = None) -> Tuple[int, str, int]:
     """
     Score based on opening year.
 
+    P-01 FIX: Now uses current_year dynamically instead of hardcoded 2026/2027/2028.
+    This means the scoring stays correct as years roll over without code changes.
+    
+    Logic: current year or earlier = URGENT, +1 = Hot, +2 = Warm, +3 or later = Track
+
     Returns: (points, timing_tier, year)
     """
     if not opening_date:
@@ -505,27 +567,26 @@ def get_timing_score(opening_date: str = None) -> Tuple[int, str, int]:
     if year_match:
         year = int(year_match.group())
     else:
-        # Check for year references
-        if "2026" in date_str or "this year" in date_str:
-            year = 2026
-        elif "2027" in date_str or "next year" in date_str:
-            year = 2027
-        elif "2028" in date_str:
-            year = 2028
-        elif "2029" in date_str or "2030" in date_str:
-            year = 2029
+        # Check for relative year references
+        if "this year" in date_str:
+            year = current_year
+        elif "next year" in date_str:
+            year = current_year + 1
         else:
             return (4, "Unknown", None)
 
-    # Score based on year
-    if year <= 2026:
-        return (25, "2026 - URGENT!", year)
-    elif year == 2027:
-        return (18, "2027 - Hot", year)
-    elif year == 2028:
-        return (12, "2028 - Warm", year)
+    # P-01: Score based on distance from current year (not hardcoded years)
+    years_out = year - current_year
+
+    if years_out <= 0:
+        # This year or already past — URGENT (may already be open/opening soon)
+        return (25, f"{year} - URGENT!", year)
+    elif years_out == 1:
+        return (18, f"{year} - Hot", year)
+    elif years_out == 2:
+        return (12, f"{year} - Warm", year)
     else:
-        return (6, "2029+ - Track", year)
+        return (6, f"{year}+ - Track", year)
 
 
 # =============================================================================
@@ -681,7 +742,7 @@ def get_existing_client_score(hotel_name: str = None, brand: str = None) -> Tupl
     combined_text = f"{hotel_name or ''} {brand or ''}".lower()
 
     for client_brand in EXISTING_CLIENT_BRANDS:
-        if client_brand in combined_text:
+        if _brand_matches(client_brand, combined_text):
             return (3, f"Existing Client - {client_brand.title()}")
 
     return (0, "No Existing Relationship")
@@ -1077,6 +1138,17 @@ if __name__ == "__main__":
         # Should SKIP - Budget
         ("Hampton Inn Orlando", "Orlando", "Florida", "USA"),
         ("Holiday Inn Miami", "Miami", "Florida", "USA"),
+        
+        # M-07: FALSE POSITIVE TESTS - these should NOT match budget brands
+        ("Trump International Miami", "Miami", "Florida", "USA"),
+        ("The Glorious Hotel Miami", "Miami Beach", "FL", "USA"),
+        ("Global Luxury Resort Naples", "Naples", "FL", "USA"),
+        ("Triumph Hotel Nashville", "Nashville", "TN", "USA"),
+        
+        # M-07: TRUE POSITIVE TESTS - these SHOULD match
+        ("Tru by Hilton Orlando", "Orlando", "FL", "USA"),
+        ("Glo Hotel Downtown", "Tampa", "FL", "USA"),
+        ("Riu Palace Cancun", "Cancun", None, "Mexico"),
     ]
 
     for hotel, city, state, country in test_cases:

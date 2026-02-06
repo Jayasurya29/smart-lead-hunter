@@ -129,11 +129,30 @@ celery_app.conf.update(
 )
 
 
-# Optional: Task base class with common error handling
 class BaseTask(celery_app.Task):
-    """Base task with automatic retry on failure"""
+    """Base task with automatic retry on recoverable failures.
     
-    autoretry_for = (Exception,)
+    L-12 FIX: Previously used autoretry_for=(Exception,) which catches
+    EVERYTHING including SystemExit and KeyboardInterrupt, preventing
+    clean worker shutdown (Ctrl+C wouldn't stop workers).
+    
+    Now limited to specific recoverable exceptions:
+    - ConnectionError: DB/Redis/HTTP connection lost
+    - TimeoutError: Network timeouts
+    - OSError: File/network I/O errors
+    - RuntimeError: Async loop issues, etc.
+    
+    Non-recoverable errors (SystemExit, KeyboardInterrupt, MemoryError,
+    ValueError, TypeError) will NOT be retried — they'll fail immediately
+    and get logged.
+    """
+    
+    autoretry_for = (
+        ConnectionError,    # DB/Redis/HTTP connection lost
+        TimeoutError,       # Network timeouts
+        OSError,            # File/network I/O errors  
+        RuntimeError,       # Async event loop issues
+    )
     retry_backoff = True  # Exponential backoff
     retry_backoff_max = 600  # Max 10 minutes between retries
     retry_jitter = True  # Add randomness to prevent thundering herd

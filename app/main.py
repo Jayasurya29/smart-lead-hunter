@@ -9,6 +9,8 @@ Run with:
 
 import logging
 import re
+import time
+from collections import defaultdict
 from datetime import datetime, timezone, timedelta
 from typing import Optional, List
 from contextlib import asynccontextmanager
@@ -41,6 +43,30 @@ logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 )
 logger = logging.getLogger(__name__)
+
+
+# -----------------------------------------------------------------------------
+# Helpers
+# -----------------------------------------------------------------------------
+
+def escape_like(value: str) -> str:
+    """Escape LIKE-special characters (%, _) so user input is treated literally.
+    
+    SQLAlchemy parameterizes the value (no SQL injection), but without
+    escaping, a user-supplied '%' or '_' acts as a wildcard inside LIKE/ILIKE,
+    allowing unintended pattern matching.
+    
+    The backslash is used as the escape character, which is the default for
+    PostgreSQL and SQLite.  If you ever switch to a database that doesn't
+    support backslash-escape in LIKE, add  .ilike(..., escape='\\')  to the
+    query calls.
+    """
+    return (
+        value
+        .replace("\\", "\\\\")   # escape the escape char first
+        .replace("%", "\\%")
+        .replace("_", "\\_")
+    )
 
 
 # -----------------------------------------------------------------------------
@@ -222,11 +248,69 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    # P-02 FIX: Environment-aware CORS (was allow_origins=["*"])
+    # In production, restrict to your actual domain(s).
+    # In development, allow localhost variants.
+    allow_origins=(
+        [
+            "https://leads.jauniforms.com",  # TODO: Update to your production domain
+        ]
+        if getattr(settings, "environment", "development") == "production"
+        else [
+            "http://localhost:8000",
+            "http://localhost:3000",
+            "http://127.0.0.1:8000",
+        ]
+    ),
     allow_credentials=True,
-    allow_methods=["*"],
+    allow_methods=["GET", "POST", "PATCH", "DELETE"],
     allow_headers=["*"],
 )
+
+
+# P-03: Simple in-memory rate limiter for API endpoints
+# Limits each client IP to a configurable number of requests per window.
+# Skips static assets, dashboard HTML, and health checks.
+_rate_limit_store: dict = defaultdict(lambda: {"count": 0, "reset": 0.0})
+_RATE_LIMIT_MAX = 60        # requests per window
+_RATE_LIMIT_WINDOW = 60.0   # seconds
+
+
+@app.middleware("http")
+async def rate_limit_middleware(request: Request, call_next):
+    """P-03: Rate limit API requests per client IP.
+    
+    Only applies to /leads, /sources, /scrape, and /api paths.
+    Dashboard HTML pages, health checks, and static files are exempt.
+    """
+    path = request.url.path
+
+    # Skip rate limiting for non-API paths
+    if not any(path.startswith(p) for p in ["/leads", "/sources", "/scrape", "/api"]):
+        return await call_next(request)
+
+    client_ip = request.client.host if request.client else "unknown"
+    now = time.monotonic()
+    bucket = _rate_limit_store[client_ip]
+
+    # Reset window if expired
+    if now > bucket["reset"]:
+        bucket["count"] = 0
+        bucket["reset"] = now + _RATE_LIMIT_WINDOW
+
+    bucket["count"] += 1
+
+    if bucket["count"] > _RATE_LIMIT_MAX:
+        from fastapi.responses import JSONResponse
+        return JSONResponse(
+            status_code=429,
+            content={"detail": "Too many requests. Please slow down."},
+            headers={"Retry-After": str(int(bucket["reset"] - now))}
+        )
+
+    response = await call_next(request)
+    return response
+
 
 # -----------------------------------------------------------------------------
 # Jinja2 Templates
@@ -234,6 +318,79 @@ app.add_middleware(
 
 templates_path = Path(__file__).parent / "templates"
 templates = Jinja2Templates(directory=str(templates_path))
+
+
+# -----------------------------------------------------------------------------
+# Shared Helpers
+# -----------------------------------------------------------------------------
+
+async def _get_dashboard_stats(db: AsyncSession) -> dict:
+    """Fetch all dashboard stats in 2 queries instead of 12.
+    
+    Uses SQLAlchemy conditional aggregation:  count() + filter()
+    so the database scans the leads table once and the sources table once.
+    """
+    now = datetime.now(timezone.utc)
+    today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    week_start = today_start - timedelta(days=now.weekday())
+
+    # -- Single query for ALL lead counts --
+    lead_result = await db.execute(
+        select(
+            func.count(PotentialLead.id).label("total"),
+            func.count(PotentialLead.id).filter(
+                PotentialLead.status == "new"
+            ).label("new"),
+            func.count(PotentialLead.id).filter(
+                PotentialLead.status == "approved"
+            ).label("approved"),
+            func.count(PotentialLead.id).filter(
+                PotentialLead.status == "pending"
+            ).label("pending"),
+            func.count(PotentialLead.id).filter(
+                PotentialLead.status.in_(["rejected", "bad"])
+            ).label("rejected"),
+            func.count(PotentialLead.id).filter(
+                PotentialLead.lead_score >= settings.hot_lead_threshold
+            ).label("hot"),
+            func.count(PotentialLead.id).filter(
+                PotentialLead.lead_score >= settings.warm_lead_threshold,
+                PotentialLead.lead_score < settings.hot_lead_threshold
+            ).label("warm"),
+            func.count(PotentialLead.id).filter(
+                PotentialLead.created_at >= today_start
+            ).label("today"),
+            func.count(PotentialLead.id).filter(
+                PotentialLead.created_at >= week_start
+            ).label("this_week"),
+        )
+    )
+    lr = lead_result.one()
+
+    # -- Single query for ALL source counts --
+    source_result = await db.execute(
+        select(
+            func.count(Source.id).label("total"),
+            func.count(Source.id).filter(Source.is_active == True).label("active"),
+            func.count(Source.id).filter(Source.health_status == "healthy").label("healthy"),
+        )
+    )
+    sr = source_result.one()
+
+    return {
+        "total_leads": lr.total or 0,
+        "new_leads": lr.new or 0,
+        "approved_leads": lr.approved or 0,
+        "pending_leads": lr.pending or 0,
+        "rejected_leads": lr.rejected or 0,
+        "hot_leads": lr.hot or 0,
+        "warm_leads": lr.warm or 0,
+        "leads_today": lr.today or 0,
+        "leads_this_week": lr.this_week or 0,
+        "total_sources": sr.total or 0,
+        "active_sources": sr.active or 0,
+        "healthy_sources": sr.healthy or 0,
+    }
 
 
 # -----------------------------------------------------------------------------
@@ -272,95 +429,8 @@ async def health_check(db: AsyncSession = Depends(get_db)):
 @app.get("/stats", response_model=StatsResponse, tags=["Dashboard"])
 async def get_stats(db: AsyncSession = Depends(get_db)):
     """Get dashboard statistics"""
-    now = datetime.now(timezone.utc)
-    today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
-    week_start = today_start - timedelta(days=now.weekday())
-    
-    # Total leads
-    result = await db.execute(select(func.count(PotentialLead.id)))
-    total_leads = result.scalar() or 0
-    
-    # New leads
-    result = await db.execute(
-        select(func.count(PotentialLead.id)).where(PotentialLead.status == "new")
-    )
-    new_leads = result.scalar() or 0
-    
-    # Approved leads
-    result = await db.execute(
-        select(func.count(PotentialLead.id)).where(PotentialLead.status == "approved")
-    )
-    approved_leads = result.scalar() or 0
-    
-    # Pending leads
-    result = await db.execute(
-        select(func.count(PotentialLead.id)).where(PotentialLead.status == "pending")
-    )
-    pending_leads = result.scalar() or 0
-    
-    # Rejected leads
-    result = await db.execute(
-        select(func.count(PotentialLead.id)).where(PotentialLead.status.in_(["rejected", "bad"]))
-    )
-    rejected_leads = result.scalar() or 0
-    
-    # Hot leads (score >= 70)
-    result = await db.execute(
-        select(func.count(PotentialLead.id)).where(PotentialLead.lead_score >= 70)
-    )
-    hot_leads = result.scalar() or 0
-    
-    # Warm leads (score 50-69)
-    result = await db.execute(
-        select(func.count(PotentialLead.id)).where(
-            PotentialLead.lead_score >= 50,
-            PotentialLead.lead_score < 70
-        )
-    )
-    warm_leads = result.scalar() or 0
-    
-    # Total sources
-    result = await db.execute(select(func.count(Source.id)))
-    total_sources = result.scalar() or 0
-    
-    # Active sources
-    result = await db.execute(
-        select(func.count(Source.id)).where(Source.is_active == True)
-    )
-    active_sources = result.scalar() or 0
-    
-    # Healthy sources
-    result = await db.execute(
-        select(func.count(Source.id)).where(Source.health_status == "healthy")
-    )
-    healthy_sources = result.scalar() or 0
-    
-    # Leads today
-    result = await db.execute(
-        select(func.count(PotentialLead.id)).where(PotentialLead.created_at >= today_start)
-    )
-    leads_today = result.scalar() or 0
-    
-    # Leads this week
-    result = await db.execute(
-        select(func.count(PotentialLead.id)).where(PotentialLead.created_at >= week_start)
-    )
-    leads_this_week = result.scalar() or 0
-    
-    return StatsResponse(
-        total_leads=total_leads,
-        new_leads=new_leads,
-        approved_leads=approved_leads,
-        pending_leads=pending_leads,
-        rejected_leads=rejected_leads,
-        hot_leads=hot_leads,
-        warm_leads=warm_leads,
-        total_sources=total_sources,
-        active_sources=active_sources,
-        healthy_sources=healthy_sources,
-        leads_today=leads_today,
-        leads_this_week=leads_this_week
-    )
+    stats = await _get_dashboard_stats(db)
+    return StatsResponse(**stats)
 
 
 # -----------------------------------------------------------------------------
@@ -391,8 +461,9 @@ async def list_leads(
         query = query.where(PotentialLead.lead_score >= min_score)
         count_query = count_query.where(PotentialLead.lead_score >= min_score)
     if state:
-        query = query.where(PotentialLead.state.ilike(f"%{state}%"))
-        count_query = count_query.where(PotentialLead.state.ilike(f"%{state}%"))
+        safe_state = escape_like(state)
+        query = query.where(PotentialLead.state.ilike(f"%{safe_state}%"))
+        count_query = count_query.where(PotentialLead.state.ilike(f"%{safe_state}%"))
     if location_type:
         query = query.where(PotentialLead.location_type == location_type)
         count_query = count_query.where(PotentialLead.location_type == location_type)
@@ -400,10 +471,11 @@ async def list_leads(
         query = query.where(PotentialLead.brand_tier == brand_tier)
         count_query = count_query.where(PotentialLead.brand_tier == brand_tier)
     if search:
+        safe_search = escape_like(search)
         search_filter = (
-            PotentialLead.hotel_name.ilike(f"%{search}%") |
-            PotentialLead.city.ilike(f"%{search}%") |
-            PotentialLead.brand.ilike(f"%{search}%")
+            PotentialLead.hotel_name.ilike(f"%{safe_search}%") |
+            PotentialLead.city.ilike(f"%{safe_search}%") |
+            PotentialLead.brand.ilike(f"%{safe_search}%")
         )
         query = query.where(search_filter)
         count_query = count_query.where(search_filter)
@@ -439,13 +511,13 @@ async def get_hot_leads(
     per_page: int = Query(20, ge=1, le=100),
     db: AsyncSession = Depends(get_db)
 ):
-    """Get hot leads (score >= 70) - ready for outreach"""
+    """Get hot leads (score >= config threshold) - ready for outreach"""
     query = select(PotentialLead).where(
-        PotentialLead.lead_score >= 70,
+        PotentialLead.lead_score >= settings.hot_lead_threshold,
         PotentialLead.status == "new"
     )
     count_query = select(func.count(PotentialLead.id)).where(
-        PotentialLead.lead_score >= 70,
+        PotentialLead.lead_score >= settings.hot_lead_threshold,
         PotentialLead.status == "new"
     )
     
@@ -902,36 +974,12 @@ async def dashboard_page(
     db: AsyncSession = Depends(get_db)
 ):
     """Main dashboard page"""
-    # Get stats
-    now = datetime.now(timezone.utc)
-    today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
-    week_start = today_start - timedelta(days=now.weekday())
-
-    stats = {}
-
-    result = await db.execute(select(func.count(PotentialLead.id)))
-    stats["total_leads"] = result.scalar() or 0
-
-    result = await db.execute(select(func.count(PotentialLead.id)).where(PotentialLead.status == "new"))
-    stats["new_leads"] = result.scalar() or 0
-
-    result = await db.execute(select(func.count(PotentialLead.id)).where(PotentialLead.status == "approved"))
-    stats["approved_leads"] = result.scalar() or 0
-
-    result = await db.execute(select(func.count(PotentialLead.id)).where(PotentialLead.lead_score >= 70))
-    stats["hot_leads"] = result.scalar() or 0
-
-    result = await db.execute(select(func.count(PotentialLead.id)).where(
-        PotentialLead.lead_score >= 50, PotentialLead.lead_score < 70
-    ))
-    stats["warm_leads"] = result.scalar() or 0
-
-    result = await db.execute(select(func.count(PotentialLead.id)).where(PotentialLead.created_at >= week_start))
-    stats["leads_this_week"] = result.scalar() or 0
+    # Get stats (2 queries instead of 12)
+    stats = await _get_dashboard_stats(db)
 
     # Apply view presets
     if view == "hot":
-        min_score = 70
+        min_score = settings.hot_lead_threshold
         status = "new"
 
     # Build query
@@ -951,10 +999,11 @@ async def dashboard_page(
         query = query.where(PotentialLead.brand_tier == brand_tier)
         count_query = count_query.where(PotentialLead.brand_tier == brand_tier)
     if search:
+        safe_search = escape_like(search)
         search_filter = (
-            PotentialLead.hotel_name.ilike(f"%{search}%") |
-            PotentialLead.city.ilike(f"%{search}%") |
-            PotentialLead.brand.ilike(f"%{search}%")
+            PotentialLead.hotel_name.ilike(f"%{safe_search}%") |
+            PotentialLead.city.ilike(f"%{safe_search}%") |
+            PotentialLead.brand.ilike(f"%{safe_search}%")
         )
         query = query.where(search_filter)
         count_query = count_query.where(search_filter)
@@ -995,31 +1044,7 @@ async def dashboard_page(
 @app.get("/api/dashboard/stats", response_class=HTMLResponse, tags=["Dashboard"])
 async def dashboard_stats_partial(request: Request, db: AsyncSession = Depends(get_db)):
     """HTMX partial: Stats cards"""
-    now = datetime.now(timezone.utc)
-    today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
-    week_start = today_start - timedelta(days=now.weekday())
-
-    stats = {}
-
-    result = await db.execute(select(func.count(PotentialLead.id)))
-    stats["total_leads"] = result.scalar() or 0
-
-    result = await db.execute(select(func.count(PotentialLead.id)).where(PotentialLead.status == "new"))
-    stats["new_leads"] = result.scalar() or 0
-
-    result = await db.execute(select(func.count(PotentialLead.id)).where(PotentialLead.status == "approved"))
-    stats["approved_leads"] = result.scalar() or 0
-
-    result = await db.execute(select(func.count(PotentialLead.id)).where(PotentialLead.lead_score >= 70))
-    stats["hot_leads"] = result.scalar() or 0
-
-    result = await db.execute(select(func.count(PotentialLead.id)).where(
-        PotentialLead.lead_score >= 50, PotentialLead.lead_score < 70
-    ))
-    stats["warm_leads"] = result.scalar() or 0
-
-    result = await db.execute(select(func.count(PotentialLead.id)).where(PotentialLead.created_at >= week_start))
-    stats["leads_this_week"] = result.scalar() or 0
+    stats = await _get_dashboard_stats(db)
 
     return templates.TemplateResponse(
         "partials/stats.html",
@@ -1056,10 +1081,11 @@ async def dashboard_leads_partial(
         query = query.where(PotentialLead.brand_tier == brand_tier)
         count_query = count_query.where(PotentialLead.brand_tier == brand_tier)
     if search:
+        safe_search = escape_like(search)
         search_filter = (
-            PotentialLead.hotel_name.ilike(f"%{search}%") |
-            PotentialLead.city.ilike(f"%{search}%") |
-            PotentialLead.brand.ilike(f"%{search}%")
+            PotentialLead.hotel_name.ilike(f"%{safe_search}%") |
+            PotentialLead.city.ilike(f"%{safe_search}%") |
+            PotentialLead.brand.ilike(f"%{safe_search}%")
         )
         query = query.where(search_filter)
         count_query = count_query.where(search_filter)
@@ -1198,161 +1224,41 @@ async def dashboard_trigger_scrape(request: Request):
 
 
 # -----------------------------------------------------------------------------
-# SSE Scrape Endpoint with Real-time Progress
+# SSE Scrape Endpoint - Uses the REAL Orchestrator Pipeline
 # -----------------------------------------------------------------------------
-
-async def scrape_url_for_sse(url: str, use_playwright: bool = False) -> Optional[str]:
-    """Scrape a single URL and return text content"""
-    import httpx
-    from bs4 import BeautifulSoup
-
-    # Try lxml, fall back to html.parser
-    try:
-        import lxml
-        parser = "lxml"
-    except ImportError:
-        parser = "html.parser"
-
-    try:
-        if use_playwright:
-            try:
-                from playwright.async_api import async_playwright
-
-                async with async_playwright() as p:
-                    browser = await p.chromium.launch(headless=True)
-                    page = await browser.new_page()
-                    await page.goto(url, wait_until="networkidle", timeout=30000)
-                    await asyncio.sleep(2)
-                    content = await page.content()
-                    await browser.close()
-
-                    soup = BeautifulSoup(content, parser)
-                    for tag in soup(['script', 'style', 'nav', 'footer']):
-                        tag.decompose()
-                    return soup.get_text(' ', strip=True)
-
-            except ImportError:
-                logger.warning("Playwright not available, falling back to httpx")
-
-        async with httpx.AsyncClient(
-            timeout=30.0,
-            follow_redirects=True,
-            headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
-        ) as client:
-            response = await client.get(url)
-
-            if response.status_code == 200:
-                soup = BeautifulSoup(response.text, parser)
-                for tag in soup(['script', 'style', 'nav', 'footer']):
-                    tag.decompose()
-                return soup.get_text(' ', strip=True)
-            else:
-                return None
-
-    except Exception as e:
-        logger.error(f"Scrape failed for {url}: {e}")
-        return None
-
-
-async def process_content_for_sse(text: str, source_url: str, source_site: str) -> dict:
-    """Process scraped content and return stats"""
-    stats = {"leads_found": 0, "leads_saved": 0, "leads_skipped": 0, "errors": []}
-
-    try:
-        from app.services.intelligent_pipeline import IntelligentPipeline as LeadExtractionPipeline
-        from app.services.scorer import LeadScorer
-
-        pipeline = LeadExtractionPipeline()
-        result = await pipeline.extract(text, source_url=source_url, source_name=source_site)
-
-        if not result.success or not result.leads:
-            return stats
-
-        stats["leads_found"] = len(result.leads)
-
-        async with async_session() as session:
-            for lead in result.leads:
-                try:
-                    hotel = lead.to_dict() if hasattr(lead, 'to_dict') else lead.__dict__
-                    hotel["source_url"] = source_url
-                    hotel["source_site"] = source_site
-
-                    scorer = LeadScorer()
-                    breakdown = scorer.score_with_breakdown(hotel)
-
-                    if scorer.is_budget_brand(hotel) or breakdown.total < 20:
-                        stats["leads_skipped"] += 1
-                        continue
-
-                    hotel["lead_score"] = breakdown.total
-                    hotel["score_breakdown"] = {
-                        "location": breakdown.location,
-                        "brand": breakdown.brand,
-                        "timing": breakdown.timing,
-                        "room_count": breakdown.room_count,
-                        "contact": breakdown.contact
-                    }
-
-                    # Check duplicate
-                    normalized_name = (hotel.get("hotel_name") or "").lower().strip()
-                    existing = await session.execute(
-                        select(PotentialLead).where(PotentialLead.hotel_name_normalized == normalized_name)
-                    )
-                    if existing.scalar_one_or_none():
-                        stats["leads_skipped"] += 1
-                        continue
-
-                    # Save lead
-                    new_lead = PotentialLead(
-                        hotel_name=hotel.get("hotel_name"),
-                        hotel_name_normalized=normalized_name,
-                        brand=hotel.get("brand"),
-                        hotel_type=hotel.get("hotel_type"),
-                        hotel_website=hotel.get("hotel_website"),
-                        city=hotel.get("city"),
-                        state=hotel.get("state"),
-                        country=hotel.get("country", "USA"),
-                        contact_name=hotel.get("contact_name"),
-                        contact_title=hotel.get("contact_title"),
-                        contact_email=hotel.get("contact_email"),
-                        contact_phone=hotel.get("contact_phone"),
-                        opening_date=hotel.get("opening_date"),
-                        room_count=hotel.get("room_count"),
-                        description=hotel.get("description"),
-                        lead_score=hotel.get("lead_score"),
-                        score_breakdown=hotel.get("score_breakdown"),
-                        source_url=source_url,
-                        source_site=source_site,
-                        status="new",
-                        raw_data=hotel
-                    )
-                    session.add(new_lead)
-                    await session.commit()
-                    stats["leads_saved"] += 1
-
-                except Exception as e:
-                    stats["errors"].append(str(e))
-                    await session.rollback()
-
-    except Exception as e:
-        stats["errors"].append(str(e))
-
-    return stats
-
+# This is the UNIFIED scrape path. Both the dashboard "Run Scrape" button
+# and any future triggers use the same orchestrator that the CLI uses.
+# No duplicate scraping/extraction/scoring/dedup logic.
+# -----------------------------------------------------------------------------
 
 @app.get("/api/dashboard/scrape/stream", tags=["Dashboard"])
 async def scrape_with_progress():
-    """SSE endpoint for real-time scrape progress"""
+    """SSE endpoint for real-time scrape progress using the orchestrator pipeline"""
 
     scrape_id = str(uuid.uuid4())
     active_scrapes[scrape_id] = {"status": "starting"}
 
     async def event_generator():
+        orchestrator = None
         try:
+            import os
+
             # Send initial event with scrape ID
             yield f"data: {json.dumps({'type': 'started', 'scrape_id': scrape_id})}\n\n"
 
-            # Get active sources
+            # --- Initialize orchestrator (same one the CLI uses) ---
+            yield f"data: {json.dumps({'type': 'info', 'message': 'Initializing pipeline...'})}\n\n"
+
+            from app.services.orchestrator import LeadHunterOrchestrator
+            orchestrator = LeadHunterOrchestrator(
+                gemini_api_key=os.getenv("GEMINI_API_KEY"),
+                save_to_database=True,
+            )
+            await orchestrator.initialize()
+
+            yield f"data: {json.dumps({'type': 'info', 'message': 'Pipeline ready. Loading sources...'})}\n\n"
+
+            # --- Get active sources from DB ---
             async with async_session() as session:
                 result = await session.execute(
                     select(Source).where(Source.is_active == True).order_by(Source.priority.desc())
@@ -1360,18 +1266,18 @@ async def scrape_with_progress():
                 sources = result.scalars().all()
 
             total_sources = len(sources)
-            total_stats = {
-                "sources_scraped": 0,
-                "urls_scraped": 0,
-                "leads_found": 0,
-                "leads_saved": 0,
-                "leads_skipped": 0,
-                "errors": []
-            }
+            source_names = [s.name for s in sources]
 
             yield f"data: {json.dumps({'type': 'info', 'message': f'Found {total_sources} active sources to scrape'})}\n\n"
 
             start_time = datetime.now(timezone.utc)
+
+            # --- PHASE 1: SCRAPE all sources via the engine ---
+            yield f"data: {json.dumps({'type': 'info', 'message': 'Phase 1: Scraping sources...'})}\n\n"
+
+            # Scrape one source at a time so we can send progress events
+            all_pages = []
+            sources_successful = 0
 
             for idx, source in enumerate(sources, 1):
                 # Check for cancellation
@@ -1383,59 +1289,141 @@ async def scrape_with_progress():
                 source_name = source.name
                 yield f"data: {json.dumps({'type': 'source_start', 'source': source_name, 'current': idx, 'total': total_sources})}\n\n"
 
-                urls = source.entry_urls or [source.base_url]
-                urls = [u for u in urls if u]
-
-                for url in urls:
-                    if scrape_id in scrape_cancellations:
-                        break
-
-                    yield f"data: {json.dumps({'type': 'url_start', 'url': url[:80], 'source': source_name})}\n\n"
-
-                    try:
-                        text = await scrape_url_for_sse(url, source.use_playwright)
-
-                        if text:
-                            total_stats["urls_scraped"] += 1
-
-                            stats = await process_content_for_sse(text, url, source_name)
-
-                            total_stats["leads_found"] += stats["leads_found"]
-                            total_stats["leads_saved"] += stats["leads_saved"]
-                            total_stats["leads_skipped"] += stats["leads_skipped"]
-
-                            if stats["leads_found"] > 0:
-                                yield f"data: {json.dumps({'type': 'leads_found', 'url': url[:60], 'found': stats['leads_found'], 'saved': stats['leads_saved'], 'total_saved': total_stats['leads_saved']})}\n\n"
-                        else:
-                            yield f"data: {json.dumps({'type': 'url_error', 'url': url[:60], 'error': 'Failed to fetch'})}\n\n"
-
-                        # Rate limiting
-                        await asyncio.sleep(1)
-
-                    except Exception as e:
-                        total_stats["errors"].append(f"{url}: {str(e)}")
-                        yield f"data: {json.dumps({'type': 'url_error', 'url': url[:60], 'error': str(e)[:100]})}\n\n"
-
-                total_stats["sources_scraped"] += 1
-
-                # Update source last_scraped_at
-                async with async_session() as session:
-                    await session.execute(
-                        select(Source).where(Source.id == source.id)
+                try:
+                    # Use the orchestrator's scraping engine
+                    scrape_results = await orchestrator.scraping_engine.scrape_sources(
+                        [source_name], deep=True, max_concurrent=3
                     )
-                    source_obj = (await session.execute(select(Source).where(Source.id == source.id))).scalar_one_or_none()
-                    if source_obj:
-                        source_obj.last_scraped_at = datetime.now(timezone.utc)
-                        await session.commit()
 
-                yield f"data: {json.dumps({'type': 'source_complete', 'source': source_name, 'current': idx, 'total': total_sources})}\n\n"
+                    source_pages = 0
+                    for sname, results in scrape_results.items():
+                        successful = [r for r in results if r.success]
+                        source_pages += len(successful)
+                        for r in successful:
+                            all_pages.append({
+                                "source_name": sname,
+                                "url": r.url,
+                                "content": r.text or r.html or "",
+                            })
 
-            # Calculate duration
+                    if source_pages > 0:
+                        sources_successful += 1
+                        yield f"data: {json.dumps({'type': 'source_complete', 'source': source_name, 'current': idx, 'total': total_sources, 'pages': source_pages})}\n\n"
+                    else:
+                        yield f"data: {json.dumps({'type': 'url_error', 'url': source.base_url[:60], 'error': 'No content returned'})}\n\n"
+
+                    # Update source last_scraped_at
+                    async with async_session() as session:
+                        source_obj = (await session.execute(
+                            select(Source).where(Source.id == source.id)
+                        )).scalar_one_or_none()
+                        if source_obj:
+                            if source_pages > 0:
+                                source_obj.record_success(0)  # lead count updated after extraction
+                            else:
+                                source_obj.record_failure()
+                            await session.commit()
+
+                except Exception as e:
+                    logger.error(f"Source {source_name} failed: {e}")
+                    yield f"data: {json.dumps({'type': 'url_error', 'url': source.base_url[:60], 'error': str(e)[:100]})}\n\n"
+
+                # Rate limiting between sources
+                await asyncio.sleep(1)
+
+            yield f"data: {json.dumps({'type': 'info', 'message': f'Scraping complete: {len(all_pages)} pages from {sources_successful} sources'})}\n\n"
+
+            if not all_pages:
+                yield f"data: {json.dumps({'type': 'complete', 'stats': {'sources_scraped': 0, 'leads_found': 0, 'leads_saved': 0}, 'duration_seconds': 0})}\n\n"
+                return
+
+            # --- PHASE 2: EXTRACTION via intelligent pipeline ---
+            yield f"data: {json.dumps({'type': 'info', 'message': 'Phase 2: AI extraction (Gemini)...'})}\n\n"
+
+            pages_for_pipeline = [
+                {'url': p['url'], 'content': p['content'], 'source': p['source_name']}
+                for p in all_pages
+            ]
+
+            pipeline_result = await orchestrator.pipeline.process_pages(
+                pages_for_pipeline,
+                source_name="Dashboard Scrape"
+            )
+
+            leads_extracted = pipeline_result.leads_extracted
+            yield f"data: {json.dumps({'type': 'info', 'message': f'Extracted {leads_extracted} leads from {pipeline_result.pages_classified} pages'})}\n\n"
+
+            # --- PHASE 3: DEDUPLICATION via smart deduplicator ---
+            if orchestrator.deduplicator and pipeline_result.final_leads:
+                yield f"data: {json.dumps({'type': 'info', 'message': 'Phase 3: Deduplication...'})}\n\n"
+
+                leads_for_dedup = [lead.to_dict() for lead in pipeline_result.final_leads]
+                merged_leads = orchestrator.deduplicator.deduplicate(leads_for_dedup)
+                dedup_stats = orchestrator.deduplicator.get_stats()
+
+                dupes_found = dedup_stats.get("duplicates_found", 0)
+                unique_count = len(merged_leads)
+                yield f"data: {json.dumps({'type': 'info', 'message': f'Dedup: {dupes_found} duplicates merged, {unique_count} unique leads'})}\n\n"
+
+                # Convert MergedLead objects to dicts for save_leads_to_database
+                lead_dicts = []
+                for ml in merged_leads:
+                    d = {
+                        'hotel_name': ml.hotel_name,
+                        'brand': ml.brand,
+                        'property_type': ml.property_type,
+                        'city': ml.city,
+                        'state': ml.state,
+                        'country': ml.country,
+                        'opening_date': ml.opening_date,
+                        'room_count': ml.room_count,
+                        'contact_name': ml.contact_name,
+                        'contact_title': ml.contact_title,
+                        'contact_email': ml.contact_email,
+                        'contact_phone': ml.contact_phone,
+                        'source_url': ml.source_urls[0] if ml.source_urls else '',
+                        'source_name': ml.source_names[0] if ml.source_names else '',
+                        'key_insights': getattr(ml, 'key_insights', ''),
+                        'confidence_score': ml.confidence_score,
+                        'qualification_score': getattr(ml, 'qualification_score', 0),
+                    }
+                    if ml.merged_from_count > 1:
+                        d['key_insights'] = (d.get('key_insights') or '') + f"\n\n Merged from {ml.merged_from_count} sources"
+                    lead_dicts.append(d)
+            else:
+                # No deduplicator or no leads
+                lead_dicts = [lead.to_dict() for lead in (pipeline_result.final_leads or [])]
+
+            # --- PHASE 4: SAVE TO DATABASE via orchestrator ---
+            if lead_dicts:
+                yield f"data: {json.dumps({'type': 'info', 'message': f'Phase 4: Saving {len(lead_dicts)} leads to database...'})}\n\n"
+
+                db_result = await orchestrator.save_leads_to_database(lead_dicts)
+                leads_saved = db_result['saved']
+                leads_dupes = db_result['duplicates']
+
+                if leads_saved > 0:
+                    yield f"data: {json.dumps({'type': 'leads_found', 'url': 'pipeline', 'found': len(lead_dicts), 'saved': leads_saved, 'total_saved': leads_saved})}\n\n"
+
+                yield f"data: {json.dumps({'type': 'info', 'message': f'Saved {leads_saved} new leads, {leads_dupes} already existed'})}\n\n"
+            else:
+                leads_saved = 0
+                leads_dupes = 0
+
+            # --- COMPLETE ---
             end_time = datetime.now(timezone.utc)
             duration = (end_time - start_time).total_seconds()
 
-            # Send completion event
-            yield f"data: {json.dumps({'type': 'complete', 'stats': total_stats, 'duration_seconds': duration})}\n\n"
+            final_stats = {
+                "sources_scraped": sources_successful,
+                "urls_scraped": len(all_pages),
+                "leads_found": leads_extracted,
+                "leads_saved": leads_saved,
+                "leads_skipped": leads_dupes,
+                "errors": []
+            }
+
+            yield f"data: {json.dumps({'type': 'complete', 'stats': final_stats, 'duration_seconds': duration})}\n\n"
 
         except Exception as e:
             logger.error(f"Scrape stream error: {e}")
@@ -1443,6 +1431,12 @@ async def scrape_with_progress():
         finally:
             active_scrapes.pop(scrape_id, None)
             scrape_cancellations.discard(scrape_id)
+            # Clean up orchestrator
+            if orchestrator:
+                try:
+                    await orchestrator.close()
+                except Exception:
+                    pass
 
     return StreamingResponse(
         event_generator(),

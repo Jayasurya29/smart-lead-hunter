@@ -129,6 +129,51 @@
     </div>
 </div>
 
+<!-- L-13 FIX: Pagination filter preservation
+     When pagination links are clicked, they typically only carry ?page=N
+     and lose all active filters (search, status, location_type, etc.).
+     
+     This script intercepts pagination link clicks and appends the current
+     filter values from the form, so page 2 of "Florida / Luxury" stays
+     filtered as "Florida / Luxury" instead of showing all leads.
+-->
+<script>
+    document.addEventListener('click', function(e) {
+        // Find pagination links (adjust selector to match your lead_list.html)
+        const link = e.target.closest('a[href*="page="]');
+        if (!link) return;
+        
+        // Only fix links that go to /dashboard
+        const url = new URL(link.href, window.location.origin);
+        if (!url.pathname.startsWith('/dashboard')) return;
+        
+        e.preventDefault();
+        
+        // Get current filter values from the form
+        const form = document.getElementById('filter-form');
+        if (form) {
+            const formData = new FormData(form);
+            // Keep the page param from the clicked link
+            const page = url.searchParams.get('page') || '1';
+            
+            // Build new URL with filters + page
+            const params = new URLSearchParams();
+            params.set('page', page);
+            
+            for (const [key, value] of formData.entries()) {
+                if (value && value.trim() !== '') {
+                    params.set(key, value);
+                }
+            }
+            
+            window.location.href = '/dashboard?' + params.toString();
+        } else {
+            // Fallback: just follow the link
+            window.location.href = link.href;
+        }
+    });
+</script>
+
 <!-- Scrape Progress Modal -->
 {% include "partials/scrape_modal.html" %}
 {% endblock %}

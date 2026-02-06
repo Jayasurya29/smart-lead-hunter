@@ -114,11 +114,18 @@ function simpleScrapeController() {
         timer: null,
         scrapeId: null,
         errorMessage: '',
+        eventSource: null,
         results: {
             pages: 0,
             leads: 0,
             new: 0
         },
+        
+        // M-16: SSE reconnection state
+        _sseRetryCount: 0,
+        _sseMaxRetries: 5,
+        _sseRetryTimer: null,
+        _sseIntentionallyClosed: false,
         
         openModal() {
             // Show modal
@@ -132,6 +139,8 @@ function simpleScrapeController() {
             this.scrapeId = null;
             this.errorMessage = '';
             this.results = { pages: 0, leads: 0, new: 0 };
+            this._sseRetryCount = 0;
+            this._sseIntentionallyClosed = false;
             
             // Start timer
             this.timer = setInterval(() => {
@@ -166,7 +175,6 @@ function simpleScrapeController() {
                     if (data.scrape_id) {
                         this.scrapeId = data.scrape_id;
                         this.message = 'Scrape started...';
-                        // Connect to SSE stream for real-time updates
                         this.connectToStream();
                     } else if (data.task_id) {
                         this.scrapeId = data.task_id;
@@ -190,9 +198,35 @@ function simpleScrapeController() {
         },
         
         connectToStream() {
-            // Connect to SSE endpoint for real-time updates
+            /**
+             * M-16 FIX: Robust SSE reconnection with exponential backoff.
+             *
+             * Previously, onerror closed the EventSource permanently and used
+             * a fragile setTimeout to guess when the scrape was done. Now we:
+             * 1. Reconnect automatically on transient errors (network blips)
+             * 2. Use exponential backoff (1s → 2s → 4s → 8s → 16s)
+             * 3. Cap retries at 5 before giving up
+             * 4. Only treat the connection as dead after max retries
+             */
+            this._sseIntentionallyClosed = false;
+            this._createEventSource();
+        },
+        
+        _createEventSource() {
+            // Clean up any existing connection
+            if (this.eventSource) {
+                this.eventSource.close();
+                this.eventSource = null;
+            }
+            
             try {
                 const eventSource = new EventSource('/api/dashboard/scrape/stream');
+                
+                eventSource.onopen = () => {
+                    // Reset retry count on successful connection
+                    this._sseRetryCount = 0;
+                    console.log('SSE connected');
+                };
                 
                 eventSource.onmessage = (event) => {
                     try {
@@ -204,26 +238,50 @@ function simpleScrapeController() {
                     }
                 };
                 
-                eventSource.onerror = (error) => {
-                    console.log('SSE connection closed or error');
+                eventSource.onerror = () => {
+                    // M-16: Don't permanently close — attempt reconnection
                     eventSource.close();
-                    // If we're still running after SSE closes, poll instead
-                    if (this.status === 'running' && this.elapsedTime > 5) {
-                        // SSE might have ended normally, check if complete
-                        setTimeout(() => {
-                            if (this.status === 'running') {
-                                this.handleComplete({
-                                    message: 'Scrape finished',
-                                    pages: this.results.pages,
-                                    leads: this.results.leads,
-                                    new: this.results.new
-                                });
-                            }
-                        }, 2000);
+                    this.eventSource = null;
+                    
+                    // If we intentionally closed (modal dismissed, scrape done), stop
+                    if (this._sseIntentionallyClosed) {
+                        console.log('SSE closed intentionally');
+                        return;
                     }
+                    
+                    // If scrape is no longer running, no need to reconnect
+                    if (this.status !== 'running') {
+                        return;
+                    }
+                    
+                    this._sseRetryCount++;
+                    
+                    if (this._sseRetryCount > this._sseMaxRetries) {
+                        console.warn('SSE max retries reached, giving up');
+                        // After max retries, assume scrape finished (server may
+                        // have closed the stream normally after completion)
+                        if (this.elapsedTime > 5) {
+                            this.handleComplete({
+                                message: 'Scrape finished',
+                                pages: this.results.pages,
+                                leads: this.results.leads,
+                                new: this.results.new
+                            });
+                        }
+                        return;
+                    }
+                    
+                    // Exponential backoff: 1s, 2s, 4s, 8s, 16s
+                    const delay = Math.min(1000 * Math.pow(2, this._sseRetryCount - 1), 16000);
+                    console.log(`SSE reconnecting in ${delay}ms (attempt ${this._sseRetryCount}/${this._sseMaxRetries})`);
+                    
+                    this._sseRetryTimer = setTimeout(() => {
+                        if (this.status === 'running' && !this._sseIntentionallyClosed) {
+                            this._createEventSource();
+                        }
+                    }, delay);
                 };
                 
-                // Store reference to close later
                 this.eventSource = eventSource;
             } catch (e) {
                 console.log('SSE not supported, continuing without real-time updates');
@@ -262,17 +320,17 @@ function simpleScrapeController() {
                 case 'complete':
                 case 'finished':
                     this.handleComplete(data.stats || data);
-                    if (this.eventSource) this.eventSource.close();
+                    this._closeSSE();
                     break;
                     
                 case 'error':
                     this.handleError(data.message || 'Scrape error');
-                    if (this.eventSource) this.eventSource.close();
+                    this._closeSSE();
                     break;
                     
                 case 'cancelled':
                     this.handleError('Scrape was cancelled');
-                    if (this.eventSource) this.eventSource.close();
+                    this._closeSSE();
                     break;
             }
         },
@@ -308,11 +366,25 @@ function simpleScrapeController() {
             this.errorMessage = message;
         },
         
-        closeModal() {
-            document.getElementById('scrape-modal').classList.add('hidden');
+        /**
+         * M-16: Centralized SSE cleanup — marks the close as intentional
+         * so the onerror handler won't try to reconnect.
+         */
+        _closeSSE() {
+            this._sseIntentionallyClosed = true;
+            if (this._sseRetryTimer) {
+                clearTimeout(this._sseRetryTimer);
+                this._sseRetryTimer = null;
+            }
             if (this.eventSource) {
                 this.eventSource.close();
+                this.eventSource = null;
             }
+        },
+        
+        closeModal() {
+            document.getElementById('scrape-modal').classList.add('hidden');
+            this._closeSSE();
             if (this.status === 'running') {
                 // Let it run in background, just close modal
                 if (typeof showToast === 'function') {

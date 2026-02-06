@@ -1,210 +1,184 @@
-# 🚀 SMART LEAD HUNTER - FREE AI UPGRADE
+# 🏨 Smart Lead Hunter
 
-## What's New
-
-I've upgraded your extraction system with a **100% FREE AI stack**:
-
-| Component | Before | After | Cost |
-|-----------|--------|-------|------|
-| Primary AI | Ollama 3.2 3B (local) | **Groq Llama 3.3 70B** (cloud) | **$0** |
-| Backup AI | None | Ollama 3.2 (local) | **$0** |
-| Email Validation | Regex only | **email-validator** library | **$0** |
-| Phone Validation | Regex only | **phonenumbers** library | **$0** |
-| Fuzzy Matching | Basic | **RapidFuzz** (10x faster) | **$0** |
-
-**Total Monthly Cost: $0**
+Automated hotel lead generation system for **J.A. Uniforms** — finds new hotel openings, renovations, and conversions across 79 sources, scores them, and pushes qualified leads to Insightly CRM.
 
 ---
 
-## Files Updated
+## Architecture
 
 ```
-📁 Your Project
-├── app/
-│   ├── config.py              # ✅ Updated - Groq API support
-│   ├── services/
-│   │   └── extractor.py       # ✅ NEW - Smart extraction with fallback
-│   └── tasks/
-│       └── scraping_tasks.py  # ✅ NEW - Missing Celery tasks
-├── requirements.txt           # ✅ Updated - Added groq, validators
-├── .env.example               # ✅ Updated - Groq API key setup
-└── test_ai_stack.py           # ✅ NEW - Test your setup
+┌──────────────────────────────────────────────────────────┐
+│                    SCRAPING ENGINE                        │
+│  79 Sources → HTTPX → Crawl4AI → Playwright (fallback)   │
+│  Rate limiting · Content caching · Domain learning        │
+├──────────────────────────────────────────────────────────┤
+│                    AI PIPELINE                            │
+│  1. QuickReject  → Skip irrelevant pages                 │
+│  2. Extract      → Gemini 2.0 Flash (primary)            │
+│                    Ollama llama3.2 (backup, local)        │
+│  3. Validate     → Email/phone/date parsing              │
+│  4. Enrich       → Contact lookup (Hunter/Apollo)        │
+│  5. Score        → 100-point system                      │
+├──────────────────────────────────────────────────────────┤
+│                    DEDUPLICATION                          │
+│  RapidFuzz fuzzy matching + merge across sources          │
+├──────────────────────────────────────────────────────────┤
+│                    SCORING (100 pts)                      │
+│  Brand Tier: 25 · Location: 20 · Timing: 25              │
+│  Room Count: 15 · Contact: 8 · Build: 4 · Client: 3     │
+├──────────────────────────────────────────────────────────┤
+│                    OUTPUT                                 │
+│  Dashboard (FastAPI + HTMX) · Insightly CRM sync         │
+│  Celery workers · Scheduled scrapes (6 AM daily)          │
+└──────────────────────────────────────────────────────────┘
 ```
+
+**Total Monthly Cost: $0** (Gemini free tier + Ollama local)
 
 ---
 
-## Quick Setup (5 minutes)
+## Quick Start
 
-### Step 1: Get FREE Groq API Key
-
-1. Go to: **https://console.groq.com/**
-2. Sign up with Google or GitHub
-3. **NO CREDIT CARD REQUIRED**
-4. Copy your API key
-
-### Step 2: Update Your .env File
+### 1. Clone & Install
 
 ```bash
-# Add this to your .env file:
-GROQ_API_KEY=gsk_xxxxxxxxxxxxxxxxxxxxxxxx
-```
-
-### Step 3: Install New Dependencies
-
-```bash
+git clone <repo-url>
+cd smart-lead-hunter
+python -m venv venv
+source venv/bin/activate  # Windows: venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
-### Step 4: Test It Works
+### 2. Post-Install Setup
 
 ```bash
-python test_ai_stack.py
+playwright install chromium
+crawl4ai-setup
+python -m spacy download en_core_web_sm
 ```
 
-You should see:
+### 3. Environment
+
+```bash
+cp .env.example .env
+# Edit .env with your API keys
 ```
-✅ Groq API (FREE - GPT-4 level quality)
-✅ Emails found: ['jennifer.adams@fourseasons.com', 'press@marriott.com']
-✅ Phones found: ['(239) 555-8742']
+
+Required keys:
+
+| Key | Source | Cost |
+|-----|--------|------|
+| `GEMINI_API_KEY` | [aistudio.google.com/apikey](https://aistudio.google.com/apikey) | Free |
+| `HUNTER_API_KEY` | [hunter.io](https://hunter.io) | Free tier |
+| `APOLLO_API_KEY` | [apollo.io](https://www.apollo.io) | Free tier |
+| `INSIGHTLY_API_KEY` | Your Insightly account | Included |
+
+### 4. Start Services
+
+```bash
+# Database + Redis
+docker compose up -d
+
+# Web app
+uvicorn app.main:app --reload --port 8000
+
+# Celery worker (separate terminal)
+celery -A app.tasks.celery_app worker --loglevel=info
+
+# Celery beat scheduler (separate terminal)
+celery -A app.tasks.celery_app beat --loglevel=info
+```
+
+Dashboard: **http://localhost:8000/dashboard**
+API Docs: **http://localhost:8000/docs**
+
+---
+
+## AI Stack
+
+| Component | Model | Purpose | Cost |
+|-----------|-------|---------|------|
+| **Primary AI** | Google Gemini 2.0 Flash | Lead extraction from scraped pages | $0 (free tier) |
+| **Backup AI** | Ollama llama3.2 (local) | Fallback when Gemini unavailable | $0 (runs locally) |
+| **Email validation** | email-validator | Verify extracted emails | $0 |
+| **Phone parsing** | phonenumbers | Format/validate phone numbers | $0 |
+| **Fuzzy matching** | RapidFuzz | Deduplication across sources | $0 |
+
+The pipeline tries Gemini first. If Gemini fails (rate limit, network), it falls back to Ollama automatically. If neither is available, regex-only extraction still captures emails, phones, and room counts.
+
+---
+
+## Scoring System (100 points)
+
+| Category | Max Points | Details |
+|----------|-----------|---------|
+| Brand Tier | 25 | Ultra Luxury (25) → Upscale (10) → Budget (skip) |
+| Timing | 25 | This year (25) → Next year (18) → +2yr (12) → +3yr+ (6) |
+| Location | 20 | Florida (20) → Caribbean/Strong US (15) → Other US (10) → International (skip) |
+| Room Count | 15 | 500+ (15) → 300+ (12) → 150+ (9) → 100+ (6) |
+| Contact Info | 8 | Name (3) + Email (3) + Phone (2) |
+| New Build | 4 | New (4) → Conversion (3) → Renovation (2) |
+| Existing Client | 3 | Known brand relationship bonus |
+
+**Auto-skip:** Budget brands (Tier 5) and international locations are filtered out before saving.
+
+---
+
+## Project Structure
+
+```
+smart-lead-hunter/
+├── app/
+│   ├── main.py                 # FastAPI app + API endpoints
+│   ├── config.py               # Settings (env vars)
+│   ├── database.py             # SQLAlchemy async setup
+│   ├── models.py               # DB models (Lead, Source, ScrapeLog)
+│   ├── services/
+│   │   ├── orchestrator.py     # Pipeline coordinator
+│   │   ├── scraping_engine.py  # 3-engine scraper (HTTPX/Crawl4AI/Playwright)
+│   │   ├── extractor.py        # AI extraction (Gemini + Ollama)
+│   │   ├── scorer.py           # 100-point scoring system
+│   │   ├── deduplicator.py     # RapidFuzz dedup + merge
+│   │   └── insightly_crm.py   # CRM integration
+│   ├── tasks/
+│   │   ├── celery_app.py       # Celery config + schedules
+│   │   └── scraping_tasks.py   # Async task definitions
+│   └── templates/
+│       ├── base.html           # Layout (Tailwind + HTMX + Alpine)
+│       ├── dashboard.html      # Main dashboard
+│       └── partials/           # HTMX fragments
+├── docker-compose.yml          # Postgres + Redis
+├── requirements.txt            # Python dependencies
+├── .env.example                # Environment template
+└── README.md                   # This file
 ```
 
 ---
 
-## How It Works
+## Scheduled Tasks
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                  EXTRACTION PIPELINE                            │
-├─────────────────────────────────────────────────────────────────┤
-│                                                                 │
-│  1. TRY GROQ (Primary - FREE, best quality)                    │
-│     ├── Model: Llama 3.3 70B (GPT-4 level!)                    │
-│     ├── Speed: ~0.3 seconds                                    │
-│     └── Limit: ~1000 requests/day                              │
-│                                                                 │
-│  2. IF GROQ FAILS → TRY OLLAMA (Backup - FREE, local)          │
-│     ├── Model: Llama 3.2 3B                                    │
-│     ├── Speed: Depends on your PC                              │
-│     └── Limit: Unlimited                                       │
-│                                                                 │
-│  3. ALWAYS RUN: Regex + Validation (FREE)                      │
-│     ├── Extract emails (validated)                             │
-│     ├── Extract phones (formatted)                             │
-│     └── Extract room counts                                    │
-│                                                                 │
-│  4. SCORE & FILTER                                             │
-│     ├── Skip budget brands (Hampton, Holiday Inn, etc.)        │
-│     ├── Skip international (Europe, Asia, etc.)                │
-│     └── Score 0-100 based on your criteria                     │
-│                                                                 │
-└─────────────────────────────────────────────────────────────────┘
-```
-
----
-
-## Quality Comparison
-
-| Metric | Before (Ollama 3.2 3B) | After (Groq 3.3 70B) |
-|--------|------------------------|----------------------|
-| Parameters | 3 billion | **70 billion** |
-| Intelligence | Basic | **GPT-4 level** |
-| JSON accuracy | ~70-75% | **~90-92%** |
-| Speed | 3-5 seconds | **0.3 seconds** |
-| Cost | $0 | **$0** |
-
----
-
-## What Each File Does
-
-### `app/services/extractor.py`
-The brain of extraction. Contains:
-- `GroqExtractor` - Primary AI using FREE Groq API
-- `OllamaExtractor` - Backup AI running locally
-- `SmartExtractor` - Combines both with automatic fallback
-- Email/phone validation and extraction
-
-**Usage:**
-```python
-from app.services.extractor import extract_lead_data
-
-result = await extract_lead_data(page_text, "https://news.marriott.com/...")
-for hotel in result["hotels"]:
-    print(f"Found: {hotel['hotel_name']} - Score: {hotel.get('lead_score')}")
-```
-
-### `app/tasks/scraping_tasks.py`
-The missing Celery tasks file! Contains:
-- `scrape_single_url` - Scrape one URL
-- `scrape_source` - Scrape all URLs from a source
-- `run_full_scrape` - Daily scrape of all sources (6 AM)
-- `sync_approved_to_insightly` - Push to CRM
-
-**Usage:**
-```python
-from app.tasks.scraping_tasks import run_full_scrape
-
-# Trigger manually
-run_full_scrape.delay()
-
-# Or let Celery Beat run it daily at 6 AM
-```
-
-### `app/config.py`
-Updated configuration with:
-- Groq API key support
-- AI status checking
-- Helper methods
-
----
-
-## Groq Free Tier Limits
-
-| Limit | Value |
-|-------|-------|
-| Requests per minute | ~30 |
-| Requests per day | ~1000 |
-| Credit card required | **NO** |
-| Cost | **$0 forever** |
-
-For your 75 sources scraped daily, this is **more than enough**.
+| Task | Schedule | Queue |
+|------|----------|-------|
+| Full scrape (all 79 sources) | Daily at 6:00 AM ET | scraping |
+| High-priority sources | Every 6 hours | scraping |
+| Duplicate cleanup | Daily at 3:00 AM ET | maintenance |
+| Embedding update | Sundays at 2:00 AM ET | maintenance |
+| Insightly CRM sync | Hourly at :15 | crm |
 
 ---
 
 ## Troubleshooting
 
-### "Groq API key not set"
+**"Gemini API key not set"** → Get a free key at [aistudio.google.com/apikey](https://aistudio.google.com/apikey), add to `.env`
+
+**"Ollama not running"** → Install from [ollama.ai](https://ollama.ai/), then:
 ```bash
-export GROQ_API_KEY=your-key-here
-# Or add to .env file
+ollama serve
+ollama pull llama3.2
 ```
 
-### "Ollama not running"
-```bash
-# Install: https://ollama.ai/
-ollama serve  # Start server
-ollama pull llama3.2  # Download model
-```
+**"Redis connection refused"** → Check Docker is running: `docker compose ps`
 
-### "No AI available"
-The extractor will still work with regex-only extraction. You'll get:
-- Emails ✅
-- Phone numbers ✅
-- Room counts ✅
+**"Port 6379 in use"** → Another Redis is running. The docker-compose uses port 6380 to avoid conflicts.
 
-But you won't get AI-powered hotel name/location extraction.
-
----
-
-## Next Steps
-
-1. ✅ Get Groq API key (5 minutes)
-2. ✅ Update .env file
-3. ✅ Run test script
-4. 🔄 Replace your old files with these
-5. 🚀 Start scraping with better AI!
-
----
-
-**Questions?** The code is well-commented. Check `extractor.py` for details on how the fallback system works.
-
-**Total investment: 5 minutes of setup for GPT-4 level extraction at $0/month!**
+**Dashboard blank after CDN update** → Verify SRI hashes match. See comment in `base.html`.

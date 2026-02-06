@@ -8,6 +8,7 @@ CHANGES IN V2:
 - Simplified code
 - Better key_insights preservation
 - Async database comparison
+- P-05: Unicode normalization in _clean_name() for cross-source matching
 
 PROBLEM:
 - Same hotel appears from multiple sources with slightly different names
@@ -30,6 +31,7 @@ Usage:
 
 import re
 import logging
+import unicodedata
 from dataclasses import dataclass, field
 from typing import List, Dict, Optional, Set, Tuple, Any
 from datetime import datetime
@@ -172,9 +174,9 @@ class SmartDeduplicator:
         }
         
         if USING_RAPIDFUZZ:
-            logger.info("✅ Using rapidfuzz for fast fuzzy matching")
+            logger.info("Using rapidfuzz for fast fuzzy matching")
         else:
-            logger.info("⚠️ rapidfuzz not available, using difflib (slower)")
+            logger.info("rapidfuzz not available, using difflib (slower)")
     
     # =========================================================================
     # MAIN API
@@ -214,7 +216,7 @@ class SmartDeduplicator:
         
         self._stats['unique_output'] = len(merged)
         
-        logger.info(f"🔄 Deduplication: {len(leads)} → {len(merged)} unique leads")
+        logger.info(f"Deduplication: {len(leads)} -> {len(merged)} unique leads")
         logger.info(f"   Found {self._stats['duplicates_found']} duplicates")
         
         return merged
@@ -244,7 +246,7 @@ class SmartDeduplicator:
             for existing in existing_normalized:
                 similarity = self._calculate_similarity(lead, existing)
                 if similarity >= self.threshold:
-                    logger.info(f"   ⚠️ Already exists: '{lead.hotel_name}' ≈ '{existing.hotel_name}' ({similarity:.2f})")
+                    logger.info(f"   Already exists: '{lead.hotel_name}' ~ '{existing.hotel_name}' ({similarity:.2f})")
                     existing_matches.append(lead)
                     is_existing = True
                     break
@@ -252,7 +254,7 @@ class SmartDeduplicator:
             if not is_existing:
                 new_leads.append(lead)
         
-        logger.info(f"🔍 Database check: {len(new_leads)} new, {len(existing_matches)} already exist")
+        logger.info(f"Database check: {len(new_leads)} new, {len(existing_matches)} already exist")
         
         return new_leads, existing_matches
     
@@ -351,8 +353,22 @@ class SmartDeduplicator:
             return SequenceMatcher(None, n1, n2).ratio()
     
     def _clean_name(self, name: str) -> str:
-        """Normalize hotel name for comparison"""
+        """Normalize hotel name for comparison.
+        
+        P-05 FIX: Added NFKD Unicode normalization so visually similar
+        characters from different scraped pages compare as equal:
+          - "Hotel" vs "Hôtel"  (accented chars)
+          - "Resort - Spa" vs "Resort — Spa"  (em dashes)
+          - "fi" vs ligature char  (ligatures)
+        Without this, the same hotel scraped from different sites with
+        different Unicode encodings would be treated as two separate leads.
+        """
         name = name.lower().strip()
+        
+        # P-05: Unicode NFKD normalization - decompose accented chars
+        # then strip combining marks (accents, diacritics)
+        name = unicodedata.normalize('NFKD', name)
+        name = ''.join(c for c in name if not unicodedata.combining(c))
         
         # Remove common suffixes
         for suffix in ['hotel', 'hotels', 'resort', 'resorts', 'spa', 'suites', 
@@ -438,7 +454,7 @@ class SmartDeduplicator:
                 if sim >= self.threshold:
                     group.append(lead2)
                     grouped.add(j)
-                    logger.debug(f"   Match ({sim:.2f}): '{lead1.hotel_name}' ≈ '{lead2.hotel_name}'")
+                    logger.debug(f"   Match ({sim:.2f}): '{lead1.hotel_name}' ~ '{lead2.hotel_name}'")
             
             groups.append(group)
         
@@ -503,7 +519,7 @@ class SmartDeduplicator:
         merged.first_seen = min(l.first_seen for l in leads if l.first_seen)
         merged.last_updated = datetime.now().isoformat()
         
-        logger.info(f"   📎 Merged {len(leads)} → '{merged.hotel_name}' (from {len(all_urls)} sources)")
+        logger.info(f"   Merged {len(leads)} -> '{merged.hotel_name}' (from {len(all_urls)} sources)")
         
         return merged
 
@@ -544,7 +560,7 @@ if __name__ == "__main__":
             "city": "Kanab",
             "state": "Utah",
             "opening_date": "2029",
-            "key_insights": "• 77 rooms planned\n• IHG management",
+            "key_insights": "77 rooms planned, IHG management",
             "source_url": "https://hoteldive.com/news/3"
         },
         {
@@ -560,23 +576,67 @@ if __name__ == "__main__":
     print("="*70)
     print(f"Using: {'rapidfuzz' if USING_RAPIDFUZZ else 'difflib'}")
     
-    print(f"\n📥 Input: {len(test_leads)} leads")
+    print(f"\nInput: {len(test_leads)} leads")
     for lead in test_leads:
-        print(f"   • {lead['hotel_name']} ({lead.get('state', 'Unknown')})")
+        print(f"   - {lead['hotel_name']} ({lead.get('state', 'Unknown')})")
     
     # Run deduplication
     unique = deduplicate_leads(test_leads)
     
-    print(f"\n📤 Output: {len(unique)} unique leads")
+    print(f"\nOutput: {len(unique)} unique leads")
     print("-"*70)
     
     for lead in unique:
-        print(f"\n🏨 {lead.hotel_name}")
+        print(f"\n  {lead.hotel_name}")
         print(f"   Location: {lead.city}, {lead.state}")
         print(f"   Opening: {lead.opening_date}")
         print(f"   Key Insights: {lead.key_insights[:50]}..." if lead.key_insights else "   Key Insights: None")
         print(f"   Merged from: {lead.merged_from_count} sources")
         for url in lead.source_urls:
-            print(f"      • {url}")
+            print(f"      - {url}")
+    
+    # P-05: Unicode normalization test
+    print("\n" + "="*70)
+    print("P-05: UNICODE NORMALIZATION TEST")
+    print("="*70)
+    
+    dedup = SmartDeduplicator()
+    
+    # These should all clean to the same string
+    test_names = [
+        "Hotel & Residences Miami Beach",
+        "H\u00f4tel & R\u00e9sidences Miami Beach",   # accented
+        "Hotel \u0026 Residences Miami Beach",          # & entity
+    ]
+    print("\n_clean_name() results:")
+    for name in test_names:
+        cleaned = dedup._clean_name(name)
+        print(f"   '{name}' -> '{cleaned}'")
+    
+    unicode_leads = [
+        {
+            "hotel_name": "H\u00f4tel & R\u00e9sidences Miami Beach",
+            "city": "Miami Beach",
+            "state": "FL",
+            "source_url": "https://source1.com"
+        },
+        {
+            "hotel_name": "Hotel & Residences Miami Beach",
+            "city": "Miami Beach",
+            "state": "FL",
+            "source_url": "https://source2.com"
+        },
+    ]
+    
+    print(f"\nInput: {len(unicode_leads)} leads (same hotel, different Unicode)")
+    for lead in unicode_leads:
+        print(f"   - {lead['hotel_name']}")
+    
+    unicode_unique = deduplicate_leads(unicode_leads)
+    
+    print(f"\nOutput: {len(unicode_unique)} unique leads")
+    expected = 1
+    status = "PASS" if len(unicode_unique) == expected else "FAIL"
+    print(f"   {status} (expected {expected})")
     
     print("\n" + "="*70)

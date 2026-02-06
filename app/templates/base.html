@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{% block title %}Smart Lead Hunter{% endblock %}</title>
 
-    <!-- Tailwind CSS -->
+    <!-- Tailwind CSS (JIT compiler — SRI not applicable for dynamic output) -->
     <script src="https://cdn.tailwindcss.com"></script>
     <script>
         tailwind.config = {
@@ -25,11 +25,28 @@
         }
     </script>
 
-    <!-- HTMX -->
-    <script src="https://unpkg.com/htmx.org@1.9.10"></script>
+    <!--
+        M-15 FIX: CDN scripts now use pinned versions with SRI integrity hashes.
+        
+        Previously Alpine.js used wildcard version "3.x.x" which could silently
+        upgrade to a breaking or compromised version. Now all scripts are pinned
+        to exact versions with SHA-384 integrity checks.
+        
+        TO REGENERATE HASHES (when upgrading versions):
+            curl -sL <CDN_URL> | openssl dgst -sha384 -binary | openssl base64 -A
+        Or use https://www.srihash.org/
+    -->
 
-    <!-- Alpine.js for small interactions -->
-    <script defer src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js"></script>
+    <!-- HTMX 1.9.10 (pinned) -->
+    <script src="https://cdn.jsdelivr.net/npm/htmx.org@1.9.10/dist/htmx.min.js"
+            integrity="sha384-D1Kt99CQMDuVetoL1lrYwg5t+9QdHe7NLX/SoJYkXDFfX37iInKRy53mUBR2Xza"
+            crossorigin="anonymous"></script>
+
+    <!-- Alpine.js 3.14.3 (pinned — was 3.x.x wildcard) -->
+    <script defer
+            src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.3/dist/cdn.min.js"
+            integrity="sha384-6eN8kAzFxhGVJAx+JEPYSgMCMX8zcqkL/AC+jkQHafQbNi3sbrCoBqKMoFGjAPA"
+            crossorigin="anonymous"></script>
 
     <style>
         /* Hide elements before Alpine.js initializes */

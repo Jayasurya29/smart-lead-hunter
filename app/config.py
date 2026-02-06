@@ -68,6 +68,13 @@ class Settings(BaseSettings):
     score_existing_client_max: int = 3  # Already a customer
     
     # -------------------------------------------------------------------------
+    # LEAD CLASSIFICATION THRESHOLDS
+    # -------------------------------------------------------------------------
+    hot_lead_threshold: int = 70        # Score >= 70 = hot lead
+    warm_lead_threshold: int = 50       # Score >= 50 = warm lead
+    min_score_threshold: int = 20       # Score < 20 = filtered out
+    
+    # -------------------------------------------------------------------------
     # ENVIRONMENT
     # -------------------------------------------------------------------------
     environment: str = "development"
@@ -97,7 +104,7 @@ class Settings(BaseSettings):
         return bool(self.insightly_api_key and self.insightly_api_key != "your-insightly-api-key")
     
     def get_ai_status(self) -> dict:
-        """Get status of AI providers"""
+        """Get status of AI providers (sync version for CLI/startup only)"""
         import httpx
         
         status = {
@@ -121,7 +128,38 @@ class Settings(BaseSettings):
         try:
             response = httpx.get(f"{self.ollama_url}/api/tags", timeout=5.0)
             status["ollama"]["available"] = response.status_code == 200
-        except:
+        except Exception:
+            pass
+        
+        return status
+    
+    async def get_ai_status_async(self) -> dict:
+        """Get status of AI providers (async version for use in FastAPI endpoints)"""
+        import httpx
+        
+        status = {
+            "gemini": {
+                "configured": self.has_gemini,
+                "model": self.gemini_model,
+                "available": self.has_gemini,
+                "cost": "$0 (free credits)",
+                "priority": 1
+            },
+            "ollama": {
+                "configured": True,
+                "model": self.ollama_model,
+                "available": False,
+                "cost": "$0 (local)",
+                "priority": 2
+            }
+        }
+        
+        # Check Ollama availability without blocking the event loop
+        try:
+            async with httpx.AsyncClient(timeout=5.0) as client:
+                response = await client.get(f"{self.ollama_url}/api/tags")
+                status["ollama"]["available"] = response.status_code == 200
+        except Exception:
             pass
         
         return status

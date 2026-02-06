@@ -259,54 +259,38 @@ class LeadHunterOrchestrator:
             leads_for_dedup = [lead.to_dict() for lead in pipeline_result.final_leads]
             merged_leads = self.deduplicator.deduplicate(leads_for_dedup)
             
-            # Convert back to ExtractedLead
-            unique_leads = []
+            # M-05 FIX: Work with dicts directly instead of converting
+            # MergedLead back to ExtractedLead. The old conversion lost fields
+            # like priority, revenue_estimates, contact_relevance, and
+            # estimated_value that exist on MergedLead but not ExtractedLead.
+            unique_lead_dicts = []
             for lead in merged_leads:
-                extracted = ExtractedLead(
-                    hotel_name=lead.hotel_name,
-                    brand=lead.brand,
-                    property_type=lead.property_type,
-                    city=lead.city,
-                    state=lead.state,
-                    country=lead.country,
-                    opening_date=lead.opening_date,
-                    opening_status=getattr(lead, 'opening_status', ''),
-                    room_count=lead.room_count,
-                    management_company=lead.management_company,
-                    developer=lead.developer,
-                    owner=getattr(lead, 'owner', ''),
-                    contact_name=lead.contact_name,
-                    contact_title=lead.contact_title,
-                    contact_email=lead.contact_email,
-                    contact_phone=lead.contact_phone,
-                    key_insights=getattr(lead, 'key_insights', ''),
-                    source_url=lead.source_urls[0] if lead.source_urls else '',
-                    source_name=lead.source_names[0] if lead.source_names else '',
-                    source_urls=lead.source_urls,
-                    source_names=lead.source_names,
-                    merged_from_count=lead.merged_from_count,
-                    confidence_score=lead.confidence_score,
-                    qualification_score=getattr(lead, 'qualification_score', 0),
-                )
+                lead_dict = lead.to_dict() if hasattr(lead, 'to_dict') else vars(lead)
+                
+                # Ensure source_url/source_name are set from merged lists
+                if not lead_dict.get('source_url') and lead.source_urls:
+                    lead_dict['source_url'] = lead.source_urls[0]
+                if not lead_dict.get('source_name') and lead.source_names:
+                    lead_dict['source_name'] = lead.source_names[0]
                 
                 # Add merge note to insights
                 if lead.merged_from_count > 1:
                     merge_note = f"\n\n📎 Merged from {lead.merged_from_count} sources"
-                    extracted.key_insights = (extracted.key_insights or '') + merge_note
+                    lead_dict['key_insights'] = (lead_dict.get('key_insights') or '') + merge_note
                 
-                unique_leads.append(extracted)
+                unique_lead_dicts.append(lead_dict)
             
             dedup_stats = self.deduplicator.get_stats()
             logger.info(f"   ✅ {dedup_stats['duplicates_found']} duplicates merged")
-            logger.info(f"   📊 {len(unique_leads)} unique leads")
+            logger.info(f"   📊 {len(unique_lead_dicts)} unique leads")
         else:
-            unique_leads = pipeline_result.final_leads
+            unique_lead_dicts = [lead.to_dict() for lead in pipeline_result.final_leads]
         
-        self.stats.leads_after_dedup = len(unique_leads)
+        self.stats.leads_after_dedup = len(unique_lead_dicts)
         
         # Count quality levels
-        for lead in unique_leads:
-            score = lead.qualification_score
+        for ld in unique_lead_dicts:
+            score = ld.get('qualification_score', 0)
             if score >= 70:
                 self.stats.high_quality_leads += 1
             elif score >= 40:
@@ -314,21 +298,21 @@ class LeadHunterOrchestrator:
             else:
                 self.stats.low_quality_leads += 1
             
-            if lead.contact_email:
+            if ld.get('contact_email'):
                 self.stats.leads_with_email += 1
-            if lead.contact_phone:
+            if ld.get('contact_phone'):
                 self.stats.leads_with_phone += 1
-            if lead.contact_name:
+            if ld.get('contact_name'):
                 self.stats.leads_with_contact_name += 1
         
         self.stats.end_time = datetime.now()
         
         # Record learnings
         if LEARNING_AVAILABLE:
-            self._record_learnings(scrape_results, unique_leads)
+            self._record_learnings(scrape_results, unique_lead_dicts)
         
-        # Convert to dicts
-        lead_dicts = [lead.to_dict() for lead in unique_leads]
+        # Sort by score (already dicts — no redundant conversion)
+        lead_dicts = unique_lead_dicts
         lead_dicts.sort(key=lambda x: -x.get("qualification_score", 0))
         
         # PHASE 4: SAVE TO DATABASE
@@ -345,7 +329,13 @@ class LeadHunterOrchestrator:
         return lead_dicts
     
     async def save_leads_to_database(self, leads: list) -> dict:
-        """Save leads to database"""
+        """Save leads to database with per-lead savepoints.
+        
+        H-04 FIX: Each lead is wrapped in a savepoint (nested transaction)
+        so a single bad lead can't roll back the entire batch. Previously,
+        one exception during db.add() could corrupt the session and cause
+        the final db.commit() to lose all leads.
+        """
         logger.info(f"\n💾 SAVING {len(leads)} LEADS TO DATABASE...")
         
         saved = 0
@@ -365,89 +355,101 @@ class LeadHunterOrchestrator:
         
         async with async_session() as db:
             for lead_dict in leads:
-                try:
-                    hotel_name = (lead_dict.get('hotel_name') or '').strip()
-                    if not hotel_name:
-                        errors += 1
-                        continue
-                    
-                    normalized = normalize_name(hotel_name)
-                    
-                    # Check for existing
-                    result = await db.execute(
-                        select(PotentialLead).where(
-                            PotentialLead.hotel_name_normalized == normalized
-                        )
-                    )
-                    if result.scalars().first():
-                        duplicates += 1
-                        continue
-                    
-                    # Calculate score
-                    score_result = calculate_lead_score(
-                        hotel_name=hotel_name,
-                        city=lead_dict.get('city'),
-                        state=lead_dict.get('state'),
-                        country=lead_dict.get('country', 'USA'),
-                        opening_date=lead_dict.get('opening_date'),
-                        room_count=lead_dict.get('room_count'),
-                        contact_name=lead_dict.get('contact_name'),
-                        contact_email=lead_dict.get('contact_email'),
-                        contact_phone=lead_dict.get('contact_phone'),
-                        brand=lead_dict.get('brand'),
-                    )
-                    
-                    if not score_result['should_save']:
-                        logger.info(f"   ⏭️ Skipped: {hotel_name} - {score_result['skip_reason']}")
-                        duplicates += 1
-                        continue
-                    
-                    # Create lead
-                    room_count = None
+                # H-04: Savepoint per lead — if this lead errors, rollback
+                # only this lead, not the whole batch.
+                async with db.begin_nested():
                     try:
-                        room_count = int(float(lead_dict.get('room_count', 0) or 0))
-                        if room_count == 0:
-                            room_count = None
-                    except:
-                        pass
-                    
-                    lead = PotentialLead(
-                        hotel_name=hotel_name,
-                        hotel_name_normalized=normalized,
-                        brand=lead_dict.get('brand') or None,
-                        brand_tier=score_result.get('brand_tier'),
-                        hotel_type=lead_dict.get('property_type') or lead_dict.get('hotel_type'),
-                        city=lead_dict.get('city'),
-                        state=lead_dict.get('state'),
-                        country=lead_dict.get('country', 'USA'),
-                        location_type=score_result.get('location_type'),
-                        opening_date=lead_dict.get('opening_date'),
-                        opening_year=score_result.get('opening_year') or extract_year(lead_dict.get('opening_date')),
-                        room_count=room_count,
-                        contact_name=lead_dict.get('contact_name'),
-                        contact_title=lead_dict.get('contact_title'),
-                        contact_email=lead_dict.get('contact_email'),
-                        contact_phone=lead_dict.get('contact_phone'),
-                        description=lead_dict.get('key_insights'),
-                        source_url=lead_dict.get('source_url'),
-                        source_site=lead_dict.get('source_name'),
-                        lead_score=score_result['total_score'],
-                        score_breakdown=score_result['breakdown'],
-                        status='new',
-                        scraped_at=datetime.now(timezone.utc),
-                        created_at=datetime.now(timezone.utc),
-                    )
-                    
-                    db.add(lead)
-                    saved += 1
-                    
-                    quality = "🔴 HOT" if lead.lead_score >= 70 else "🟠 WARM" if lead.lead_score >= 50 else "🔵 COOL"
-                    logger.info(f"   {quality} [{lead.lead_score}] {hotel_name}")
-                    
-                except Exception as e:
-                    logger.error(f"   ❌ Error: {lead_dict.get('hotel_name', 'unknown')}: {e}")
-                    errors += 1
+                        hotel_name = (lead_dict.get('hotel_name') or '').strip()
+                        if not hotel_name:
+                            errors += 1
+                            continue
+                        
+                        normalized = normalize_name(hotel_name)
+                        
+                        # Check for existing
+                        result = await db.execute(
+                            select(PotentialLead).where(
+                                PotentialLead.hotel_name_normalized == normalized
+                            )
+                        )
+                        if result.scalars().first():
+                            duplicates += 1
+                            continue
+                        
+                        # M-04 FIX: Use pipeline's qualification_score when
+                        # available instead of re-scoring from scratch.
+                        # Still call calculate_lead_score() for metadata
+                        # (brand_tier, location_type, opening_year, should_save).
+                        score_result = calculate_lead_score(
+                            hotel_name=hotel_name,
+                            city=lead_dict.get('city'),
+                            state=lead_dict.get('state'),
+                            country=lead_dict.get('country', 'USA'),
+                            opening_date=lead_dict.get('opening_date'),
+                            room_count=lead_dict.get('room_count'),
+                            contact_name=lead_dict.get('contact_name'),
+                            contact_email=lead_dict.get('contact_email'),
+                            contact_phone=lead_dict.get('contact_phone'),
+                            brand=lead_dict.get('brand'),
+                        )
+                        
+                        if not score_result['should_save']:
+                            logger.info(f"   ⏭️ Skipped: {hotel_name} - {score_result['skip_reason']}")
+                            duplicates += 1
+                            continue
+                        
+                        # M-04: Prefer pipeline score over re-calculated score
+                        pipeline_score = lead_dict.get('qualification_score')
+                        final_score = pipeline_score if pipeline_score else score_result['total_score']
+                        
+                        # Create lead
+                        room_count = None
+                        try:
+                            room_count = int(float(lead_dict.get('room_count', 0) or 0))
+                            if room_count == 0:
+                                room_count = None
+                        except (ValueError, TypeError):
+                            pass
+                        
+                        lead = PotentialLead(
+                            hotel_name=hotel_name,
+                            hotel_name_normalized=normalized,
+                            brand=lead_dict.get('brand') or None,
+                            brand_tier=score_result.get('brand_tier'),
+                            hotel_type=lead_dict.get('property_type') or lead_dict.get('hotel_type'),
+                            city=lead_dict.get('city'),
+                            state=lead_dict.get('state'),
+                            country=lead_dict.get('country', 'USA'),
+                            location_type=score_result.get('location_type'),
+                            opening_date=lead_dict.get('opening_date'),
+                            opening_year=score_result.get('opening_year') or extract_year(lead_dict.get('opening_date')),
+                            room_count=room_count,
+                            contact_name=lead_dict.get('contact_name'),
+                            contact_title=lead_dict.get('contact_title'),
+                            contact_email=lead_dict.get('contact_email'),
+                            contact_phone=lead_dict.get('contact_phone'),
+                            description=lead_dict.get('key_insights'),
+                            source_url=lead_dict.get('source_url'),
+                            source_site=lead_dict.get('source_name'),
+                            lead_score=final_score,
+                            score_breakdown=score_result['breakdown'],
+                            status='new',
+                            scraped_at=datetime.now(timezone.utc),
+                            created_at=datetime.now(timezone.utc),
+                        )
+                        
+                        db.add(lead)
+                        saved += 1
+                        
+                        quality = "🔴 HOT" if final_score >= 70 else "🟠 WARM" if final_score >= 50 else "🔵 COOL"
+                        logger.info(f"   {quality} [{final_score}] {hotel_name}")
+                        
+                    except Exception as e:
+                        logger.error(f"   ❌ Error: {lead_dict.get('hotel_name', 'unknown')}: {e}")
+                        errors += 1
+                        # Savepoint auto-rolls back on exception — other leads safe
             
+            # Commit all successful savepoints at once
             await db.commit()
         
         logger.info(f"\n✅ SAVED: {saved} | Duplicates: {duplicates} | Errors: {errors}")

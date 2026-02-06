@@ -3,12 +3,10 @@ Insightly CRM Integration Service
 ---------------------------------
 Handles all interactions with Insightly API v3.1
 
-Features:
-- Push leads to custom "Potential Leads" object
-- Move approved leads to standard Leads
-- Check for duplicates before creating
-- Update lead status
-- Fetch existing leads for comparison
+H-06 FIX: OData filter injection — single quotes in hotel names/values are now
+escaped before being interpolated into OData $filter expressions.
+H-07 FIX: _get_lead_source_id() now caches the result so it's not fetched
+from the API on every convert_to_lead() call.
 
 API Documentation: https://api.insightly.com/v3.1/Help
 """
@@ -21,6 +19,19 @@ from datetime import datetime, timezone
 from ..config import settings
 
 logger = logging.getLogger(__name__)
+
+
+def _escape_odata_string(value: str) -> str:
+    """H-06: Escape single quotes for OData filter expressions.
+    
+    OData uses single quotes to delimit strings. A literal single quote
+    inside a value must be doubled: O'Brien → O''Brien.
+    Without this, a hotel name like "Marriott's Resort" would break the
+    filter syntax, and a malicious value could inject arbitrary filter logic.
+    """
+    if not value:
+        return value
+    return value.replace("'", "''")
 
 
 class InsightlyClient:
@@ -48,6 +59,9 @@ class InsightlyClient:
         """Initialize Insightly client with API credentials"""
         self.api_key = settings.insightly_api_key
         self.base_url = settings.insightly_api_url
+        
+        # H-07: Cache for lead source ID (fetched once, reused)
+        self._lead_source_id_cache: Dict[str, Optional[int]] = {}
         
         # Validate configuration
         if not self.api_key:
@@ -82,19 +96,6 @@ class InsightlyClient:
         
         Args:
             lead_data: Dictionary containing lead information
-                - hotel_name (required)
-                - contact_email
-                - contact_phone
-                - city
-                - state
-                - country
-                - opening_date
-                - room_count
-                - hotel_type
-                - brand
-                - lead_score
-                - source_url
-                - notes
         
         Returns:
             Created record data or None if failed
@@ -103,8 +104,6 @@ class InsightlyClient:
             logger.warning("Insightly not configured. Skipping create_potential_lead.")
             return None
         
-        # Map our fields to Insightly custom object fields
-        # Note: Field names must match what's configured in Insightly
         record = {
             "RECORD_NAME": lead_data.get("hotel_name", "Unknown Hotel"),
             "CUSTOMFIELDS": self._build_custom_fields(lead_data)
@@ -135,16 +134,7 @@ class InsightlyClient:
         record_id: int, 
         updates: Dict[str, Any]
     ) -> Optional[Dict]:
-        """
-        Update an existing potential lead record
-        
-        Args:
-            record_id: Insightly record ID
-            updates: Dictionary of fields to update
-        
-        Returns:
-            Updated record data or None if failed
-        """
+        """Update an existing potential lead record"""
         if not self.enabled:
             return None
         
@@ -201,14 +191,9 @@ class InsightlyClient:
         top: int = 100
     ) -> List[Dict]:
         """
-        Search potential leads with optional filters
+        Search potential leads with optional filters.
         
-        Args:
-            filters: Dictionary of field/value pairs to filter by
-            top: Maximum number of records to return
-        
-        Returns:
-            List of matching records
+        H-06: String values are now escaped for OData safety.
         """
         if not self.enabled:
             return []
@@ -219,11 +204,13 @@ class InsightlyClient:
             # Build OData filter if provided
             if filters:
                 filter_parts = []
-                for field, value in filters.items():
+                for field_name, value in filters.items():
                     if isinstance(value, str):
-                        filter_parts.append(f"{field} eq '{value}'")
+                        # H-06: Escape single quotes to prevent OData injection
+                        safe_value = _escape_odata_string(value)
+                        filter_parts.append(f"{field_name} eq '{safe_value}'")
                     else:
-                        filter_parts.append(f"{field} eq {value}")
+                        filter_parts.append(f"{field_name} eq {value}")
                 params["$filter"] = " and ".join(filter_parts)
             
             async with httpx.AsyncClient(timeout=30.0) as client:
@@ -253,17 +240,9 @@ class InsightlyClient:
         additional_data: Optional[Dict[str, Any]] = None
     ) -> Optional[Dict]:
         """
-        Convert an approved potential lead to a standard Lead
+        Convert an approved potential lead to a standard Lead.
         
-        This is called when a potential lead is marked as "Approved"
-        in the review workflow.
-        
-        Args:
-            potential_lead_id: ID of the potential lead record
-            additional_data: Optional extra fields to add to the Lead
-        
-        Returns:
-            Created Lead record or None if failed
+        H-07: Lead source ID is now cached after first lookup.
         """
         if not self.enabled:
             return None
@@ -341,16 +320,9 @@ class InsightlyClient:
         city: Optional[str] = None
     ) -> Optional[Dict]:
         """
-        Check if a lead already exists in Insightly
+        Check if a lead already exists in Insightly.
         
-        Checks both Potential Leads and standard Leads
-        
-        Args:
-            hotel_name: Hotel name to search for
-            city: Optional city for more precise matching
-        
-        Returns:
-            Existing record if found, None otherwise
+        H-06: Hotel name is escaped for OData safety.
         """
         if not self.enabled:
             return None
@@ -362,7 +334,6 @@ class InsightlyClient:
         )
         
         for result in potential_results:
-            # Check city match if provided
             if city:
                 custom_fields = {
                     cf["FIELD_NAME"]: cf["FIELD_VALUE"] 
@@ -377,12 +348,15 @@ class InsightlyClient:
         
         # Search in standard Leads
         try:
+            # H-06: Escape single quotes in hotel name for OData filter
+            safe_name = _escape_odata_string(hotel_name)
+            
             async with httpx.AsyncClient(timeout=30.0) as client:
                 response = await client.get(
                     f"{self.base_url}/Leads/Search",
                     headers=self.headers,
                     params={
-                        "$filter": f"LEAD_NAME eq '{hotel_name}'",
+                        "$filter": f"LEAD_NAME eq '{safe_name}'",
                         "$top": 5
                     }
                 )
@@ -408,11 +382,7 @@ class InsightlyClient:
     # -------------------------------------------------------------------------
     
     def _build_custom_fields(self, data: Dict[str, Any]) -> List[Dict]:
-        """
-        Build Insightly custom fields array from our data
-        
-        Maps our field names to Insightly custom field names
-        """
+        """Build Insightly custom fields array from our data"""
         field_mapping = {
             "contact_email": "Contact_Email__c",
             "contact_phone": "Contact_Phone__c",
@@ -464,13 +434,17 @@ class InsightlyClient:
     
     async def _get_lead_source_id(self, source_name: str) -> Optional[int]:
         """
-        Get the Lead Source ID for "Smart Lead Hunter"
+        Get the Lead Source ID for "Smart Lead Hunter".
         
-        Lead Sources are configured in Insightly settings.
-        This fetches the ID for our custom source.
+        H-07: Result is cached after first successful lookup so we don't
+        hit the API on every convert_to_lead() call.
         """
+        # H-07: Return cached value if available
+        if source_name in self._lead_source_id_cache:
+            return self._lead_source_id_cache[source_name]
+        
         try:
-            async with httpx.AsyncClient(timeout=30.0) as client:
+            async with httpx.AsyncClient(timeout=10.0) as client:
                 response = await client.get(
                     f"{self.base_url}/LeadSources",
                     headers=self.headers
@@ -480,10 +454,14 @@ class InsightlyClient:
                     sources = response.json()
                     for source in sources:
                         if source.get("LEAD_SOURCE") == source_name:
-                            return source.get("LEAD_SOURCE_ID")
+                            source_id = source.get("LEAD_SOURCE_ID")
+                            # H-07: Cache for future calls
+                            self._lead_source_id_cache[source_name] = source_id
+                            return source_id
                     
-                    # Source not found - log warning
-                    logger.warning(f"Lead source '{source_name}' not found in Insightly. Create it in Settings > Lead Sources.")
+                    logger.warning(f"Lead source '{source_name}' not found in Insightly.")
+                    # Cache None too so we don't keep retrying
+                    self._lead_source_id_cache[source_name] = None
                     return None
                     
         except httpx.RequestError as e:
@@ -500,16 +478,7 @@ class InsightlyClient:
         leads: List[Dict[str, Any]],
         skip_duplicates: bool = True
     ) -> Dict[str, Any]:
-        """
-        Create multiple potential leads with duplicate checking
-        
-        Args:
-            leads: List of lead data dictionaries
-            skip_duplicates: If True, skip leads that already exist
-        
-        Returns:
-            Summary of created, skipped, and failed leads
-        """
+        """Create multiple potential leads with duplicate checking"""
         results = {
             "created": 0,
             "skipped": 0,
@@ -521,7 +490,6 @@ class InsightlyClient:
             hotel_name = lead_data.get("hotel_name", "Unknown")
             city = lead_data.get("city")
             
-            # Check for duplicates
             if skip_duplicates:
                 existing = await self.check_duplicate_lead(hotel_name, city)
                 if existing:
@@ -533,7 +501,6 @@ class InsightlyClient:
                     })
                     continue
             
-            # Create the lead
             created = await self.create_potential_lead(lead_data)
             if created:
                 results["created"] += 1
@@ -562,17 +529,9 @@ class InsightlyClient:
     # -------------------------------------------------------------------------
     
     async def test_connection(self) -> Dict[str, Any]:
-        """
-        Test the Insightly API connection
-        
-        Returns:
-            Connection status and account info
-        """
+        """Test the Insightly API connection"""
         if not self.enabled:
-            return {
-                "connected": False,
-                "error": "API key not configured"
-            }
+            return {"connected": False, "error": "API key not configured"}
         
         try:
             async with httpx.AsyncClient(timeout=10.0) as client:
@@ -589,21 +548,12 @@ class InsightlyClient:
                         "instance": self.base_url
                     }
                 elif response.status_code == 401:
-                    return {
-                        "connected": False,
-                        "error": "Invalid API key"
-                    }
+                    return {"connected": False, "error": "Invalid API key"}
                 else:
-                    return {
-                        "connected": False,
-                        "error": f"HTTP {response.status_code}"
-                    }
+                    return {"connected": False, "error": f"HTTP {response.status_code}"}
                     
         except httpx.RequestError as e:
-            return {
-                "connected": False,
-                "error": str(e)
-            }
+            return {"connected": False, "error": str(e)}
 
 
 # Singleton instance for import convenience

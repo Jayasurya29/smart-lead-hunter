@@ -3,20 +3,19 @@ SMART LEAD HUNTER - CELERY SCRAPING TASKS
 ==========================================
 Background tasks for automated lead scraping
 
-Tasks:
-- scrape_single_url: Scrape one URL
-- scrape_source: Scrape all URLs from a source
-- run_full_scrape: Daily scrape of all active sources
-- scrape_high_priority_sources: Scrape priority sources more frequently
+H-08 FIX: run_full_scrape() now uses Celery group() to fan out source scrapes
+in parallel instead of calling .apply().get() in a blocking loop. With 79
+sources this reduces daily scrape time from hours to minutes.
+
+H-09 FIX: Replaced run_async() helper that created a new event loop per task
+invocation with a shared asyncio.Runner (Python 3.11+) that persists across
+task calls within a worker. This enables connection reuse for DB sessions
+and HTTP clients.
 
 Usage:
-    # Start Celery worker
     celery -A app.tasks.celery_app worker --loglevel=info
-    
-    # Start beat scheduler
     celery -A app.tasks.celery_app beat --loglevel=info
     
-    # Trigger manually
     from app.tasks.scraping_tasks import run_full_scrape
     run_full_scrape.delay()
 """
@@ -26,7 +25,7 @@ import logging
 from datetime import datetime, timezone
 from typing import Optional, List, Dict, Any
 
-from celery import shared_task
+from celery import shared_task, group
 from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
@@ -40,18 +39,55 @@ logger = logging.getLogger(__name__)
 
 
 # =============================================================================
+# H-09 FIX: SHARED EVENT LOOP HELPER
+# =============================================================================
+# 
+# BEFORE (broken): Every task created and destroyed its own event loop via
+# asyncio.new_event_loop(). This prevented connection reuse for DB sessions
+# and HTTP clients, creating a new connection pool per task invocation.
+#
+# AFTER: Use asyncio.Runner (Python 3.11+) which maintains a single event
+# loop across calls within the same worker process. Falls back to the old
+# pattern on Python < 3.11.
+
+import sys
+
+if sys.version_info >= (3, 11):
+    # Python 3.11+: Use asyncio.Runner for connection reuse
+    import threading
+    
+    _runner_local = threading.local()
+    
+    def run_async(coro):
+        """Run async coroutine in Celery sync context with shared event loop.
+        
+        Uses asyncio.Runner (Python 3.11+) which keeps the event loop alive
+        across calls, enabling connection pooling for DB and HTTP clients.
+        One Runner per worker thread.
+        """
+        if not hasattr(_runner_local, 'runner') or _runner_local.runner is None:
+            _runner_local.runner = asyncio.Runner()
+        try:
+            return _runner_local.runner.run(coro)
+        except RuntimeError:
+            # Runner was closed or loop is dead — create a new one
+            _runner_local.runner = asyncio.Runner()
+            return _runner_local.runner.run(coro)
+else:
+    # Python < 3.11: Fallback to loop-per-task (original behavior)
+    def run_async(coro):
+        """Run async function in sync context (for Celery) — legacy fallback."""
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            return loop.run_until_complete(coro)
+        finally:
+            loop.close()
+
+
+# =============================================================================
 # HELPER FUNCTIONS
 # =============================================================================
-
-def run_async(coro):
-    """Run async function in sync context (for Celery)"""
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    try:
-        return loop.run_until_complete(coro)
-    finally:
-        loop.close()
-
 
 async def get_active_sources() -> List[Dict]:
     """Get all active sources from database"""
@@ -73,64 +109,93 @@ async def get_source_by_id(source_id: int) -> Optional[Dict]:
         return source.to_dict() if source else None
 
 
-async def save_lead_to_db(hotel: Dict) -> Optional[int]:
-    """Save extracted hotel as potential lead"""
-    async with async_session() as session:
-        try:
-            # Check for duplicate by normalized name
-            normalized_name = (hotel.get("hotel_name") or "").lower().strip()
-            
-            result = await session.execute(
-                select(PotentialLead).where(
-                    PotentialLead.hotel_name_normalized == normalized_name
-                )
-            )
-            existing = result.scalar_one_or_none()
-            
-            if existing:
-                logger.info(f"Duplicate found: {hotel.get('hotel_name')}")
-                return None
-            
-            # Create new lead
-            lead = PotentialLead(
-                hotel_name=hotel.get("hotel_name"),
-                hotel_name_normalized=normalized_name,
-                brand=hotel.get("brand"),
-                hotel_type=hotel.get("hotel_type"),
-                hotel_website=hotel.get("hotel_website"),
-                city=hotel.get("city"),
-                state=hotel.get("state"),
-                country=hotel.get("country", "USA"),
-                contact_name=hotel.get("contact_name"),
-                contact_title=hotel.get("contact_title"),
-                contact_email=hotel.get("contact_email"),
-                contact_phone=hotel.get("contact_phone"),
-                opening_date=hotel.get("opening_date"),
-                room_count=hotel.get("room_count"),
-                description=hotel.get("description"),
-                key_insights=hotel.get("key_insights"),
-                management_company=hotel.get("management_company"),
-                developer=hotel.get("developer"),
-                owner=hotel.get("owner"),
-                lead_score=hotel.get("lead_score"),
-                score_breakdown=hotel.get("score_breakdown"),
-                source_url=hotel.get("source_url"),
-                source_site=hotel.get("source_site"),
-                status="new",
-                raw_data=hotel
-            )
-            
-            session.add(lead)
-            await session.commit()
-            await session.refresh(lead)
-            
-            logger.info(f"✅ Saved lead: {lead.hotel_name} (ID: {lead.id})")
-            return lead.id
-            
-        except Exception as e:
-            logger.error(f"Failed to save lead: {e}")
+async def save_lead_to_db(
+    hotel: Dict,
+    session=None,
+) -> Optional[int]:
+    """Save extracted hotel as potential lead.
+    
+    M-13 FIX: Accepts an optional session parameter. When called in a loop,
+    the caller passes a shared session to avoid opening 20+ connections for
+    20+ leads. If no session is provided, creates its own (backward compat).
+    """
+    owns_session = session is None
+    if owns_session:
+        session = async_session()
+    
+    try:
+        if owns_session:
+            # If we own the session, use context manager
+            async with session:
+                return await _save_lead_impl(hotel, session, commit=True)
+        else:
+            # Caller owns the session — don't commit (caller batches)
+            return await _save_lead_impl(hotel, session, commit=False)
+    except Exception as e:
+        logger.error(f"Failed to save lead: {e}")
+        if owns_session:
             await session.rollback()
-            return None
+        return None
+
+
+async def _save_lead_impl(
+    hotel: Dict,
+    session,
+    commit: bool = True,
+) -> Optional[int]:
+    """Internal implementation for save_lead_to_db."""
+    normalized_name = (hotel.get("hotel_name") or "").lower().strip()
+    
+    result = await session.execute(
+        select(PotentialLead).where(
+            PotentialLead.hotel_name_normalized == normalized_name
+        )
+    )
+    existing = result.scalar_one_or_none()
+    
+    if existing:
+        logger.info(f"Duplicate found: {hotel.get('hotel_name')}")
+        return None
+    
+    lead = PotentialLead(
+        hotel_name=hotel.get("hotel_name"),
+        hotel_name_normalized=normalized_name,
+        brand=hotel.get("brand"),
+        hotel_type=hotel.get("hotel_type"),
+        hotel_website=hotel.get("hotel_website"),
+        city=hotel.get("city"),
+        state=hotel.get("state"),
+        country=hotel.get("country", "USA"),
+        contact_name=hotel.get("contact_name"),
+        contact_title=hotel.get("contact_title"),
+        contact_email=hotel.get("contact_email"),
+        contact_phone=hotel.get("contact_phone"),
+        opening_date=hotel.get("opening_date"),
+        room_count=hotel.get("room_count"),
+        description=hotel.get("description"),
+        key_insights=hotel.get("key_insights"),
+        management_company=hotel.get("management_company"),
+        developer=hotel.get("developer"),
+        owner=hotel.get("owner"),
+        lead_score=hotel.get("lead_score"),
+        score_breakdown=hotel.get("score_breakdown"),
+        source_url=hotel.get("source_url"),
+        source_site=hotel.get("source_site"),
+        status="new",
+        raw_data=hotel
+    )
+    
+    session.add(lead)
+    
+    if commit:
+        await session.commit()
+        await session.refresh(lead)
+    else:
+        # Flush to get the ID without committing
+        await session.flush()
+    
+    logger.info(f"✅ Saved lead: {lead.hotel_name} (ID: {lead.id})")
+    return lead.id
 
 
 async def create_scrape_log(source_id: int) -> int:
@@ -192,21 +257,26 @@ async def update_source_stats(source_id: int, leads_found: int):
 
 async def scrape_url_async(url: str, use_playwright: bool = False) -> Optional[str]:
     """
-    Scrape a single URL and return text content
+    Scrape a single URL and return text content.
     
-    Args:
-        url: URL to scrape
-        use_playwright: Whether to use Playwright for JS rendering
+    ⚠️ M-14 DEPRECATION NOTE: This function reimplements basic HTTP+BeautifulSoup
+    scraping that scraping_engine.py already handles with 3-engine fallback
+    (HTTPX → Crawl4AI → Playwright), caching, rate limiting, and anti-detection.
     
-    Returns:
-        Text content or None if failed
+    TODO: Replace calls to this function with ScrapingEngine.scrape() to get:
+    - Automatic engine selection based on domain learning
+    - Content caching (avoids re-scraping same URL within TTL)
+    - Rate limiting per domain
+    - Anti-detection headers and browser fingerprinting
+    - Retry logic with engine fallback
+    
+    Keeping for now to avoid breaking changes mid-sprint. Target removal: Phase 4.
     """
     import httpx
     from bs4 import BeautifulSoup
     
     try:
         if use_playwright:
-            # Use Playwright for JS-heavy sites
             try:
                 from playwright.async_api import async_playwright
                 
@@ -214,7 +284,7 @@ async def scrape_url_async(url: str, use_playwright: bool = False) -> Optional[s
                     browser = await p.chromium.launch(headless=True)
                     page = await browser.new_page()
                     await page.goto(url, wait_until="networkidle", timeout=30000)
-                    await asyncio.sleep(2)  # Wait for dynamic content
+                    await asyncio.sleep(2)
                     content = await page.content()
                     await browser.close()
                     
@@ -226,7 +296,6 @@ async def scrape_url_async(url: str, use_playwright: bool = False) -> Optional[s
             except ImportError:
                 logger.warning("Playwright not available, falling back to httpx")
         
-        # Use httpx for static sites
         async with httpx.AsyncClient(
             timeout=30.0,
             follow_redirects=True,
@@ -255,11 +324,10 @@ async def process_scraped_content(
     source_url: str,
     source_site: str
 ) -> Dict[str, Any]:
-    """
-    Process scraped content: extract, score, and save leads
+    """Process scraped content: extract, score, and save leads.
     
-    Returns:
-        Stats about processing
+    M-13 FIX: Uses a single shared DB session for all leads from one page
+    instead of opening a new connection per lead.
     """
     stats = {
         "leads_found": 0,
@@ -269,7 +337,6 @@ async def process_scraped_content(
     }
     
     try:
-        # Extract hotel data using AI
         pipeline = LeadExtractionPipeline()
         result = await pipeline.extract(text, source_url=source_url, source_name=source_site)
         
@@ -279,50 +346,48 @@ async def process_scraped_content(
         
         stats["leads_found"] = len(result.leads)
         
-        for lead in result.leads:
-            try:
-                # Convert to dict for scoring
-                hotel = lead.to_dict() if hasattr(lead, 'to_dict') else lead.__dict__
-                
-                # Add source info
-                hotel["source_url"] = source_url
-                hotel["source_site"] = source_site
-                
-                # Calculate score using new scorer
-                scorer = LeadScorer()
-                breakdown = scorer.score_with_breakdown(hotel)
-                
-                # Check if should save (skip budget brands and low scores)
-                if scorer.is_budget_brand(hotel):
-                    logger.info(f"Skipping budget brand: {hotel.get('hotel_name')}")
-                    stats["leads_skipped"] += 1
-                    continue
-                
-                if breakdown.total < 20:
-                    logger.info(f"Skipping low score: {hotel.get('hotel_name')} ({breakdown.total})")
-                    stats["leads_skipped"] += 1
-                    continue
-                
-                # Add score to hotel data
-                hotel["lead_score"] = breakdown.total
-                hotel["score_breakdown"] = {
-                    "location": breakdown.location,
-                    "brand": breakdown.brand,
-                    "timing": breakdown.timing,
-                    "room_count": breakdown.room_count,
-                    "contact": breakdown.contact
-                }
-                
-                # Save to database
-                lead_id = await save_lead_to_db(hotel)
-                if lead_id:
-                    stats["leads_saved"] += 1
-                else:
-                    stats["leads_skipped"] += 1
+        # M-13: Single session for all leads from this page
+        async with async_session() as session:
+            for lead in result.leads:
+                try:
+                    hotel = lead.to_dict() if hasattr(lead, 'to_dict') else lead.__dict__
+                    hotel["source_url"] = source_url
+                    hotel["source_site"] = source_site
                     
-            except Exception as e:
-                logger.error(f"Error processing hotel: {e}")
-                stats["errors"].append(str(e))
+                    scorer = LeadScorer()
+                    breakdown = scorer.score_with_breakdown(hotel)
+                    
+                    if scorer.is_budget_brand(hotel):
+                        logger.info(f"Skipping budget brand: {hotel.get('hotel_name')}")
+                        stats["leads_skipped"] += 1
+                        continue
+                    
+                    if breakdown.total < 20:
+                        logger.info(f"Skipping low score: {hotel.get('hotel_name')} ({breakdown.total})")
+                        stats["leads_skipped"] += 1
+                        continue
+                    
+                    hotel["lead_score"] = breakdown.total
+                    hotel["score_breakdown"] = {
+                        "location": breakdown.location,
+                        "brand": breakdown.brand,
+                        "timing": breakdown.timing,
+                        "room_count": breakdown.room_count,
+                        "contact": breakdown.contact
+                    }
+                    
+                    lead_id = await save_lead_to_db(hotel, session=session)
+                    if lead_id:
+                        stats["leads_saved"] += 1
+                    else:
+                        stats["leads_skipped"] += 1
+                        
+                except Exception as e:
+                    logger.error(f"Error processing hotel: {e}")
+                    stats["errors"].append(str(e))
+            
+            # M-13: Single commit for all leads from this page
+            await session.commit()
         
     except Exception as e:
         logger.error(f"Extraction failed: {e}")
@@ -337,30 +402,16 @@ async def process_scraped_content(
 
 @celery_app.task(bind=True, base=BaseTask, name="scrape_single_url")
 def scrape_single_url(self, url: str, source_site: str = "manual") -> Dict[str, Any]:
-    """
-    Scrape a single URL
-    
-    Args:
-        url: URL to scrape
-        source_site: Name of the source site
-    
-    Returns:
-        Stats about the scrape
-    """
+    """Scrape a single URL"""
     logger.info(f"📥 Scraping: {url}")
     
     async def _scrape():
-        # Scrape the URL
         text = await scrape_url_async(url)
-        
         if not text:
             return {"success": False, "error": "Failed to fetch URL"}
-        
-        # Process content
         stats = await process_scraped_content(text, url, source_site)
         stats["success"] = True
         stats["url"] = url
-        
         return stats
     
     return run_async(_scrape())
@@ -368,24 +419,13 @@ def scrape_single_url(self, url: str, source_site: str = "manual") -> Dict[str, 
 
 @celery_app.task(bind=True, base=BaseTask, name="scrape_source")
 def scrape_source(self, source_id: int) -> Dict[str, Any]:
-    """
-    Scrape all URLs from a source
-    
-    Args:
-        source_id: ID of the source to scrape
-    
-    Returns:
-        Stats about the scrape
-    """
+    """Scrape all URLs from a source"""
     async def _scrape():
         source = await get_source_by_id(source_id)
-        
         if not source:
             return {"success": False, "error": f"Source {source_id} not found"}
         
         logger.info(f"🌐 Scraping source: {source['name']}")
-        
-        # Create scrape log
         log_id = await create_scrape_log(source_id)
         
         total_stats = {
@@ -397,48 +437,32 @@ def scrape_source(self, source_id: int) -> Dict[str, Any]:
             "errors": []
         }
         
-        # Get URLs to scrape
         urls = source.get("entry_urls") or [source.get("base_url") or source.get("url")]
-        urls = [u for u in urls if u]  # Filter None
+        urls = [u for u in urls if u]
         
         for url in urls:
             try:
-                # Scrape URL
                 text = await scrape_url_async(url, source.get("use_playwright", False))
-                
                 if text:
                     total_stats["urls_scraped"] += 1
-                    
-                    # Process content
-                    stats = await process_scraped_content(
-                        text, url, source["name"]
-                    )
-                    
+                    stats = await process_scraped_content(text, url, source["name"])
                     total_stats["leads_found"] += stats["leads_found"]
                     total_stats["leads_saved"] += stats["leads_saved"]
                     total_stats["errors"].extend(stats.get("errors", []))
-                
-                # Rate limiting
                 await asyncio.sleep(2)
-                
             except Exception as e:
                 logger.error(f"Error scraping {url}: {e}")
                 total_stats["errors"].append(str(e))
         
-        # Update scrape log
         status = "completed" if not total_stats["errors"] else "completed_with_errors"
         await update_scrape_log(
-            log_id,
-            status=status,
+            log_id, status=status,
             urls_scraped=total_stats["urls_scraped"],
             leads_found=total_stats["leads_found"],
             leads_new=total_stats["leads_saved"],
             errors=total_stats["errors"] if total_stats["errors"] else None
         )
-        
-        # Update source stats
         await update_source_stats(source_id, total_stats["leads_saved"])
-        
         total_stats["success"] = True
         return total_stats
     
@@ -448,69 +472,95 @@ def scrape_source(self, source_id: int) -> Dict[str, Any]:
 @celery_app.task(bind=True, base=BaseTask, name="run_full_scrape")
 def run_full_scrape(self) -> Dict[str, Any]:
     """
-    Run full scrape of all active sources
+    Run full scrape of all active sources.
+    Scheduled daily at 6 AM.
     
-    This is scheduled to run daily at 6 AM
+    H-08 FIX: Uses Celery group() to fan out source scrapes in parallel
+    instead of the old .apply().get() loop that ran them synchronously
+    in the current process. With 79 sources this reduces scrape time
+    from hours to minutes.
     """
     logger.info("=" * 60)
     logger.info("🚀 STARTING FULL SCRAPE")
     logger.info("=" * 60)
     
-    async def _full_scrape():
-        sources = await get_active_sources()
-        
-        results = {
-            "started_at": datetime.now(timezone.utc).isoformat(),
-            "sources_total": len(sources),
-            "sources_scraped": 0,
-            "total_leads_found": 0,
-            "total_leads_saved": 0,
-            "errors": []
-        }
-        
-        for source in sources:
-            try:
-                logger.info(f"\n📍 Processing: {source['name']}")
-                
-                # Scrape this source (synchronously within the task)
-                source_result = scrape_source.apply(args=[source['id']]).get()
-                
-                results["sources_scraped"] += 1
-                results["total_leads_found"] += source_result.get("leads_found", 0)
-                results["total_leads_saved"] += source_result.get("leads_saved", 0)
-                
-                if source_result.get("errors"):
-                    results["errors"].extend(source_result["errors"])
-                
-            except Exception as e:
-                logger.error(f"Failed to scrape {source['name']}: {e}")
-                results["errors"].append(f"{source['name']}: {str(e)}")
-        
-        results["completed_at"] = datetime.now(timezone.utc).isoformat()
+    async def _get_sources():
+        return await get_active_sources()
+    
+    sources = run_async(_get_sources())
+    
+    results = {
+        "started_at": datetime.now(timezone.utc).isoformat(),
+        "sources_total": len(sources),
+        "sources_scraped": 0,
+        "total_leads_found": 0,
+        "total_leads_saved": 0,
+        "errors": []
+    }
+    
+    if not sources:
         results["success"] = True
-        
-        logger.info("=" * 60)
-        logger.info(f"✅ FULL SCRAPE COMPLETE")
-        logger.info(f"   Sources: {results['sources_scraped']}/{results['sources_total']}")
-        logger.info(f"   Leads found: {results['total_leads_found']}")
-        logger.info(f"   Leads saved: {results['total_leads_saved']}")
-        logger.info("=" * 60)
-        
+        results["completed_at"] = datetime.now(timezone.utc).isoformat()
         return results
     
-    return run_async(_full_scrape())
+    # H-08: Fan out all source scrapes in parallel using Celery group()
+    # Instead of: for source in sources: scrape_source.apply(args=[id]).get()
+    # This dispatches all tasks to workers and waits for all to complete.
+    job = group(
+        scrape_source.s(source['id']) for source in sources
+    )
+    
+    # Apply the group and wait for all results (with a generous timeout)
+    # timeout = 30 min per source max, but they run in parallel
+    timeout_seconds = max(len(sources) * 60, 1800)  # At least 30 min
+    group_result = job.apply_async()
+    
+    try:
+        source_results = group_result.get(
+            timeout=timeout_seconds,
+            propagate=False  # Don't raise on individual task failures
+        )
+    except Exception as e:
+        logger.error(f"Group execution error: {e}")
+        results["errors"].append(f"Group error: {str(e)}")
+        source_results = []
+    
+    # Aggregate results from all sources
+    for source_result in source_results:
+        if isinstance(source_result, Exception):
+            results["errors"].append(str(source_result))
+            continue
+        if isinstance(source_result, dict):
+            results["sources_scraped"] += 1
+            results["total_leads_found"] += source_result.get("leads_found", 0)
+            results["total_leads_saved"] += source_result.get("leads_saved", 0)
+            if source_result.get("errors"):
+                results["errors"].extend(source_result["errors"])
+    
+    results["completed_at"] = datetime.now(timezone.utc).isoformat()
+    results["success"] = True
+    
+    logger.info("=" * 60)
+    logger.info(f"✅ FULL SCRAPE COMPLETE")
+    logger.info(f"   Sources: {results['sources_scraped']}/{results['sources_total']}")
+    logger.info(f"   Leads found: {results['total_leads_found']}")
+    logger.info(f"   Leads saved: {results['total_leads_saved']}")
+    logger.info("=" * 60)
+    
+    return results
 
 
 @celery_app.task(bind=True, base=BaseTask, name="scrape_high_priority_sources")
 def scrape_high_priority_sources(self) -> Dict[str, Any]:
     """
-    Scrape only high-priority sources (priority >= 8)
+    Scrape only high-priority sources (priority >= 8).
+    Runs more frequently than full scrape.
     
-    This runs more frequently than full scrape
+    H-08: Also uses group() for parallel execution.
     """
     logger.info("🔥 Scraping high-priority sources")
     
-    async def _priority_scrape():
+    async def _get_priority_sources():
         async with async_session() as session:
             result = await session.execute(
                 select(Source)
@@ -519,25 +569,39 @@ def scrape_high_priority_sources(self) -> Dict[str, Any]:
                 .order_by(Source.priority.desc())
             )
             sources = result.scalars().all()
-        
-        results = {
-            "sources_scraped": 0,
-            "leads_saved": 0,
-            "errors": []
-        }
-        
-        for source in sources:
-            try:
-                source_result = scrape_source.apply(args=[source.id]).get()
-                results["sources_scraped"] += 1
-                results["leads_saved"] += source_result.get("leads_saved", 0)
-            except Exception as e:
-                results["errors"].append(str(e))
-        
+            return [{"id": s.id, "name": s.name} for s in sources]
+    
+    sources = run_async(_get_priority_sources())
+    
+    results = {
+        "sources_scraped": 0,
+        "leads_saved": 0,
+        "errors": []
+    }
+    
+    if not sources:
         results["success"] = True
         return results
     
-    return run_async(_priority_scrape())
+    # H-08: Parallel execution with group()
+    job = group(scrape_source.s(s['id']) for s in sources)
+    group_result = job.apply_async()
+    
+    try:
+        source_results = group_result.get(timeout=1800, propagate=False)
+    except Exception as e:
+        results["errors"].append(str(e))
+        source_results = []
+    
+    for sr in source_results:
+        if isinstance(sr, dict):
+            results["sources_scraped"] += 1
+            results["leads_saved"] += sr.get("leads_saved", 0)
+        elif isinstance(sr, Exception):
+            results["errors"].append(str(sr))
+    
+    results["success"] = True
+    return results
 
 
 # =============================================================================
@@ -548,10 +612,7 @@ def scrape_high_priority_sources(self) -> Dict[str, Any]:
 def update_all_embeddings() -> Dict[str, Any]:
     """Update embeddings for leads that don't have them"""
     logger.info("🔄 Updating embeddings...")
-    
     # TODO: Implement embedding updates using sentence-transformers
-    # This is for deduplication
-    
     return {"status": "not_implemented_yet"}
 
 
@@ -559,9 +620,7 @@ def update_all_embeddings() -> Dict[str, Any]:
 def check_duplicates() -> Dict[str, Any]:
     """Check for and merge duplicate leads"""
     logger.info("🔍 Checking for duplicates...")
-    
     # TODO: Implement duplicate detection using pgvector
-    
     return {"status": "not_implemented_yet"}
 
 
@@ -581,7 +640,6 @@ def sync_approved_to_insightly() -> Dict[str, Any]:
             return {"success": False, "error": "Insightly not configured"}
         
         async with async_session() as session:
-            # Get approved leads not yet synced
             result = await session.execute(
                 select(PotentialLead)
                 .where(PotentialLead.status == "approved")
@@ -609,7 +667,6 @@ def sync_approved_to_insightly() -> Dict[str, Any]:
                 })
                 
                 if result:
-                    # Update lead with Insightly ID
                     async with async_session() as session:
                         await session.execute(
                             update(PotentialLead)
@@ -678,10 +735,6 @@ def health_check() -> Dict[str, Any]:
         "worker": "celery"
     }
 
-
-# =============================================================================
-# EXPORTS
-# =============================================================================
 
 __all__ = [
     "scrape_single_url",
