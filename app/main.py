@@ -23,7 +23,7 @@ from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
 from pathlib import Path
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func, text
+from sqlalchemy import select, func, text, or_
 
 import asyncio
 import json
@@ -38,8 +38,10 @@ from app.services.utils import normalize_hotel_name
 # Protected by _scrape_lock for async-safe mutation within a single worker.
 # NOTE: For multi-worker uvicorn (--workers >1), migrate to Redis hash/pub-sub.
 active_scrapes: dict = {}
+_pending_scrape_config = {}
 scrape_cancellations: set = set()
 _scrape_lock = asyncio.Lock()
+_pending_scrape_config: dict = {}
 
 # Configure logging
 logging.basicConfig(
@@ -1016,80 +1018,89 @@ async def get_scrape_logs(
 @app.get("/dashboard", response_class=HTMLResponse, tags=["Dashboard"])
 async def dashboard_page(
     request: Request,
-    page: int = Query(1, ge=1),
-    per_page: int = Query(20, ge=1, le=100),
-    view: Optional[str] = None,
-    search: Optional[str] = Query(None),
-    status: Optional[str] = Query(None),
-    min_score: Optional[int] = Query(None),
-    location_type: Optional[str] = Query(None),
-    brand_tier: Optional[str] = Query(None),
+    tab: str = "pipeline",
+    page: int = 1,
+    search: str = "",
+    score: str = "",
+    location: str = "",
+    tier: str = "",
     db: AsyncSession = Depends(get_db)
 ):
-    """Main dashboard page"""
-    # Get stats (2 queries instead of 12)
-    stats = await _get_dashboard_stats(db)
+    """Dashboard page with Pipeline/Approved/Rejected tabs"""
+    from sqlalchemy import select, func, or_
 
-    # Apply view presets
-    if view == "hot":
-        min_score = settings.hot_lead_threshold
-        status = "new"
+    # Map tab to status
+    tab_status_map = {
+        "pipeline": "new",
+        "approved": "approved",
+        "rejected": "rejected",
+    }
+    status = tab_status_map.get(tab, "new")
 
-    # Build query
-    query = select(PotentialLead)
-    count_query = select(func.count(PotentialLead.id))
+    # Base query
+    query = select(PotentialLead).where(PotentialLead.status == status)
 
-    if status:
-        query = query.where(PotentialLead.status == status)
-        count_query = count_query.where(PotentialLead.status == status)
-    if min_score:
-        query = query.where(PotentialLead.lead_score >= min_score)
-        count_query = count_query.where(PotentialLead.lead_score >= min_score)
-    if location_type:
-        query = query.where(PotentialLead.location_type == location_type)
-        count_query = count_query.where(PotentialLead.location_type == location_type)
-    if brand_tier:
-        query = query.where(PotentialLead.brand_tier == brand_tier)
-        count_query = count_query.where(PotentialLead.brand_tier == brand_tier)
+    # Filters
     if search:
-        safe_search = escape_like(search)
-        search_filter = (
-            PotentialLead.hotel_name.ilike(f"%{safe_search}%") |
-            PotentialLead.city.ilike(f"%{safe_search}%") |
-            PotentialLead.brand.ilike(f"%{safe_search}%")
+        search_term = f"%{search}%"
+        query = query.where(
+            or_(
+                PotentialLead.hotel_name.ilike(search_term),
+                PotentialLead.city.ilike(search_term),
+                PotentialLead.brand.ilike(search_term),
+                PotentialLead.state.ilike(search_term),
+            )
         )
-        query = query.where(search_filter)
-        count_query = count_query.where(search_filter)
+    if score == "hot":
+        query = query.where(PotentialLead.lead_score >= 70)
+    elif score == "warm":
+        query = query.where(PotentialLead.lead_score.between(50, 69))
+    elif score == "cold":
+        query = query.where(PotentialLead.lead_score < 50)
+    if location:
+        query = query.where(PotentialLead.location_type == location)
+    if tier:
+        query = query.where(PotentialLead.brand_tier == tier)
 
-    result = await db.execute(count_query)
-    total = result.scalar() or 0
+    # Order
+    query = query.order_by(PotentialLead.lead_score.desc().nullslast())
 
-    # Apply pagination
+    # Pagination
+    per_page = 25
     offset = (page - 1) * per_page
-    query = query.order_by(
-        PotentialLead.lead_score.desc().nullslast(),
-        PotentialLead.created_at.desc()
-    ).offset(offset).limit(per_page)
 
-    result = await db.execute(query)
+    # Get total count for pagination
+    count_query = select(func.count()).select_from(query.subquery())
+    total_result = await db.execute(count_query)
+    total_count = total_result.scalar() or 0
+    total_pages = max(1, (total_count + per_page - 1) // per_page)
+
+    # Get leads
+    result = await db.execute(query.offset(offset).limit(per_page))
     leads = result.scalars().all()
 
-    pages = (total + per_page - 1) // per_page if total > 0 else 1
+    # Tab counts
+    for tab_name, tab_status in tab_status_map.items():
+        count_result = await db.execute(
+            select(func.count()).where(PotentialLead.status == tab_status)
+        )
+        # We'll pass these as pipeline_count, approved_count, rejected_count
+
+    pipeline_count_r = await db.execute(select(func.count()).where(PotentialLead.status == "new"))
+    approved_count_r = await db.execute(select(func.count()).where(PotentialLead.status == "approved"))
+    rejected_count_r = await db.execute(select(func.count()).where(PotentialLead.status == "rejected"))
 
     return templates.TemplateResponse(
         "dashboard.html",
         {
             "request": request,
-            "stats": stats,
             "leads": leads,
-            "pagination": {"total": total, "page": page, "per_page": per_page, "pages": pages},
-            "filters": {
-                "search": search,
-                "status": status,
-                "min_score": min_score,
-                "location_type": location_type,
-                "brand_tier": brand_tier
-            }
+            "active_tab": tab,
+            "current_page": page,
+            "total_pages": total_pages,
+            "pipeline_count": pipeline_count_r.scalar() or 0,
+            "approved_count": approved_count_r.scalar() or 0,
+            "rejected_count": rejected_count_r.scalar() or 0,
         }
     )
 
@@ -1190,6 +1201,74 @@ async def dashboard_lead_detail_partial(
         {"request": request, "lead": lead}
     )
 
+@app.get("/api/dashboard/leads/{lead_id}/row", response_class=HTMLResponse, tags=["Dashboard"])
+async def dashboard_lead_row_partial(
+    request: Request,
+    lead_id: int,
+    db: AsyncSession = Depends(get_db)
+):
+    """HTMX partial: Return single lead row (for refresh after edit)"""
+    result = await db.execute(
+        select(PotentialLead).where(PotentialLead.id == lead_id)
+    )
+    lead = result.scalar_one_or_none()
+
+    if not lead:
+        return HTMLResponse(content="", status_code=404)
+
+    return templates.TemplateResponse(
+        "partials/lead_row.html",
+        {"request": request, "lead": lead}
+    )
+
+@app.patch("/api/dashboard/leads/{lead_id}/edit", tags=["Dashboard"])
+async def dashboard_edit_lead(
+    lead_id: int,
+    request: Request,
+    db: AsyncSession = Depends(get_db)
+):
+    """Edit lead fields from the detail panel"""
+    data = await request.json()
+
+    result = await db.execute(
+        select(PotentialLead).where(PotentialLead.id == lead_id)
+    )
+    lead = result.scalar_one_or_none()
+
+    if not lead:
+        from fastapi.responses import JSONResponse
+        return JSONResponse(content={"detail": "Lead not found"}, status_code=404)
+
+    # Editable fields whitelist
+    editable_fields = [
+        "hotel_name", "brand", "brand_tier", "hotel_type",
+        "city", "state", "country",
+        "opening_date", "room_count",
+        "management_company", "developer", "owner",
+        "contact_name", "contact_title", "contact_email", "contact_phone",
+        "description", "notes",
+    ]
+
+    for field in editable_fields:
+        if field in data:
+            value = data[field]
+            # Convert empty strings to None
+            if value == "" or value is None:
+                setattr(lead, field, None)
+            elif field == "room_count":
+                setattr(lead, field, int(value) if value else None)
+            else:
+                setattr(lead, field, str(value))
+
+    from datetime import datetime, timezone
+    lead.updated_at = datetime.now(timezone.utc)
+
+    await db.commit()
+    await db.refresh(lead)
+
+    from fastapi.responses import JSONResponse
+    return JSONResponse(content={"status": "ok", "id": lead.id})
+
 
 @app.post("/api/dashboard/leads/{lead_id}/approve", response_class=HTMLResponse, tags=["Dashboard"])
 async def dashboard_approve_lead(
@@ -1251,30 +1330,180 @@ async def dashboard_reject_lead(
         {"request": request, "lead": lead}
     )
 
+@app.post("/api/dashboard/leads/{lead_id}/restore", response_class=HTMLResponse, tags=["Dashboard"])
+async def dashboard_restore_lead(
+    request: Request,
+    lead_id: int,
+    db: AsyncSession = Depends(get_db)
+):
+    """Restore a lead back to 'new' (pipeline) status"""
+    result = await db.execute(
+        select(PotentialLead).where(PotentialLead.id == lead_id)
+    )
+    lead = result.scalar_one_or_none()
+
+    if not lead:
+        return HTMLResponse(content="<div class='text-red-500 p-2'>Lead not found</div>", status_code=404)
+
+    lead.status = "new"
+    lead.rejection_reason = None
+
+    from datetime import datetime, timezone
+    lead.updated_at = datetime.now(timezone.utc)
+
+    await db.commit()
+    await db.refresh(lead)
+
+    return templates.TemplateResponse(
+        "partials/lead_row.html",
+        {"request": request, "lead": lead}
+    )
+
+@app.get("/api/dashboard/sources/list", tags=["Dashboard"])
+async def dashboard_sources_list(db: AsyncSession = Depends(get_db)):
+    """Return all sources with metadata for scrape modal source selection."""
+    from datetime import timedelta
+    
+    result = await db.execute(
+        select(Source).where(Source.is_active == True).order_by(Source.priority.desc(), Source.name)
+    )
+    sources = result.scalars().all()
+    
+    now = datetime.now(timezone.utc)
+    
+    # Build category counts
+    cat_counts = {}
+    cat_labels = {
+        "chain_newsroom": "🏨 Chain Newsrooms",
+        "luxury_independent": "💎 Luxury & Independent",
+        "aggregator": "📰 Aggregators",
+        "industry": "🏗️ Industry",
+        "florida": "🌴 Florida",
+        "caribbean": "🏝️ Caribbean",
+        "travel_pub": "✈️ Travel Pubs",
+        "pr_wire": "📡 PR Wire",
+    }
+    
+    all_sources = []
+    due_sources = []
+    
+    # Frequency → hours threshold
+    freq_hours = {
+        "daily": 20,
+        "every_3_days": 68,
+        "twice_weekly": 96,
+        "weekly": 160,
+        "monthly": 720,
+    }
+    
+    for src in sources:
+        # Count categories
+        cat_counts[src.source_type] = cat_counts.get(src.source_type, 0) + 1
+        
+        # Gold URL count
+        gold_urls = src.gold_urls or {} if hasattr(src, 'gold_urls') else {}
+        active_gold = sum(1 for m in gold_urls.values() if m.get("miss_streak", 0) < 3)
+        
+        source_data = {
+            "id": src.id,
+            "name": src.name,
+            "type": src.source_type,
+            "priority": src.priority,
+            "frequency": src.scrape_frequency or "daily",
+            "health": src.health_status or "new",
+            "leads": src.leads_found or 0,
+            "gold_count": active_gold,
+            "last_scraped": src.last_scraped_at.isoformat() if src.last_scraped_at else None,
+        }
+        all_sources.append(source_data)
+        
+        # Check if due for scraping
+        freq = src.scrape_frequency or "daily"
+        threshold = freq_hours.get(freq, 160)  # default weekly
+        
+        is_due = False
+        reason = ""
+        
+        if not src.last_scraped_at:
+            is_due = True
+            reason = "Never scraped"
+        else:
+            hours_since = (now - src.last_scraped_at).total_seconds() / 3600
+            if hours_since >= threshold:
+                is_due = True
+                reason = f"{freq} (last: {hours_since:.0f}h ago)"
+        
+        if is_due:
+            # Determine scrape mode for this source
+            scrape_mode = "discover" if active_gold == 0 else "gold"
+            needs_discovery = True
+            if hasattr(src, 'last_discovery_at') and src.last_discovery_at:
+                interval = getattr(src, 'discovery_interval_days', 7) or 7
+                needs_discovery = (now - src.last_discovery_at) > timedelta(days=interval)
+            
+            if needs_discovery:
+                scrape_mode = "discover"
+            
+            due_sources.append({
+                **source_data,
+                "reason": reason,
+                "mode": scrape_mode,
+            })
+    
+    categories = [
+        {"type": t, "label": cat_labels.get(t, t), "count": c}
+        for t, c in sorted(cat_counts.items())
+    ]
+    
+    return {
+        "sources": all_sources,
+        "due_sources": due_sources,
+        "categories": categories,
+        "total": len(all_sources),
+        "total_due": len(due_sources),
+    }
+
 
 @app.post("/api/dashboard/scrape", tags=["Dashboard"])
 async def dashboard_trigger_scrape(request: Request):
-    """Trigger a scrape job via Celery (legacy endpoint)"""
     try:
-        from app.tasks.scraping_tasks import run_full_scrape
-
-        # Queue the task with Celery
-        task = run_full_scrape.delay()
-
-        logger.info(f"Dashboard: Scrape triggered by user (task_id: {task.id})")
-
+        # Parse request body (may be empty for backwards compat)
+        body = {}
+        try:
+            body = await request.json()
+        except:
+            pass
+        
+        mode = body.get("mode", "full")
+        source_ids = body.get("source_ids", [])
+        
+        # Store the scrape config in a global so the SSE stream can pick it up
+        import uuid
+        scrape_id = str(uuid.uuid4())
+        
+        # Store config for the SSE endpoint to use
+        global _pending_scrape_config
+        _pending_scrape_config = {
+            "mode": mode,
+            "source_ids": source_ids,
+            "scrape_id": scrape_id,
+        }
+        
+        logger.info(f"Dashboard: Scrape triggered (mode={mode}, sources={len(source_ids) if source_ids else 'all'})")
+        
         return {
             "status": "started",
-            "message": "Scrape job queued successfully",
-            "task_id": task.id
+            "message": f"Scrape job started ({mode} mode)",
+            "scrape_id": scrape_id,
+            "mode": mode,
+            "source_count": len(source_ids) if source_ids else "all",
         }
     except Exception as e:
         logger.error(f"Dashboard: Failed to trigger scrape: {e}")
         return {
             "status": "error",
-            "message": f"Failed to queue scrape: {str(e)}. Is Celery worker running?"
+            "message": f"Failed to start scrape: {str(e)}"
         }
-
 
 # -----------------------------------------------------------------------------
 # SSE Scrape Endpoint - Uses the REAL Orchestrator Pipeline
@@ -1289,8 +1518,16 @@ async def scrape_with_progress(request: Request):
     """SSE endpoint for real-time scrape progress using the orchestrator pipeline"""
 
     scrape_id = str(uuid.uuid4())
+
+    # Get scrape config from the POST trigger
+    global _pending_scrape_config
+    scrape_config = dict(_pending_scrape_config)
+    _pending_scrape_config = {}
+    config_source_ids = scrape_config.get("source_ids", [])
+
     async with _scrape_lock:
         active_scrapes[scrape_id] = {"status": "starting"}
+    
 
     async def event_generator():
         orchestrator = None
@@ -1318,6 +1555,11 @@ async def scrape_with_progress(request: Request):
                     select(Source).where(Source.is_active == True).order_by(Source.priority.desc())
                 )
                 sources = result.scalars().all()
+
+            # Filter if specific sources requested
+            if config_source_ids:
+                sources = [s for s in sources if s.id in config_source_ids]
+
 
             total_sources = len(sources)
             source_names = [s.name for s in sources]
@@ -1349,14 +1591,54 @@ async def scrape_with_progress(request: Request):
                     break
 
                 source_name = source.name
-                yield f"data: {json.dumps({'type': 'source_start', 'source': source_name, 'current': idx, 'total': total_sources})}\n\n"
+                
+
+                # Check for gold URLs (fast scrape mode)
+                gold_urls_dict = source.gold_urls or {}
+                active_gold = [url for url, meta in gold_urls_dict.items() if meta.get("miss_streak", 0) < 3]
+                
+                # Decide: gold mode vs rediscovery
+                use_gold = len(active_gold) > 0
+                needs_rediscovery = False
+                
+                if use_gold and source.last_discovery_at:
+                    discovery_interval = source.discovery_interval_days or 7
+                    days_since_discovery = (datetime.now(timezone.utc) - source.last_discovery_at).total_seconds() / 86400
+                    if days_since_discovery >= discovery_interval:
+                        needs_rediscovery = True
+                        use_gold = False  # Force deep crawl to find new gold
+                elif use_gold and not source.last_discovery_at:
+                    # Has gold URLs but never formally discovered — do a full crawl
+                    needs_rediscovery = True
+                    use_gold = False
+                
+                if needs_rediscovery:
+                    mode_label = f"🔄 Rediscovery (overdue, {len(active_gold)} gold exist)"
+                elif use_gold:
+                    mode_label = f"⚡ GOLD ({len(active_gold)} URLs)"
+                else:
+                    mode_label = "🔍 First Discovery"
+                yield f"data: {json.dumps({'type': 'source_start', 'source': source_name, 'current': idx, 'total': total_sources, 'mode': 'gold' if use_gold else 'discover'})}\n\n"
+                yield f"data: {json.dumps({'type': 'info', 'message': f'{source_name}: {mode_label}'})}\n\n"
 
                 try:
-                    # Use the orchestrator's scraping engine
-                    scrape_results = await orchestrator.scraping_engine.scrape_sources(
-                        [source_name], deep=True, max_concurrent=3
-                    )
-
+                    if use_gold:
+                        # FAST MODE: Hit only known gold URLs directly
+                        scrape_results = {source_name: []}
+                        for gold_url in active_gold:
+                            try:
+                                await orchestrator.scraping_engine.rate_limiter.acquire(gold_url)
+                                result = await orchestrator.scraping_engine.http_scraper.scrape(gold_url)
+                                if result.success:
+                                    scrape_results[source_name].append(result)
+                            except Exception as e:
+                                logger.warning(f"Gold URL failed {gold_url[:50]}: {e}")
+                        logger.info(f"⚡ Gold mode: {source_name} → {len(scrape_results[source_name])} pages from {len(active_gold)} gold URLs")
+                    else:
+                        # DISCOVERY MODE: Deep crawl to find new gold URLs
+                        scrape_results = await orchestrator.scraping_engine.scrape_sources(
+                            [source_name], deep=True, max_concurrent=3
+                        )
                     source_pages = 0
                     for sname, results in scrape_results.items():
                         successful = [r for r in results if r.success]
@@ -1471,6 +1753,103 @@ async def scrape_with_progress(request: Request):
             else:
                 leads_saved = 0
                 leads_dupes = 0
+
+            # --- PHASE 5: GOLD URL TRACKING & SOURCE STATS ---
+            yield f"data: {json.dumps({'type': 'info', 'message': 'Updating source intelligence...'})}\n\n"
+
+            try:
+                async with async_session() as stats_session:
+                    source_id_map = {src.name: src.id for src in sources}
+
+                    # Build map: source_id -> {url: lead_count}
+                    url_lead_map = {}
+                    
+                    if lead_dicts:
+                        for lead in lead_dicts:
+                            src_url = lead.get("source_url", "")
+                            src_name = lead.get("source_name", "") or lead.get("source", "")
+                            
+                            source_id = None
+                            for sname, sid in source_id_map.items():
+                                if sname.lower() in (src_name or "").lower() or (src_name or "").lower() in sname.lower():
+                                    source_id = sid
+                                    break
+                            
+                            if source_id and src_url:
+                                if source_id not in url_lead_map:
+                                    url_lead_map[source_id] = {}
+                                url_lead_map[source_id][src_url] = url_lead_map[source_id].get(src_url, 0) + 1
+
+                    # Update each source
+                    for src in sources:
+                        source_obj = (await stats_session.execute(
+                            select(Source).where(Source.id == src.id)
+                        )).scalar_one_or_none()
+                        
+                        if not source_obj:
+                            continue
+                        
+                        source_obj.total_scrapes = (source_obj.total_scrapes or 0) + 1
+                        source_obj.last_scraped_at = datetime.now(timezone.utc)
+                        
+                        source_leads = sum(url_lead_map.get(src.id, {}).values()) if src.id in url_lead_map else 0
+                        
+                        if source_leads > 0:
+                            source_obj.leads_found = (source_obj.leads_found or 0) + source_leads
+                            source_obj.last_success_at = datetime.now(timezone.utc)
+                            source_obj.consecutive_failures = 0
+                            source_obj.health_status = "healthy"
+                        
+                        scrapes = source_obj.total_scrapes or 1
+                        old_avg = float(source_obj.avg_lead_yield or 0)
+                        source_obj.avg_lead_yield = ((old_avg * (scrapes - 1)) + source_leads) / scrapes
+                        
+                        # Update gold URLs
+                        gold = dict(source_obj.gold_urls or {})
+                        now_str = datetime.now(timezone.utc).isoformat()
+                        
+                        if src.id in url_lead_map:
+                            for url, count in url_lead_map[src.id].items():
+                                if url in gold:
+                                    gold[url]["leads_found"] = gold[url].get("leads_found", 0) + count
+                                    gold[url]["last_hit"] = now_str
+                                    gold[url]["miss_streak"] = 0
+                                    gold[url]["total_checks"] = gold[url].get("total_checks", 0) + 1
+                                else:
+                                    gold[url] = {
+                                        "leads_found": count,
+                                        "last_hit": now_str,
+                                        "first_found": now_str,
+                                        "miss_streak": 0,
+                                        "total_checks": 1,
+                                    }
+                        
+                        # Track misses on existing gold URLs
+                        scraped_urls_for_source = [
+                            p["url"] for p in all_pages 
+                            if p.get("source_name") == src.name
+                        ]
+                        for url in scraped_urls_for_source:
+                            if url in gold and (src.id not in url_lead_map or url not in url_lead_map.get(src.id, {})):
+                                gold[url]["miss_streak"] = gold[url].get("miss_streak", 0) + 1
+                                gold[url]["total_checks"] = gold[url].get("total_checks", 0) + 1
+                                if gold[url]["miss_streak"] >= 3:
+                                    logger.info(f"Gold URL demoted (3 misses): {url[:60]}")
+                        
+                        source_obj.gold_urls = gold
+                        source_obj.last_discovery_at = datetime.now(timezone.utc)
+                    
+                    await stats_session.commit()
+                
+                total_gold = sum(len(urls) for urls in url_lead_map.values())
+                if total_gold > 0:
+                    yield f"data: {json.dumps({'type': 'info', 'message': f'Recorded {total_gold} gold URLs across {len(url_lead_map)} sources'})}\n\n"
+                else:
+                    yield f"data: {json.dumps({'type': 'info', 'message': 'Source stats updated (no new gold URLs this run)'})}\n\n"
+                    
+            except Exception as gold_err:
+                logger.error(f"Gold URL tracking error: {gold_err}")
+                yield f"data: {json.dumps({'type': 'info', 'message': f'Warning: Source stats update failed: {str(gold_err)[:50]}'})}\n\n"
 
             # --- COMPLETE ---
             end_time = datetime.now(timezone.utc)

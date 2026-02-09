@@ -41,7 +41,7 @@
     <script src="https://cdn.jsdelivr.net/npm/htmx.org@1.9.10/dist/htmx.min.js"></script>
 
     <!-- Alpine.js 3.14.3 (pinned — was 3.x.x wildcard) -->
-    <script src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.3/dist/cdn.min.js"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.3/dist/cdn.min.js"></script>
 
     <style>
         /* Hide elements before Alpine.js initializes */
@@ -87,21 +87,21 @@
                             <a href="/dashboard" class="text-xl font-bold text-brand-600">Smart Lead Hunter</a>
                         </div>
                         <div class="hidden sm:ml-8 sm:flex sm:space-x-8">
-                            <a href="/dashboard"
-                               class="nav-link inline-flex items-center border-b-2 px-1 pt-1 text-sm font-medium {% if not request.query_params.get('view') and not request.query_params.get('location_type') %}border-brand-500 text-gray-900{% else %}border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700{% endif %}">
+                            <a href="/dashboard?tab=pipeline"
+                               class="nav-link inline-flex items-center border-b-2 px-1 pt-1 text-sm font-medium {% if not request.query_params.get('score') and not request.query_params.get('location') %}border-brand-500 text-gray-900{% else %}border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700{% endif %}">
                                 Dashboard
                             </a>
-                            <a href="/dashboard?view=hot"
-                               class="nav-link inline-flex items-center border-b-2 px-1 pt-1 text-sm font-medium {% if request.query_params.get('view') == 'hot' %}border-brand-500 text-gray-900{% else %}border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700{% endif %}">
-                                Hot Leads
+                            <a href="/dashboard?tab=pipeline&score=hot"
+                               class="nav-link inline-flex items-center border-b-2 px-1 pt-1 text-sm font-medium {% if request.query_params.get('score') == 'hot' %}border-brand-500 text-gray-900{% else %}border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700{% endif %}">
+                                🔥 Hot Leads
                             </a>
-                            <a href="/dashboard?location_type=florida"
-                               class="nav-link inline-flex items-center border-b-2 px-1 pt-1 text-sm font-medium {% if request.query_params.get('location_type') == 'florida' %}border-brand-500 text-gray-900{% else %}border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700{% endif %}">
-                                Florida
+                            <a href="/dashboard?tab=pipeline&location=florida"
+                               class="nav-link inline-flex items-center border-b-2 px-1 pt-1 text-sm font-medium {% if request.query_params.get('location') == 'florida' %}border-brand-500 text-gray-900{% else %}border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700{% endif %}">
+                                🌴 Florida
                             </a>
-                            <a href="/dashboard?location_type=caribbean"
-                               class="nav-link inline-flex items-center border-b-2 px-1 pt-1 text-sm font-medium {% if request.query_params.get('location_type') == 'caribbean' %}border-brand-500 text-gray-900{% else %}border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700{% endif %}">
-                                Caribbean
+                            <a href="/dashboard?tab=pipeline&location=caribbean"
+                               class="nav-link inline-flex items-center border-b-2 px-1 pt-1 text-sm font-medium {% if request.query_params.get('location') == 'caribbean' %}border-brand-500 text-gray-900{% else %}border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700{% endif %}">
+                                🏝️ Caribbean
                             </a>
                         </div>
                     </div>

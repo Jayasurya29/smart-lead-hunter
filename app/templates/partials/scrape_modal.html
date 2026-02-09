@@ -1,396 +1,611 @@
-<!-- Simple Scrape Progress Modal -->
-<div id="scrape-modal" 
+<!-- Smart Scrape Modal with Source Selection -->
+<div id="scrape-modal"
      class="fixed inset-0 z-50 hidden"
-     x-data="simpleScrapeController()"
+     x-data="scrapeController()"
      @open-scrape-modal.window="openModal()">
     
     <!-- Backdrop -->
-    <div class="absolute inset-0 bg-gray-500 bg-opacity-75 transition-opacity" @click="closeModal()"></div>
+    <div class="absolute inset-0 bg-gray-900 bg-opacity-60 backdrop-blur-sm" @click="closeModal()"></div>
     
     <!-- Modal -->
     <div class="absolute inset-0 flex items-center justify-center p-4">
-        <div class="bg-white rounded-lg shadow-xl max-w-md w-full overflow-hidden" @click.stop>
+        <div class="bg-white rounded-xl shadow-2xl w-full max-w-3xl overflow-hidden max-h-[90vh] flex flex-col" @click.stop>
             
-            <!-- Header -->
-            <div class="px-6 py-4 border-b border-gray-200">
-                <div class="flex items-center justify-between">
-                    <h3 class="text-lg font-semibold text-gray-900 flex items-center">
-                        <template x-if="status === 'running'">
-                            <svg class="animate-spin mr-3 h-5 w-5 text-brand-600" fill="none" viewBox="0 0 24 24">
-                                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-                                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                            </svg>
+            <!-- ============ SETUP VIEW (source selection) ============ -->
+            <template x-if="view === 'setup'">
+                <div class="flex flex-col max-h-[90vh]">
+                    <!-- Header -->
+                    <div class="px-6 py-4 border-b border-gray-200 bg-gradient-to-r from-blue-50 to-indigo-50">
+                        <div class="flex items-center justify-between">
+                            <div>
+                                <h3 class="text-lg font-bold text-gray-900">🚀 Run Scrape Pipeline</h3>
+                                <p class="text-sm text-gray-500">Choose scrape mode and sources</p>
+                            </div>
+                            <button @click="closeModal()" class="text-gray-400 hover:text-gray-600 p-1">
+                                <svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+                                </svg>
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Mode Selection -->
+                    <div class="px-6 py-4 border-b border-gray-100">
+                        <div class="grid grid-cols-3 gap-3">
+                            <button @click="scrapeMode = 'smart'"
+                                    class="p-3 rounded-lg border-2 text-left transition-all"
+                                    :class="scrapeMode === 'smart' ? 'border-blue-500 bg-blue-50' : 'border-gray-200 hover:border-gray-300'">
+                                <div class="text-sm font-bold" :class="scrapeMode === 'smart' ? 'text-blue-700' : 'text-gray-700'">⚡ Smart</div>
+                                <div class="text-xs text-gray-500 mt-1">Only due sources, gold URLs first</div>
+                                <div class="text-xs font-medium mt-1" :class="scrapeMode === 'smart' ? 'text-blue-600' : 'text-gray-400'" x-text="dueSources.length + ' sources due'"></div>
+                            </button>
+                            <button @click="scrapeMode = 'manual'"
+                                    class="p-3 rounded-lg border-2 text-left transition-all"
+                                    :class="scrapeMode === 'manual' ? 'border-purple-500 bg-purple-50' : 'border-gray-200 hover:border-gray-300'">
+                                <div class="text-sm font-bold" :class="scrapeMode === 'manual' ? 'text-purple-700' : 'text-gray-700'">🎯 Manual</div>
+                                <div class="text-xs text-gray-500 mt-1">Pick specific sources</div>
+                                <div class="text-xs font-medium mt-1" :class="scrapeMode === 'manual' ? 'text-purple-600' : 'text-gray-400'" x-text="selectedSources.length + ' selected'"></div>
+                            </button>
+                            <button @click="scrapeMode = 'full'"
+                                    class="p-3 rounded-lg border-2 text-left transition-all"
+                                    :class="scrapeMode === 'full' ? 'border-amber-500 bg-amber-50' : 'border-gray-200 hover:border-gray-300'">
+                                <div class="text-sm font-bold" :class="scrapeMode === 'full' ? 'text-amber-700' : 'text-gray-700'">🔄 Full Sweep</div>
+                                <div class="text-xs text-gray-500 mt-1">All active sources</div>
+                                <div class="text-xs font-medium mt-1" :class="scrapeMode === 'full' ? 'text-amber-600' : 'text-gray-400'" x-text="allSources.length + ' sources'"></div>
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Source List (Manual mode) -->
+                    <div class="flex-1 overflow-y-auto px-6 py-3" x-show="scrapeMode === 'manual'" style="max-height: 400px;">
+                        <!-- Category toggles -->
+                        <div class="flex flex-wrap gap-2 mb-3">
+                            <template x-for="cat in categories" :key="cat.type">
+                                <button @click="toggleCategory(cat.type)"
+                                        class="px-3 py-1 rounded-full text-xs font-medium transition-colors"
+                                        :class="isCategorySelected(cat.type) ? 'bg-indigo-600 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'">
+                                    <span x-text="cat.label"></span>
+                                    <span class="ml-1 opacity-70" x-text="'(' + cat.count + ')'"></span>
+                                </button>
+                            </template>
+                            <button @click="selectedSources = allSources.map(s => s.id)"
+                                    class="px-3 py-1 rounded-full text-xs font-medium bg-gray-800 text-white hover:bg-gray-700">
+                                Select All
+                            </button>
+                            <button @click="selectedSources = []"
+                                    class="px-3 py-1 rounded-full text-xs font-medium bg-gray-100 text-gray-600 hover:bg-gray-200">
+                                Clear
+                            </button>
+                        </div>
+                        
+                        <!-- Source checkboxes -->
+                        <div class="space-y-1">
+                            <template x-for="src in allSources" :key="src.id">
+                                <label class="flex items-center p-2 rounded-lg hover:bg-gray-50 cursor-pointer group">
+                                    <input type="checkbox" :value="src.id" 
+                                           :checked="selectedSources.includes(src.id)"
+                                           @change="toggleSource(src.id)"
+                                           class="h-4 w-4 text-indigo-600 rounded border-gray-300">
+                                    <div class="ml-3 flex-1 min-w-0">
+                                        <div class="flex items-center">
+                                            <span class="text-sm font-medium text-gray-700 truncate" x-text="src.name"></span>
+                                            <span class="ml-2 text-xs px-1.5 py-0.5 rounded-full"
+                                                  :class="{
+                                                      'bg-green-100 text-green-700': src.health === 'healthy',
+                                                      'bg-yellow-100 text-yellow-700': src.health === 'degraded',
+                                                      'bg-red-100 text-red-700': src.health === 'failing' || src.health === 'dead',
+                                                      'bg-gray-100 text-gray-500': src.health === 'new'
+                                                  }" x-text="src.health"></span>
+                                            <span x-show="src.gold_count > 0" class="ml-1 text-xs text-amber-600">⭐ <span x-text="src.gold_count"></span></span>
+                                        </div>
+                                        <div class="text-xs text-gray-400 flex items-center gap-2">
+                                            <span x-text="src.type"></span>
+                                            <span>P<span x-text="src.priority"></span></span>
+                                            <span x-text="src.frequency"></span>
+                                            <span x-show="src.leads > 0" class="text-emerald-600" x-text="src.leads + ' leads'"></span>
+                                        </div>
+                                    </div>
+                                </label>
+                            </template>
+                        </div>
+                    </div>
+
+                    <!-- Smart mode: Show what's due -->
+                    <div class="flex-1 overflow-y-auto px-6 py-3" x-show="scrapeMode === 'smart'" style="max-height: 400px;">
+                        <template x-if="dueSources.length === 0">
+                            <div class="text-center py-8 text-gray-400">
+                                <div class="text-4xl mb-2">✨</div>
+                                <div class="text-sm font-medium">All sources are up to date!</div>
+                                <div class="text-xs mt-1">No sources are due for scraping right now</div>
+                            </div>
                         </template>
-                        <template x-if="status === 'complete'">
-                            <svg class="mr-3 h-5 w-5 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>
-                            </svg>
-                        </template>
-                        <template x-if="status === 'error'">
-                            <svg class="mr-3 h-5 w-5 text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
-                            </svg>
-                        </template>
-                        <span x-text="title"></span>
-                    </h3>
-                    <button @click="closeModal()" class="text-gray-400 hover:text-gray-600" x-show="status !== 'running'">
-                        <svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
-                        </svg>
-                    </button>
+                        <div class="space-y-1">
+                            <template x-for="item in dueSources" :key="item.id">
+                                <div class="flex items-center p-2 rounded-lg bg-blue-50">
+                                    <div class="w-2 h-2 rounded-full bg-blue-500 mr-3"></div>
+                                    <div class="flex-1 min-w-0">
+                                        <div class="text-sm font-medium text-gray-700 truncate" x-text="item.name"></div>
+                                        <div class="text-xs text-gray-400" x-text="item.reason"></div>
+                                    </div>
+                                    <span x-show="item.gold_count > 0" class="text-xs text-amber-600 mr-2">⭐ <span x-text="item.gold_count"></span> gold</span>
+                                    <span class="text-xs px-2 py-0.5 rounded-full"
+                                          :class="item.mode === 'gold' ? 'bg-amber-100 text-amber-700' : 'bg-blue-100 text-blue-700'"
+                                          x-text="item.mode === 'gold' ? 'Fast' : 'Discovery'"></span>
+                                </div>
+                            </template>
+                        </div>
+                    </div>
+
+                    <!-- Full sweep info -->
+                    <div class="px-6 py-3" x-show="scrapeMode === 'full'">
+                        <div class="bg-amber-50 border border-amber-200 rounded-lg p-4">
+                            <div class="flex items-start">
+                                <span class="text-xl mr-3">⚠️</span>
+                                <div>
+                                    <div class="text-sm font-medium text-amber-800">Full sweep will scrape all <span x-text="allSources.length"></span> active sources</div>
+                                    <div class="text-xs text-amber-600 mt-1">This may take 30-90 minutes depending on content volume. Uses gold URLs where available for speed.</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Footer -->
+                    <div class="px-6 py-4 bg-gray-50 border-t border-gray-200 flex justify-between items-center">
+                        <div class="text-xs text-gray-400">
+                            <template x-if="scrapeMode === 'smart'"><span x-text="dueSources.length + ' sources will be scraped'"></span></template>
+                            <template x-if="scrapeMode === 'manual'"><span x-text="selectedSources.length + ' sources selected'"></span></template>
+                            <template x-if="scrapeMode === 'full'"><span x-text="allSources.length + ' sources (full sweep)'"></span></template>
+                        </div>
+                        <div class="flex gap-2">
+                            <button @click="closeModal()" class="px-4 py-2 text-sm text-gray-600 bg-white border border-gray-300 rounded-lg hover:bg-gray-50">Cancel</button>
+                            <button @click="startScrape()"
+                                    class="px-6 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 disabled:opacity-50"
+                                    :disabled="scrapeMode === 'manual' && selectedSources.length === 0">
+                                🚀 Start Pipeline
+                            </button>
+                        </div>
+                    </div>
                 </div>
-            </div>
-            
-            <!-- Body -->
-            <div class="px-6 py-4">
-                <!-- Progress indicator -->
-                <template x-if="status === 'running'">
-                    <div>
-                        <div class="flex justify-between text-sm text-gray-600 mb-2">
-                            <span x-text="message"></span>
-                            <span x-text="elapsedTime + 's'"></span>
-                        </div>
-                        <div class="w-full bg-gray-200 rounded-full h-2 mb-4">
-                            <div class="bg-brand-600 h-2 rounded-full transition-all duration-500 animate-pulse" style="width: 100%"></div>
-                        </div>
-                        <p class="text-sm text-gray-500 text-center">This may take a few minutes...</p>
-                    </div>
-                </template>
-                
-                <!-- Complete state -->
-                <template x-if="status === 'complete'">
-                    <div class="text-center">
-                        <div class="grid grid-cols-3 gap-4 mb-4">
-                            <div class="bg-gray-50 rounded-lg p-3">
-                                <div class="text-2xl font-bold text-gray-900" x-text="results.pages || 0"></div>
-                                <div class="text-xs text-gray-500">Pages</div>
+            </template>
+
+            <!-- ============ PROGRESS VIEW ============ -->
+            <template x-if="view === 'progress'">
+                <div class="flex flex-col max-h-[90vh]">
+                    <!-- Header -->
+                    <div class="px-6 py-4 border-b border-gray-200 flex-shrink-0"
+                         :class="phase === 'complete' ? 'bg-emerald-50' : phase === 'error' ? 'bg-red-50' : 'bg-blue-50'">
+                        <div class="flex items-center justify-between">
+                            <div class="flex items-center">
+                                <template x-if="phase === 'complete'">
+                                    <div class="w-10 h-10 rounded-full bg-emerald-100 flex items-center justify-center mr-3">
+                                        <svg class="w-6 h-6 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
+                                    </div>
+                                </template>
+                                <template x-if="phase === 'error'">
+                                    <div class="w-10 h-10 rounded-full bg-red-100 flex items-center justify-center mr-3">
+                                        <svg class="w-6 h-6 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+                                    </div>
+                                </template>
+                                <template x-if="phase !== 'complete' && phase !== 'error'">
+                                    <div class="w-10 h-10 rounded-full bg-blue-100 flex items-center justify-center mr-3">
+                                        <svg class="animate-spin w-5 h-5 text-blue-600" fill="none" viewBox="0 0 24 24">
+                                            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                                            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                                        </svg>
+                                    </div>
+                                </template>
+                                <div>
+                                    <h3 class="text-lg font-bold text-gray-900" x-text="title"></h3>
+                                    <p class="text-sm text-gray-500" x-text="subtitle"></p>
+                                </div>
                             </div>
-                            <div class="bg-green-50 rounded-lg p-3">
-                                <div class="text-2xl font-bold text-green-600" x-text="results.leads || 0"></div>
-                                <div class="text-xs text-gray-500">Leads Found</div>
-                            </div>
-                            <div class="bg-blue-50 rounded-lg p-3">
-                                <div class="text-2xl font-bold text-blue-600" x-text="results.new || 0"></div>
-                                <div class="text-xs text-gray-500">New Leads</div>
+                            <div class="flex items-center gap-3">
+                                <span class="text-sm font-mono text-gray-500" x-text="formatTime(elapsed)"></span>
+                                <button @click="closeModal()" class="text-gray-400 hover:text-gray-600 p-1">
+                                    <svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+                                    </svg>
+                                </button>
                             </div>
                         </div>
-                        <p class="text-sm text-gray-600" x-text="'Completed in ' + elapsedTime + ' seconds'"></p>
                     </div>
-                </template>
-                
-                <!-- Error state -->
-                <template x-if="status === 'error'">
-                    <div class="text-center">
-                        <p class="text-red-600 mb-2" x-text="errorMessage"></p>
-                        <p class="text-sm text-gray-500">Please check the server logs for more details.</p>
+
+                    <!-- Phase Steps -->
+                    <div class="px-6 py-3 bg-gray-50 border-b border-gray-100 flex-shrink-0">
+                        <div class="flex items-center justify-between text-xs">
+                            <template x-for="(p, i) in phases" :key="i">
+                                <div class="flex items-center" :class="i < phases.length - 1 ? 'flex-1' : ''">
+                                    <div class="flex items-center">
+                                        <div class="w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold"
+                                             :class="phaseIndex > i ? 'bg-emerald-500 text-white' : phaseIndex === i ? 'bg-blue-600 text-white ring-2 ring-blue-200' : 'bg-gray-200 text-gray-500'">
+                                            <template x-if="phaseIndex > i"><svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 13l4 4L19 7"/></svg></template>
+                                            <span x-show="phaseIndex <= i" x-text="i + 1"></span>
+                                        </div>
+                                        <span class="ml-1.5 font-medium" :class="phaseIndex >= i ? 'text-gray-900' : 'text-gray-400'" x-text="p"></span>
+                                    </div>
+                                    <div x-show="i < phases.length - 1" class="flex-1 h-0.5 mx-3" :class="phaseIndex > i ? 'bg-emerald-400' : 'bg-gray-200'"></div>
+                                </div>
+                            </template>
+                        </div>
                     </div>
-                </template>
-            </div>
-            
-            <!-- Footer -->
-            <div class="px-6 py-4 bg-gray-50 border-t border-gray-200 flex justify-end space-x-3">
-                <button x-show="status === 'running'" 
-                        @click="closeModal()"
-                        class="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50">
-                    Run in Background
-                </button>
-                <button x-show="status !== 'running'" 
-                        @click="closeModal()"
-                        class="px-4 py-2 text-sm font-medium text-white bg-brand-600 border border-transparent rounded-md hover:bg-brand-700">
-                    Close
-                </button>
-            </div>
+
+                    <!-- Stats Cards -->
+                    <div class="px-6 py-3 grid grid-cols-4 gap-3 flex-shrink-0">
+                        <div class="bg-gray-50 rounded-lg p-3 text-center">
+                            <div class="text-2xl font-bold text-gray-900" x-text="stats.sources"></div>
+                            <div class="text-xs text-gray-500">Sources</div>
+                        </div>
+                        <div class="bg-gray-50 rounded-lg p-3 text-center">
+                            <div class="text-2xl font-bold text-blue-600" x-text="stats.pages"></div>
+                            <div class="text-xs text-gray-500">Pages</div>
+                        </div>
+                        <div class="bg-gray-50 rounded-lg p-3 text-center">
+                            <div class="text-2xl font-bold text-amber-600" x-text="stats.extracted"></div>
+                            <div class="text-xs text-gray-500">Extracted</div>
+                        </div>
+                        <div class="bg-emerald-50 rounded-lg p-3 text-center">
+                            <div class="text-2xl font-bold text-emerald-600" x-text="stats.saved"></div>
+                            <div class="text-xs text-gray-500">New Leads</div>
+                        </div>
+                    </div>
+
+                    <!-- Sources Progress + Live Feed side by side -->
+                    <div class="flex-1 overflow-hidden px-6 py-2 flex gap-4" style="max-height: 300px;">
+                        <!-- Sources List -->
+                        <div class="w-1/3 flex flex-col" x-show="sourcesProgress.length > 0">
+                            <span class="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Sources</span>
+                            <div class="flex-1 overflow-y-auto space-y-1">
+                                <template x-for="src in sourcesProgress" :key="src.name">
+                                    <div class="flex items-center text-sm py-1">
+                                        <template x-if="src.status === 'done'">
+                                            <svg class="w-4 h-4 text-emerald-500 mr-2 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
+                                        </template>
+                                        <template x-if="src.status === 'active'">
+                                            <span class="w-4 h-4 mr-2 flex-shrink-0 flex items-center justify-center"><span class="w-2.5 h-2.5 rounded-full bg-blue-500 animate-pulse"></span></span>
+                                        </template>
+                                        <template x-if="src.status === 'error'">
+                                            <svg class="w-4 h-4 text-red-400 mr-2 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01"/></svg>
+                                        </template>
+                                        <span class="flex-1 truncate text-xs" :class="src.status === 'active' ? 'text-blue-700 font-medium' : 'text-gray-600'" x-text="src.name"></span>
+                                        <span class="text-xs text-gray-400 ml-1" x-show="src.pages > 0" x-text="src.pages + 'p'"></span>
+                                    </div>
+                                </template>
+                            </div>
+                        </div>
+
+                        <!-- Live Feed -->
+                        <div class="flex-1 flex flex-col">
+                            <div class="flex items-center justify-between mb-2">
+                                <span class="text-xs font-semibold text-gray-400 uppercase tracking-wider">Live Feed</span>
+                                <span class="text-xs text-gray-400" x-text="events.length + ' events'"></span>
+                            </div>
+                            <div id="scrape-feed" class="flex-1 bg-gray-900 rounded-lg p-3 overflow-y-auto font-mono text-xs space-y-0.5">
+                                <template x-for="(evt, i) in events" :key="i">
+                                    <div class="flex">
+                                        <span class="text-gray-500 mr-2 flex-shrink-0" x-text="evt.time"></span>
+                                        <span :class="{
+                                            'text-emerald-400': evt.type === 'success',
+                                            'text-blue-400': evt.type === 'info',
+                                            'text-amber-400': evt.type === 'warn',
+                                            'text-red-400': evt.type === 'error',
+                                            'text-purple-400': evt.type === 'lead',
+                                            'text-cyan-400': evt.type === 'phase',
+                                            'text-gray-400': evt.type === 'debug'
+                                        }" x-text="evt.msg"></span>
+                                    </div>
+                                </template>
+                                <template x-if="events.length === 0">
+                                    <div class="text-gray-500">Waiting for events...</div>
+                                </template>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Footer -->
+                    <div class="px-6 py-4 bg-gray-50 border-t border-gray-200 flex justify-between items-center flex-shrink-0">
+                        <template x-if="phase !== 'complete' && phase !== 'error'">
+                            <p class="text-xs text-gray-400">Scrape continues in background if you close</p>
+                        </template>
+                        <template x-if="phase === 'complete'">
+                            <p class="text-sm text-emerald-600 font-medium">✨ Pipeline finished successfully!</p>
+                        </template>
+                        <template x-if="phase === 'error'">
+                            <p class="text-sm text-red-500" x-text="errorMsg"></p>
+                        </template>
+                        <div class="flex gap-2">
+                            <button x-show="phase !== 'complete' && phase !== 'error'"
+                                    @click="closeModal()"
+                                    class="px-4 py-2 text-sm text-gray-600 bg-white border border-gray-300 rounded-lg hover:bg-gray-50">
+                                Run in Background
+                            </button>
+                            <button x-show="phase === 'complete' || phase === 'error'"
+                                    @click="closeModal(); window.location.reload()"
+                                    class="px-4 py-2 text-sm font-medium text-white rounded-lg"
+                                    :class="phase === 'complete' ? 'bg-emerald-600 hover:bg-emerald-700' : 'bg-gray-600 hover:bg-gray-700'">
+                                Close & Refresh
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </template>
         </div>
     </div>
 </div>
 
 <script>
-function simpleScrapeController() {
+function scrapeController() {
     return {
-        status: 'idle', // idle, running, complete, error
-        title: 'Starting Scrape...',
-        message: 'Initializing...',
-        elapsedTime: 0,
+        // Views: setup | progress
+        view: 'setup',
+        scrapeMode: 'smart',  // smart | manual | full
+        
+        // Source data
+        allSources: [],
+        dueSources: [],
+        selectedSources: [],
+        categories: [],
+        
+        // Progress state
+        phase: 'scraping',
+        phaseIndex: 0,
+        phases: ['Scraping', 'Extraction', 'Dedup', 'Complete'],
+        title: 'Pipeline Running',
+        subtitle: '',
+        elapsed: 0,
         timer: null,
-        scrapeId: null,
-        errorMessage: '',
+        errorMsg: '',
         eventSource: null,
-        results: {
-            pages: 0,
-            leads: 0,
-            new: 0
+        _retryCount: 0,
+        _maxRetries: 5,
+        _closed: false,
+        
+        stats: { sources: 0, pages: 0, extracted: 0, saved: 0 },
+        sourcesProgress: [],
+        events: [],
+
+        formatTime(s) {
+            const m = Math.floor(s / 60);
+            const sec = s % 60;
+            return m > 0 ? `${m}m ${sec}s` : `${sec}s`;
         },
-        
-        // M-16: SSE reconnection state
-        _sseRetryCount: 0,
-        _sseMaxRetries: 5,
-        _sseRetryTimer: null,
-        _sseIntentionallyClosed: false,
-        
-        openModal() {
-            // Show modal
+
+        log(type, msg) {
+            const now = new Date();
+            const time = now.toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
+            this.events.push({ time, type, msg });
+            this.$nextTick(() => {
+                const feed = document.getElementById('scrape-feed');
+                if (feed) feed.scrollTop = feed.scrollHeight;
+            });
+        },
+
+        async openModal() {
             document.getElementById('scrape-modal').classList.remove('hidden');
-            
-            // Reset state
-            this.status = 'running';
-            this.title = 'Scraping in Progress...';
-            this.message = 'Starting scraper...';
-            this.elapsedTime = 0;
-            this.scrapeId = null;
-            this.errorMessage = '';
-            this.results = { pages: 0, leads: 0, new: 0 };
-            this._sseRetryCount = 0;
-            this._sseIntentionallyClosed = false;
-            
-            // Start timer
-            this.timer = setInterval(() => {
-                this.elapsedTime++;
-                // Update message based on time
-                if (this.elapsedTime > 5) this.message = 'Fetching hotel sources...';
-                if (this.elapsedTime > 15) this.message = 'Extracting lead data...';
-                if (this.elapsedTime > 30) this.message = 'Processing leads...';
-                if (this.elapsedTime > 60) this.message = 'Still working...';
-                if (this.elapsedTime > 120) this.message = 'Almost done...';
-            }, 1000);
-            
-            // Call the scrape endpoint
-            this.runScrape();
+            this.view = 'setup';
+            this.scrapeMode = 'smart';
+            this.selectedSources = [];
+            await this.loadSources();
         },
-        
-        async runScrape() {
+
+        async loadSources() {
             try {
-                // Use the correct endpoint: /api/dashboard/scrape
-                const response = await fetch('/api/dashboard/scrape', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    }
-                });
-                
-                const data = await response.json();
-                console.log('Scrape response:', data);
-                
-                if (response.ok) {
-                    // Check if it returned a scrape_id (async task)
-                    if (data.scrape_id) {
-                        this.scrapeId = data.scrape_id;
-                        this.message = 'Scrape started...';
-                        this.connectToStream();
-                    } else if (data.task_id) {
-                        this.scrapeId = data.task_id;
-                        this.message = 'Scrape queued...';
-                        this.connectToStream();
-                    } else if (data.status === 'completed' || data.status === 'success') {
-                        // Completed immediately
-                        this.handleComplete(data);
-                    } else {
-                        // Unknown response, assume it started
-                        this.message = data.message || 'Scrape in progress...';
-                        this.connectToStream();
-                    }
-                } else {
-                    this.handleError(data.detail || data.message || 'Scrape failed');
+                const resp = await fetch('/api/dashboard/sources/list');
+                if (resp.ok) {
+                    const data = await resp.json();
+                    this.allSources = data.sources || [];
+                    this.dueSources = data.due_sources || [];
+                    this.categories = data.categories || [];
                 }
-            } catch (error) {
-                console.error('Scrape error:', error);
-                this.handleError(error.message || 'Connection error');
+            } catch (e) {
+                console.error('Failed to load sources:', e);
+                // Fallback: still allow full scrape
             }
         },
-        
-        connectToStream() {
-            /**
-             * M-16 FIX: Robust SSE reconnection with exponential backoff.
-             *
-             * Previously, onerror closed the EventSource permanently and used
-             * a fragile setTimeout to guess when the scrape was done. Now we:
-             * 1. Reconnect automatically on transient errors (network blips)
-             * 2. Use exponential backoff (1s → 2s → 4s → 8s → 16s)
-             * 3. Cap retries at 5 before giving up
-             * 4. Only treat the connection as dead after max retries
-             */
-            this._sseIntentionallyClosed = false;
-            this._createEventSource();
+
+        toggleSource(id) {
+            const idx = this.selectedSources.indexOf(id);
+            if (idx >= 0) this.selectedSources.splice(idx, 1);
+            else this.selectedSources.push(id);
         },
-        
-        _createEventSource() {
-            // Clean up any existing connection
-            if (this.eventSource) {
-                this.eventSource.close();
-                this.eventSource = null;
+
+        toggleCategory(type) {
+            const catSources = this.allSources.filter(s => s.type === type).map(s => s.id);
+            const allSelected = catSources.every(id => this.selectedSources.includes(id));
+            if (allSelected) {
+                this.selectedSources = this.selectedSources.filter(id => !catSources.includes(id));
+            } else {
+                catSources.forEach(id => {
+                    if (!this.selectedSources.includes(id)) this.selectedSources.push(id);
+                });
             }
-            
+        },
+
+        isCategorySelected(type) {
+            const catSources = this.allSources.filter(s => s.type === type).map(s => s.id);
+            return catSources.length > 0 && catSources.every(id => this.selectedSources.includes(id));
+        },
+
+        startScrape() {
+            // Switch to progress view
+            this.view = 'progress';
+            this.phase = 'scraping';
+            this.phaseIndex = 0;
+            this.title = 'Pipeline Running';
+            this.subtitle = 'Initializing...';
+            this.elapsed = 0;
+            this.stats = { sources: 0, pages: 0, extracted: 0, saved: 0 };
+            this.sourcesProgress = [];
+            this.events = [];
+            this.errorMsg = '';
+            this._retryCount = 0;
+            this._closed = false;
+
+            this.log('info', `Starting pipeline (${this.scrapeMode} mode)...`);
+            this.timer = setInterval(() => this.elapsed++, 1000);
+            this.triggerScrape();
+        },
+
+        async triggerScrape() {
             try {
-                const eventSource = new EventSource('/api/dashboard/scrape/stream');
+                // Build source list based on mode
+                let sourceIds = [];
+                if (this.scrapeMode === 'manual') {
+                    sourceIds = this.selectedSources;
+                } else if (this.scrapeMode === 'smart') {
+                    sourceIds = this.dueSources.map(s => s.id);
+                }
+                // full mode = empty array = all sources
+
+                const resp = await fetch('/api/dashboard/scrape', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        mode: this.scrapeMode,
+                        source_ids: sourceIds
+                    })
+                });
+                const data = await resp.json();
                 
-                eventSource.onopen = () => {
-                    // Reset retry count on successful connection
-                    this._sseRetryCount = 0;
-                    console.log('SSE connected');
+                if (resp.ok) {
+                    this.log('success', `Scrape queued (${this.scrapeMode} mode)`);
+                    this.connectSSE();
+                } else {
+                    this.handleError(data.detail || 'Failed to start');
+                }
+            } catch (e) {
+                this.handleError('Connection error: ' + e.message);
+            }
+        },
+
+        connectSSE() {
+            this._closed = false;
+            this._createSSE();
+        },
+
+        _createSSE() {
+            if (this.eventSource) { this.eventSource.close(); this.eventSource = null; }
+            try {
+                const es = new EventSource('/api/dashboard/scrape/stream');
+                es.onopen = () => { this._retryCount = 0; };
+                es.onmessage = (e) => {
+                    try { this.handleEvent(JSON.parse(e.data)); }
+                    catch (err) { this.log('debug', e.data); }
                 };
-                
-                eventSource.onmessage = (event) => {
-                    try {
-                        const data = JSON.parse(event.data);
-                        console.log('SSE message:', data);
-                        this.handleStreamEvent(data);
-                    } catch (e) {
-                        console.log('SSE raw:', event.data);
-                    }
-                };
-                
-                eventSource.onerror = () => {
-                    // M-16: Don't permanently close — attempt reconnection
-                    eventSource.close();
-                    this.eventSource = null;
-                    
-                    // If we intentionally closed (modal dismissed, scrape done), stop
-                    if (this._sseIntentionallyClosed) {
-                        console.log('SSE closed intentionally');
-                        return;
-                    }
-                    
-                    // If scrape is no longer running, no need to reconnect
-                    if (this.status !== 'running') {
-                        return;
-                    }
-                    
-                    this._sseRetryCount++;
-                    
-                    if (this._sseRetryCount > this._sseMaxRetries) {
-                        console.warn('SSE max retries reached, giving up');
-                        // After max retries, assume scrape finished (server may
-                        // have closed the stream normally after completion)
-                        if (this.elapsedTime > 5) {
-                            this.handleComplete({
-                                message: 'Scrape finished',
-                                pages: this.results.pages,
-                                leads: this.results.leads,
-                                new: this.results.new
-                            });
+                es.onerror = () => {
+                    es.close(); this.eventSource = null;
+                    if (this._closed || this.phase === 'complete' || this.phase === 'error') return;
+                    this._retryCount++;
+                    if (this._retryCount > this._maxRetries) {
+                        if (this.elapsed > 5) {
+                            this.phase = 'complete'; this.phaseIndex = 3;
+                            this.title = 'Pipeline Complete'; this.subtitle = 'Stream ended';
+                            clearInterval(this.timer);
+                            this.log('success', 'Pipeline finished');
                         }
                         return;
                     }
-                    
-                    // Exponential backoff: 1s, 2s, 4s, 8s, 16s
-                    const delay = Math.min(1000 * Math.pow(2, this._sseRetryCount - 1), 16000);
-                    console.log(`SSE reconnecting in ${delay}ms (attempt ${this._sseRetryCount}/${this._sseMaxRetries})`);
-                    
-                    this._sseRetryTimer = setTimeout(() => {
-                        if (this.status === 'running' && !this._sseIntentionallyClosed) {
-                            this._createEventSource();
-                        }
+                    const delay = Math.min(1000 * Math.pow(2, this._retryCount - 1), 16000);
+                    setTimeout(() => {
+                        if (this.phase !== 'complete' && this.phase !== 'error' && !this._closed) this._createSSE();
                     }, delay);
                 };
-                
-                this.eventSource = eventSource;
-            } catch (e) {
-                console.log('SSE not supported, continuing without real-time updates');
-            }
+                this.eventSource = es;
+            } catch (e) { this.log('error', 'SSE unavailable'); }
         },
-        
-        handleStreamEvent(data) {
-            switch(data.type) {
+
+        handleEvent(data) {
+            switch (data.type) {
                 case 'started':
-                    this.scrapeId = data.scrape_id;
-                    this.message = 'Scrape started...';
+                    this.log('info', 'Pipeline initialized');
                     break;
-                    
                 case 'info':
-                    this.message = data.message || 'Processing...';
+                    this.subtitle = data.message;
+                    if (data.message.includes('Phase 2') || data.message.includes('AI extraction')) {
+                        this.phase = 'extraction'; this.phaseIndex = 1;
+                        this.title = 'AI Extraction';
+                        this.log('phase', '━━ Phase 2: AI Extraction (Gemini) ━━');
+                    } else if (data.message.includes('Phase 3') || data.message.includes('Dedup')) {
+                        this.phase = 'dedup'; this.phaseIndex = 2;
+                        this.title = 'Deduplication';
+                        this.log('phase', '━━ Phase 3: Deduplication ━━');
+                    } else if (data.message.includes('Extracted')) {
+                        const m = data.message.match(/Extracted (\d+)/);
+                        if (m) this.stats.extracted = parseInt(m[1]);
+                        this.log('info', data.message);
+                    } else if (data.message.includes('Saved')) {
+                        const m = data.message.match(/Saved (\d+)/);
+                        if (m) this.stats.saved = parseInt(m[1]);
+                        this.log('success', data.message);
+                    } else {
+                        this.log('info', data.message);
+                    }
                     break;
-                    
                 case 'source_start':
-                    this.message = `Scraping: ${data.source || 'source'}`;
+                    if (!this.sourcesProgress.find(s => s.name === data.source)) {
+                        this.sourcesProgress.push({ name: data.source, status: 'active', pages: 0 });
+                    }
+                    this.subtitle = `Scraping ${data.source} (${data.current}/${data.total})`;
+                    this.log('info', `▸ Scraping ${data.source} [${data.current}/${data.total}]`);
                     break;
-                    
                 case 'source_complete':
-                    this.message = `Completed: ${data.source || 'source'}`;
+                    const src = this.sourcesProgress.find(s => s.name === data.source);
+                    if (src) { src.status = 'done'; src.pages = data.pages || 0; }
+                    this.stats.sources++;
+                    this.stats.pages += (data.pages || 0);
+                    this.log('success', `✓ ${data.source}: ${data.pages || 0} pages`);
                     break;
-                    
+                case 'url_error':
+                    const errSrc = this.sourcesProgress.find(s => s.status === 'active');
+                    if (errSrc) errSrc.status = 'error';
+                    this.log('warn', `⚠ ${data.url}: ${data.error}`);
+                    break;
                 case 'leads_found':
-                    this.results.leads = data.total_saved || data.found || this.results.leads + 1;
-                    this.results.new = data.saved || this.results.new;
-                    this.message = `Found ${this.results.leads} leads...`;
+                    this.stats.saved = data.total_saved || data.saved || this.stats.saved;
+                    this.log('lead', `★ ${data.saved || 0} new leads saved (${data.total_saved || 0} total)`);
                     break;
-                    
-                case 'url_start':
-                    this.message = `Fetching: ${(data.url || '').substring(0, 40)}...`;
-                    break;
-                    
                 case 'complete':
                 case 'finished':
-                    this.handleComplete(data.stats || data);
+                    clearInterval(this.timer);
+                    this.phase = 'complete'; this.phaseIndex = 3;
+                    this.title = 'Pipeline Complete!';
+                    const s = data.stats || data;
+                    this.stats.sources = s.sources_scraped || this.stats.sources;
+                    this.stats.pages = s.urls_scraped || this.stats.pages;
+                    this.stats.extracted = s.leads_found || this.stats.extracted;
+                    this.stats.saved = s.leads_saved || this.stats.saved;
+                    const dur = data.duration_seconds ? Math.round(data.duration_seconds) : this.elapsed;
+                    this.subtitle = `Completed in ${this.formatTime(dur)}`;
+                    this.log('success', `━━ COMPLETE: ${this.stats.saved} new leads from ${this.stats.sources} sources ━━`);
                     this._closeSSE();
                     break;
-                    
                 case 'error':
-                    this.handleError(data.message || 'Scrape error');
+                    this.handleError(data.message || 'Unknown error');
                     this._closeSSE();
                     break;
-                    
                 case 'cancelled':
-                    this.handleError('Scrape was cancelled');
+                    this.handleError('Scrape cancelled');
                     this._closeSSE();
                     break;
             }
         },
-        
-        handleComplete(data) {
+
+        handleError(msg) {
             clearInterval(this.timer);
-            this.status = 'complete';
-            this.title = 'Scrape Complete!';
-            
-            // Extract results from various response formats
-            this.results = {
-                pages: data.pages_scraped || data.urls_scraped || data.pages || this.results.pages || 0,
-                leads: data.leads_found || data.total_leads || data.leads || this.results.leads || 0,
-                new: data.new_leads || data.leads_saved || data.new || this.results.new || 0
-            };
-            
-            // Refresh the dashboard data
-            if (typeof htmx !== 'undefined') {
-                htmx.ajax('GET', '/api/dashboard/stats', '#stats-container');
-                htmx.ajax('GET', '/api/dashboard/leads', '#lead-list-container');
-            }
-            
-            // Show toast
-            if (typeof showToast === 'function') {
-                showToast(`Scrape complete! Found ${this.results.new} new leads.`, 'success');
-            }
+            this.phase = 'error';
+            this.title = 'Pipeline Error';
+            this.subtitle = msg;
+            this.errorMsg = msg;
+            this.log('error', `✗ ${msg}`);
         },
-        
-        handleError(message) {
-            clearInterval(this.timer);
-            this.status = 'error';
-            this.title = 'Scrape Failed';
-            this.errorMessage = message;
-        },
-        
-        /**
-         * M-16: Centralized SSE cleanup — marks the close as intentional
-         * so the onerror handler won't try to reconnect.
-         */
+
         _closeSSE() {
-            this._sseIntentionallyClosed = true;
-            if (this._sseRetryTimer) {
-                clearTimeout(this._sseRetryTimer);
-                this._sseRetryTimer = null;
-            }
-            if (this.eventSource) {
-                this.eventSource.close();
-                this.eventSource = null;
-            }
+            this._closed = true;
+            if (this.eventSource) { this.eventSource.close(); this.eventSource = null; }
         },
-        
+
         closeModal() {
             document.getElementById('scrape-modal').classList.add('hidden');
             this._closeSSE();
-            if (this.status === 'running') {
-                // Let it run in background, just close modal
-                if (typeof showToast === 'function') {
-                    showToast('Scrape running in background...', 'info');
-                }
-            }
             clearInterval(this.timer);
         }
     }

@@ -3,6 +3,7 @@ Source model - stores websites we scrape for hotel leads
 """
 from sqlalchemy import Column, String, Integer, DateTime, Text, Boolean, Numeric, ARRAY
 from datetime import datetime, timezone
+from sqlalchemy.dialects.postgresql import JSONB
 
 from app.database import Base
 
@@ -34,6 +35,13 @@ class Source(Base):
     leads_found = Column(Integer, default=0)
     success_rate = Column(Numeric(5, 2), default=0.00)
     consecutive_failures = Column(Integer, default=0)  # For health monitoring
+
+    # Gold URL Tracking
+    gold_urls = Column(JSONB, default={})
+    last_discovery_at = Column(DateTime(timezone=True))
+    discovery_interval_days = Column(Integer, default=7)
+    avg_lead_yield = Column(Numeric(5, 2), default=0.00)
+    total_scrapes = Column(Integer, default=0)
     
     # Health Monitoring
     health_status = Column(String(20), default="new")  # healthy, degraded, failing, dead, new
@@ -76,7 +84,12 @@ class Source(Base):
             "health_status": self.health_status,
             "notes": self.notes,
             "created_at": self.created_at.isoformat() if self.created_at else None,
-            "updated_at": self.updated_at.isoformat() if self.updated_at else None
+            "updated_at": self.updated_at.isoformat() if self.updated_at else None,
+            "gold_urls": self.gold_urls or {},
+            "last_discovery_at": self.last_discovery_at.isoformat() if self.last_discovery_at else None,
+            "discovery_interval_days": self.discovery_interval_days,
+            "avg_lead_yield": float(self.avg_lead_yield) if self.avg_lead_yield else 0.0,
+            "total_scrapes": self.total_scrapes or 0
         }
     
     def record_success(self, leads_count: int = 0):

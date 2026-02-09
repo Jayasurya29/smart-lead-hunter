@@ -91,6 +91,7 @@ class MergedLead:
     source_url: str = ""  # Primary source
     source_name: str = ""  # Primary source name
     source_urls: List[str] = field(default_factory=list)
+    source_extractions: Dict[str, Dict] = field(default_factory=dict)  # {url: {extracted_fields}}
     source_names: List[str] = field(default_factory=list)
     merged_from_count: int = 1
     
@@ -123,6 +124,7 @@ class MergedLead:
             'source_url': self.source_urls[0] if self.source_urls else self.source_url,
             'source_name': self.source_names[0] if self.source_names else self.source_name,
             'source_urls': self.source_urls,
+            'source_extractions': self.source_extractions,
             'source_names': self.source_names,
             'merged_from_count': self.merged_from_count,
             'first_seen': self.first_seen,
@@ -321,6 +323,15 @@ class SmartDeduplicator:
             source_url=source_url,
             source_name=source_name,
             source_urls=[source_url] if source_url else [],
+            source_extractions={source_url: {
+            'hotel_name': data.get('hotel_name', ''),
+            'city': data.get('city', ''),
+            'state': data.get('state', ''),
+            'room_count': data.get('room_count'),
+            'opening_date': data.get('opening_date', ''),
+            'brand': data.get('brand', ''),
+            'key_insights': data.get('key_insights', '') or data.get('description', ''),
+            }} if source_url else {},
             source_names=[source_name] if source_name else [],
             merged_from_count=1,
             first_seen=datetime.now().isoformat(),
@@ -522,6 +533,13 @@ class SmartDeduplicator:
                     all_names.append(name)
         
         merged.source_urls = all_urls
+        # Merge source extractions from all leads
+        all_extractions = {}
+        for lead in leads:
+            for url, extraction in lead.source_extractions.items():
+                if url and url not in all_extractions:
+                    all_extractions[url] = extraction
+        merged.source_extractions = all_extractions
         merged.source_names = all_names
         merged.source_url = all_urls[0] if all_urls else ""
         merged.source_name = all_names[0] if all_names else ""
