@@ -329,26 +329,30 @@ class SmartDeduplicator:
     
     # =========================================================================
     # SIMILARITY
-    # =========================================================================
-    
+    # ========================================================================
+        
     def _name_similarity(self, name1: str, name2: str) -> float:
         """Calculate name similarity (0-1)"""
         if not name1 or not name2:
             return 0.0
-        
+
         # Normalize names
         n1 = self._clean_name(name1)
         n2 = self._clean_name(name2)
-        
+
         if n1 == n2:
             return 1.0
-        
+
         if n1 in n2 or n2 in n1:
             return 0.9
-        
+
         # Use rapidfuzz if available (returns 0-100)
         if USING_RAPIDFUZZ:
-            return fuzz.ratio(n1, n2) / 100.0
+            # Take best of character ratio and token-set ratio
+            # token_set_ratio handles reordering and extra words much better
+            char_ratio = fuzz.ratio(n1, n2) / 100.0
+            token_ratio = fuzz.token_set_ratio(n1, n2) / 100.0
+            return max(char_ratio, token_ratio)
         else:
             return SequenceMatcher(None, n1, n2).ratio()
     
@@ -397,37 +401,45 @@ class SmartDeduplicator:
         
         return False
     
+    
     def _locations_different(self, lead1: MergedLead, lead2: MergedLead) -> bool:
         """Check if locations are clearly different"""
-        # Different cities
-        if lead1.city and lead2.city:
-            c1, c2 = lead1.city.lower().strip(), lead2.city.lower().strip()
-            if c1 != c2 and c1 not in c2 and c2 not in c1:
-                return True
-        
-        # Different states
+        # Different states = definitely different
         if lead1.state and lead2.state:
             if lead1.state.lower() != lead2.state.lower():
                 return True
-        
+
+        # Different cities only count as "different" if no state info
+        # (same state + different city = could be same resort area)
+        if not lead1.state and not lead2.state:
+            if lead1.city and lead2.city:
+                c1, c2 = lead1.city.lower().strip(), lead2.city.lower().strip()
+                if c1 != c2 and c1 not in c2 and c2 not in c1:
+                    return True
+
         return False
+    
     
     def _calculate_similarity(self, lead1: MergedLead, lead2: MergedLead) -> float:
         """Calculate overall similarity between two leads"""
         # Start with name similarity
         sim = self._name_similarity(lead1.hotel_name, lead2.hotel_name)
-        
+
         # Location penalty/boost
         if self._locations_different(lead1, lead2):
-            sim *= 0.4  # Heavy penalty for different locations
+            sim *= 0.4  # Heavy penalty for different states
         elif self._locations_match(lead1, lead2):
             sim += self.LOCATION_BOOST
-        
+        else:
+            # Same state but different city — small boost (resort areas span cities)
+            if lead1.state and lead2.state and lead1.state.lower() == lead2.state.lower():
+                sim += 0.05
+
         # Brand boost
         if lead1.brand and lead2.brand:
             if lead1.brand.lower() == lead2.brand.lower():
                 sim += self.BRAND_BOOST
-        
+
         return min(sim, 1.0)
     
     # =========================================================================
