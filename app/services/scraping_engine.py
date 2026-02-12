@@ -297,16 +297,23 @@ class PlaywrightScraper:
                 user_agent=self.config.user_agent, viewport={'width': 1920, 'height': 1080},
                 extra_http_headers=extra_headers or {})
             page = await context.new_page()
-            response = await page.goto(url, wait_until="networkidle", timeout=self.config.default_timeout * 1000)
+            try:
+                response = await page.goto(url, wait_until="networkidle", timeout=self.config.default_timeout * 1000)
+            except Exception:
+                # Fallback for Wix/SPA sites that never reach networkidle
+                response = await page.goto(url, wait_until="domcontentloaded", timeout=self.config.default_timeout * 1000)
+                await page.wait_for_timeout(5000)
+            # Auto-dismiss cookie consent banners
+            await self._dismiss_cookies(page)
             if wait_for:
                 try: await page.wait_for_selector(wait_for, timeout=10000)
                 except Exception: pass
             await asyncio.sleep(1)
             html = await page.content()
             crawl_time = int((time.time() - start_time) * 1000)
+            # Use inner_text for visible-only content (respects CSS display/visibility)
+            text = await page.inner_text("body")
             soup = BeautifulSoup(html, 'lxml')
-            for s in soup(["script", "style", "nav", "footer", "header"]): s.decompose()
-            text = soup.get_text(separator="\n", strip=True)
             title = soup.title.string if soup.title else None
             links = []
             for a in soup.find_all('a', href=True):
@@ -323,6 +330,50 @@ class PlaywrightScraper:
         finally:
             if page: await page.close()
             if context: await context.close()
+
+    async def _dismiss_cookies(self, page):
+        """Try to dismiss cookie consent banners using common button patterns."""
+        COOKIE_SELECTORS = [
+            # Cookiebot (very common)
+            "#CybotCookiebotDialogBodyLevelButtonLevelOptinAllowAll",
+            "#CybotCookiebotDialogBodyButtonAccept",
+            # OneTrust
+            "#onetrust-accept-btn-handler",
+            # Generic text-based
+            "button:has-text('Allow all')",
+            "button:has-text('Accept all')",
+            "button:has-text('Accept All')",
+            "button:has-text('Accept cookies')",
+            "button:has-text('Accept Cookies')",
+            "button:has-text('I agree')",
+            "button:has-text('I Accept')",
+            "button:has-text('Got it')",
+            "button:has-text('Agree')",
+            "button:has-text('Allow All')",
+            "button:has-text('Consent')",
+            # Container-scoped
+            "[id*='cookie'] button:has-text('Accept')",
+            "[id*='consent'] button:has-text('Accept')",
+            "[class*='cookie'] button:has-text('Accept')",
+            "[class*='consent'] button:has-text('Accept')",
+            # Attribute-based
+            ".cookie-consent-accept",
+            "[data-action='accept']",
+            "[aria-label*='accept' i]",
+        ]
+        try:
+            for selector in COOKIE_SELECTORS:
+                try:
+                    btn = page.locator(selector).first
+                    if await btn.is_visible(timeout=2000):
+                        await btn.click()
+                        logger.info(f"\U0001f36a Cookie dismissed via: {selector}")
+                        await page.wait_for_timeout(2000)
+                        return
+                except Exception:
+                    continue
+        except Exception:
+            pass  # Cookie dismissal is best-effort
 
     async def close(self):
         if self._browser: await self._browser.close()

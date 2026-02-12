@@ -174,8 +174,10 @@ async def grade_source(source: Source, orchestrator) -> Dict:
         result["leads_us_caribbean"] = len(us_caribbean)
         result["leads_international"] = len(international)
         
-        # Deduplicate gold URLs
-        result["gold_urls"] = list(set(result["gold_urls"]))
+        # Gold URLs = pages with 2+ leads (listing pages, not individual articles)
+        from collections import Counter
+        url_counts = Counter(result["gold_urls"])
+        result["gold_urls"] = [url for url, count in url_counts.items() if count >= 2]
         
     except Exception as e:
         result["grade"] = "C"
@@ -385,8 +387,7 @@ async def run_grading(
         print(f"\n  📄 Full report saved: {report_path}")
         
         # Cleanup
-        if hasattr(orchestrator, 'cleanup'):
-            await orchestrator.cleanup()
+        await orchestrator.close()
 
 
 async def show_report(sources: List[Source]):

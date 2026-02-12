@@ -610,6 +610,34 @@ class URLFilter:
                 r'/privacy',
             ],
         },
+        'hotelnewsresource.com': {
+            'block': [
+                r'/directory/',
+                r'/events/',
+                r'/advertise/',
+                r'/Info-',
+                r'/HNR-region-',
+                r'/HNR-category-(?!.*Openings)',  # Block other categories
+                r'/topics/',
+                r'studio\.hotelnewsresource',
+            ],
+            'allow_patterns': [
+                r'/article\d+\.html',              # Article pages
+                r'/HNR-category-category-Openings',  # Entry page
+            ]
+        },
+        'lodgingmagazine.com': {
+            'block': [
+                r'/tag/',
+                r'/author/',
+                r'/wp-admin/',
+                r'/subscribe/',
+            ],
+            'allow_patterns': [
+                r'/category/finance-development/',   # Our entry URLs
+                r'/\d{4}/\d{2}/[a-z0-9-]+',          # Article URLs
+            ]
+        },
         # -------------------------------------------------------------------------
         # OTHER CHAINS
         # -------------------------------------------------------------------------

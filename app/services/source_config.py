@@ -233,9 +233,9 @@ SOURCE_PATTERNS: Dict[str, SourcePatterns] = {
         block_patterns=[r'/organization/', r'/opinion/', r'/video/', r'/event/', r'/panel/', r'/viewpoint/', r'/podcast/', r'/supplier/', r'/me/'],
         link_patterns=[r'announcement/\d+', r'news/\d+\.html'], max_pages=30, source_type="aggregator"),
     "Hotel News Resource - Openings": SourcePatterns(
-        gold_patterns=[r'hotelnewsresource\.com/article/.*'],
+        gold_patterns=[r'hotelnewsresource\.com/article\d+\.html'],
         block_patterns=[r'/directory/', r'/events/', r'/advertise/'] + _SOCIAL,
-        link_patterns=[r'/article/[a-z0-9-]+'], max_pages=30, source_type="aggregator"),
+        link_patterns=[r'/article\d+\.html'], max_pages=30, source_type="aggregator"),
     "Hotel News Resource - Florida": SourcePatterns(
         gold_patterns=[r'hotelnewsresource\.com/article/.*'],
         block_patterns=[r'/directory/', r'/events/'] + _SOCIAL,
@@ -254,7 +254,7 @@ SOURCE_PATTERNS: Dict[str, SourcePatterns] = {
         link_patterns=[r'/\d{4}/\d{2}/\d{2}/[a-z0-9-]+'], max_pages=30, source_type="industry"),
     "LODGING Magazine": SourcePatterns(
         gold_patterns=[r'lodgingmagazine\.com/.*hotel', r'lodgingmagazine\.com/.*opening'],
-        block_patterns=[r'/tag/', r'/category/', r'/author/', r'/wp-admin/', r'/subscribe'] + _SOCIAL,
+        block_patterns=[r'/tag/', r'/author/', r'/wp-admin/', r'/subscribe/'] + _SOCIAL,
         link_patterns=[r'/\d{4}/\d{2}/[a-z0-9-]+/'], max_pages=30, source_type="industry"),
 
     # NEW: Missing industry sources

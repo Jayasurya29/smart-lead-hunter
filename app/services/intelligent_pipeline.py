@@ -1224,7 +1224,7 @@ class LeadValidator:
         # Rule 3: Opening date should be current year or later (not ancient)
         current_year = datetime.now().year
         opening_year = self._extract_year(lead.opening_date)
-        if opening_year and opening_year < current_year - 1:
+        if opening_year and opening_year < current_year:
             return self._reject("past_opening", f"Old opening ({opening_year}): '{name}'")
         
         # Rule 4: Room count sanity (if provided, must be realistic)
@@ -1433,12 +1433,31 @@ class IntelligentPipeline:
         logger.info(f"\n📊 STAGE 2: Classifying {len(pages_after_reject)} pages (parallel)...")
         classification_start = time.time()
         
+        # URLs that are ALWAYS relevant (dedicated openings pages) - skip classifier
+        ALWAYS_RELEVANT_PATTERNS = [
+            'openings', 'new-hotels', 'new-openings', 'pipeline',
+            'hotel-openings', '2026-openings', '2027-openings',
+        ]
+
         async def classify_one(page):
             async with sem:
                 url = page.get('url', '')
                 content = page.get('content', '') or page.get('text', '')
                 if not content or len(content) < 100:
                     return None
+                
+                # Skip classification for dedicated openings pages
+                url_lower = url.lower()
+                if any(pattern in url_lower for pattern in ALWAYS_RELEVANT_PATTERNS):
+                    logger.info(f"   ⚡ Auto-relevant (openings page): {url[:70]}...")
+                    auto_result = ClassificationResult(
+                        url=url, summary="Dedicated openings page - auto-classified",
+                        is_relevant=True, confidence=1.0,
+                        reasoning="URL matches openings page pattern - skip classifier",
+                        processing_time_ms=0
+                    )
+                    return (page, auto_result)
+                
                 result = await self.classifier.classify(url, content)
                 return (page, result)
         

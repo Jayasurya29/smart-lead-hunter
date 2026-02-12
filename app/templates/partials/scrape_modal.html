@@ -1,8 +1,9 @@
-<!-- Smart Scrape Modal with Source Selection -->
+<!-- Smart Scrape Modal with Source Selection + URL Extract -->
 <div id="scrape-modal"
      class="fixed inset-0 z-50 hidden"
      x-data="scrapeController()"
-     @open-scrape-modal.window="openModal()">
+     @open-scrape-modal.window="openModal()"
+     @open-url-extract.window="openUrlExtract($event.detail)">
     
     <!-- Backdrop -->
     <div class="absolute inset-0 bg-gray-900 bg-opacity-60 backdrop-blur-sm" @click="closeModal()"></div>
@@ -29,29 +30,37 @@
                         </div>
                     </div>
 
-                    <!-- Mode Selection -->
+                    <!-- Mode Selection — NOW 4 COLUMNS -->
                     <div class="px-6 py-4 border-b border-gray-100">
-                        <div class="grid grid-cols-3 gap-3">
+                        <div class="grid grid-cols-4 gap-3">
                             <button @click="scrapeMode = 'smart'"
                                     class="p-3 rounded-lg border-2 text-left transition-all"
                                     :class="scrapeMode === 'smart' ? 'border-blue-500 bg-blue-50' : 'border-gray-200 hover:border-gray-300'">
                                 <div class="text-sm font-bold" :class="scrapeMode === 'smart' ? 'text-blue-700' : 'text-gray-700'">⚡ Smart</div>
-                                <div class="text-xs text-gray-500 mt-1">Only due sources, gold URLs first</div>
-                                <div class="text-xs font-medium mt-1" :class="scrapeMode === 'smart' ? 'text-blue-600' : 'text-gray-400'" x-text="dueSources.length + ' sources due'"></div>
+                                <div class="text-xs text-gray-500 mt-1">Only due sources</div>
+                                <div class="text-xs font-medium mt-1" :class="scrapeMode === 'smart' ? 'text-blue-600' : 'text-gray-400'" x-text="dueSources.length + ' due'"></div>
                             </button>
                             <button @click="scrapeMode = 'manual'"
                                     class="p-3 rounded-lg border-2 text-left transition-all"
                                     :class="scrapeMode === 'manual' ? 'border-purple-500 bg-purple-50' : 'border-gray-200 hover:border-gray-300'">
                                 <div class="text-sm font-bold" :class="scrapeMode === 'manual' ? 'text-purple-700' : 'text-gray-700'">🎯 Manual</div>
-                                <div class="text-xs text-gray-500 mt-1">Pick specific sources</div>
+                                <div class="text-xs text-gray-500 mt-1">Pick sources</div>
                                 <div class="text-xs font-medium mt-1" :class="scrapeMode === 'manual' ? 'text-purple-600' : 'text-gray-400'" x-text="selectedSources.length + ' selected'"></div>
                             </button>
                             <button @click="scrapeMode = 'full'"
                                     class="p-3 rounded-lg border-2 text-left transition-all"
                                     :class="scrapeMode === 'full' ? 'border-amber-500 bg-amber-50' : 'border-gray-200 hover:border-gray-300'">
                                 <div class="text-sm font-bold" :class="scrapeMode === 'full' ? 'text-amber-700' : 'text-gray-700'">🔄 Full Sweep</div>
-                                <div class="text-xs text-gray-500 mt-1">All active sources</div>
+                                <div class="text-xs text-gray-500 mt-1">All sources</div>
                                 <div class="text-xs font-medium mt-1" :class="scrapeMode === 'full' ? 'text-amber-600' : 'text-gray-400'" x-text="allSources.length + ' sources'"></div>
+                            </button>
+                            <!-- NEW: URL Extract mode -->
+                            <button @click="scrapeMode = 'url'"
+                                    class="p-3 rounded-lg border-2 text-left transition-all"
+                                    :class="scrapeMode === 'url' ? 'border-emerald-500 bg-emerald-50' : 'border-gray-200 hover:border-gray-300'">
+                                <div class="text-sm font-bold" :class="scrapeMode === 'url' ? 'text-emerald-700' : 'text-gray-700'">🔗 URL Extract</div>
+                                <div class="text-xs text-gray-500 mt-1">Paste any URL</div>
+                                <div class="text-xs font-medium mt-1" :class="scrapeMode === 'url' ? 'text-emerald-600' : 'text-gray-400'">Direct extract</div>
                             </button>
                         </div>
                     </div>
@@ -149,19 +158,62 @@
                         </div>
                     </div>
 
+                    <!-- NEW: URL Extract mode -->
+                    <div class="flex-1 px-6 py-4" x-show="scrapeMode === 'url'">
+                        <div class="bg-emerald-50 border border-emerald-200 rounded-xl p-5">
+                            <div class="flex items-start mb-4">
+                                <div class="w-10 h-10 rounded-lg bg-emerald-100 flex items-center justify-center mr-3 flex-shrink-0">
+                                    <svg class="w-5 h-5 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1"/>
+                                    </svg>
+                                </div>
+                                <div>
+                                    <div class="text-sm font-bold text-emerald-800">Paste any article URL to extract leads</div>
+                                    <div class="text-xs text-emerald-600 mt-1">Works with hotel opening articles, listicles, press releases — any page mentioning new hotel openings</div>
+                                </div>
+                            </div>
+                            <div class="relative">
+                                <input type="url" 
+                                       x-model="extractUrl"
+                                       @keydown.enter="startScrape()"
+                                       placeholder="https://"
+                                       class="w-full px-4 py-3 pr-10 text-sm border-2 border-emerald-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 bg-white placeholder-gray-400">
+                                <div class="absolute right-3 top-1/2 -translate-y-1/2">
+                                    <svg class="w-5 h-5 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9m-9 9a9 9 0 019-9"/>
+                                    </svg>
+                                </div>
+                            </div>
+                            <div class="mt-3 flex flex-wrap gap-2">
+                                <span class="text-xs text-emerald-600 font-medium">Try:</span>
+                                <button @click="extractUrl = 'https://www.hoteldive.com/news/top-hotel-openings-2026/810298/'" 
+                                        class="text-xs px-2 py-1 bg-white border border-emerald-200 rounded-md text-emerald-700 hover:bg-emerald-100 transition-colors cursor-pointer">
+                                    Hotel Dive 2026
+                                </button>
+                                <button @click="extractUrl = 'https://opulist.co/blog/the-most-beautiful-new-hotels-opening-in-the-us-in-2026'" 
+                                        class="text-xs px-2 py-1 bg-white border border-emerald-200 rounded-md text-emerald-700 hover:bg-emerald-100 transition-colors cursor-pointer">
+                                    Opulist US 2026
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
                     <!-- Footer -->
                     <div class="px-6 py-4 bg-gray-50 border-t border-gray-200 flex justify-between items-center">
                         <div class="text-xs text-gray-400">
                             <template x-if="scrapeMode === 'smart'"><span x-text="dueSources.length + ' sources will be scraped'"></span></template>
                             <template x-if="scrapeMode === 'manual'"><span x-text="selectedSources.length + ' sources selected'"></span></template>
                             <template x-if="scrapeMode === 'full'"><span x-text="allSources.length + ' sources (full sweep)'"></span></template>
+                            <template x-if="scrapeMode === 'url'"><span x-text="extractUrl ? 'Ready to extract from URL' : 'Paste a URL above'"></span></template>
                         </div>
                         <div class="flex gap-2">
                             <button @click="closeModal()" class="px-4 py-2 text-sm text-gray-600 bg-white border border-gray-300 rounded-lg hover:bg-gray-50">Cancel</button>
                             <button @click="startScrape()"
-                                    class="px-6 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 disabled:opacity-50"
-                                    :disabled="scrapeMode === 'manual' && selectedSources.length === 0">
-                                🚀 Start Pipeline
+                                    class="px-6 py-2 text-sm font-medium text-white rounded-lg hover:opacity-90 disabled:opacity-50 transition-all"
+                                    :class="scrapeMode === 'url' ? 'bg-emerald-600 hover:bg-emerald-700' : 'bg-blue-600 hover:bg-blue-700'"
+                                    :disabled="(scrapeMode === 'manual' && selectedSources.length === 0) || (scrapeMode === 'url' && !extractUrl.trim())">
+                                <span x-show="scrapeMode !== 'url'">🚀 Start Pipeline</span>
+                                <span x-show="scrapeMode === 'url'">🔗 Extract Leads</span>
                             </button>
                         </div>
                     </div>
@@ -337,13 +389,16 @@ function scrapeController() {
     return {
         // Views: setup | progress
         view: 'setup',
-        scrapeMode: 'smart',  // smart | manual | full
+        scrapeMode: 'smart',  // smart | manual | full | url
         
         // Source data
         allSources: [],
         dueSources: [],
         selectedSources: [],
         categories: [],
+        
+        // URL Extract
+        extractUrl: '',
         
         // Progress state
         phase: 'scraping',
@@ -384,7 +439,17 @@ function scrapeController() {
             this.view = 'setup';
             this.scrapeMode = 'smart';
             this.selectedSources = [];
+            this.extractUrl = '';
             await this.loadSources();
+        },
+
+        // Open directly in URL mode (from quick-extract bar)
+        openUrlExtract(detail) {
+            document.getElementById('scrape-modal').classList.remove('hidden');
+            this.view = 'setup';
+            this.scrapeMode = 'url';
+            this.extractUrl = (detail && detail.url) ? detail.url : '';
+            this.selectedSources = [];
         },
 
         async loadSources() {
@@ -398,7 +463,6 @@ function scrapeController() {
                 }
             } catch (e) {
                 console.error('Failed to load sources:', e);
-                // Fallback: still allow full scrape
             }
         },
 
@@ -430,7 +494,7 @@ function scrapeController() {
             this.view = 'progress';
             this.phase = 'scraping';
             this.phaseIndex = 0;
-            this.title = 'Pipeline Running';
+            this.title = this.scrapeMode === 'url' ? 'Extracting from URL' : 'Pipeline Running';
             this.subtitle = 'Initializing...';
             this.elapsed = 0;
             this.stats = { sources: 0, pages: 0, extracted: 0, saved: 0 };
@@ -440,21 +504,49 @@ function scrapeController() {
             this._retryCount = 0;
             this._closed = false;
 
-            this.log('info', `Starting pipeline (${this.scrapeMode} mode)...`);
+            if (this.scrapeMode === 'url') {
+                this.log('info', `Extracting leads from: ${this.extractUrl}`);
+            } else {
+                this.log('info', `Starting pipeline (${this.scrapeMode} mode)...`);
+            }
             this.timer = setInterval(() => this.elapsed++, 1000);
-            this.triggerScrape();
+
+            if (this.scrapeMode === 'url') {
+                this.triggerUrlExtract();
+            } else {
+                this.triggerScrape();
+            }
+        },
+
+        // NEW: Trigger URL extraction
+        async triggerUrlExtract() {
+            try {
+                const resp = await fetch('/api/dashboard/extract-url', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ url: this.extractUrl })
+                });
+                const data = await resp.json();
+                
+                if (resp.ok && data.status !== 'error') {
+                    this.log('success', 'URL extract started');
+                    this.connectSSE('/api/dashboard/extract-url/stream');
+                } else {
+                    this.handleError(data.message || 'Failed to start URL extract');
+                }
+            } catch (e) {
+                this.handleError('Connection error: ' + e.message);
+            }
         },
 
         async triggerScrape() {
             try {
-                // Build source list based on mode
                 let sourceIds = [];
                 if (this.scrapeMode === 'manual') {
                     sourceIds = this.selectedSources;
                 } else if (this.scrapeMode === 'smart') {
                     sourceIds = this.dueSources.map(s => s.id);
                 }
-                // full mode = empty array = all sources
 
                 const resp = await fetch('/api/dashboard/scrape', {
                     method: 'POST',
@@ -468,7 +560,7 @@ function scrapeController() {
                 
                 if (resp.ok) {
                     this.log('success', `Scrape queued (${this.scrapeMode} mode)`);
-                    this.connectSSE();
+                    this.connectSSE('/api/dashboard/scrape/stream');
                 } else {
                     this.handleError(data.detail || 'Failed to start');
                 }
@@ -477,15 +569,17 @@ function scrapeController() {
             }
         },
 
-        connectSSE() {
+        // Updated: accepts URL parameter for different SSE endpoints
+        connectSSE(url) {
             this._closed = false;
+            this._sseUrl = url || '/api/dashboard/scrape/stream';
             this._createSSE();
         },
 
         _createSSE() {
             if (this.eventSource) { this.eventSource.close(); this.eventSource = null; }
             try {
-                const es = new EventSource('/api/dashboard/scrape/stream');
+                const es = new EventSource(this._sseUrl || '/api/dashboard/scrape/stream');
                 es.onopen = () => { this._retryCount = 0; };
                 es.onmessage = (e) => {
                     try { this.handleEvent(JSON.parse(e.data)); }
@@ -575,7 +669,7 @@ function scrapeController() {
                     this.stats.saved = s.leads_saved || this.stats.saved;
                     const dur = data.duration_seconds ? Math.round(data.duration_seconds) : this.elapsed;
                     this.subtitle = `Completed in ${this.formatTime(dur)}`;
-                    this.log('success', `━━ COMPLETE: ${this.stats.saved} new leads from ${this.stats.sources} sources ━━`);
+                    this.log('success', `━━ COMPLETE: ${this.stats.saved} new leads from ${this.stats.extracted} extracted ━━`);
                     this._closeSSE();
                     break;
                 case 'error':

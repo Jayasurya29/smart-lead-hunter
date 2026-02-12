@@ -368,7 +368,74 @@ class LeadHunterOrchestrator:
                                 PotentialLead.hotel_name_normalized == normalized
                             )
                         )
-                        if result.scalars().first():
+
+                        existing = result.scalars().first()
+                        if existing:
+                            # ENRICHMENT: Update existing lead with better/new info
+                            enriched = False
+                            enrichment_fields = {
+                                'brand': lead_dict.get('brand'),
+                                'city': lead_dict.get('city'),
+                                'state': lead_dict.get('state'),
+                                'country': lead_dict.get('country'),
+                                'opening_date': lead_dict.get('opening_date'),
+                                'room_count': lead_dict.get('room_count'),
+                                'contact_name': lead_dict.get('contact_name'),
+                                'contact_title': lead_dict.get('contact_title'),
+                                'contact_email': lead_dict.get('contact_email'),
+                                'contact_phone': lead_dict.get('contact_phone'),
+                                'description': lead_dict.get('key_insights'),
+                                'hotel_type': lead_dict.get('property_type') or lead_dict.get('hotel_type'),
+                            }
+                            
+                            for field, new_val in enrichment_fields.items():
+                                if not new_val:
+                                    continue
+                                old_val = getattr(existing, field, None)
+                                # Fill empty fields
+                                if not old_val and new_val:
+                                    setattr(existing, field, new_val)
+                                    enriched = True
+                                # Update if new value is longer/more detailed
+                                elif field == 'description' and old_val and new_val and len(str(new_val)) > len(str(old_val)):
+                                    setattr(existing, field, new_val)
+                                    enriched = True
+                            
+
+                            # Add new source URL + what it contributed
+                            new_source_url = lead_dict.get('source_url')
+                            if new_source_url:
+                                existing_urls = existing.source_urls or []
+                                if new_source_url not in existing_urls:
+                                    existing.source_urls = existing_urls + [new_source_url]
+                                    enriched = True
+                                
+                                # Track what this source extracted
+                                extractions = dict(existing.source_extractions or {})
+                                if new_source_url not in extractions:
+                                    extractions[new_source_url] = {
+                                        k: v for k, v in {
+                                            'hotel_name': lead_dict.get('hotel_name'),
+                                            'brand': lead_dict.get('brand'),
+                                            'city': lead_dict.get('city'),
+                                            'state': lead_dict.get('state'),
+                                            'country': lead_dict.get('country'),
+                                            'opening_date': lead_dict.get('opening_date'),
+                                            'room_count': lead_dict.get('room_count'),
+                                            'contact_name': lead_dict.get('contact_name'),
+                                            'contact_email': lead_dict.get('contact_email'),
+                                            'contact_phone': lead_dict.get('contact_phone'),
+                                            'key_insights': lead_dict.get('key_insights'),
+                                            'source_name': lead_dict.get('source_name'),
+                                        }.items() if v
+                                    }
+                                    existing.source_extractions = extractions
+                                    enriched = True
+                            
+                            if enriched:
+                                existing.updated_at = datetime.now(timezone.utc)
+                                logger.info(f"   📝 Enriched: {hotel_name}")
+                            
                             duplicates += 1
                             continue
                         

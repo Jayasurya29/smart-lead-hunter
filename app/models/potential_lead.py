@@ -86,6 +86,8 @@ class PotentialLead(Base):
     
     # Raw data
     raw_data = Column(JSONB)
+    source_urls = Column(JSONB, default=list)
+    source_extractions = Column(JSONB, default=dict)
     
     # Timestamps
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))

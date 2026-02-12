@@ -45,11 +45,14 @@ def _brand_matches(brand: str, text: str) -> bool:
     """M-07: Match a brand name against hotel text with word-boundary
     awareness for short names.
 
-    For brands <= 4 chars (like "glo", "tru", "riu", "w"), uses \\b
+    For brands <= 4 chars (like "glo", "tru", "riu",
+    "royalton",
+    "royalton vessence", "w"), uses \\b
     word-boundary regex so "Global Luxury Resort" won't match "glo"
     but "Glo Hotel" will.
 
-    For longer brands (like "four seasons", "ritz-carlton"), uses
+    For longer brands (like "equinox hotel",
+    "four seasons", "ritz-carlton"), uses
     plain substring matching which is safe and fast.
     """
     stripped = brand.strip()
@@ -73,14 +76,18 @@ def _brand_matches(brand: str, text: str) -> bool:
 
 TIER1_ULTRA_LUXURY = [
     "alila", "aman", "amangiri", "amanera", "amanyara", "armani hotel",
+    "baccarat hotel",
     "banyan tree", "belmond", "bulgari",
     "capella", "cheval blanc",
+    "como hotels",
+    "corinthia hotel",
     "dorchester collection",
     "eden rock",
     "faena",
     "jade mountain",
     "leading hotels of the world",
-    "mandarin oriental", "miraval",
+    "mandarin oriental", "mirbeau",
+    "miraval",
     "nikki beach resort",
     "oberoi", "oetker collection", "one&only", "one & only",
     "peninsula", "preferred hotels",
@@ -91,11 +98,14 @@ TIER1_ULTRA_LUXURY = [
 ]
 
 TIER2_LUXURY = [
-    "acqualina", "auberge",
+    "acqualina",
+    "atlantis", "auberge",
+    "caesars palace",
     "conrad",
+    "equinox hotel",
     "four seasons",
-    "grand hyatt",
     "langham", "le blanc", "loews", "lxr",
+    "mgm grand",
     "montage",
     "nobu hotel", "nomad",
     "park hyatt",
@@ -103,24 +113,28 @@ TIER2_LUXURY = [
     "st. regis", "st regis",
     "the luxury collection", "luxury collection",
     "waldorf astoria", "waldorf-astoria",
+    "white elephant",
     "zoetry",
+    "registry collection",
 ]
 
 TIER3_UPPER_UPSCALE = [
     "1 hotel", "1hotel",
-    "ace hotel", "andaz", "autograph collection",
+    "ace hotel", "andaz",
+    "archer hotel", "autograph collection",
     "canopy by hilton", "canopy", "curio collection", "curio",
-    "delano", "destination by hyatt", "dream hotel",
-    "edition", "embassy suites",
-    "fairmont",
-    "graduate hotels", "graduate austin", "graduate", "grand wailea",
+    "delano", "destination by hyatt", "dolce", "dream hotel",
+    "edition", "fairmont",
+    "graduate hotels", "graduate austin", "grand hyatt",
+    "graduate", "grand wailea",
     "hard rock hotel", "hotel indigo", "hyatt centric", "hyatt regency",
     "intercontinental", "impression by secrets",
     "jw marriott",
     "kimpton",
     "le meridien",
     "live aqua",
-    "mgallery", "mr. c",
+    "mgallery", "mondrian",
+    "mr. c",
     "newbury boston",
     "omni",
     "pendry", "proper hotel",
@@ -130,6 +144,7 @@ TIER3_UPPER_UPSCALE = [
     "thompson", "tribute portfolio",
     "unbound collection", "unico",
     "vignette collection", "virgin hotels",
+    "warwick",
     "w hotel", "w hotels", "w miami", "w south beach", "w fort lauderdale",
     "w new york", "w los angeles", "w hollywood", "w chicago", "w austin",
     "zemi", "hyatt zilara", "hyatt ziva", "zilara", "ziva",
@@ -137,45 +152,66 @@ TIER3_UPPER_UPSCALE = [
 
 TIER4_UPSCALE = [
     "breathless resorts", "breathless",
+    "citizenm", "club med",
+    "couples resort",
     "crowne plaza",
-    "delta hotels", "doubletree", "dreams resorts", "dreams",
-    "el san juan hotel", "even hotels",
+    "delta hotels", "divi resorts",
+    "doubletree", "dreams resorts", "dreams",
+    "el cid resort",
+    "el san juan hotel",
+    "embassy suites", "even hotels",
     "gaylord",
-    "hilton hotel", "hilton hotels", "hilton miami", "hilton orlando",
-    "hilton fort lauderdale", "hilton los angeles", "hilton new york",
-    "hilton chicago", "hilton san", "hilton bay", "hilton resort", "hilton beach",
-    "hyatt",
-    "marriott hotel", "marriott hotels", "marriott",
+    "hilton hotel", "hilton hotels", "hilton miami", "hilton fort lauderdale", "hilton los angeles", "hilton chicago", "hilton san", "hilton bay", "hilton resort", "moon palace",
     "novotel",
+    "occidental",
+    "outrigger",
     "pullman",
     "riu palace", "riu",
-    "sandals", "sheraton", "sonesta", "sunscape resorts", "sunscape",
+    "royalton",
+    "royalton vessence",
+    "sandals", "sheraton",
+    "sonesta hotel", "sonesta", "sunscape resorts",
+    "temptation resort", "sunscape",
     "voco",
     "westin", "wyndham grand",
     "bahia principe", "barcelo", "iberostar", "karisma",
-    "excellence resorts", "excellence", "palace resorts", "paradisus",
+    "lopesan",
+    "margaritaville",
+    "excellence resorts", "excellence", "palace resorts",
+    "princess hotel",
+    "princess grand",
+    "princess senses", "paradisus",
 ]
 
 TIER5_SKIP = [
-    "ac hotel", "ac hotels", "aloft", "americinn", "avid hotels", "atwell suites",
+    "ac hotel",
+    "apartment collection",
+    "apartment collection by hilton", "ac hotels", "aloft", "americinn", "avid hotels", "atwell suites",
     "baymont", "best western",
-    "cambria", "candlewood", "caption by hyatt", "clarion", "club med",
-    "comfort inn", "comfort suites", "country inn", "courtyard",
+    "cambria", "candlewood", "caption by hyatt", "clarion", "comfort inn", "comfort suites", "country inn", "courtyard",
     "days inn", "drury",
-    "econo lodge", "element", "extended stay",
+    "econo lodge", "element", "everhome",
+    "everhome suites",
+    "extended stay",
     "fairfield", "four points",
     "garner", "glo",
     "hampton", "hampton inn", "hawthorn", "hilton garden inn",
     "holiday inn", "holiday inn express", "home2", "homewood",
     "hyatt house", "hyatt place",
-    "la quinta", "livsmart",
-    "microtel", "motel 6", "motto", "moxy",
+    "hyatt studios",
+    "la quinta",
+    "livaway",
+    "livaway suites", "livsmart",
+    "microtel", "motel 6",
+    "my place",
+    "my place hotel", "motto", "moxy",
     "park inn", "protea",
     "quality inn",
     "radisson", "ramada", "red lion", "red roof", "residence inn", "rodeway",
-    "sleep inn", "spark by hilton", "springhill", "staybridge", "studiores", "super 8",
+    "sleep inn", "spark by hilton", "springhill", "sojourn suites",
+    "staybridge", "studiores", "super 8",
     "towneplace", "tru by hilton", "tru",
-    "wingate", "woodspring", "wyndham",
+    "wingate", "woodspring", "wyndham garden", "wyndham hotel", "wyndham hotels",
 ]
 
 # Tier name mapping for database storage
@@ -710,27 +746,29 @@ def get_new_build_score(project_type: str = None, description: str = None) -> Tu
 # =============================================================================
 
 EXISTING_CLIENT_BRANDS = [
+    "grand hyatt",
     "graduate", "graduate hotels",
     "loews",
+    "equinox hotel",
     "four seasons",
     "ritz-carlton", "ritz carlton",
     "hilton",
-    "marriott",
-    "hyatt",
     "kimpton",
     "intercontinental",
-    "embassy suites",
+    "divi resorts",
     "doubletree",
+    "caesars palace",
     "conrad",
     "waldorf",
     "jw marriott",
     "westin",
     "sheraton",
+    "sonesta hotel",
     "autograph collection",
     "st. regis", "st regis",
     "w hotel", "w hotels",
     "andaz",
-    "grand hyatt",
+    "archer hotel",
     "park hyatt",
     "fairmont",
     "mandarin oriental",
@@ -832,6 +870,13 @@ def calculate_lead_score(
         "points": timing_points,
         "tier": timing_tier
     }
+
+    # Reject leads with opening dates in the past (already opened)
+    if opening_year and opening_year < datetime.now().year:
+        result["should_save"] = False
+        result["skip_reason"] = f"Past opening ({opening_year}): {hotel_name}"
+        return result
+
     result["total_score"] += timing_points
 
     # 4. ROOM COUNT (15 pts max)

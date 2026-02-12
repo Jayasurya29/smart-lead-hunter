@@ -39,6 +39,7 @@ from app.services.utils import normalize_hotel_name
 # NOTE: For multi-worker uvicorn (--workers >1), migrate to Redis hash/pub-sub.
 active_scrapes: dict = {}
 _pending_scrape_config = {}
+_pending_extract_url = ""
 scrape_cancellations: set = set()
 _scrape_lock = asyncio.Lock()
 _pending_scrape_config: dict = {}
@@ -1623,14 +1624,38 @@ async def scrape_with_progress(request: Request):
 
                 try:
                     if use_gold:
-                        # FAST MODE: Hit only known gold URLs directly
+                        # FAST MODE: Hit gold URLs + follow their links (depth 1)
                         scrape_results = {source_name: []}
+                        visited = set()
                         for gold_url in active_gold:
                             try:
+                                # 1. Fetch the listing/hub page
                                 await orchestrator.scraping_engine.rate_limiter.acquire(gold_url)
                                 result = await orchestrator.scraping_engine.http_scraper.scrape(gold_url)
                                 if result.success:
                                     scrape_results[source_name].append(result)
+                                    visited.add(gold_url)
+                                    
+                                    # 2. Extract links and follow depth-1 (new articles)
+                                    from bs4 import BeautifulSoup
+                                    from urllib.parse import urljoin
+                                    soup = BeautifulSoup(result.html or "", 'lxml')
+                                    links = set()
+                                    for a in soup.find_all('a', href=True):
+                                        full_url = urljoin(gold_url, a['href'])
+                                        if full_url not in visited and source.base_url in full_url:
+                                            links.add(full_url)
+                                    
+                                    # Fetch up to 15 linked pages
+                                    for link_url in list(links)[:15]:
+                                        try:
+                                            await orchestrator.scraping_engine.rate_limiter.acquire(link_url)
+                                            link_result = await orchestrator.scraping_engine.http_scraper.scrape(link_url)
+                                            if link_result.success:
+                                                scrape_results[source_name].append(link_result)
+                                                visited.add(link_url)
+                                        except Exception:
+                                            pass
                             except Exception as e:
                                 logger.warning(f"Gold URL failed {gold_url[:50]}: {e}")
                         logger.info(f"⚡ Gold mode: {source_name} → {len(scrape_results[source_name])} pages from {len(active_gold)} gold URLs")
@@ -1807,9 +1832,15 @@ async def scrape_with_progress(request: Request):
                         # Update gold URLs
                         gold = dict(source_obj.gold_urls or {})
                         now_str = datetime.now(timezone.utc).isoformat()
-                        
+                    
+
                         if src.id in url_lead_map:
                             for url, count in url_lead_map[src.id].items():
+                                # Only record as gold if 2+ leads from same page
+                                # (listing/hub pages have multiple leads, individual articles don't)
+                                if count < 2 and url not in gold:
+                                    continue  # Skip individual article pages
+                                
                                 if url in gold:
                                     gold[url]["leads_found"] = gold[url].get("leads_found", 0) + count
                                     gold[url]["last_hit"] = now_str
@@ -1889,6 +1920,262 @@ async def scrape_with_progress(request: Request):
             "X-Accel-Buffering": "no"
         }
     )
+
+
+# =============================================================================
+# URL EXTRACT FEATURE - Backend Endpoints
+# =============================================================================
+# ADD these to app/main.py
+#
+# STEP 1: Add this global variable near the other globals (around line 50-60,
+#          near where _pending_scrape_config is defined):
+#
+#     _pending_extract_url = ""
+#
+# STEP 2: Add both endpoint functions BEFORE the cancel endpoint
+#          (around line 1920, before @app.post("/api/dashboard/scrape/cancel/..."))
+# =============================================================================
+
+
+# --- ENDPOINT 1: Trigger URL extraction ---
+# Paste this after the scrape/stream endpoint block and before scrape/cancel
+
+@app.post("/api/dashboard/extract-url", tags=["Dashboard"])
+async def dashboard_extract_url(request: Request):
+    """Accept a URL for direct lead extraction"""
+    try:
+        body = await request.json()
+        url = (body.get("url") or "").strip()
+
+        if not url:
+            return {"status": "error", "message": "No URL provided"}
+
+        if not url.startswith("http"):
+            url = "https://" + url
+
+        # Store for SSE stream to pick up
+        global _pending_extract_url
+        _pending_extract_url = url
+
+        logger.info(f"Dashboard: URL extract triggered for {url}")
+
+        return {
+            "status": "started",
+            "message": f"Extracting leads from URL",
+            "url": url,
+        }
+    except Exception as e:
+        logger.error(f"Dashboard: Failed to trigger URL extract: {e}")
+        return {"status": "error", "message": f"Failed: {str(e)}"}
+
+
+# --- ENDPOINT 2: SSE stream for URL extraction progress ---
+
+@app.get("/api/dashboard/extract-url/stream", tags=["Dashboard"])
+async def extract_url_stream(request: Request):
+    """SSE endpoint for real-time URL extraction progress"""
+
+    global _pending_extract_url
+    target_url = _pending_extract_url
+    _pending_extract_url = ""
+
+    if not target_url:
+        async def empty():
+            yield f"data: {json.dumps({'type': 'error', 'message': 'No URL pending. Please click Extract again.'})}\n\n"
+        return StreamingResponse(empty(), media_type="text/event-stream")
+
+    async def event_generator():
+        orchestrator = None
+        try:
+            import os
+
+            yield f"data: {json.dumps({'type': 'started', 'scrape_id': 'url-extract'})}\n\n"
+            yield f"data: {json.dumps({'type': 'info', 'message': f'Target: {target_url}'})}\n\n"
+
+            # --- Initialize pipeline ---
+            yield f"data: {json.dumps({'type': 'info', 'message': 'Initializing pipeline...'})}\n\n"
+
+            from app.services.orchestrator import LeadHunterOrchestrator
+            orchestrator = LeadHunterOrchestrator(
+                gemini_api_key=os.getenv("GEMINI_API_KEY"),
+                save_to_database=True,
+            )
+            await orchestrator.initialize()
+
+            yield f"data: {json.dumps({'type': 'info', 'message': 'Pipeline ready.'})}\n\n"
+
+            start_time = datetime.now(timezone.utc)
+
+            # --- PHASE 1: SCRAPE the URL ---
+            yield f"data: {json.dumps({'type': 'source_start', 'source': 'URL Extract', 'current': 1, 'total': 1, 'mode': 'direct'})}\n\n"
+            yield f"data: {json.dumps({'type': 'info', 'message': 'Phase 1: Fetching page content...'})}\n\n"
+
+            # Try scraping with the engine's HTTP scraper
+            scrape_result = None
+            page_content = ""
+
+            try:
+                scrape_result = await orchestrator.scraping_engine.http_scraper.scrape(target_url)
+                if scrape_result and scrape_result.success:
+                    page_content = scrape_result.text or scrape_result.html or ""
+                    # Safety: if we got raw HTML instead of clean text, strip it
+                    if page_content.strip().startswith('<') and len(page_content) > 30000:
+                        from bs4 import BeautifulSoup
+                        soup = BeautifulSoup(page_content, 'lxml')
+                        for s in soup(["script", "style", "nav", "footer", "header"]): s.decompose()
+                        page_content = soup.get_text(separator="\n", strip=True)
+                    yield f"data: {json.dumps({'type': 'source_complete', 'source': 'URL Extract', 'current': 1, 'total': 1, 'pages': 1})}\n\n"
+                    yield f"data: {json.dumps({'type': 'info', 'message': f'Page fetched: {len(page_content):,} chars'})}\n\n"
+                else:
+                    yield f"data: {json.dumps({'type': 'info', 'message': 'HTTP scraper failed, trying fallback...'})}\n\n"
+            except Exception as e:
+                yield f"data: {json.dumps({'type': 'info', 'message': f'HTTP scraper error: {str(e)[:60]}, trying fallback...'})}\n\n"
+
+            # Fallback: try with httpx directly
+            if not page_content:
+                try:
+                    import httpx
+                    async with httpx.AsyncClient(
+                        timeout=30,
+                        follow_redirects=True,
+                        headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
+                    ) as client:
+                        resp = await client.get(target_url)
+                        if resp.status_code == 200:
+                            page_content = resp.text
+                            yield f"data: {json.dumps({'type': 'source_complete', 'source': 'URL Extract', 'current': 1, 'total': 1, 'pages': 1})}\n\n"
+                            yield f"data: {json.dumps({'type': 'info', 'message': f'Page fetched (fallback): {len(page_content):,} chars'})}\n\n"
+                        else:
+                            yield f"data: {json.dumps({'type': 'error', 'message': f'Failed to fetch URL: HTTP {resp.status_code}'})}\n\n"
+                            return
+                except Exception as e2:
+                    yield f"data: {json.dumps({'type': 'error', 'message': f'All fetch methods failed: {str(e2)[:80]}'})}\n\n"
+                    return
+
+            if not page_content:
+                yield f"data: {json.dumps({'type': 'error', 'message': 'No content retrieved from URL'})}\n\n"
+                return
+
+            # Check if client disconnected
+            if await request.is_disconnected():
+                return
+
+            # --- PHASE 2: AI EXTRACTION ---
+            yield f"data: {json.dumps({'type': 'info', 'message': 'Phase 2: AI extraction (Gemini)...'})}\n\n"
+
+            # Extract domain for source name
+            from urllib.parse import urlparse
+            domain = urlparse(target_url).netloc.replace("www.", "")
+            source_label = f"URL Extract ({domain})"
+
+            pages_for_pipeline = [{
+                "url": target_url,
+                "content": page_content,
+                "source": source_label,
+            }]
+
+            pipeline_result = await orchestrator.pipeline.process_pages(
+                pages_for_pipeline,
+                source_name=source_label,
+            )
+
+            leads_extracted = pipeline_result.leads_extracted
+            yield f"data: {json.dumps({'type': 'info', 'message': f'Extracted {leads_extracted} leads from page'})}\n\n"
+
+            if leads_extracted == 0:
+                yield f"data: {json.dumps({'type': 'info', 'message': 'No hotel leads found on this page. Try a different URL with hotel opening announcements.'})}\n\n"
+                end_time = datetime.now(timezone.utc)
+                duration = (end_time - start_time).total_seconds()
+                yield f"data: {json.dumps({'type': 'complete', 'stats': {'sources_scraped': 1, 'urls_scraped': 1, 'leads_found': 0, 'leads_saved': 0, 'leads_skipped': 0}, 'duration_seconds': duration})}\n\n"
+                return
+
+            # --- PHASE 3: DEDUPLICATION ---
+            if orchestrator.deduplicator and pipeline_result.final_leads:
+                yield f"data: {json.dumps({'type': 'info', 'message': 'Phase 3: Deduplication...'})}\n\n"
+
+                leads_for_dedup = [lead.to_dict() for lead in pipeline_result.final_leads]
+                merged_leads = orchestrator.deduplicator.deduplicate(leads_for_dedup)
+                dedup_stats = orchestrator.deduplicator.get_stats()
+
+                dupes_found = dedup_stats.get("duplicates_found", 0)
+                unique_count = len(merged_leads)
+                yield f"data: {json.dumps({'type': 'info', 'message': f'Dedup: {dupes_found} duplicates merged, {unique_count} unique leads'})}\n\n"
+
+                # Convert to dicts
+                lead_dicts = []
+                for ml in merged_leads:
+                    d = {
+                        "hotel_name": ml.hotel_name,
+                        "brand": ml.brand,
+                        "property_type": ml.property_type,
+                        "city": ml.city,
+                        "state": ml.state,
+                        "country": ml.country,
+                        "opening_date": ml.opening_date,
+                        "room_count": ml.room_count,
+                        "contact_name": ml.contact_name,
+                        "contact_title": ml.contact_title,
+                        "contact_email": ml.contact_email,
+                        "contact_phone": ml.contact_phone,
+                        "source_url": ml.source_urls[0] if ml.source_urls else target_url,
+                        "source_name": source_label,
+                        "key_insights": getattr(ml, "key_insights", ""),
+                        "confidence_score": ml.confidence_score,
+                        "qualification_score": getattr(ml, "qualification_score", 0),
+                    }
+                    lead_dicts.append(d)
+            else:
+                lead_dicts = [lead.to_dict() for lead in (pipeline_result.final_leads or [])]
+                # Ensure source_url is set
+                for d in lead_dicts:
+                    if not d.get("source_url"):
+                        d["source_url"] = target_url
+                    if not d.get("source_name"):
+                        d["source_name"] = source_label
+
+            # --- PHASE 4: SAVE ---
+            leads_saved = 0
+            leads_dupes = 0
+            if lead_dicts:
+                yield f"data: {json.dumps({'type': 'info', 'message': f'Phase 4: Saving {len(lead_dicts)} leads to database...'})}\n\n"
+
+                db_result = await orchestrator.save_leads_to_database(lead_dicts)
+                leads_saved = db_result["saved"]
+                leads_dupes = db_result["duplicates"]
+
+                if leads_saved > 0:
+                    yield f"data: {json.dumps({'type': 'leads_found', 'url': target_url, 'found': len(lead_dicts), 'saved': leads_saved, 'total_saved': leads_saved})}\n\n"
+
+                yield f"data: {json.dumps({'type': 'info', 'message': f'Saved {leads_saved} new leads, {leads_dupes} already existed'})}\n\n"
+
+            # --- COMPLETE ---
+            end_time = datetime.now(timezone.utc)
+            duration = (end_time - start_time).total_seconds()
+
+            final_stats = {
+                "sources_scraped": 1,
+                "urls_scraped": 1,
+                "leads_found": leads_extracted,
+                "leads_saved": leads_saved,
+                "leads_skipped": leads_dupes,
+            }
+
+            yield f"data: {json.dumps({'type': 'complete', 'stats': final_stats, 'duration_seconds': duration})}\n\n"
+
+        except Exception as e:
+            logger.error(f"URL extract stream error: {e}")
+            import traceback
+            traceback.print_exc()
+            yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
+        finally:
+            if orchestrator:
+                try:
+                    await orchestrator.close()
+                except Exception:
+                    pass
+
+    return StreamingResponse(event_generator(), media_type="text/event-stream")
+
 
 
 @app.post("/api/dashboard/scrape/cancel/{scrape_id}", tags=["Dashboard"])
