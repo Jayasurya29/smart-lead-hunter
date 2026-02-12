@@ -8,17 +8,15 @@ Run with:
 """
 
 import logging
-import re
 import time
 from collections import defaultdict
 from datetime import datetime, timezone, timedelta
 from typing import Optional, List
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, HTTPException, Depends, Query, Request, BackgroundTasks
+from fastapi import FastAPI, HTTPException, Depends, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, StreamingResponse
-from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
 from pathlib import Path
@@ -46,8 +44,7 @@ _pending_scrape_config: dict = {}
 
 # Configure logging
 logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+    level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 )
 logger = logging.getLogger(__name__)
 
@@ -56,21 +53,21 @@ logger = logging.getLogger(__name__)
 # Helpers
 # -----------------------------------------------------------------------------
 
+
 def escape_like(value: str) -> str:
     """Escape LIKE-special characters (%, _) so user input is treated literally.
-    
+
     SQLAlchemy parameterizes the value (no SQL injection), but without
     escaping, a user-supplied '%' or '_' acts as a wildcard inside LIKE/ILIKE,
     allowing unintended pattern matching.
-    
+
     The backslash is used as the escape character, which is the default for
     PostgreSQL and SQLite.  If you ever switch to a database that doesn't
     support backslash-escape in LIKE, add  .ilike(..., escape='\\')  to the
     query calls.
     """
     return (
-        value
-        .replace("\\", "\\\\")   # escape the escape char first
+        value.replace("\\", "\\\\")  # escape the escape char first
         .replace("%", "\\%")
         .replace("_", "\\_")
     )
@@ -80,8 +77,10 @@ def escape_like(value: str) -> str:
 # Pydantic Models (Request/Response Schemas)
 # -----------------------------------------------------------------------------
 
+
 class LeadBase(BaseModel):
     """Base lead schema"""
+
     hotel_name: str
     contact_email: Optional[str] = None
     contact_phone: Optional[str] = None
@@ -103,6 +102,7 @@ class LeadBase(BaseModel):
 
 class LeadCreate(LeadBase):
     """Schema for creating a lead"""
+
     lead_score: Optional[int] = None
     source_url: Optional[str] = None
     source_site: Optional[str] = None
@@ -110,6 +110,7 @@ class LeadCreate(LeadBase):
 
 class LeadUpdate(BaseModel):
     """Schema for updating a lead"""
+
     status: Optional[str] = None
     contact_email: Optional[str] = None
     contact_phone: Optional[str] = None
@@ -122,6 +123,7 @@ class LeadUpdate(BaseModel):
 
 class LeadResponse(LeadBase):
     """Schema for lead response"""
+
     id: int
     lead_score: Optional[int] = None
     score_breakdown: Optional[dict] = None
@@ -130,13 +132,14 @@ class LeadResponse(LeadBase):
     source_site: Optional[str] = None
     created_at: datetime
     updated_at: Optional[datetime] = None
-    
+
     class Config:
         from_attributes = True
 
 
 class LeadListResponse(BaseModel):
     """Paginated lead list response"""
+
     leads: List[LeadResponse]
     total: int
     page: int
@@ -146,6 +149,7 @@ class LeadListResponse(BaseModel):
 
 class SourceBase(BaseModel):
     """Base source schema"""
+
     name: str
     base_url: str
     source_type: Optional[str] = "aggregator"
@@ -158,11 +162,13 @@ class SourceBase(BaseModel):
 
 class SourceCreate(SourceBase):
     """Schema for creating a source"""
+
     entry_urls: Optional[List[str]] = None
 
 
 class SourceResponse(BaseModel):
     """Schema for source response"""
+
     id: int
     name: str
     base_url: str
@@ -181,13 +187,14 @@ class SourceResponse(BaseModel):
     notes: Optional[str] = None
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
-    
+
     class Config:
         from_attributes = True
 
 
 class ScrapeLogResponse(BaseModel):
     """Schema for scrape log response"""
+
     id: int
     source_id: Optional[int] = None
     source_name: Optional[str] = None
@@ -199,13 +206,14 @@ class ScrapeLogResponse(BaseModel):
     leads_new: int = 0
     leads_duplicate: int = 0
     leads_skipped: int = 0
-    
+
     class Config:
         from_attributes = True
 
 
 class StatsResponse(BaseModel):
     """Schema for dashboard stats"""
+
     total_leads: int
     new_leads: int
     approved_leads: int
@@ -224,21 +232,22 @@ class StatsResponse(BaseModel):
 # Application Lifecycle
 # -----------------------------------------------------------------------------
 
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application startup and shutdown"""
     logger.info("=" * 50)
     logger.info("Starting Smart Lead Hunter...")
     logger.info("=" * 50)
-    
+
     await init_db()
     logger.info("Database tables verified")
-    
+
     logger.info("Smart Lead Hunter is ready!")
     logger.info("API Docs: http://localhost:8000/docs")
-    
+
     yield
-    
+
     logger.info("Shutting down Smart Lead Hunter...")
 
 
@@ -246,13 +255,14 @@ async def lifespan(app: FastAPI):
 # FastAPI App
 # -----------------------------------------------------------------------------
 from app.logging_config import setup_logging
+
 setup_logging()
 
 app = FastAPI(
     title="Smart Lead Hunter",
     description="Automated hotel lead generation system for J.A. Uniforms",
     version="1.0.0",
-    lifespan=lifespan
+    lifespan=lifespan,
 )
 
 app.add_middleware(
@@ -281,15 +291,15 @@ app.add_middleware(
 # Limits each client IP to a configurable number of requests per window.
 # Skips static assets, dashboard HTML, and health checks.
 _rate_limit_store: dict = defaultdict(lambda: {"count": 0, "reset": 0.0})
-_RATE_LIMIT_MAX = 60        # requests per window
-_RATE_LIMIT_WINDOW = 60.0   # seconds
+_RATE_LIMIT_MAX = 60  # requests per window
+_RATE_LIMIT_WINDOW = 60.0  # seconds
 _RATE_LIMIT_MAX_ENTRIES = 10000  # max tracked IPs before forced eviction
 _rate_limit_last_cleanup = 0.0
 
 
 def _cleanup_rate_limit_store(now: float) -> None:
     """Evict expired rate limit entries to prevent unbounded memory growth.
-    
+
     Runs at most once per window period. Removes entries whose reset time
     has passed (plus a small buffer).
     """
@@ -298,25 +308,29 @@ def _cleanup_rate_limit_store(now: float) -> None:
     if now - _rate_limit_last_cleanup < _RATE_LIMIT_WINDOW:
         return
     _rate_limit_last_cleanup = now
-    
-    expired = [ip for ip, bucket in _rate_limit_store.items()
-               if now > bucket["reset"] + _RATE_LIMIT_WINDOW]
+
+    expired = [
+        ip
+        for ip, bucket in _rate_limit_store.items()
+        if now > bucket["reset"] + _RATE_LIMIT_WINDOW
+    ]
     for ip in expired:
         del _rate_limit_store[ip]
-    
+
     # Emergency eviction if still too large (e.g., botnet with rotating IPs)
     if len(_rate_limit_store) > _RATE_LIMIT_MAX_ENTRIES:
         # Remove oldest entries first
-        sorted_ips = sorted(_rate_limit_store.keys(),
-                           key=lambda ip: _rate_limit_store[ip]["reset"])
-        for ip in sorted_ips[:len(_rate_limit_store) - _RATE_LIMIT_MAX_ENTRIES // 2]:
+        sorted_ips = sorted(
+            _rate_limit_store.keys(), key=lambda ip: _rate_limit_store[ip]["reset"]
+        )
+        for ip in sorted_ips[: len(_rate_limit_store) - _RATE_LIMIT_MAX_ENTRIES // 2]:
             del _rate_limit_store[ip]
 
 
 @app.middleware("http")
 async def rate_limit_middleware(request: Request, call_next):
     """P-03: Rate limit API requests per client IP.
-    
+
     Only applies to /leads, /sources, /scrape, and /api paths.
     Dashboard HTML pages, health checks, and static files are exempt.
     """
@@ -333,10 +347,10 @@ async def rate_limit_middleware(request: Request, call_next):
     else:
         client_ip = request.client.host if request.client else "unknown"
     now = time.monotonic()
-    
+
     # Periodic eviction of expired entries (prevents memory leak)
     _cleanup_rate_limit_store(now)
-    
+
     bucket = _rate_limit_store[client_ip]
 
     # Reset window if expired
@@ -348,10 +362,11 @@ async def rate_limit_middleware(request: Request, call_next):
 
     if bucket["count"] > _RATE_LIMIT_MAX:
         from fastapi.responses import JSONResponse
+
         return JSONResponse(
             status_code=429,
             content={"detail": "Too many requests. Please slow down."},
-            headers={"Retry-After": str(int(bucket["reset"] - now))}
+            headers={"Retry-After": str(int(bucket["reset"] - now))},
         )
 
     response = await call_next(request)
@@ -370,9 +385,10 @@ templates = Jinja2Templates(directory=str(templates_path))
 # Shared Helpers
 # -----------------------------------------------------------------------------
 
+
 async def _get_dashboard_stats(db: AsyncSession) -> dict:
     """Fetch all dashboard stats in 2 queries instead of 12.
-    
+
     Uses SQLAlchemy conditional aggregation:  count() + filter()
     so the database scans the leads table once and the sources table once.
     """
@@ -384,31 +400,33 @@ async def _get_dashboard_stats(db: AsyncSession) -> dict:
     lead_result = await db.execute(
         select(
             func.count(PotentialLead.id).label("total"),
-            func.count(PotentialLead.id).filter(
-                PotentialLead.status == "new"
-            ).label("new"),
-            func.count(PotentialLead.id).filter(
-                PotentialLead.status == "approved"
-            ).label("approved"),
-            func.count(PotentialLead.id).filter(
-                PotentialLead.status == "pending"
-            ).label("pending"),
-            func.count(PotentialLead.id).filter(
-                PotentialLead.status.in_(["rejected", "bad"])
-            ).label("rejected"),
-            func.count(PotentialLead.id).filter(
-                PotentialLead.lead_score >= settings.hot_lead_threshold
-            ).label("hot"),
-            func.count(PotentialLead.id).filter(
+            func.count(PotentialLead.id)
+            .filter(PotentialLead.status == "new")
+            .label("new"),
+            func.count(PotentialLead.id)
+            .filter(PotentialLead.status == "approved")
+            .label("approved"),
+            func.count(PotentialLead.id)
+            .filter(PotentialLead.status == "pending")
+            .label("pending"),
+            func.count(PotentialLead.id)
+            .filter(PotentialLead.status.in_(["rejected", "bad"]))
+            .label("rejected"),
+            func.count(PotentialLead.id)
+            .filter(PotentialLead.lead_score >= settings.hot_lead_threshold)
+            .label("hot"),
+            func.count(PotentialLead.id)
+            .filter(
                 PotentialLead.lead_score >= settings.warm_lead_threshold,
-                PotentialLead.lead_score < settings.hot_lead_threshold
-            ).label("warm"),
-            func.count(PotentialLead.id).filter(
-                PotentialLead.created_at >= today_start
-            ).label("today"),
-            func.count(PotentialLead.id).filter(
-                PotentialLead.created_at >= week_start
-            ).label("this_week"),
+                PotentialLead.lead_score < settings.hot_lead_threshold,
+            )
+            .label("warm"),
+            func.count(PotentialLead.id)
+            .filter(PotentialLead.created_at >= today_start)
+            .label("today"),
+            func.count(PotentialLead.id)
+            .filter(PotentialLead.created_at >= week_start)
+            .label("this_week"),
         )
     )
     lr = lead_result.one()
@@ -417,8 +435,10 @@ async def _get_dashboard_stats(db: AsyncSession) -> dict:
     source_result = await db.execute(
         select(
             func.count(Source.id).label("total"),
-            func.count(Source.id).filter(Source.is_active == True).label("active"),
-            func.count(Source.id).filter(Source.health_status == "healthy").label("healthy"),
+            func.count(Source.id).filter(Source.is_active).label("active"),
+            func.count(Source.id)
+            .filter(Source.health_status == "healthy")
+            .label("healthy"),
         )
     )
     sr = source_result.one()
@@ -443,6 +463,7 @@ async def _get_dashboard_stats(db: AsyncSession) -> dict:
 # Health & Status Endpoints
 # -----------------------------------------------------------------------------
 
+
 @app.get("/", tags=["Health"])
 async def root():
     """Root endpoint - API info"""
@@ -450,7 +471,7 @@ async def root():
         "name": "Smart Lead Hunter",
         "version": "1.0.0",
         "status": "running",
-        "docs": "/docs"
+        "docs": "/docs",
     }
 
 
@@ -462,13 +483,11 @@ async def health_check(db: AsyncSession = Depends(get_db)):
         db_status = "healthy"
     except Exception as e:
         db_status = f"unhealthy: {e}"
-    
+
     return {
         "status": "healthy" if db_status == "healthy" else "degraded",
         "timestamp": datetime.now(timezone.utc).isoformat(),
-        "components": {
-            "database": db_status
-        }
+        "components": {"database": db_status},
     }
 
 
@@ -483,6 +502,7 @@ async def get_stats(db: AsyncSession = Depends(get_db)):
 # Lead Endpoints
 # -----------------------------------------------------------------------------
 
+
 @app.get("/leads", response_model=LeadListResponse, tags=["Leads"])
 async def list_leads(
     page: int = Query(1, ge=1),
@@ -493,12 +513,12 @@ async def list_leads(
     location_type: Optional[str] = None,
     brand_tier: Optional[str] = None,
     search: Optional[str] = None,
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
 ):
     """List leads with filtering and pagination"""
     query = select(PotentialLead)
     count_query = select(func.count(PotentialLead.id))
-    
+
     # Apply filters
     if status:
         query = query.where(PotentialLead.status == status)
@@ -519,35 +539,38 @@ async def list_leads(
     if search:
         safe_search = escape_like(search)
         search_filter = (
-            PotentialLead.hotel_name.ilike(f"%{safe_search}%") |
-            PotentialLead.city.ilike(f"%{safe_search}%") |
-            PotentialLead.brand.ilike(f"%{safe_search}%")
+            PotentialLead.hotel_name.ilike(f"%{safe_search}%")
+            | PotentialLead.city.ilike(f"%{safe_search}%")
+            | PotentialLead.brand.ilike(f"%{safe_search}%")
         )
         query = query.where(search_filter)
         count_query = count_query.where(search_filter)
-    
+
     # Get total count
     result = await db.execute(count_query)
     total = result.scalar() or 0
-    
+
     # Apply pagination and ordering - HIGH SCORES FIRST
     offset = (page - 1) * per_page
-    query = query.order_by(
-        PotentialLead.lead_score.desc().nullslast(),
-        PotentialLead.created_at.desc()
-    ).offset(offset).limit(per_page)
-    
+    query = (
+        query.order_by(
+            PotentialLead.lead_score.desc().nullslast(), PotentialLead.created_at.desc()
+        )
+        .offset(offset)
+        .limit(per_page)
+    )
+
     result = await db.execute(query)
     leads = result.scalars().all()
-    
+
     pages = (total + per_page - 1) // per_page if total > 0 else 1
-    
+
     return LeadListResponse(
         leads=[LeadResponse.model_validate(lead) for lead in leads],
         total=total,
         page=page,
         per_page=per_page,
-        pages=pages
+        pages=pages,
     )
 
 
@@ -555,37 +578,37 @@ async def list_leads(
 async def get_hot_leads(
     page: int = Query(1, ge=1),
     per_page: int = Query(20, ge=1, le=100),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
 ):
     """Get hot leads (score >= config threshold) - ready for outreach"""
     query = select(PotentialLead).where(
         PotentialLead.lead_score >= settings.hot_lead_threshold,
-        PotentialLead.status == "new"
+        PotentialLead.status == "new",
     )
     count_query = select(func.count(PotentialLead.id)).where(
         PotentialLead.lead_score >= settings.hot_lead_threshold,
-        PotentialLead.status == "new"
+        PotentialLead.status == "new",
     )
-    
+
     result = await db.execute(count_query)
     total = result.scalar() or 0
-    
+
     offset = (page - 1) * per_page
-    query = query.order_by(
-        PotentialLead.lead_score.desc()
-    ).offset(offset).limit(per_page)
-    
+    query = (
+        query.order_by(PotentialLead.lead_score.desc()).offset(offset).limit(per_page)
+    )
+
     result = await db.execute(query)
     leads = result.scalars().all()
-    
+
     pages = (total + per_page - 1) // per_page if total > 0 else 1
-    
+
     return LeadListResponse(
         leads=[LeadResponse.model_validate(lead) for lead in leads],
         total=total,
         page=page,
         per_page=per_page,
-        pages=pages
+        pages=pages,
     )
 
 
@@ -593,35 +616,35 @@ async def get_hot_leads(
 async def get_florida_leads(
     page: int = Query(1, ge=1),
     per_page: int = Query(20, ge=1, le=100),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
 ):
     """Get Florida leads - your primary market"""
-    query = select(PotentialLead).where(
-        PotentialLead.location_type == "florida"
-    )
+    query = select(PotentialLead).where(PotentialLead.location_type == "florida")
     count_query = select(func.count(PotentialLead.id)).where(
         PotentialLead.location_type == "florida"
     )
-    
+
     result = await db.execute(count_query)
     total = result.scalar() or 0
-    
+
     offset = (page - 1) * per_page
-    query = query.order_by(
-        PotentialLead.lead_score.desc().nullslast()
-    ).offset(offset).limit(per_page)
-    
+    query = (
+        query.order_by(PotentialLead.lead_score.desc().nullslast())
+        .offset(offset)
+        .limit(per_page)
+    )
+
     result = await db.execute(query)
     leads = result.scalars().all()
-    
+
     pages = (total + per_page - 1) // per_page if total > 0 else 1
-    
+
     return LeadListResponse(
         leads=[LeadResponse.model_validate(lead) for lead in leads],
         total=total,
         page=page,
         per_page=per_page,
-        pages=pages
+        pages=pages,
     )
 
 
@@ -629,49 +652,47 @@ async def get_florida_leads(
 async def get_caribbean_leads(
     page: int = Query(1, ge=1),
     per_page: int = Query(20, ge=1, le=100),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
 ):
     """Get Caribbean leads"""
-    query = select(PotentialLead).where(
-        PotentialLead.location_type == "caribbean"
-    )
+    query = select(PotentialLead).where(PotentialLead.location_type == "caribbean")
     count_query = select(func.count(PotentialLead.id)).where(
         PotentialLead.location_type == "caribbean"
     )
-    
+
     result = await db.execute(count_query)
     total = result.scalar() or 0
-    
+
     offset = (page - 1) * per_page
-    query = query.order_by(
-        PotentialLead.lead_score.desc().nullslast()
-    ).offset(offset).limit(per_page)
-    
+    query = (
+        query.order_by(PotentialLead.lead_score.desc().nullslast())
+        .offset(offset)
+        .limit(per_page)
+    )
+
     result = await db.execute(query)
     leads = result.scalars().all()
-    
+
     pages = (total + per_page - 1) // per_page if total > 0 else 1
-    
+
     return LeadListResponse(
         leads=[LeadResponse.model_validate(lead) for lead in leads],
         total=total,
         page=page,
         per_page=per_page,
-        pages=pages
+        pages=pages,
     )
 
 
 @app.get("/leads/{lead_id}", response_model=LeadResponse, tags=["Leads"])
 async def get_lead(lead_id: int, db: AsyncSession = Depends(get_db)):
     """Get a single lead by ID"""
-    result = await db.execute(
-        select(PotentialLead).where(PotentialLead.id == lead_id)
-    )
+    result = await db.execute(select(PotentialLead).where(PotentialLead.id == lead_id))
     lead = result.scalar_one_or_none()
-    
+
     if not lead:
         raise HTTPException(status_code=404, detail="Lead not found")
-    
+
     return LeadResponse.model_validate(lead)
 
 
@@ -680,7 +701,7 @@ async def create_lead(lead_data: LeadCreate, db: AsyncSession = Depends(get_db))
     """Create a new lead manually"""
     # Use shared normalization (consistent with orchestrator + Celery paths)
     normalized_name = normalize_hotel_name(lead_data.hotel_name)
-    
+
     # Check for duplicate before inserting
     existing = await db.execute(
         select(PotentialLead).where(
@@ -690,9 +711,9 @@ async def create_lead(lead_data: LeadCreate, db: AsyncSession = Depends(get_db))
     if existing.scalar_one_or_none():
         raise HTTPException(
             status_code=409,
-            detail=f"A lead with a similar name already exists: '{lead_data.hotel_name}'"
+            detail=f"A lead with a similar name already exists: '{lead_data.hotel_name}'",
         )
-    
+
     lead = PotentialLead(
         hotel_name=lead_data.hotel_name,
         hotel_name_normalized=normalized_name,
@@ -715,110 +736,109 @@ async def create_lead(lead_data: LeadCreate, db: AsyncSession = Depends(get_db))
         source_url=lead_data.source_url,
         source_site=lead_data.source_site or "manual",
         status="new",
-        lead_score=lead_data.lead_score
+        lead_score=lead_data.lead_score,
     )
-    
+
     db.add(lead)
     await db.commit()
     await db.refresh(lead)
-    
-    logger.info(f"Created lead: {lead.hotel_name} (ID: {lead.id}, Score: {lead.lead_score})")
-    
+
+    logger.info(
+        f"Created lead: {lead.hotel_name} (ID: {lead.id}, Score: {lead.lead_score})"
+    )
+
     return LeadResponse.model_validate(lead)
 
 
 @app.patch("/leads/{lead_id}", response_model=LeadResponse, tags=["Leads"])
-async def update_lead(lead_id: int, updates: LeadUpdate, db: AsyncSession = Depends(get_db)):
+async def update_lead(
+    lead_id: int, updates: LeadUpdate, db: AsyncSession = Depends(get_db)
+):
     """Update a lead"""
-    result = await db.execute(
-        select(PotentialLead).where(PotentialLead.id == lead_id)
-    )
+    result = await db.execute(select(PotentialLead).where(PotentialLead.id == lead_id))
     lead = result.scalar_one_or_none()
-    
+
     if not lead:
         raise HTTPException(status_code=404, detail="Lead not found")
-    
+
     update_data = updates.model_dump(exclude_unset=True)
     for field, value in update_data.items():
         setattr(lead, field, value)
-    
+
     lead.updated_at = datetime.now(timezone.utc)
-    
+
     await db.commit()
     await db.refresh(lead)
-    
+
     logger.info(f"Updated lead: {lead.hotel_name} (ID: {lead.id})")
-    
+
     return LeadResponse.model_validate(lead)
 
 
 @app.post("/leads/{lead_id}/approve", response_model=LeadResponse, tags=["Leads"])
 async def approve_lead(lead_id: int, db: AsyncSession = Depends(get_db)):
     """Approve a lead - ready for CRM push"""
-    result = await db.execute(
-        select(PotentialLead).where(PotentialLead.id == lead_id)
-    )
+    result = await db.execute(select(PotentialLead).where(PotentialLead.id == lead_id))
     lead = result.scalar_one_or_none()
-    
+
     if not lead:
         raise HTTPException(status_code=404, detail="Lead not found")
-    
+
     lead.status = "approved"
     lead.updated_at = datetime.now(timezone.utc)
-    
+
     await db.commit()
     await db.refresh(lead)
-    
+
     logger.info(f"Approved lead: {lead.hotel_name} (ID: {lead.id})")
-    
+
     return LeadResponse.model_validate(lead)
 
 
 @app.post("/leads/{lead_id}/reject", response_model=LeadResponse, tags=["Leads"])
 async def reject_lead(
-    lead_id: int, 
-    reason: Optional[str] = Query(None, description="Rejection reason: duplicate, budget_brand, international, old_opening, bad_data"),
-    db: AsyncSession = Depends(get_db)
+    lead_id: int,
+    reason: Optional[str] = Query(
+        None,
+        description="Rejection reason: duplicate, budget_brand, international, old_opening, bad_data",
+    ),
+    db: AsyncSession = Depends(get_db),
 ):
     """Reject a lead"""
-    result = await db.execute(
-        select(PotentialLead).where(PotentialLead.id == lead_id)
-    )
+    result = await db.execute(select(PotentialLead).where(PotentialLead.id == lead_id))
     lead = result.scalar_one_or_none()
-    
+
     if not lead:
         raise HTTPException(status_code=404, detail="Lead not found")
-    
+
     lead.status = "rejected"
     lead.rejection_reason = reason
     lead.notes = f"{lead.notes or ''}\nRejected: {reason or 'No reason given'}".strip()
     lead.updated_at = datetime.now(timezone.utc)
-    
+
     await db.commit()
     await db.refresh(lead)
-    
+
     logger.info(f"Rejected lead: {lead.hotel_name} (ID: {lead.id}, Reason: {reason})")
-    
+
     return LeadResponse.model_validate(lead)
 
 
 @app.delete("/leads/{lead_id}", tags=["Leads"])
 async def delete_lead(lead_id: int, db: AsyncSession = Depends(get_db)):
     """Delete a lead"""
-    result = await db.execute(
-        select(PotentialLead).where(PotentialLead.id == lead_id)
-    )
+    result = await db.execute(select(PotentialLead).where(PotentialLead.id == lead_id))
     lead = result.scalar_one_or_none()
-    
+
     if not lead:
         raise HTTPException(status_code=404, detail="Lead not found")
-    
+
     hotel_name = lead.hotel_name
     await db.delete(lead)
     await db.commit()
-    
+
     logger.info(f"Deleted lead: {hotel_name} (ID: {lead_id})")
-    
+
     return {"message": "Lead deleted", "id": lead_id}
 
 
@@ -826,55 +846,61 @@ async def delete_lead(lead_id: int, db: AsyncSession = Depends(get_db)):
 # Source Endpoints
 # -----------------------------------------------------------------------------
 
+
 @app.get("/sources", response_model=List[SourceResponse], tags=["Sources"])
 async def list_sources(
     active_only: bool = False,
     source_type: Optional[str] = None,
     min_priority: Optional[int] = None,
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
 ):
     """List all scraping sources"""
     query = select(Source)
-    
+
     if active_only:
-        query = query.where(Source.is_active == True)
+        query = query.where(Source.is_active)
     if source_type:
         query = query.where(Source.source_type == source_type)
     if min_priority:
         query = query.where(Source.priority >= min_priority)
-    
+
     query = query.order_by(Source.priority.desc(), Source.name)
-    
+
     result = await db.execute(query)
     sources = result.scalars().all()
-    
+
     return [SourceResponse.model_validate(source) for source in sources]
 
 
 @app.get("/sources/healthy", response_model=List[SourceResponse], tags=["Sources"])
 async def list_healthy_sources(db: AsyncSession = Depends(get_db)):
     """List healthy sources ready for scraping"""
-    query = select(Source).where(
-        Source.is_active == True,
-        Source.health_status.in_(["healthy", "new", "degraded"])
-    ).order_by(Source.priority.desc())
-    
+    query = (
+        select(Source)
+        .where(
+            Source.is_active, Source.health_status.in_(["healthy", "new", "degraded"])
+        )
+        .order_by(Source.priority.desc())
+    )
+
     result = await db.execute(query)
     sources = result.scalars().all()
-    
+
     return [SourceResponse.model_validate(source) for source in sources]
 
 
 @app.get("/sources/problems", response_model=List[SourceResponse], tags=["Sources"])
 async def list_problem_sources(db: AsyncSession = Depends(get_db)):
     """List sources with issues (failing/dead)"""
-    query = select(Source).where(
-        Source.health_status.in_(["failing", "dead"])
-    ).order_by(Source.consecutive_failures.desc())
-    
+    query = (
+        select(Source)
+        .where(Source.health_status.in_(["failing", "dead"]))
+        .order_by(Source.consecutive_failures.desc())
+    )
+
     result = await db.execute(query)
     sources = result.scalars().all()
-    
+
     return [SourceResponse.model_validate(source) for source in sources]
 
 
@@ -887,8 +913,10 @@ async def create_source(source_data: SourceCreate, db: AsyncSession = Depends(ge
     )
     existing = result.scalar_one_or_none()
     if existing:
-        raise HTTPException(status_code=409, detail="Source with this URL already exists")
-    
+        raise HTTPException(
+            status_code=409, detail="Source with this URL already exists"
+        )
+
     source = Source(
         name=source_data.name,
         base_url=source_data.base_url,
@@ -899,81 +927,79 @@ async def create_source(source_data: SourceCreate, db: AsyncSession = Depends(ge
         use_playwright=source_data.use_playwright,
         is_active=source_data.is_active,
         notes=source_data.notes,
-        health_status="new"
+        health_status="new",
     )
-    
+
     db.add(source)
     await db.commit()
     await db.refresh(source)
-    
+
     logger.info(f"Created source: {source.name} (ID: {source.id})")
-    
+
     return SourceResponse.model_validate(source)
 
 
-@app.post("/sources/{source_id}/toggle", response_model=SourceResponse, tags=["Sources"])
+@app.post(
+    "/sources/{source_id}/toggle", response_model=SourceResponse, tags=["Sources"]
+)
 async def toggle_source(source_id: int, db: AsyncSession = Depends(get_db)):
     """Toggle source active/inactive"""
-    result = await db.execute(
-        select(Source).where(Source.id == source_id)
-    )
+    result = await db.execute(select(Source).where(Source.id == source_id))
     source = result.scalar_one_or_none()
-    
+
     if not source:
         raise HTTPException(status_code=404, detail="Source not found")
-    
+
     source.is_active = not source.is_active
     source.updated_at = datetime.now(timezone.utc)
-    
+
     await db.commit()
     await db.refresh(source)
-    
+
     status = "activated" if source.is_active else "deactivated"
     logger.info(f"Source {status}: {source.name} (ID: {source.id})")
-    
+
     return SourceResponse.model_validate(source)
 
 
-@app.post("/sources/{source_id}/reset-health", response_model=SourceResponse, tags=["Sources"])
+@app.post(
+    "/sources/{source_id}/reset-health", response_model=SourceResponse, tags=["Sources"]
+)
 async def reset_source_health(source_id: int, db: AsyncSession = Depends(get_db)):
     """Reset a source's health status (after fixing issues)"""
-    result = await db.execute(
-        select(Source).where(Source.id == source_id)
-    )
+    result = await db.execute(select(Source).where(Source.id == source_id))
     source = result.scalar_one_or_none()
-    
+
     if not source:
         raise HTTPException(status_code=404, detail="Source not found")
-    
+
     source.health_status = "new"
     source.consecutive_failures = 0
     source.updated_at = datetime.now(timezone.utc)
-    
+
     await db.commit()
     await db.refresh(source)
-    
+
     logger.info(f"Reset health for source: {source.name} (ID: {source.id})")
-    
+
     return SourceResponse.model_validate(source)
 
 
 @app.delete("/sources/{source_id}", tags=["Sources"])
 async def delete_source(source_id: int, db: AsyncSession = Depends(get_db)):
     """Delete a source"""
-    result = await db.execute(
-        select(Source).where(Source.id == source_id)
-    )
+    result = await db.execute(select(Source).where(Source.id == source_id))
     source = result.scalar_one_or_none()
-    
+
     if not source:
         raise HTTPException(status_code=404, detail="Source not found")
-    
+
     name = source.name
     await db.delete(source)
     await db.commit()
-    
+
     logger.info(f"Deleted source: {name} (ID: {source_id})")
-    
+
     return {"message": "Source deleted", "id": source_id}
 
 
@@ -981,41 +1007,48 @@ async def delete_source(source_id: int, db: AsyncSession = Depends(get_db)):
 # Scrape Logs Endpoint
 # -----------------------------------------------------------------------------
 
+
 @app.get("/scrape/logs", response_model=List[ScrapeLogResponse], tags=["Scraping"])
 async def get_scrape_logs(
     limit: int = Query(20, ge=1, le=100),
     source_id: Optional[int] = None,
     status: Optional[str] = None,
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
 ):
     """Get recent scrape logs"""
     # Single JOIN query instead of N+1 (was: 1 query per log to fetch source name)
     query = select(ScrapeLog, Source.name.label("source_name")).outerjoin(
         Source, ScrapeLog.source_id == Source.id
     )
-    
+
     if source_id:
         query = query.where(ScrapeLog.source_id == source_id)
     if status:
         query = query.where(ScrapeLog.status == status)
-    
+
     query = query.order_by(ScrapeLog.started_at.desc()).limit(limit)
-    
+
     result = await db.execute(query)
     rows = result.all()
-    
+
     response_list = []
     for log, src_name in rows:
         log_response = ScrapeLogResponse.model_validate(log)
         log_response.source_name = src_name
         response_list.append(log_response)
-    
+
     return response_list
 
 
 # -----------------------------------------------------------------------------
 # Dashboard Endpoints (HTMX + Jinja2)
 # -----------------------------------------------------------------------------
+# Static files
+from fastapi.staticfiles import StaticFiles as _SF
+
+app.mount("/static", _SF(directory="app/static"), name="static")
+
+
 @app.get("/dashboard", response_class=HTMLResponse, tags=["Dashboard"])
 async def dashboard_page(
     request: Request,
@@ -1025,10 +1058,10 @@ async def dashboard_page(
     score: str = "",
     location: str = "",
     tier: str = "",
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
 ):
     """Dashboard page with Pipeline/Approved/Rejected tabs"""
-    from sqlalchemy import select, func, or_
+    from sqlalchemy import select, func
 
     # Map tab to status
     tab_status_map = {
@@ -1082,14 +1115,18 @@ async def dashboard_page(
 
     # Tab counts
     for tab_name, tab_status in tab_status_map.items():
-        count_result = await db.execute(
-            select(func.count()).where(PotentialLead.status == tab_status)
-        )
+        await db.execute(select(func.count()).where(PotentialLead.status == tab_status))
         # We'll pass these as pipeline_count, approved_count, rejected_count
 
-    pipeline_count_r = await db.execute(select(func.count()).where(PotentialLead.status == "new"))
-    approved_count_r = await db.execute(select(func.count()).where(PotentialLead.status == "approved"))
-    rejected_count_r = await db.execute(select(func.count()).where(PotentialLead.status == "rejected"))
+    pipeline_count_r = await db.execute(
+        select(func.count()).where(PotentialLead.status == "new")
+    )
+    approved_count_r = await db.execute(
+        select(func.count()).where(PotentialLead.status == "approved")
+    )
+    rejected_count_r = await db.execute(
+        select(func.count()).where(PotentialLead.status == "rejected")
+    )
 
     return templates.TemplateResponse(
         "dashboard.html",
@@ -1102,7 +1139,7 @@ async def dashboard_page(
             "pipeline_count": pipeline_count_r.scalar() or 0,
             "approved_count": approved_count_r.scalar() or 0,
             "rejected_count": rejected_count_r.scalar() or 0,
-        }
+        },
     )
 
 
@@ -1112,8 +1149,7 @@ async def dashboard_stats_partial(request: Request, db: AsyncSession = Depends(g
     stats = await _get_dashboard_stats(db)
 
     return templates.TemplateResponse(
-        "partials/stats.html",
-        {"request": request, "stats": stats}
+        "partials/stats.html", {"request": request, "stats": stats}
     )
 
 
@@ -1127,7 +1163,7 @@ async def dashboard_leads_partial(
     min_score: Optional[int] = None,
     location_type: Optional[str] = None,
     brand_tier: Optional[str] = None,
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
 ):
     """HTMX partial: Lead list with filtering and pagination"""
     query = select(PotentialLead)
@@ -1148,9 +1184,9 @@ async def dashboard_leads_partial(
     if search:
         safe_search = escape_like(search)
         search_filter = (
-            PotentialLead.hotel_name.ilike(f"%{safe_search}%") |
-            PotentialLead.city.ilike(f"%{safe_search}%") |
-            PotentialLead.brand.ilike(f"%{safe_search}%")
+            PotentialLead.hotel_name.ilike(f"%{safe_search}%")
+            | PotentialLead.city.ilike(f"%{safe_search}%")
+            | PotentialLead.brand.ilike(f"%{safe_search}%")
         )
         query = query.where(search_filter)
         count_query = count_query.where(search_filter)
@@ -1159,10 +1195,13 @@ async def dashboard_leads_partial(
     total = result.scalar() or 0
 
     offset = (page - 1) * per_page
-    query = query.order_by(
-        PotentialLead.lead_score.desc().nullslast(),
-        PotentialLead.created_at.desc()
-    ).offset(offset).limit(per_page)
+    query = (
+        query.order_by(
+            PotentialLead.lead_score.desc().nullslast(), PotentialLead.created_at.desc()
+        )
+        .offset(offset)
+        .limit(per_page)
+    )
 
     result = await db.execute(query)
     leads = result.scalars().all()
@@ -1174,80 +1213,92 @@ async def dashboard_leads_partial(
         {
             "request": request,
             "leads": leads,
-            "pagination": {"total": total, "page": page, "per_page": per_page, "pages": pages}
-        }
+            "pagination": {
+                "total": total,
+                "page": page,
+                "per_page": per_page,
+                "pages": pages,
+            },
+        },
     )
 
 
-@app.get("/api/dashboard/leads/{lead_id}", response_class=HTMLResponse, tags=["Dashboard"])
+@app.get(
+    "/api/dashboard/leads/{lead_id}", response_class=HTMLResponse, tags=["Dashboard"]
+)
 async def dashboard_lead_detail_partial(
-    request: Request,
-    lead_id: int,
-    db: AsyncSession = Depends(get_db)
+    request: Request, lead_id: int, db: AsyncSession = Depends(get_db)
 ):
     """HTMX partial: Lead detail panel"""
-    result = await db.execute(
-        select(PotentialLead).where(PotentialLead.id == lead_id)
-    )
+    result = await db.execute(select(PotentialLead).where(PotentialLead.id == lead_id))
     lead = result.scalar_one_or_none()
 
     if not lead:
         return HTMLResponse(
             content='<div class="p-6 text-center text-red-500">Lead not found</div>',
-            status_code=404
+            status_code=404,
         )
 
     return templates.TemplateResponse(
-        "partials/lead_detail.html",
-        {"request": request, "lead": lead}
+        "partials/lead_detail.html", {"request": request, "lead": lead}
     )
 
-@app.get("/api/dashboard/leads/{lead_id}/row", response_class=HTMLResponse, tags=["Dashboard"])
+
+@app.get(
+    "/api/dashboard/leads/{lead_id}/row",
+    response_class=HTMLResponse,
+    tags=["Dashboard"],
+)
 async def dashboard_lead_row_partial(
-    request: Request,
-    lead_id: int,
-    db: AsyncSession = Depends(get_db)
+    request: Request, lead_id: int, db: AsyncSession = Depends(get_db)
 ):
     """HTMX partial: Return single lead row (for refresh after edit)"""
-    result = await db.execute(
-        select(PotentialLead).where(PotentialLead.id == lead_id)
-    )
+    result = await db.execute(select(PotentialLead).where(PotentialLead.id == lead_id))
     lead = result.scalar_one_or_none()
 
     if not lead:
         return HTMLResponse(content="", status_code=404)
 
     return templates.TemplateResponse(
-        "partials/lead_row.html",
-        {"request": request, "lead": lead}
+        "partials/lead_row.html", {"request": request, "lead": lead}
     )
+
 
 @app.patch("/api/dashboard/leads/{lead_id}/edit", tags=["Dashboard"])
 async def dashboard_edit_lead(
-    lead_id: int,
-    request: Request,
-    db: AsyncSession = Depends(get_db)
+    lead_id: int, request: Request, db: AsyncSession = Depends(get_db)
 ):
     """Edit lead fields from the detail panel"""
     data = await request.json()
 
-    result = await db.execute(
-        select(PotentialLead).where(PotentialLead.id == lead_id)
-    )
+    result = await db.execute(select(PotentialLead).where(PotentialLead.id == lead_id))
     lead = result.scalar_one_or_none()
 
     if not lead:
         from fastapi.responses import JSONResponse
+
         return JSONResponse(content={"detail": "Lead not found"}, status_code=404)
 
     # Editable fields whitelist
     editable_fields = [
-        "hotel_name", "brand", "brand_tier", "hotel_type",
-        "city", "state", "country",
-        "opening_date", "room_count",
-        "management_company", "developer", "owner",
-        "contact_name", "contact_title", "contact_email", "contact_phone",
-        "description", "notes",
+        "hotel_name",
+        "brand",
+        "brand_tier",
+        "hotel_type",
+        "city",
+        "state",
+        "country",
+        "opening_date",
+        "room_count",
+        "management_company",
+        "developer",
+        "owner",
+        "contact_name",
+        "contact_title",
+        "contact_email",
+        "contact_phone",
+        "description",
+        "notes",
     ]
 
     for field in editable_fields:
@@ -1262,25 +1313,27 @@ async def dashboard_edit_lead(
                 setattr(lead, field, str(value))
 
     from datetime import datetime, timezone
+
     lead.updated_at = datetime.now(timezone.utc)
 
     await db.commit()
     await db.refresh(lead)
 
     from fastapi.responses import JSONResponse
+
     return JSONResponse(content={"status": "ok", "id": lead.id})
 
 
-@app.post("/api/dashboard/leads/{lead_id}/approve", response_class=HTMLResponse, tags=["Dashboard"])
+@app.post(
+    "/api/dashboard/leads/{lead_id}/approve",
+    response_class=HTMLResponse,
+    tags=["Dashboard"],
+)
 async def dashboard_approve_lead(
-    request: Request,
-    lead_id: int,
-    db: AsyncSession = Depends(get_db)
+    request: Request, lead_id: int, db: AsyncSession = Depends(get_db)
 ):
     """HTMX: Approve lead and return updated row"""
-    result = await db.execute(
-        select(PotentialLead).where(PotentialLead.id == lead_id)
-    )
+    result = await db.execute(select(PotentialLead).where(PotentialLead.id == lead_id))
     lead = result.scalar_one_or_none()
 
     if not lead:
@@ -1295,22 +1348,23 @@ async def dashboard_approve_lead(
     logger.info(f"Dashboard: Approved lead {lead.hotel_name} (ID: {lead.id})")
 
     return templates.TemplateResponse(
-        "partials/lead_row.html",
-        {"request": request, "lead": lead}
+        "partials/lead_row.html", {"request": request, "lead": lead}
     )
 
 
-@app.post("/api/dashboard/leads/{lead_id}/reject", response_class=HTMLResponse, tags=["Dashboard"])
+@app.post(
+    "/api/dashboard/leads/{lead_id}/reject",
+    response_class=HTMLResponse,
+    tags=["Dashboard"],
+)
 async def dashboard_reject_lead(
     request: Request,
     lead_id: int,
     reason: Optional[str] = Query(None),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
 ):
     """HTMX: Reject lead and return updated row"""
-    result = await db.execute(
-        select(PotentialLead).where(PotentialLead.id == lead_id)
-    )
+    result = await db.execute(select(PotentialLead).where(PotentialLead.id == lead_id))
     lead = result.scalar_one_or_none()
 
     if not lead:
@@ -1324,54 +1378,62 @@ async def dashboard_reject_lead(
     await db.commit()
     await db.refresh(lead)
 
-    logger.info(f"Dashboard: Rejected lead {lead.hotel_name} (ID: {lead.id}, Reason: {reason})")
+    logger.info(
+        f"Dashboard: Rejected lead {lead.hotel_name} (ID: {lead.id}, Reason: {reason})"
+    )
 
     return templates.TemplateResponse(
-        "partials/lead_row.html",
-        {"request": request, "lead": lead}
+        "partials/lead_row.html", {"request": request, "lead": lead}
     )
 
-@app.post("/api/dashboard/leads/{lead_id}/restore", response_class=HTMLResponse, tags=["Dashboard"])
+
+@app.post(
+    "/api/dashboard/leads/{lead_id}/restore",
+    response_class=HTMLResponse,
+    tags=["Dashboard"],
+)
 async def dashboard_restore_lead(
-    request: Request,
-    lead_id: int,
-    db: AsyncSession = Depends(get_db)
+    request: Request, lead_id: int, db: AsyncSession = Depends(get_db)
 ):
     """Restore a lead back to 'new' (pipeline) status"""
-    result = await db.execute(
-        select(PotentialLead).where(PotentialLead.id == lead_id)
-    )
+    result = await db.execute(select(PotentialLead).where(PotentialLead.id == lead_id))
     lead = result.scalar_one_or_none()
 
     if not lead:
-        return HTMLResponse(content="<div class='text-red-500 p-2'>Lead not found</div>", status_code=404)
+        return HTMLResponse(
+            content="<div class='text-red-500 p-2'>Lead not found</div>",
+            status_code=404,
+        )
 
     lead.status = "new"
     lead.rejection_reason = None
 
     from datetime import datetime, timezone
+
     lead.updated_at = datetime.now(timezone.utc)
 
     await db.commit()
     await db.refresh(lead)
 
     return templates.TemplateResponse(
-        "partials/lead_row.html",
-        {"request": request, "lead": lead}
+        "partials/lead_row.html", {"request": request, "lead": lead}
     )
+
 
 @app.get("/api/dashboard/sources/list", tags=["Dashboard"])
 async def dashboard_sources_list(db: AsyncSession = Depends(get_db)):
     """Return all sources with metadata for scrape modal source selection."""
     from datetime import timedelta
-    
+
     result = await db.execute(
-        select(Source).where(Source.is_active == True).order_by(Source.priority.desc(), Source.name)
+        select(Source)
+        .where(Source.is_active)
+        .order_by(Source.priority.desc(), Source.name)
     )
     sources = result.scalars().all()
-    
+
     now = datetime.now(timezone.utc)
-    
+
     # Build category counts
     cat_counts = {}
     cat_labels = {
@@ -1384,10 +1446,10 @@ async def dashboard_sources_list(db: AsyncSession = Depends(get_db)):
         "travel_pub": "✈️ Travel Pubs",
         "pr_wire": "📡 PR Wire",
     }
-    
+
     all_sources = []
     due_sources = []
-    
+
     # Frequency → hours threshold
     freq_hours = {
         "daily": 20,
@@ -1396,15 +1458,15 @@ async def dashboard_sources_list(db: AsyncSession = Depends(get_db)):
         "weekly": 160,
         "monthly": 720,
     }
-    
+
     for src in sources:
         # Count categories
         cat_counts[src.source_type] = cat_counts.get(src.source_type, 0) + 1
-        
+
         # Gold URL count
-        gold_urls = src.gold_urls or {} if hasattr(src, 'gold_urls') else {}
+        gold_urls = src.gold_urls or {} if hasattr(src, "gold_urls") else {}
         active_gold = sum(1 for m in gold_urls.values() if m.get("miss_streak", 0) < 3)
-        
+
         source_data = {
             "id": src.id,
             "name": src.name,
@@ -1414,17 +1476,19 @@ async def dashboard_sources_list(db: AsyncSession = Depends(get_db)):
             "health": src.health_status or "new",
             "leads": src.leads_found or 0,
             "gold_count": active_gold,
-            "last_scraped": src.last_scraped_at.isoformat() if src.last_scraped_at else None,
+            "last_scraped": src.last_scraped_at.isoformat()
+            if src.last_scraped_at
+            else None,
         }
         all_sources.append(source_data)
-        
+
         # Check if due for scraping
         freq = src.scrape_frequency or "daily"
         threshold = freq_hours.get(freq, 160)  # default weekly
-        
+
         is_due = False
         reason = ""
-        
+
         if not src.last_scraped_at:
             is_due = True
             reason = "Never scraped"
@@ -1433,29 +1497,33 @@ async def dashboard_sources_list(db: AsyncSession = Depends(get_db)):
             if hours_since >= threshold:
                 is_due = True
                 reason = f"{freq} (last: {hours_since:.0f}h ago)"
-        
+
         if is_due:
             # Determine scrape mode for this source
             scrape_mode = "discover" if active_gold == 0 else "gold"
             needs_discovery = True
-            if hasattr(src, 'last_discovery_at') and src.last_discovery_at:
-                interval = getattr(src, 'discovery_interval_days', 7) or 7
-                needs_discovery = (now - src.last_discovery_at) > timedelta(days=interval)
-            
+            if hasattr(src, "last_discovery_at") and src.last_discovery_at:
+                interval = getattr(src, "discovery_interval_days", 7) or 7
+                needs_discovery = (now - src.last_discovery_at) > timedelta(
+                    days=interval
+                )
+
             if needs_discovery:
                 scrape_mode = "discover"
-            
-            due_sources.append({
-                **source_data,
-                "reason": reason,
-                "mode": scrape_mode,
-            })
-    
+
+            due_sources.append(
+                {
+                    **source_data,
+                    "reason": reason,
+                    "mode": scrape_mode,
+                }
+            )
+
     categories = [
         {"type": t, "label": cat_labels.get(t, t), "count": c}
         for t, c in sorted(cat_counts.items())
     ]
-    
+
     return {
         "sources": all_sources,
         "due_sources": due_sources,
@@ -1472,16 +1540,17 @@ async def dashboard_trigger_scrape(request: Request):
         body = {}
         try:
             body = await request.json()
-        except:
+        except Exception:
             pass
-        
+
         mode = body.get("mode", "full")
         source_ids = body.get("source_ids", [])
-        
+
         # Store the scrape config in a global so the SSE stream can pick it up
         import uuid
+
         scrape_id = str(uuid.uuid4())
-        
+
         # Store config for the SSE endpoint to use
         global _pending_scrape_config
         _pending_scrape_config = {
@@ -1489,9 +1558,11 @@ async def dashboard_trigger_scrape(request: Request):
             "source_ids": source_ids,
             "scrape_id": scrape_id,
         }
-        
-        logger.info(f"Dashboard: Scrape triggered (mode={mode}, sources={len(source_ids) if source_ids else 'all'})")
-        
+
+        logger.info(
+            f"Dashboard: Scrape triggered (mode={mode}, sources={len(source_ids) if source_ids else 'all'})"
+        )
+
         return {
             "status": "started",
             "message": f"Scrape job started ({mode} mode)",
@@ -1501,10 +1572,8 @@ async def dashboard_trigger_scrape(request: Request):
         }
     except Exception as e:
         logger.error(f"Dashboard: Failed to trigger scrape: {e}")
-        return {
-            "status": "error",
-            "message": f"Failed to start scrape: {str(e)}"
-        }
+        return {"status": "error", "message": f"Failed to start scrape: {str(e)}"}
+
 
 # -----------------------------------------------------------------------------
 # SSE Scrape Endpoint - Uses the REAL Orchestrator Pipeline
@@ -1513,6 +1582,7 @@ async def dashboard_trigger_scrape(request: Request):
 # and any future triggers use the same orchestrator that the CLI uses.
 # No duplicate scraping/extraction/scoring/dedup logic.
 # -----------------------------------------------------------------------------
+
 
 @app.get("/api/dashboard/scrape/stream", tags=["Dashboard"])
 async def scrape_with_progress(request: Request):
@@ -1528,7 +1598,6 @@ async def scrape_with_progress(request: Request):
 
     async with _scrape_lock:
         active_scrapes[scrape_id] = {"status": "starting"}
-    
 
     async def event_generator():
         orchestrator = None
@@ -1542,6 +1611,7 @@ async def scrape_with_progress(request: Request):
             yield f"data: {json.dumps({'type': 'info', 'message': 'Initializing pipeline...'})}\n\n"
 
             from app.services.orchestrator import LeadHunterOrchestrator
+
             orchestrator = LeadHunterOrchestrator(
                 gemini_api_key=os.getenv("GEMINI_API_KEY"),
                 save_to_database=True,
@@ -1553,7 +1623,9 @@ async def scrape_with_progress(request: Request):
             # --- Get active sources from DB ---
             async with async_session() as session:
                 result = await session.execute(
-                    select(Source).where(Source.is_active == True).order_by(Source.priority.desc())
+                    select(Source)
+                    .where(Source.is_active)
+                    .order_by(Source.priority.desc())
                 )
                 sources = result.scalars().all()
 
@@ -1561,9 +1633,8 @@ async def scrape_with_progress(request: Request):
             if config_source_ids:
                 sources = [s for s in sources if s.id in config_source_ids]
 
-
             total_sources = len(sources)
-            source_names = [s.name for s in sources]
+            [s.name for s in sources]
 
             yield f"data: {json.dumps({'type': 'info', 'message': f'Found {total_sources} active sources to scrape'})}\n\n"
 
@@ -1588,23 +1659,30 @@ async def scrape_with_progress(request: Request):
 
                 # Check if client disconnected (stop wasting resources)
                 if await request.is_disconnected():
-                    logger.info(f"Client disconnected during scrape {scrape_id}, stopping pipeline")
+                    logger.info(
+                        f"Client disconnected during scrape {scrape_id}, stopping pipeline"
+                    )
                     break
 
                 source_name = source.name
-                
 
                 # Check for gold URLs (fast scrape mode)
                 gold_urls_dict = source.gold_urls or {}
-                active_gold = [url for url, meta in gold_urls_dict.items() if meta.get("miss_streak", 0) < 3]
-                
+                active_gold = [
+                    url
+                    for url, meta in gold_urls_dict.items()
+                    if meta.get("miss_streak", 0) < 3
+                ]
+
                 # Decide: gold mode vs rediscovery
                 use_gold = len(active_gold) > 0
                 needs_rediscovery = False
-                
+
                 if use_gold and source.last_discovery_at:
                     discovery_interval = source.discovery_interval_days or 7
-                    days_since_discovery = (datetime.now(timezone.utc) - source.last_discovery_at).total_seconds() / 86400
+                    days_since_discovery = (
+                        datetime.now(timezone.utc) - source.last_discovery_at
+                    ).total_seconds() / 86400
                     if days_since_discovery >= discovery_interval:
                         needs_rediscovery = True
                         use_gold = False  # Force deep crawl to find new gold
@@ -1612,9 +1690,11 @@ async def scrape_with_progress(request: Request):
                     # Has gold URLs but never formally discovered — do a full crawl
                     needs_rediscovery = True
                     use_gold = False
-                
+
                 if needs_rediscovery:
-                    mode_label = f"🔄 Rediscovery (overdue, {len(active_gold)} gold exist)"
+                    mode_label = (
+                        f"🔄 Rediscovery (overdue, {len(active_gold)} gold exist)"
+                    )
                 elif use_gold:
                     mode_label = f"⚡ GOLD ({len(active_gold)} URLs)"
                 else:
@@ -1630,50 +1710,70 @@ async def scrape_with_progress(request: Request):
                         for gold_url in active_gold:
                             try:
                                 # 1. Fetch the listing/hub page
-                                await orchestrator.scraping_engine.rate_limiter.acquire(gold_url)
-                                result = await orchestrator.scraping_engine.http_scraper.scrape(gold_url)
+                                await orchestrator.scraping_engine.rate_limiter.acquire(
+                                    gold_url
+                                )
+                                result = await orchestrator.scraping_engine.http_scraper.scrape(
+                                    gold_url
+                                )
                                 if result.success:
                                     scrape_results[source_name].append(result)
                                     visited.add(gold_url)
-                                    
+
                                     # 2. Extract links and follow depth-1 (new articles)
                                     from bs4 import BeautifulSoup
                                     from urllib.parse import urljoin
-                                    soup = BeautifulSoup(result.html or "", 'lxml')
+
+                                    soup = BeautifulSoup(result.html or "", "lxml")
                                     links = set()
-                                    for a in soup.find_all('a', href=True):
-                                        full_url = urljoin(gold_url, a['href'])
-                                        if full_url not in visited and source.base_url in full_url:
+                                    for a in soup.find_all("a", href=True):
+                                        full_url = urljoin(gold_url, a["href"])
+                                        if (
+                                            full_url not in visited
+                                            and source.base_url in full_url
+                                        ):
                                             links.add(full_url)
-                                    
+
                                     # Fetch up to 15 linked pages
                                     for link_url in list(links)[:15]:
                                         try:
-                                            await orchestrator.scraping_engine.rate_limiter.acquire(link_url)
-                                            link_result = await orchestrator.scraping_engine.http_scraper.scrape(link_url)
+                                            await orchestrator.scraping_engine.rate_limiter.acquire(
+                                                link_url
+                                            )
+                                            link_result = await orchestrator.scraping_engine.http_scraper.scrape(
+                                                link_url
+                                            )
                                             if link_result.success:
-                                                scrape_results[source_name].append(link_result)
+                                                scrape_results[source_name].append(
+                                                    link_result
+                                                )
                                                 visited.add(link_url)
                                         except Exception:
                                             pass
                             except Exception as e:
                                 logger.warning(f"Gold URL failed {gold_url[:50]}: {e}")
-                        logger.info(f"⚡ Gold mode: {source_name} → {len(scrape_results[source_name])} pages from {len(active_gold)} gold URLs")
+                        logger.info(
+                            f"⚡ Gold mode: {source_name} → {len(scrape_results[source_name])} pages from {len(active_gold)} gold URLs"
+                        )
                     else:
                         # DISCOVERY MODE: Deep crawl to find new gold URLs
-                        scrape_results = await orchestrator.scraping_engine.scrape_sources(
-                            [source_name], deep=True, max_concurrent=3
+                        scrape_results = (
+                            await orchestrator.scraping_engine.scrape_sources(
+                                [source_name], deep=True, max_concurrent=3
+                            )
                         )
                     source_pages = 0
                     for sname, results in scrape_results.items():
                         successful = [r for r in results if r.success]
                         source_pages += len(successful)
                         for r in successful:
-                            all_pages.append({
-                                "source_name": sname,
-                                "url": r.url,
-                                "content": r.text or r.html or "",
-                            })
+                            all_pages.append(
+                                {
+                                    "source_name": sname,
+                                    "url": r.url,
+                                    "content": r.text or r.html or "",
+                                }
+                            )
 
                     if source_pages > 0:
                         sources_successful += 1
@@ -1683,12 +1783,16 @@ async def scrape_with_progress(request: Request):
 
                     # Update source last_scraped_at
                     async with async_session() as session:
-                        source_obj = (await session.execute(
-                            select(Source).where(Source.id == source.id)
-                        )).scalar_one_or_none()
+                        source_obj = (
+                            await session.execute(
+                                select(Source).where(Source.id == source.id)
+                            )
+                        ).scalar_one_or_none()
                         if source_obj:
                             if source_pages > 0:
-                                source_obj.record_success(0)  # lead count updated after extraction
+                                source_obj.record_success(
+                                    0
+                                )  # lead count updated after extraction
                             else:
                                 source_obj.record_failure()
                             await session.commit()
@@ -1710,13 +1814,12 @@ async def scrape_with_progress(request: Request):
             yield f"data: {json.dumps({'type': 'info', 'message': 'Phase 2: AI extraction (Gemini)...'})}\n\n"
 
             pages_for_pipeline = [
-                {'url': p['url'], 'content': p['content'], 'source': p['source_name']}
+                {"url": p["url"], "content": p["content"], "source": p["source_name"]}
                 for p in all_pages
             ]
 
             pipeline_result = await orchestrator.pipeline.process_pages(
-                pages_for_pipeline,
-                source_name="Dashboard Scrape"
+                pages_for_pipeline, source_name="Dashboard Scrape"
             )
 
             leads_extracted = pipeline_result.leads_extracted
@@ -1726,7 +1829,9 @@ async def scrape_with_progress(request: Request):
             if orchestrator.deduplicator and pipeline_result.final_leads:
                 yield f"data: {json.dumps({'type': 'info', 'message': 'Phase 3: Deduplication...'})}\n\n"
 
-                leads_for_dedup = [lead.to_dict() for lead in pipeline_result.final_leads]
+                leads_for_dedup = [
+                    lead.to_dict() for lead in pipeline_result.final_leads
+                ]
                 merged_leads = orchestrator.deduplicator.deduplicate(leads_for_dedup)
                 dedup_stats = orchestrator.deduplicator.get_stats()
 
@@ -1738,38 +1843,42 @@ async def scrape_with_progress(request: Request):
                 lead_dicts = []
                 for ml in merged_leads:
                     d = {
-                        'hotel_name': ml.hotel_name,
-                        'brand': ml.brand,
-                        'property_type': ml.property_type,
-                        'city': ml.city,
-                        'state': ml.state,
-                        'country': ml.country,
-                        'opening_date': ml.opening_date,
-                        'room_count': ml.room_count,
-                        'contact_name': ml.contact_name,
-                        'contact_title': ml.contact_title,
-                        'contact_email': ml.contact_email,
-                        'contact_phone': ml.contact_phone,
-                        'source_url': ml.source_urls[0] if ml.source_urls else '',
-                        'source_name': ml.source_names[0] if ml.source_names else '',
-                        'key_insights': getattr(ml, 'key_insights', ''),
-                        'confidence_score': ml.confidence_score,
-                        'qualification_score': getattr(ml, 'qualification_score', 0),
+                        "hotel_name": ml.hotel_name,
+                        "brand": ml.brand,
+                        "property_type": ml.property_type,
+                        "city": ml.city,
+                        "state": ml.state,
+                        "country": ml.country,
+                        "opening_date": ml.opening_date,
+                        "room_count": ml.room_count,
+                        "contact_name": ml.contact_name,
+                        "contact_title": ml.contact_title,
+                        "contact_email": ml.contact_email,
+                        "contact_phone": ml.contact_phone,
+                        "source_url": ml.source_urls[0] if ml.source_urls else "",
+                        "source_name": ml.source_names[0] if ml.source_names else "",
+                        "key_insights": getattr(ml, "key_insights", ""),
+                        "confidence_score": ml.confidence_score,
+                        "qualification_score": getattr(ml, "qualification_score", 0),
                     }
                     if ml.merged_from_count > 1:
-                        d['key_insights'] = (d.get('key_insights') or '') + f"\n\n Merged from {ml.merged_from_count} sources"
+                        d["key_insights"] = (
+                            d.get("key_insights") or ""
+                        ) + f"\n\n Merged from {ml.merged_from_count} sources"
                     lead_dicts.append(d)
             else:
                 # No deduplicator or no leads
-                lead_dicts = [lead.to_dict() for lead in (pipeline_result.final_leads or [])]
+                lead_dicts = [
+                    lead.to_dict() for lead in (pipeline_result.final_leads or [])
+                ]
 
             # --- PHASE 4: SAVE TO DATABASE via orchestrator ---
             if lead_dicts:
                 yield f"data: {json.dumps({'type': 'info', 'message': f'Phase 4: Saving {len(lead_dicts)} leads to database...'})}\n\n"
 
                 db_result = await orchestrator.save_leads_to_database(lead_dicts)
-                leads_saved = db_result['saved']
-                leads_dupes = db_result['duplicates']
+                leads_saved = db_result["saved"]
+                leads_dupes = db_result["duplicates"]
 
                 if leads_saved > 0:
                     yield f"data: {json.dumps({'type': 'leads_found', 'url': 'pipeline', 'found': len(lead_dicts), 'saved': leads_saved, 'total_saved': leads_saved})}\n\n"
@@ -1788,51 +1897,67 @@ async def scrape_with_progress(request: Request):
 
                     # Build map: source_id -> {url: lead_count}
                     url_lead_map = {}
-                    
+
                     if lead_dicts:
                         for lead in lead_dicts:
                             src_url = lead.get("source_url", "")
-                            src_name = lead.get("source_name", "") or lead.get("source", "")
-                            
+                            src_name = lead.get("source_name", "") or lead.get(
+                                "source", ""
+                            )
+
                             source_id = None
                             for sname, sid in source_id_map.items():
-                                if sname.lower() in (src_name or "").lower() or (src_name or "").lower() in sname.lower():
+                                if (
+                                    sname.lower() in (src_name or "").lower()
+                                    or (src_name or "").lower() in sname.lower()
+                                ):
                                     source_id = sid
                                     break
-                            
+
                             if source_id and src_url:
                                 if source_id not in url_lead_map:
                                     url_lead_map[source_id] = {}
-                                url_lead_map[source_id][src_url] = url_lead_map[source_id].get(src_url, 0) + 1
+                                url_lead_map[source_id][src_url] = (
+                                    url_lead_map[source_id].get(src_url, 0) + 1
+                                )
 
                     # Update each source
                     for src in sources:
-                        source_obj = (await stats_session.execute(
-                            select(Source).where(Source.id == src.id)
-                        )).scalar_one_or_none()
-                        
+                        source_obj = (
+                            await stats_session.execute(
+                                select(Source).where(Source.id == src.id)
+                            )
+                        ).scalar_one_or_none()
+
                         if not source_obj:
                             continue
-                        
+
                         source_obj.total_scrapes = (source_obj.total_scrapes or 0) + 1
                         source_obj.last_scraped_at = datetime.now(timezone.utc)
-                        
-                        source_leads = sum(url_lead_map.get(src.id, {}).values()) if src.id in url_lead_map else 0
-                        
+
+                        source_leads = (
+                            sum(url_lead_map.get(src.id, {}).values())
+                            if src.id in url_lead_map
+                            else 0
+                        )
+
                         if source_leads > 0:
-                            source_obj.leads_found = (source_obj.leads_found or 0) + source_leads
+                            source_obj.leads_found = (
+                                source_obj.leads_found or 0
+                            ) + source_leads
                             source_obj.last_success_at = datetime.now(timezone.utc)
                             source_obj.consecutive_failures = 0
                             source_obj.health_status = "healthy"
-                        
+
                         scrapes = source_obj.total_scrapes or 1
                         old_avg = float(source_obj.avg_lead_yield or 0)
-                        source_obj.avg_lead_yield = ((old_avg * (scrapes - 1)) + source_leads) / scrapes
-                        
+                        source_obj.avg_lead_yield = (
+                            (old_avg * (scrapes - 1)) + source_leads
+                        ) / scrapes
+
                         # Update gold URLs
                         gold = dict(source_obj.gold_urls or {})
                         now_str = datetime.now(timezone.utc).isoformat()
-                    
 
                         if src.id in url_lead_map:
                             for url, count in url_lead_map[src.id].items():
@@ -1840,12 +1965,16 @@ async def scrape_with_progress(request: Request):
                                 # (listing/hub pages have multiple leads, individual articles don't)
                                 if count < 2 and url not in gold:
                                     continue  # Skip individual article pages
-                                
+
                                 if url in gold:
-                                    gold[url]["leads_found"] = gold[url].get("leads_found", 0) + count
+                                    gold[url]["leads_found"] = (
+                                        gold[url].get("leads_found", 0) + count
+                                    )
                                     gold[url]["last_hit"] = now_str
                                     gold[url]["miss_streak"] = 0
-                                    gold[url]["total_checks"] = gold[url].get("total_checks", 0) + 1
+                                    gold[url]["total_checks"] = (
+                                        gold[url].get("total_checks", 0) + 1
+                                    )
                                 else:
                                     gold[url] = {
                                         "leads_found": count,
@@ -1854,30 +1983,40 @@ async def scrape_with_progress(request: Request):
                                         "miss_streak": 0,
                                         "total_checks": 1,
                                     }
-                        
+
                         # Track misses on existing gold URLs
                         scraped_urls_for_source = [
-                            p["url"] for p in all_pages 
+                            p["url"]
+                            for p in all_pages
                             if p.get("source_name") == src.name
                         ]
                         for url in scraped_urls_for_source:
-                            if url in gold and (src.id not in url_lead_map or url not in url_lead_map.get(src.id, {})):
-                                gold[url]["miss_streak"] = gold[url].get("miss_streak", 0) + 1
-                                gold[url]["total_checks"] = gold[url].get("total_checks", 0) + 1
+                            if url in gold and (
+                                src.id not in url_lead_map
+                                or url not in url_lead_map.get(src.id, {})
+                            ):
+                                gold[url]["miss_streak"] = (
+                                    gold[url].get("miss_streak", 0) + 1
+                                )
+                                gold[url]["total_checks"] = (
+                                    gold[url].get("total_checks", 0) + 1
+                                )
                                 if gold[url]["miss_streak"] >= 3:
-                                    logger.info(f"Gold URL demoted (3 misses): {url[:60]}")
-                        
+                                    logger.info(
+                                        f"Gold URL demoted (3 misses): {url[:60]}"
+                                    )
+
                         source_obj.gold_urls = gold
                         source_obj.last_discovery_at = datetime.now(timezone.utc)
-                    
+
                     await stats_session.commit()
-                
+
                 total_gold = sum(len(urls) for urls in url_lead_map.values())
                 if total_gold > 0:
                     yield f"data: {json.dumps({'type': 'info', 'message': f'Recorded {total_gold} gold URLs across {len(url_lead_map)} sources'})}\n\n"
                 else:
                     yield f"data: {json.dumps({'type': 'info', 'message': 'Source stats updated (no new gold URLs this run)'})}\n\n"
-                    
+
             except Exception as gold_err:
                 logger.error(f"Gold URL tracking error: {gold_err}")
                 yield f"data: {json.dumps({'type': 'info', 'message': f'Warning: Source stats update failed: {str(gold_err)[:50]}'})}\n\n"
@@ -1892,7 +2031,7 @@ async def scrape_with_progress(request: Request):
                 "leads_found": leads_extracted,
                 "leads_saved": leads_saved,
                 "leads_skipped": leads_dupes,
-                "errors": []
+                "errors": [],
             }
 
             yield f"data: {json.dumps({'type': 'complete', 'stats': final_stats, 'duration_seconds': duration})}\n\n"
@@ -1917,8 +2056,8 @@ async def scrape_with_progress(request: Request):
         headers={
             "Cache-Control": "no-cache",
             "Connection": "keep-alive",
-            "X-Accel-Buffering": "no"
-        }
+            "X-Accel-Buffering": "no",
+        },
     )
 
 
@@ -1939,6 +2078,7 @@ async def scrape_with_progress(request: Request):
 
 # --- ENDPOINT 1: Trigger URL extraction ---
 # Paste this after the scrape/stream endpoint block and before scrape/cancel
+
 
 @app.post("/api/dashboard/extract-url", tags=["Dashboard"])
 async def dashboard_extract_url(request: Request):
@@ -1961,7 +2101,7 @@ async def dashboard_extract_url(request: Request):
 
         return {
             "status": "started",
-            "message": f"Extracting leads from URL",
+            "message": "Extracting leads from URL",
             "url": url,
         }
     except Exception as e:
@@ -1970,6 +2110,7 @@ async def dashboard_extract_url(request: Request):
 
 
 # --- ENDPOINT 2: SSE stream for URL extraction progress ---
+
 
 @app.get("/api/dashboard/extract-url/stream", tags=["Dashboard"])
 async def extract_url_stream(request: Request):
@@ -1980,8 +2121,10 @@ async def extract_url_stream(request: Request):
     _pending_extract_url = ""
 
     if not target_url:
+
         async def empty():
             yield f"data: {json.dumps({'type': 'error', 'message': 'No URL pending. Please click Extract again.'})}\n\n"
+
         return StreamingResponse(empty(), media_type="text/event-stream")
 
     async def event_generator():
@@ -1996,6 +2139,7 @@ async def extract_url_stream(request: Request):
             yield f"data: {json.dumps({'type': 'info', 'message': 'Initializing pipeline...'})}\n\n"
 
             from app.services.orchestrator import LeadHunterOrchestrator
+
             orchestrator = LeadHunterOrchestrator(
                 gemini_api_key=os.getenv("GEMINI_API_KEY"),
                 save_to_database=True,
@@ -2015,14 +2159,21 @@ async def extract_url_stream(request: Request):
             page_content = ""
 
             try:
-                scrape_result = await orchestrator.scraping_engine.http_scraper.scrape(target_url)
+                scrape_result = await orchestrator.scraping_engine.http_scraper.scrape(
+                    target_url
+                )
                 if scrape_result and scrape_result.success:
                     page_content = scrape_result.text or scrape_result.html or ""
                     # Safety: if we got raw HTML instead of clean text, strip it
-                    if page_content.strip().startswith('<') and len(page_content) > 30000:
+                    if (
+                        page_content.strip().startswith("<")
+                        and len(page_content) > 30000
+                    ):
                         from bs4 import BeautifulSoup
-                        soup = BeautifulSoup(page_content, 'lxml')
-                        for s in soup(["script", "style", "nav", "footer", "header"]): s.decompose()
+
+                        soup = BeautifulSoup(page_content, "lxml")
+                        for s in soup(["script", "style", "nav", "footer", "header"]):
+                            s.decompose()
                         page_content = soup.get_text(separator="\n", strip=True)
                     yield f"data: {json.dumps({'type': 'source_complete', 'source': 'URL Extract', 'current': 1, 'total': 1, 'pages': 1})}\n\n"
                     yield f"data: {json.dumps({'type': 'info', 'message': f'Page fetched: {len(page_content):,} chars'})}\n\n"
@@ -2035,10 +2186,13 @@ async def extract_url_stream(request: Request):
             if not page_content:
                 try:
                     import httpx
+
                     async with httpx.AsyncClient(
                         timeout=30,
                         follow_redirects=True,
-                        headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
+                        headers={
+                            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+                        },
                     ) as client:
                         resp = await client.get(target_url)
                         if resp.status_code == 200:
@@ -2065,14 +2219,17 @@ async def extract_url_stream(request: Request):
 
             # Extract domain for source name
             from urllib.parse import urlparse
+
             domain = urlparse(target_url).netloc.replace("www.", "")
             source_label = f"URL Extract ({domain})"
 
-            pages_for_pipeline = [{
-                "url": target_url,
-                "content": page_content,
-                "source": source_label,
-            }]
+            pages_for_pipeline = [
+                {
+                    "url": target_url,
+                    "content": page_content,
+                    "source": source_label,
+                }
+            ]
 
             pipeline_result = await orchestrator.pipeline.process_pages(
                 pages_for_pipeline,
@@ -2093,7 +2250,9 @@ async def extract_url_stream(request: Request):
             if orchestrator.deduplicator and pipeline_result.final_leads:
                 yield f"data: {json.dumps({'type': 'info', 'message': 'Phase 3: Deduplication...'})}\n\n"
 
-                leads_for_dedup = [lead.to_dict() for lead in pipeline_result.final_leads]
+                leads_for_dedup = [
+                    lead.to_dict() for lead in pipeline_result.final_leads
+                ]
                 merged_leads = orchestrator.deduplicator.deduplicate(leads_for_dedup)
                 dedup_stats = orchestrator.deduplicator.get_stats()
 
@@ -2117,7 +2276,9 @@ async def extract_url_stream(request: Request):
                         "contact_title": ml.contact_title,
                         "contact_email": ml.contact_email,
                         "contact_phone": ml.contact_phone,
-                        "source_url": ml.source_urls[0] if ml.source_urls else target_url,
+                        "source_url": ml.source_urls[0]
+                        if ml.source_urls
+                        else target_url,
                         "source_name": source_label,
                         "key_insights": getattr(ml, "key_insights", ""),
                         "confidence_score": ml.confidence_score,
@@ -2125,7 +2286,9 @@ async def extract_url_stream(request: Request):
                     }
                     lead_dicts.append(d)
             else:
-                lead_dicts = [lead.to_dict() for lead in (pipeline_result.final_leads or [])]
+                lead_dicts = [
+                    lead.to_dict() for lead in (pipeline_result.final_leads or [])
+                ]
                 # Ensure source_url is set
                 for d in lead_dicts:
                     if not d.get("source_url"):
@@ -2165,6 +2328,7 @@ async def extract_url_stream(request: Request):
         except Exception as e:
             logger.error(f"URL extract stream error: {e}")
             import traceback
+
             traceback.print_exc()
             yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
         finally:
@@ -2175,7 +2339,6 @@ async def extract_url_stream(request: Request):
                     pass
 
     return StreamingResponse(event_generator(), media_type="text/event-stream")
-
 
 
 @app.post("/api/dashboard/scrape/cancel/{scrape_id}", tags=["Dashboard"])

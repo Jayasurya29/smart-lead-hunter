@@ -80,7 +80,6 @@ SOURCES: List[Dict[str, Any]] = [
         "use_playwright": True,  # JS-heavy carousel
         "notes": "New openings carousel page",
     },
-    
     # =========================================================================
     # TIER 2: INDUSTRY PUBLICATIONS (Priority 9-10)
     # =========================================================================
@@ -124,7 +123,6 @@ SOURCES: List[Dict[str, Any]] = [
         "use_playwright": True,
         "notes": "Premium data - some free articles",
     },
-    
     # =========================================================================
     # TIER 3: AGGREGATORS (Priority 10) - Multiple hotels per page
     # =========================================================================
@@ -152,7 +150,6 @@ SOURCES: List[Dict[str, Any]] = [
         "use_playwright": False,
         "notes": "2027 openings - future pipeline",
     },
-    
     # =========================================================================
     # TIER 4: FLORIDA SOURCES (Priority 10) - YOUR CORE MARKET
     # =========================================================================
@@ -180,7 +177,6 @@ SOURCES: List[Dict[str, Any]] = [
         "use_playwright": True,
         "notes": "Tampa Bay - CORE MARKET",
     },
-    
     # =========================================================================
     # TIER 5: CARIBBEAN SOURCES (Priority 9-10)
     # =========================================================================
@@ -208,7 +204,6 @@ SOURCES: List[Dict[str, Any]] = [
         "use_playwright": False,
         "notes": "Sandals & Beaches all-inclusive resorts",
     },
-    
     # =========================================================================
     # TIER 6: TRAVEL PUBLICATIONS (Priority 8-9)
     # =========================================================================
@@ -227,32 +222,31 @@ SOURCES: List[Dict[str, Any]] = [
 # SEED FUNCTION
 # =============================================================================
 
+
 async def seed_sources(force: bool = False):
     """
     Populate database with sources.
-    
+
     Args:
         force: If True, update existing sources. If False, skip existing.
     """
     logger.info("=" * 60)
     logger.info("SMART LEAD HUNTER - SOURCE SEEDING")
     logger.info("=" * 60)
-    
+
     added = 0
     updated = 0
     skipped = 0
-    
+
     async with async_session() as db:
         for source_data in SOURCES:
             name = source_data["name"]
             base_url = source_data["base_url"]
-            
+
             # Check if source exists
-            result = await db.execute(
-                select(Source).where(Source.base_url == base_url)
-            )
+            result = await db.execute(select(Source).where(Source.base_url == base_url))
             existing = result.scalars().first()
-            
+
             if existing:
                 if force:
                     # Update existing
@@ -281,12 +275,12 @@ async def seed_sources(force: bool = False):
                 db.add(source)
                 added += 1
                 logger.info(f"   ✅ Added: {name}")
-        
+
         await db.commit()
-    
+
     logger.info("")
     logger.info("=" * 60)
-    logger.info(f"✅ SEEDING COMPLETE")
+    logger.info("✅ SEEDING COMPLETE")
     logger.info(f"   Added: {added}")
     logger.info(f"   Updated: {updated}")
     logger.info(f"   Skipped: {skipped}")
@@ -301,24 +295,26 @@ async def list_sources():
             select(Source).order_by(Source.priority.desc(), Source.name)
         )
         sources = result.scalars().all()
-        
+
         print("\n" + "=" * 70)
         print("SOURCES IN DATABASE")
         print("=" * 70)
         print(f"\n{'Name':<35} {'Type':<15} {'Pri':<4} {'Health':<10}")
         print("-" * 70)
-        
+
         for s in sources:
             status_icon = {
                 "healthy": "🟢",
-                "degraded": "🟡", 
+                "degraded": "🟡",
                 "failing": "🟠",
                 "dead": "🔴",
-                "new": "⚪"
+                "new": "⚪",
             }.get(s.health_status, "⚪")
-            
-            print(f"{s.name:<35} {s.source_type:<15} {s.priority:<4} {status_icon} {s.health_status}")
-        
+
+            print(
+                f"{s.name:<35} {s.source_type:<15} {s.priority:<4} {status_icon} {s.health_status}"
+            )
+
         print("-" * 70)
         print(f"Total: {len(sources)} sources")
         print("=" * 70)
@@ -329,10 +325,10 @@ async def clear_sources():
     async with async_session() as db:
         result = await db.execute(select(Source))
         sources = result.scalars().all()
-        
+
         for source in sources:
             await db.delete(source)
-        
+
         await db.commit()
         logger.info(f"🗑️ Cleared {len(sources)} sources from database")
 
@@ -341,9 +337,10 @@ async def clear_sources():
 # CLI
 # =============================================================================
 
+
 async def main():
     import sys
-    
+
     if len(sys.argv) < 2:
         print("""
 SMART LEAD HUNTER - SOURCE SEED SCRIPT
@@ -358,23 +355,23 @@ Commands:
 This is a ONE-TIME setup script. After running, manage sources via dashboard.
 """)
         return
-    
+
     command = sys.argv[1]
-    
+
     if command == "seed":
         force = "--force" in sys.argv
         await seed_sources(force=force)
-    
+
     elif command == "list":
         await list_sources()
-    
+
     elif command == "clear":
         confirm = input("⚠️  This will DELETE all sources. Type 'yes' to confirm: ")
         if confirm.lower() == "yes":
             await clear_sources()
         else:
             print("Cancelled.")
-    
+
     else:
         print(f"Unknown command: {command}")
 

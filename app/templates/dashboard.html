@@ -1,158 +1,158 @@
 {% extends "base.html" %}
-
 {% block title %}Dashboard - Smart Lead Hunter{% endblock %}
-
 {% block content %}
 <div class="min-h-screen bg-gray-50 max-w-[1440px] mx-auto">
-    <!-- Stats Bar -->
-    <div id="stats-container"
-         hx-get="/api/dashboard/stats"
-         hx-trigger="load, every 30s"
-         hx-swap="innerHTML">
+    <div id="stats-container" hx-get="/api/dashboard/stats" hx-trigger="load, every 30s" hx-swap="innerHTML">
         <div class="animate-pulse h-20 bg-gray-100 rounded-xl mx-6 mt-4"></div>
     </div>
 
-    <!-- Workflow Tabs -->
     <div class="px-6 mt-4">
         <div class="flex items-center justify-between">
             <nav class="flex space-x-1 bg-white rounded-lg shadow-sm p-1 border border-gray-200">
                 <a href="/dashboard?tab=pipeline{% if request.query_params.get('score') %}&score={{ request.query_params.get('score') }}{% endif %}"
                    class="px-4 py-2 text-sm font-medium rounded-md transition-all duration-200
-                          {% if active_tab == 'pipeline' %}bg-blue-600 text-white shadow{% else %}text-gray-600 hover:text-gray-900 hover:bg-gray-50{% endif %}">
+                          {% if active_tab == 'pipeline' %}bg-brand-800 text-white shadow{% else %}text-gray-600 hover:text-gray-900 hover:bg-gray-50{% endif %}">
                     📥 Pipeline
-                    {% if pipeline_count %}<span class="ml-1.5 px-1.5 py-0.5 text-xs rounded-full {% if active_tab == 'pipeline' %}bg-blue-500 text-white{% else %}bg-gray-200 text-gray-600{% endif %}">{{ pipeline_count }}</span>{% endif %}
+                    {% if pipeline_count %}<span class="ml-1.5 px-1.5 py-0.5 text-xs rounded-full {% if active_tab == 'pipeline' %}bg-brand-700 text-white{% else %}bg-gray-200 text-gray-600{% endif %}">{{ pipeline_count }}</span>{% endif %}
                 </a>
-                <a href="/dashboard?tab=approved{% if request.query_params.get('score') %}&score={{ request.query_params.get('score') }}{% endif %}"
+                <a href="/dashboard?tab=approved"
                    class="px-4 py-2 text-sm font-medium rounded-md transition-all duration-200
                           {% if active_tab == 'approved' %}bg-emerald-600 text-white shadow{% else %}text-gray-600 hover:text-gray-900 hover:bg-gray-50{% endif %}">
                     ✅ Approved
                     {% if approved_count %}<span class="ml-1.5 px-1.5 py-0.5 text-xs rounded-full {% if active_tab == 'approved' %}bg-emerald-500 text-white{% else %}bg-gray-200 text-gray-600{% endif %}">{{ approved_count }}</span>{% endif %}
                 </a>
-                <a href="/dashboard?tab=rejected{% if request.query_params.get('score') %}&score={{ request.query_params.get('score') }}{% endif %}"
+                <a href="/dashboard?tab=rejected"
                    class="px-4 py-2 text-sm font-medium rounded-md transition-all duration-200
                           {% if active_tab == 'rejected' %}bg-red-600 text-white shadow{% else %}text-gray-600 hover:text-gray-900 hover:bg-gray-50{% endif %}">
                     ❌ Rejected
                     {% if rejected_count %}<span class="ml-1.5 px-1.5 py-0.5 text-xs rounded-full {% if active_tab == 'rejected' %}bg-red-500 text-white{% else %}bg-gray-200 text-gray-600{% endif %}">{{ rejected_count }}</span>{% endif %}
                 </a>
             </nav>
-            
-            <div class="flex items-center gap-3">
-                <!-- Original Run Scrape button -->
-                <button onclick="window.dispatchEvent(new CustomEvent('open-scrape-modal'))"
-                        class="inline-flex items-center px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 shadow-sm transition-all">
-                    <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
-                    </svg>
-                    Run Scrape Now
-                </button>
-            </div>
+            <button onclick="window.dispatchEvent(new CustomEvent('open-scrape-modal'))"
+                    class="inline-flex items-center px-4 py-2 bg-brand-800 text-white text-sm font-medium rounded-lg hover:bg-brand-900 shadow-sm transition-all">
+                <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+                </svg>
+                Run Scrape Now
+            </button>
         </div>
     </div>
 
-    <!-- Filter Bar + Content -->
-    <div class="px-6 mt-4 flex gap-6">
-        <!-- Left: Table -->
+    <div class="px-6 mt-4 flex gap-6" x-data="dashboardFilters()">
         <div class="flex-1 min-w-0">
-            <!-- Filters -->
             <div class="bg-white rounded-lg shadow-sm border border-gray-200 p-4 mb-4">
-                <form method="GET" action="/dashboard" class="flex flex-wrap items-end gap-3">
+                <form id="filter-form" method="GET" action="/dashboard" class="flex flex-wrap items-end gap-3">
                     <input type="hidden" name="tab" value="{{ active_tab }}">
-                    <div class="flex-1 min-w-[160px]">
-                        <label class="block text-xs font-medium text-gray-500 mb-1">Search</label>
-                        <input type="text" name="search" value="{{ request.query_params.get('search', '') }}"
-                               placeholder="Hotel, city, brand..."
-                               class="w-full px-3 py-2 text-sm border border-gray-200 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent">
+                    <div class="flex-1 min-w-[200px]">
+                        <label class="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1">Search</label>
+                        <div class="relative">
+                            <svg class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
+                            </svg>
+                            <input type="text" name="search" value="{{ request.query_params.get('search', '') }}"
+                                   placeholder="Hotel name, city, brand..."
+                                   @input.debounce.400ms="submitForm()"
+                                   class="w-full pl-10 pr-3 py-2 text-sm border border-gray-200 rounded-lg focus:ring-2 focus:ring-brand-500 focus:border-transparent bg-gray-50 focus:bg-white transition-colors">
+                        </div>
                     </div>
-                    <div>
-                        <label class="block text-xs font-medium text-gray-500 mb-1">Score</label>
-                        <select name="score" class="px-3 py-2 text-sm border border-gray-200 rounded-md focus:ring-2 focus:ring-blue-500">
+                    <div class="w-[130px]">
+                        <label class="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1">Score</label>
+                        <select name="score" @change="submitForm()" class="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:ring-2 focus:ring-brand-500 bg-gray-50">
                             <option value="">All</option>
                             <option value="hot" {% if request.query_params.get('score') == 'hot' %}selected{% endif %}>🔥 Hot (70+)</option>
                             <option value="warm" {% if request.query_params.get('score') == 'warm' %}selected{% endif %}>⚡ Warm (50-69)</option>
                             <option value="cold" {% if request.query_params.get('score') == 'cold' %}selected{% endif %}>❄️ Cold (&lt;50)</option>
                         </select>
                     </div>
-                    <div>
-                        <label class="block text-xs font-medium text-gray-500 mb-1">Location</label>
-                        <select name="location" class="px-3 py-2 text-sm border border-gray-200 rounded-md focus:ring-2 focus:ring-blue-500">
+                    <div class="w-[130px]">
+                        <label class="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1">Location</label>
+                        <select name="location" @change="submitForm()" class="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:ring-2 focus:ring-brand-500 bg-gray-50">
                             <option value="">All</option>
                             <option value="florida" {% if request.query_params.get('location') == 'florida' %}selected{% endif %}>🌴 Florida</option>
                             <option value="caribbean" {% if request.query_params.get('location') == 'caribbean' %}selected{% endif %}>🏝️ Caribbean</option>
                             <option value="usa" {% if request.query_params.get('location') == 'usa' %}selected{% endif %}>🇺🇸 USA</option>
                         </select>
                     </div>
-                    <div>
-                        <label class="block text-xs font-medium text-gray-500 mb-1">Tier</label>
-                        <select name="tier" class="px-3 py-2 text-sm border border-gray-200 rounded-md focus:ring-2 focus:ring-blue-500">
+                    <div class="w-[150px]">
+                        <label class="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1">Tier</label>
+                        <select name="tier" @change="submitForm()" class="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:ring-2 focus:ring-brand-500 bg-gray-50">
                             <option value="">All Tiers</option>
-                            <option value="tier1_ultra_luxury" {% if request.query_params.get('tier') == 'tier1_ultra_luxury' %}selected{% endif %}>Ultra Luxury</option>
-                            <option value="tier2_luxury" {% if request.query_params.get('tier') == 'tier2_luxury' %}selected{% endif %}>Luxury</option>
-                            <option value="tier3_upper_upscale" {% if request.query_params.get('tier') == 'tier3_upper_upscale' %}selected{% endif %}>Upper Upscale</option>
-                            <option value="tier4_upscale" {% if request.query_params.get('tier') == 'tier4_upscale' %}selected{% endif %}>Upscale</option>
+                            <option value="tier1_ultra_luxury" {% if request.query_params.get('tier') == 'tier1_ultra_luxury' %}selected{% endif %}>✨ Ultra Luxury</option>
+                            <option value="tier2_luxury" {% if request.query_params.get('tier') == 'tier2_luxury' %}selected{% endif %}>💎 Luxury</option>
+                            <option value="tier3_upper_upscale" {% if request.query_params.get('tier') == 'tier3_upper_upscale' %}selected{% endif %}>⭐ Upper Upscale</option>
+                            <option value="tier4_upscale" {% if request.query_params.get('tier') == 'tier4_upscale' %}selected{% endif %}>🏨 Upscale</option>
                         </select>
                     </div>
-                    <div class="flex gap-2">
-                        <button type="submit"
-                                class="px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-md hover:bg-blue-700 transition-colors">
-                            Filter
-                        </button>
-                        <a href="/dashboard?tab={{ active_tab }}"
-                           class="px-4 py-2 bg-gray-100 text-gray-600 text-sm font-medium rounded-md hover:bg-gray-200 transition-colors">
-                            Reset
-                        </a>
+                    <div class="w-[110px]">
+                        <label class="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1">Opening</label>
+                        <select name="opening_year" @change="submitForm()" class="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:ring-2 focus:ring-brand-500 bg-gray-50">
+                            <option value="">All Years</option>
+                            <option value="2025" {% if request.query_params.get('opening_year') == '2025' %}selected{% endif %}>2025</option>
+                            <option value="2026" {% if request.query_params.get('opening_year') == '2026' %}selected{% endif %}>2026</option>
+                            <option value="2027" {% if request.query_params.get('opening_year') == '2027' %}selected{% endif %}>2027</option>
+                            <option value="2028" {% if request.query_params.get('opening_year') == '2028' %}selected{% endif %}>2028+</option>
+                        </select>
                     </div>
+                    <div class="w-[140px]">
+                        <label class="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1">Sort By</label>
+                        <select name="sort" @change="submitForm()" class="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:ring-2 focus:ring-brand-500 bg-gray-50">
+                            <option value="score_desc" {% if request.query_params.get('sort', 'score_desc') == 'score_desc' %}selected{% endif %}>Score ↓</option>
+                            <option value="score_asc" {% if request.query_params.get('sort') == 'score_asc' %}selected{% endif %}>Score ↑</option>
+                            <option value="newest" {% if request.query_params.get('sort') == 'newest' %}selected{% endif %}>Newest First</option>
+                            <option value="oldest" {% if request.query_params.get('sort') == 'oldest' %}selected{% endif %}>Oldest First</option>
+                            <option value="name_asc" {% if request.query_params.get('sort') == 'name_asc' %}selected{% endif %}>Name A-Z</option>
+                            <option value="opening" {% if request.query_params.get('sort') == 'opening' %}selected{% endif %}>Opening Date</option>
+                        </select>
+                    </div>
+                    <a href="/dashboard?tab={{ active_tab }}" class="px-3 py-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition-colors" title="Reset filters">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+                        </svg>
+                    </a>
                 </form>
             </div>
 
-            <!-- Lead Table -->
             <div class="bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden">
-                <div class="px-4 py-3 border-b border-gray-100">
-                    <span class="text-sm font-semibold text-gray-700">
-                        {% if active_tab == 'pipeline' %}📥 Pipeline{% elif active_tab == 'approved' %}✅ Approved{% else %}❌ Rejected{% endif %}
-                    </span>
-                    <span class="text-sm text-gray-400 ml-2">({{ leads|length }} total)</span>
+                <div class="px-4 py-3 border-b border-gray-100 flex items-center justify-between">
+                    <div>
+                        <span class="text-sm font-bold text-gray-800">
+                            {% if active_tab == 'pipeline' %}📥 Pipeline{% elif active_tab == 'approved' %}✅ Approved{% else %}❌ Rejected{% endif %}
+                        </span>
+                        <span class="text-xs text-gray-400 ml-2">({{ leads|length }} total)</span>
+                    </div>
+                    {% if leads|length > 0 %}<span class="text-xs text-gray-400">Click row for details</span>{% endif %}
                 </div>
                 <div id="leads-table" class="overflow-x-auto">
                     <table class="min-w-full divide-y divide-gray-100">
                         <thead class="bg-gray-50">
                             <tr>
-                                <th class="px-3 py-2.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider w-16">Score</th>
-                                <th class="px-3 py-2.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Hotel</th>
-                                <th class="px-3 py-2.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Location</th>
-                                <th class="px-3 py-2.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider w-28">Opening</th>
+                                <th class="px-3 py-2.5 text-left text-xs font-bold text-gray-500 uppercase tracking-wider w-16">Score</th>
+                                <th class="px-3 py-2.5 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">Hotel</th>
+                                <th class="px-3 py-2.5 text-left text-xs font-bold text-gray-500 uppercase tracking-wider w-24">Tier</th>
+                                <th class="px-3 py-2.5 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">Location</th>
+                                <th class="px-3 py-2.5 text-left text-xs font-bold text-gray-500 uppercase tracking-wider w-28">Opening</th>
                                 {% if active_tab == 'pipeline' %}
-                                <th class="px-3 py-2.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider w-16">Sources</th>
+                                <th class="px-3 py-2.5 text-left text-xs font-bold text-gray-500 uppercase tracking-wider w-16">Src</th>
                                 {% endif %}
-                                <th class="px-3 py-2.5 text-center text-xs font-semibold text-gray-500 uppercase tracking-wider w-24">Actions</th>
+                                <th class="px-3 py-2.5 text-center text-xs font-bold text-gray-500 uppercase tracking-wider w-24">Actions</th>
                             </tr>
                         </thead>
                         <tbody class="divide-y divide-gray-50">
-                            {% for lead in leads %}
-                            {% include "partials/lead_row.html" %}
-                            {% else %}
-                            <tr>
-                                <td colspan="6" class="px-6 py-12 text-center text-gray-400">
-                                    <svg class="mx-auto h-10 w-10 text-gray-300 mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"/>
-                                    </svg>
-                                    <p class="text-sm">No leads in this tab yet</p>
-                                </td>
-                            </tr>
-                            {% endfor %}
+                            {% for lead in leads %}{% include "partials/lead_row.html" %}{% else %}
+                            <tr><td colspan="7" class="px-6 py-12 text-center text-gray-400">
+                                <p class="text-sm font-medium">No leads found</p>
+                                <p class="text-xs mt-1">Try adjusting your filters or run a new scrape</p>
+                            </td></tr>{% endfor %}
                         </tbody>
                     </table>
                 </div>
-
-                <!-- Pagination -->
                 {% if total_pages and total_pages > 1 %}
-                <div class="px-4 py-3 border-t border-gray-100 flex items-center justify-between">
+                <div class="px-4 py-3 border-t border-gray-100 flex items-center justify-between bg-gray-50">
                     <span class="text-xs text-gray-500">Page {{ current_page }} of {{ total_pages }}</span>
                     <div class="flex gap-1">
                         {% for p in range(1, total_pages + 1) %}
-                        <a href="/dashboard?tab={{ active_tab }}&page={{ p }}{% if request.query_params.get('search') %}&search={{ request.query_params.get('search') }}{% endif %}{% if request.query_params.get('score') %}&score={{ request.query_params.get('score') }}{% endif %}"
-                           class="px-2.5 py-1 text-xs rounded {% if p == current_page %}bg-blue-600 text-white{% else %}bg-gray-100 text-gray-600 hover:bg-gray-200{% endif %}">
-                            {{ p }}
-                        </a>
+                        <a href="/dashboard?tab={{ active_tab }}&page={{ p }}{% if request.query_params.get('search') %}&search={{ request.query_params.get('search') }}{% endif %}{% if request.query_params.get('score') %}&score={{ request.query_params.get('score') }}{% endif %}{% if request.query_params.get('location') %}&location={{ request.query_params.get('location') }}{% endif %}{% if request.query_params.get('tier') %}&tier={{ request.query_params.get('tier') }}{% endif %}{% if request.query_params.get('opening_year') %}&opening_year={{ request.query_params.get('opening_year') }}{% endif %}{% if request.query_params.get('sort') %}&sort={{ request.query_params.get('sort') }}{% endif %}"
+                           class="px-2.5 py-1 text-xs rounded {% if p == current_page %}bg-brand-800 text-white{% else %}bg-gray-100 text-gray-600 hover:bg-gray-200{% endif %}">{{ p }}</a>
                         {% endfor %}
                     </div>
                 </div>
@@ -160,38 +160,33 @@
             </div>
         </div>
 
-        <!-- Right: Detail Panel -->
-        <div class="w-[400px] flex-shrink-0">
-            <div id="detail-panel" class="sticky top-6">
+        <div class="w-[420px] flex-shrink-0">
+            <div id="detail-panel" class="sticky top-4">
                 <div class="bg-white rounded-lg shadow-sm border border-gray-200 p-8 text-center">
                     <svg class="mx-auto h-10 w-10 text-gray-300 mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
                     </svg>
                     <p class="text-sm font-medium text-gray-500">Select a lead to view details</p>
+                    <p class="text-xs text-gray-400 mt-1">Click any row in the table</p>
                 </div>
             </div>
         </div>
     </div>
 </div>
-
-<!-- Scrape Modal -->
 {% include "partials/scrape_modal.html" %}
-
 <script>
-    // Pagination — preserve filter params
-    document.addEventListener('click', function(e) {
-        const link = e.target.closest('a[href*="page="]');
-        if (!link) return;
-        // Links already include all params from the template
-    });
-
-    // Highlight active row
-    document.addEventListener('htmx:afterSwap', function(e) {
-        if (e.detail.target.id === 'detail-panel') {
-            document.querySelectorAll('tr[data-lead-row]').forEach(r => r.classList.remove('bg-blue-50'));
-            const trigger = e.detail.requestConfig?.elt;
-            if (trigger) trigger.classList.add('bg-blue-50');
-        }
-    });
+function dashboardFilters() {
+    return {
+        submitForm() { document.getElementById('filter-form').submit(); },
+        clearSearch() { document.querySelector('input[name="search"]').value = ''; this.submitForm(); }
+    }
+}
+document.addEventListener('htmx:afterSwap', function(e) {
+    if (e.detail.target.id === 'detail-panel') {
+        document.querySelectorAll('tr[data-lead-row]').forEach(r => r.classList.remove('active'));
+        const trigger = e.detail.requestConfig?.elt;
+        if (trigger) trigger.classList.add('active');
+    }
+});
 </script>
 {% endblock %}

@@ -38,6 +38,7 @@ logger = logging.getLogger(__name__)
 # Try imports
 try:
     from app.services.source_learning import SourceLearningSystem
+
     LEARNING_AVAILABLE = True
 except ImportError:
     LEARNING_AVAILABLE = False
@@ -46,16 +47,16 @@ try:
     from app.services.intelligent_pipeline import (
         IntelligentPipeline,
         PipelineConfig,
-        PipelineResult,
-        ExtractedLead,
     )
+
     PIPELINE_AVAILABLE = True
 except ImportError:
     PIPELINE_AVAILABLE = False
     logger.warning("Intelligent pipeline not available")
 
 try:
-    from app.services.smart_deduplicator import SmartDeduplicator, MergedLead
+    from app.services.smart_deduplicator import SmartDeduplicator
+
     SMART_DEDUP_AVAILABLE = True
 except ImportError:
     SMART_DEDUP_AVAILABLE = False
@@ -64,9 +65,10 @@ except ImportError:
 @dataclass
 class PipelineStats:
     """Statistics from a pipeline run"""
+
     start_time: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     end_time: Optional[datetime] = None
-    
+
     sources_attempted: int = 0
     sources_successful: int = 0
     pages_scraped: int = 0
@@ -75,20 +77,22 @@ class PipelineStats:
     leads_after_dedup: int = 0
     leads_saved: int = 0
     leads_skipped_duplicates: int = 0
-    
+
     high_quality_leads: int = 0
     medium_quality_leads: int = 0
     low_quality_leads: int = 0
-    
+
     leads_with_email: int = 0
     leads_with_phone: int = 0
     leads_with_contact_name: int = 0
-    
+
     def to_dict(self) -> Dict[str, Any]:
         return {
             "start_time": self.start_time.isoformat(),
             "end_time": self.end_time.isoformat() if self.end_time else None,
-            "duration_seconds": (self.end_time - self.start_time).total_seconds() if self.end_time else None,
+            "duration_seconds": (self.end_time - self.start_time).total_seconds()
+            if self.end_time
+            else None,
             "sources_attempted": self.sources_attempted,
             "sources_successful": self.sources_successful,
             "pages_scraped": self.pages_scraped,
@@ -106,13 +110,13 @@ class PipelineStats:
 class LeadHunterOrchestrator:
     """
     Master orchestrator for Smart Lead Hunter.
-    
+
     Usage:
         orchestrator = LeadHunterOrchestrator()
         await orchestrator.initialize()
         leads = await orchestrator.run()
     """
-    
+
     def __init__(
         self,
         gemini_api_key: Optional[str] = None,
@@ -126,33 +130,34 @@ class LeadHunterOrchestrator:
         self.output_dir = Path(output_dir)
         self.max_concurrent_scrapes = max_concurrent_scrapes
         self.save_to_database = save_to_database
-        
+
         self.scraping_engine = None
         self.pipeline = None
         self.deduplicator = None
         self.learning_system = None
-        
+
         self.stats = PipelineStats()
         self._initialized = False
-    
+
     async def initialize(self):
         """Initialize all components"""
         if self._initialized:
             return
-        
+
         logger.info("🚀 Initializing Smart Lead Hunter...")
         self.output_dir.mkdir(parents=True, exist_ok=True)
-        
+
         # Scraping engine
         try:
             from app.services.scraping_engine import ScrapingEngine
+
             self.scraping_engine = ScrapingEngine()
             await self.scraping_engine.initialize()
             logger.info("✅ Scraping engine initialized")
         except Exception as e:
             logger.error(f"❌ Scraping engine failed: {e}")
             raise
-        
+
         # Unified pipeline
         if PIPELINE_AVAILABLE:
             config = PipelineConfig(gemini_api_key=self.gemini_api_key or "")
@@ -160,14 +165,14 @@ class LeadHunterOrchestrator:
             logger.info("✅ Intelligent pipeline initialized")
         else:
             raise RuntimeError("Intelligent pipeline not available")
-        
+
         # Deduplicator
         if SMART_DEDUP_AVAILABLE:
             self.deduplicator = SmartDeduplicator(threshold=0.75)
             logger.info("✅ Smart deduplicator initialized")
         else:
             logger.warning("⚠️ Smart deduplicator not available")
-        
+
         # Learning system
         if LEARNING_AVAILABLE:
             try:
@@ -177,10 +182,10 @@ class LeadHunterOrchestrator:
                 logger.warning(f"⚠️ Learning system not available: {e}")
         else:
             self.learning_system = None
-        
+
         self._initialized = True
         logger.info("✅ Smart Lead Hunter ready!")
-    
+
     async def run(
         self,
         source_names: Optional[List[str]] = None,
@@ -189,36 +194,39 @@ class LeadHunterOrchestrator:
     ) -> List[Dict[str, Any]]:
         """
         Run the full pipeline.
-        
+
         Args:
             source_names: Specific sources (None = all high priority)
             priority_threshold: Minimum priority (default 8)
             deep_crawl: Follow links
-            
+
         Returns:
             List of lead dictionaries
         """
         if not self._initialized:
             await self.initialize()
-        
+
         self.stats = PipelineStats()
         logger.info("=" * 60)
         logger.info("STARTING LEAD DISCOVERY PIPELINE")
         logger.info("=" * 60)
-        
+
         # PHASE 1: SCRAPING
         logger.info("\n📡 PHASE 1: SCRAPING...")
-        
+
         if source_names:
             scrape_results = await self.scraping_engine.scrape_sources(
-                source_names, deep=deep_crawl, max_concurrent=self.max_concurrent_scrapes
+                source_names,
+                deep=deep_crawl,
+                max_concurrent=self.max_concurrent_scrapes,
             )
         else:
             scrape_results = await self.scraping_engine.scrape_all_sources(
-                deep=deep_crawl, max_concurrent=self.max_concurrent_scrapes,
-                priority_threshold=priority_threshold
+                deep=deep_crawl,
+                max_concurrent=self.max_concurrent_scrapes,
+                priority_threshold=priority_threshold,
             )
-        
+
         # Collect pages
         all_pages = []
         for source_name, results in scrape_results.items():
@@ -227,141 +235,149 @@ class LeadHunterOrchestrator:
             if successful:
                 self.stats.sources_successful += 1
             self.stats.pages_scraped += len(successful)
-            
+
             for result in successful:
-                all_pages.append({
-                    "source_name": source_name,
-                    "url": result.url,
-                    "content": result.text or result.html or "",
-                })
-        
-        logger.info(f"✅ Scraped {self.stats.pages_scraped} pages from {self.stats.sources_successful} sources")
-        
+                all_pages.append(
+                    {
+                        "source_name": source_name,
+                        "url": result.url,
+                        "content": result.text or result.html or "",
+                    }
+                )
+
+        logger.info(
+            f"✅ Scraped {self.stats.pages_scraped} pages from {self.stats.sources_successful} sources"
+        )
+
         # PHASE 2: EXTRACTION (using unified pipeline)
         logger.info("\n🧠 PHASE 2: INTELLIGENT EXTRACTION...")
-        
+
         pages_for_pipeline = [
-            {'url': p['url'], 'content': p['content'], 'source': p['source_name']}
+            {"url": p["url"], "content": p["content"], "source": p["source_name"]}
             for p in all_pages
         ]
-        
+
         pipeline_result = await self.pipeline.process_pages(
             pages_for_pipeline,
-            source_name=source_names[0] if source_names and len(source_names) == 1 else "Multiple"
+            source_name=source_names[0]
+            if source_names and len(source_names) == 1
+            else "Multiple",
         )
-        
+
         self.stats.pages_processed = pipeline_result.pages_classified
         self.stats.leads_extracted = pipeline_result.leads_extracted
-        
+
         # PHASE 3: DEDUPLICATION
         logger.info("\n🔄 PHASE 3: DEDUPLICATION...")
-        
+
         if self.deduplicator and SMART_DEDUP_AVAILABLE:
             leads_for_dedup = [lead.to_dict() for lead in pipeline_result.final_leads]
             merged_leads = self.deduplicator.deduplicate(leads_for_dedup)
-            
+
             # M-05 FIX: Work with dicts directly instead of converting
             # MergedLead back to ExtractedLead. The old conversion lost fields
             # like priority, revenue_estimates, contact_relevance, and
             # estimated_value that exist on MergedLead but not ExtractedLead.
             unique_lead_dicts = []
             for lead in merged_leads:
-                lead_dict = lead.to_dict() if hasattr(lead, 'to_dict') else vars(lead)
-                
+                lead_dict = lead.to_dict() if hasattr(lead, "to_dict") else vars(lead)
+
                 # Ensure source_url/source_name are set from merged lists
-                if not lead_dict.get('source_url') and lead.source_urls:
-                    lead_dict['source_url'] = lead.source_urls[0]
-                if not lead_dict.get('source_name') and lead.source_names:
-                    lead_dict['source_name'] = lead.source_names[0]
-                
+                if not lead_dict.get("source_url") and lead.source_urls:
+                    lead_dict["source_url"] = lead.source_urls[0]
+                if not lead_dict.get("source_name") and lead.source_names:
+                    lead_dict["source_name"] = lead.source_names[0]
+
                 # Add merge note to insights
                 if lead.merged_from_count > 1:
                     merge_note = f"\n\n📎 Merged from {lead.merged_from_count} sources"
-                    lead_dict['key_insights'] = (lead_dict.get('key_insights') or '') + merge_note
-                
+                    lead_dict["key_insights"] = (
+                        lead_dict.get("key_insights") or ""
+                    ) + merge_note
+
                 unique_lead_dicts.append(lead_dict)
-            
+
             dedup_stats = self.deduplicator.get_stats()
             logger.info(f"   ✅ {dedup_stats['duplicates_found']} duplicates merged")
             logger.info(f"   📊 {len(unique_lead_dicts)} unique leads")
         else:
             unique_lead_dicts = [lead.to_dict() for lead in pipeline_result.final_leads]
-        
+
         self.stats.leads_after_dedup = len(unique_lead_dicts)
-        
+
         # Count quality levels
         for ld in unique_lead_dicts:
-            score = ld.get('qualification_score', 0)
+            score = ld.get("qualification_score", 0)
             if score >= 70:
                 self.stats.high_quality_leads += 1
             elif score >= 40:
                 self.stats.medium_quality_leads += 1
             else:
                 self.stats.low_quality_leads += 1
-            
-            if ld.get('contact_email'):
+
+            if ld.get("contact_email"):
                 self.stats.leads_with_email += 1
-            if ld.get('contact_phone'):
+            if ld.get("contact_phone"):
                 self.stats.leads_with_phone += 1
-            if ld.get('contact_name'):
+            if ld.get("contact_name"):
                 self.stats.leads_with_contact_name += 1
-        
+
         self.stats.end_time = datetime.now()
-        
+
         # Record learnings
         if LEARNING_AVAILABLE:
             self._record_learnings(scrape_results, unique_lead_dicts)
-        
+
         # Sort by score (already dicts — no redundant conversion)
         lead_dicts = unique_lead_dicts
         lead_dicts.sort(key=lambda x: -x.get("qualification_score", 0))
-        
+
         # PHASE 4: SAVE TO DATABASE
         if self.save_to_database:
             db_result = await self.save_leads_to_database(lead_dicts)
-            self.stats.leads_saved = db_result['saved']
-            self.stats.leads_skipped_duplicates = db_result['duplicates']
-        
+            self.stats.leads_saved = db_result["saved"]
+            self.stats.leads_skipped_duplicates = db_result["duplicates"]
+
         logger.info("\n" + "=" * 60)
         logger.info("PIPELINE COMPLETE")
         logger.info("=" * 60)
         self._print_summary()
-        
+
         return lead_dicts
-    
+
     async def save_leads_to_database(self, leads: list) -> dict:
         """Save leads to database with per-lead savepoints.
-        
+
         H-04 FIX: Each lead is wrapped in a savepoint (nested transaction)
         so a single bad lead can't roll back the entire batch. Previously,
         one exception during db.add() could corrupt the session and cause
         the final db.commit() to lose all leads.
         """
         logger.info(f"\n💾 SAVING {len(leads)} LEADS TO DATABASE...")
-        
+
         saved = 0
         duplicates = 0
         errors = 0
-        
+
         def extract_year(opening_date: str) -> int:
             if not opening_date:
                 return None
-            match = re.search(r'20\d{2}', str(opening_date))
+            match = re.search(r"20\d{2}", str(opening_date))
             return int(match.group()) if match else None
-        
+
         async with async_session() as db:
             for lead_dict in leads:
                 # H-04: Savepoint per lead — if this lead errors, rollback
                 # only this lead, not the whole batch.
                 async with db.begin_nested():
                     try:
-                        hotel_name = (lead_dict.get('hotel_name') or '').strip()
+                        hotel_name = (lead_dict.get("hotel_name") or "").strip()
                         if not hotel_name:
                             errors += 1
                             continue
-                        
+
                         normalized = normalize_hotel_name(hotel_name)
-                        
+
                         # Check for existing
                         result = await db.execute(
                             select(PotentialLead).where(
@@ -374,20 +390,21 @@ class LeadHunterOrchestrator:
                             # ENRICHMENT: Update existing lead with better/new info
                             enriched = False
                             enrichment_fields = {
-                                'brand': lead_dict.get('brand'),
-                                'city': lead_dict.get('city'),
-                                'state': lead_dict.get('state'),
-                                'country': lead_dict.get('country'),
-                                'opening_date': lead_dict.get('opening_date'),
-                                'room_count': lead_dict.get('room_count'),
-                                'contact_name': lead_dict.get('contact_name'),
-                                'contact_title': lead_dict.get('contact_title'),
-                                'contact_email': lead_dict.get('contact_email'),
-                                'contact_phone': lead_dict.get('contact_phone'),
-                                'description': lead_dict.get('key_insights'),
-                                'hotel_type': lead_dict.get('property_type') or lead_dict.get('hotel_type'),
+                                "brand": lead_dict.get("brand"),
+                                "city": lead_dict.get("city"),
+                                "state": lead_dict.get("state"),
+                                "country": lead_dict.get("country"),
+                                "opening_date": lead_dict.get("opening_date"),
+                                "room_count": lead_dict.get("room_count"),
+                                "contact_name": lead_dict.get("contact_name"),
+                                "contact_title": lead_dict.get("contact_title"),
+                                "contact_email": lead_dict.get("contact_email"),
+                                "contact_phone": lead_dict.get("contact_phone"),
+                                "description": lead_dict.get("key_insights"),
+                                "hotel_type": lead_dict.get("property_type")
+                                or lead_dict.get("hotel_type"),
                             }
-                            
+
                             for field, new_val in enrichment_fields.items():
                                 if not new_val:
                                     continue
@@ -397,139 +414,184 @@ class LeadHunterOrchestrator:
                                     setattr(existing, field, new_val)
                                     enriched = True
                                 # Update if new value is longer/more detailed
-                                elif field == 'description' and old_val and new_val and len(str(new_val)) > len(str(old_val)):
+                                elif (
+                                    field == "description"
+                                    and old_val
+                                    and new_val
+                                    and len(str(new_val)) > len(str(old_val))
+                                ):
                                     setattr(existing, field, new_val)
                                     enriched = True
-                            
 
                             # Add new source URL + what it contributed
-                            new_source_url = lead_dict.get('source_url')
+                            new_source_url = lead_dict.get("source_url")
                             if new_source_url:
                                 existing_urls = existing.source_urls or []
                                 if new_source_url not in existing_urls:
-                                    existing.source_urls = existing_urls + [new_source_url]
+                                    existing.source_urls = existing_urls + [
+                                        new_source_url
+                                    ]
                                     enriched = True
-                                
+
                                 # Track what this source extracted
                                 extractions = dict(existing.source_extractions or {})
                                 if new_source_url not in extractions:
                                     extractions[new_source_url] = {
-                                        k: v for k, v in {
-                                            'hotel_name': lead_dict.get('hotel_name'),
-                                            'brand': lead_dict.get('brand'),
-                                            'city': lead_dict.get('city'),
-                                            'state': lead_dict.get('state'),
-                                            'country': lead_dict.get('country'),
-                                            'opening_date': lead_dict.get('opening_date'),
-                                            'room_count': lead_dict.get('room_count'),
-                                            'contact_name': lead_dict.get('contact_name'),
-                                            'contact_email': lead_dict.get('contact_email'),
-                                            'contact_phone': lead_dict.get('contact_phone'),
-                                            'key_insights': lead_dict.get('key_insights'),
-                                            'source_name': lead_dict.get('source_name'),
-                                        }.items() if v
+                                        k: v
+                                        for k, v in {
+                                            "hotel_name": lead_dict.get("hotel_name"),
+                                            "brand": lead_dict.get("brand"),
+                                            "city": lead_dict.get("city"),
+                                            "state": lead_dict.get("state"),
+                                            "country": lead_dict.get("country"),
+                                            "opening_date": lead_dict.get(
+                                                "opening_date"
+                                            ),
+                                            "room_count": lead_dict.get("room_count"),
+                                            "contact_name": lead_dict.get(
+                                                "contact_name"
+                                            ),
+                                            "contact_email": lead_dict.get(
+                                                "contact_email"
+                                            ),
+                                            "contact_phone": lead_dict.get(
+                                                "contact_phone"
+                                            ),
+                                            "key_insights": lead_dict.get(
+                                                "key_insights"
+                                            ),
+                                            "source_name": lead_dict.get("source_name"),
+                                        }.items()
+                                        if v
                                     }
                                     existing.source_extractions = extractions
                                     enriched = True
-                            
+
                             if enriched:
                                 existing.updated_at = datetime.now(timezone.utc)
                                 logger.info(f"   📝 Enriched: {hotel_name}")
-                            
+
                             duplicates += 1
                             continue
-                        
+
                         # M-04 FIX: Use pipeline's qualification_score when
                         # available instead of re-scoring from scratch.
                         # Still call calculate_lead_score() for metadata
                         # (brand_tier, location_type, opening_year, should_save).
                         score_result = calculate_lead_score(
                             hotel_name=hotel_name,
-                            city=lead_dict.get('city'),
-                            state=lead_dict.get('state'),
-                            country=lead_dict.get('country', 'USA'),
-                            opening_date=lead_dict.get('opening_date'),
-                            room_count=lead_dict.get('room_count'),
-                            contact_name=lead_dict.get('contact_name'),
-                            contact_email=lead_dict.get('contact_email'),
-                            contact_phone=lead_dict.get('contact_phone'),
-                            brand=lead_dict.get('brand'),
+                            city=lead_dict.get("city"),
+                            state=lead_dict.get("state"),
+                            country=lead_dict.get("country", "USA"),
+                            opening_date=lead_dict.get("opening_date"),
+                            room_count=lead_dict.get("room_count"),
+                            contact_name=lead_dict.get("contact_name"),
+                            contact_email=lead_dict.get("contact_email"),
+                            contact_phone=lead_dict.get("contact_phone"),
+                            brand=lead_dict.get("brand"),
                         )
-                        
-                        if not score_result['should_save']:
-                            logger.info(f"   ⏭️ Skipped: {hotel_name} - {score_result['skip_reason']}")
+
+                        if not score_result["should_save"]:
+                            logger.info(
+                                f"   ⏭️ Skipped: {hotel_name} - {score_result['skip_reason']}"
+                            )
                             duplicates += 1
                             continue
-                        
+
                         # M-04: Prefer pipeline score over re-calculated score
-                        pipeline_score = lead_dict.get('qualification_score')
-                        final_score = pipeline_score if pipeline_score else score_result['total_score']
-                        
+                        pipeline_score = lead_dict.get("qualification_score")
+                        final_score = (
+                            pipeline_score
+                            if pipeline_score
+                            else score_result["total_score"]
+                        )
+
                         # Create lead
                         room_count = None
                         try:
-                            room_count = int(float(lead_dict.get('room_count', 0) or 0))
+                            room_count = int(float(lead_dict.get("room_count", 0) or 0))
                             if room_count == 0:
                                 room_count = None
                         except (ValueError, TypeError):
                             pass
-                        
+
                         lead = PotentialLead(
                             hotel_name=hotel_name,
                             hotel_name_normalized=normalized,
-                            brand=lead_dict.get('brand') or None,
-                            brand_tier=score_result.get('brand_tier'),
-                            hotel_type=lead_dict.get('property_type') or lead_dict.get('hotel_type'),
-                            city=lead_dict.get('city'),
-                            state=lead_dict.get('state'),
-                            country=lead_dict.get('country', 'USA'),
-                            location_type=score_result.get('location_type'),
-                            opening_date=lead_dict.get('opening_date'),
-                            opening_year=score_result.get('opening_year') or extract_year(lead_dict.get('opening_date')),
+                            brand=lead_dict.get("brand") or None,
+                            brand_tier=score_result.get("brand_tier"),
+                            hotel_type=lead_dict.get("property_type")
+                            or lead_dict.get("hotel_type"),
+                            city=lead_dict.get("city"),
+                            state=lead_dict.get("state"),
+                            country=lead_dict.get("country", "USA"),
+                            location_type=score_result.get("location_type"),
+                            opening_date=lead_dict.get("opening_date"),
+                            opening_year=score_result.get("opening_year")
+                            or extract_year(lead_dict.get("opening_date")),
                             room_count=room_count,
-                            contact_name=lead_dict.get('contact_name'),
-                            contact_title=lead_dict.get('contact_title'),
-                            contact_email=lead_dict.get('contact_email'),
-                            contact_phone=lead_dict.get('contact_phone'),
-                            description=lead_dict.get('key_insights'),
-                            source_url=lead_dict.get('source_url'),
-                            source_site=lead_dict.get('source_name'),
+                            contact_name=lead_dict.get("contact_name"),
+                            contact_title=lead_dict.get("contact_title"),
+                            contact_email=lead_dict.get("contact_email"),
+                            contact_phone=lead_dict.get("contact_phone"),
+                            description=lead_dict.get("key_insights"),
+                            source_url=lead_dict.get("source_url"),
+                            source_site=lead_dict.get("source_name"),
                             lead_score=final_score,
-                            score_breakdown=score_result['breakdown'],
-                            status='new',
+                            score_breakdown=score_result["breakdown"],
+                            status="new",
                             scraped_at=datetime.now(timezone.utc),
                             created_at=datetime.now(timezone.utc),
                         )
-                        
+
                         db.add(lead)
                         saved += 1
-                        
-                        quality = "🔴 HOT" if final_score >= 70 else "🟠 WARM" if final_score >= 50 else "🔵 COOL"
+
+                        quality = (
+                            "🔴 HOT"
+                            if final_score >= 70
+                            else "🟠 WARM"
+                            if final_score >= 50
+                            else "🔵 COOL"
+                        )
                         logger.info(f"   {quality} [{final_score}] {hotel_name}")
-                        
+
                     except Exception as e:
-                        logger.error(f"   ❌ Error: {lead_dict.get('hotel_name', 'unknown')}: {e}")
+                        logger.error(
+                            f"   ❌ Error: {lead_dict.get('hotel_name', 'unknown')}: {e}"
+                        )
                         errors += 1
                         # Savepoint auto-rolls back on exception — other leads safe
-            
+
             # Commit all successful savepoints at once
             await db.commit()
-        
-        logger.info(f"\n✅ SAVED: {saved} | Duplicates: {duplicates} | Errors: {errors}")
-        return {'saved': saved, 'duplicates': duplicates, 'errors': errors}
-    
+
+        logger.info(
+            f"\n✅ SAVED: {saved} | Duplicates: {duplicates} | Errors: {errors}"
+        )
+        return {"saved": saved, "duplicates": duplicates, "errors": errors}
+
     def _print_summary(self):
         """Print summary"""
         s = self.stats
         if s.end_time and s.start_time:
             # Ensure both are timezone-aware or both naive
             from datetime import timezone
-            end = s.end_time if s.end_time.tzinfo else s.end_time.replace(tzinfo=timezone.utc)
-            start = s.start_time if s.start_time.tzinfo else s.start_time.replace(tzinfo=timezone.utc)
+
+            end = (
+                s.end_time
+                if s.end_time.tzinfo
+                else s.end_time.replace(tzinfo=timezone.utc)
+            )
+            start = (
+                s.start_time
+                if s.start_time.tzinfo
+                else s.start_time.replace(tzinfo=timezone.utc)
+            )
             duration = (end - start).total_seconds()
         else:
             duration = 0
-        
+
         print(f"""
 📊 PIPELINE SUMMARY
 ────────────────────────────────────────
@@ -544,56 +606,62 @@ class LeadHunterOrchestrator:
 ────────────────────────────────────────
 🎉 Leads available in dashboard!
 """)
-    
+
     def _record_learnings(self, scrape_results: Dict, leads: List):
         """Record learnings about which URLs produced leads."""
         if not LEARNING_AVAILABLE or not self.learning_system:
             return
-        
+
         try:
             # Build map of URL -> leads
             url_to_leads = {}
             for lead in leads:
-                source_url = lead.source_url if hasattr(lead, 'source_url') else lead.get('source_url', '')
+                source_url = (
+                    lead.source_url
+                    if hasattr(lead, "source_url")
+                    else lead.get("source_url", "")
+                )
                 if source_url:
                     if source_url not in url_to_leads:
                         url_to_leads[source_url] = []
                     url_to_leads[source_url].append(lead)
-            
+
             # Record each URL's result
             for source_name, results in scrape_results.items():
                 for result in results:
                     if not result.success:
                         continue
-                    
+
                     url = result.url
                     leads_from_url = url_to_leads.get(url, [])
                     produced_lead = len(leads_from_url) > 0
-                    
+
                     # Calculate lead quality
                     lead_quality = None
                     lead_location = None
-                    
+
                     if leads_from_url:
                         # Get average confidence
                         qualities = []
                         for lead in leads_from_url:
-                            if hasattr(lead, 'confidence_score'):
+                            if hasattr(lead, "confidence_score"):
                                 qualities.append(lead.confidence_score)
-                            elif isinstance(lead, dict) and lead.get('confidence_score'):
-                                qualities.append(lead['confidence_score'])
+                            elif isinstance(lead, dict) and lead.get(
+                                "confidence_score"
+                            ):
+                                qualities.append(lead["confidence_score"])
                         if qualities:
                             lead_quality = sum(qualities) / len(qualities)
-                        
+
                         # Get location type
                         for lead in leads_from_url:
-                            if hasattr(lead, 'location_type'):
+                            if hasattr(lead, "location_type"):
                                 lead_location = lead.location_type
                             elif isinstance(lead, dict):
-                                lead_location = lead.get('location_type')
+                                lead_location = lead.get("location_type")
                             if lead_location:
                                 break
-                    
+
                     # Record to learning system
                     self.learning_system.record_result(
                         source_name=source_name,
@@ -601,33 +669,40 @@ class LeadHunterOrchestrator:
                         produced_lead=produced_lead,
                         lead_quality=lead_quality,
                         lead_location=lead_location,
-                        response_time_ms=getattr(result, 'crawl_time_ms', 0)
+                        response_time_ms=getattr(result, "crawl_time_ms", 0),
                     )
-            
+
             self.learning_system.save()
             logger.info("📚 Learnings recorded")
-            
+
         except Exception as e:
             logger.warning(f"Could not record learnings: {e}")
-    
-    async def export_leads(self, leads: List[Dict], filename: str = "leads.json", format: str = "json") -> str:
+
+    async def export_leads(
+        self, leads: List[Dict], filename: str = "leads.json", format: str = "json"
+    ) -> str:
         """Export leads to file"""
         output_path = self.output_dir / filename
-        
+
         if format == "json":
-            with open(output_path, 'w') as f:
-                json.dump({"exported_at": datetime.now().isoformat(), "leads": leads}, f, indent=2)
+            with open(output_path, "w") as f:
+                json.dump(
+                    {"exported_at": datetime.now().isoformat(), "leads": leads},
+                    f,
+                    indent=2,
+                )
         elif format == "csv":
             import csv
+
             if leads:
-                with open(output_path, 'w', newline='', encoding='utf-8-sig') as f:
+                with open(output_path, "w", newline="", encoding="utf-8-sig") as f:
                     writer = csv.DictWriter(f, fieldnames=leads[0].keys())
                     writer.writeheader()
                     writer.writerows(leads)
-        
+
         logger.info(f"✅ Exported {len(leads)} leads to {output_path}")
         return str(output_path)
-    
+
     async def close(self):
         """Clean up"""
         if self.scraping_engine:
@@ -639,17 +714,19 @@ class LeadHunterOrchestrator:
 # CLI
 # =============================================================================
 
+
 async def main():
     """Main entry point"""
     import argparse
     import os
-    
+
     try:
         from dotenv import load_dotenv
+
         load_dotenv()
     except ImportError:
         pass
-    
+
     parser = argparse.ArgumentParser(description="Smart Lead Hunter")
     parser.add_argument("--sources", nargs="+", help="Specific sources")
     parser.add_argument("--priority", type=int, default=8, help="Min priority")
@@ -657,25 +734,25 @@ async def main():
     parser.add_argument("--no-deep", action="store_true", help="No deep crawl")
     parser.add_argument("--no-save", action="store_true", help="Don't save to DB")
     parser.add_argument("--test", action="store_true", help="Test mode (3 sources)")
-    
+
     args = parser.parse_args()
-    
+
     print("""
 ╔══════════════════════════════════════════════════════════════════╗
 ║   🏨 SMART LEAD HUNTER                                          ║
 ║   Intelligent Hotel Lead Discovery                               ║
 ╚══════════════════════════════════════════════════════════════════╝
 """)
-    
+
     orchestrator = LeadHunterOrchestrator(
         gemini_api_key=os.getenv("GEMINI_API_KEY"),
         output_dir=args.output,
         save_to_database=not args.no_save,
     )
-    
+
     try:
         await orchestrator.initialize()
-        
+
         if args.test:
             sources = list(orchestrator.scraping_engine._sources.keys())[:3]
             leads = await orchestrator.run(source_names=sources, deep_crawl=False)
@@ -683,14 +760,16 @@ async def main():
             leads = await orchestrator.run(
                 source_names=args.sources,
                 priority_threshold=args.priority,
-                deep_crawl=not args.no_deep
+                deep_crawl=not args.no_deep,
             )
-        
+
         if leads:
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             await orchestrator.export_leads(leads, f"leads_{timestamp}.json")
-            await orchestrator.export_leads(leads, f"leads_{timestamp}.csv", format="csv")
-    
+            await orchestrator.export_leads(
+                leads, f"leads_{timestamp}.csv", format="csv"
+            )
+
     finally:
         await orchestrator.close()
 

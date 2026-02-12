@@ -1,95 +1,78 @@
-<!-- Lead Detail Panel - Editable with Source Provenance -->
-<div class="bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden" x-data="leadEditor({{ lead.id }})">
-    
-    <!-- Header -->
-    <div class="px-4 py-3 bg-gradient-to-r {% if lead.lead_score and lead.lead_score >= 70 %}from-red-50 to-orange-50 border-b border-red-100{% elif lead.lead_score and lead.lead_score >= 50 %}from-orange-50 to-amber-50 border-b border-orange-100{% else %}from-gray-50 to-white border-b border-gray-200{% endif %}">
-        <div class="flex items-center justify-between">
-            <h3 class="text-sm font-bold text-gray-900 truncate pr-2" title="{{ lead.hotel_name }}">
-                {{ lead.hotel_name }}
-            </h3>
+<div class="bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden slide-in" x-data="leadEditor({{ lead.id }})">
+    <div class="px-4 py-3 {% if lead.lead_score and lead.lead_score >= 70 %}bg-gradient-to-r from-red-50 to-orange-50 border-b border-red-100{% elif lead.lead_score and lead.lead_score >= 50 %}bg-gradient-to-r from-amber-50 to-orange-50 border-b border-orange-100{% else %}bg-gradient-to-r from-gray-50 to-white border-b border-gray-200{% endif %}">
+        <div class="flex items-start justify-between">
+            <div class="flex-1 min-w-0 pr-3">
+                <h3 class="text-sm font-bold text-gray-900 leading-tight">{{ lead.hotel_name }}</h3>
+                {% if lead.brand %}<p class="text-xs text-gray-500 mt-0.5">{{ lead.brand }}</p>{% endif %}
+            </div>
             {% if lead.lead_score and lead.lead_score >= 70 %}
-            <span class="flex-shrink-0 inline-flex items-center px-2.5 py-1 rounded-full text-sm font-bold bg-red-100 text-red-700 ring-1 ring-red-200">
-                🔥 {{ lead.lead_score }}
-            </span>
+            <span class="flex-shrink-0 px-3 py-1.5 rounded-lg text-sm font-bold score-hot">{{ lead.lead_score }}</span>
             {% elif lead.lead_score and lead.lead_score >= 50 %}
-            <span class="flex-shrink-0 inline-flex items-center px-2.5 py-1 rounded-full text-sm font-bold bg-orange-100 text-orange-700 ring-1 ring-orange-200">
-                ⚡ {{ lead.lead_score }}
-            </span>
+            <span class="flex-shrink-0 px-3 py-1.5 rounded-lg text-sm font-bold score-warm">{{ lead.lead_score }}</span>
             {% else %}
-            <span class="flex-shrink-0 inline-flex items-center px-2.5 py-1 rounded-full text-sm font-bold bg-gray-100 text-gray-600">
-                {{ lead.lead_score or '?' }}
-            </span>
+            <span class="flex-shrink-0 px-3 py-1.5 rounded-lg text-sm font-bold score-cold">{{ lead.lead_score or '?' }}</span>
             {% endif %}
         </div>
-        {% if lead.brand %}
-        <p class="text-xs text-gray-500 mt-0.5">{{ lead.brand }}</p>
-        {% endif %}
-        <div class="flex items-center mt-1.5 gap-2">
-            <span class="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium
-                {% if lead.status == 'new' %}bg-blue-100 text-blue-700
-                {% elif lead.status == 'approved' %}bg-emerald-100 text-emerald-700
-                {% elif lead.status == 'rejected' %}bg-red-100 text-red-700
-                {% else %}bg-gray-100 text-gray-600{% endif %}">
-                {{ lead.status | title }}
-            </span>
-            {% if lead.source_urls and lead.source_urls | length > 1 %}
-            <span class="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-purple-100 text-purple-700">
-                Merged from {{ lead.source_urls | length }} sources
-            </span>
-            {% endif %}
+        <div class="flex items-center mt-2 gap-2 flex-wrap">
+            <span class="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-semibold
+                {% if lead.status == 'new' %}bg-blue-100 text-blue-700{% elif lead.status == 'approved' %}bg-emerald-100 text-emerald-700{% elif lead.status == 'rejected' %}bg-red-100 text-red-700{% else %}bg-gray-100 text-gray-600{% endif %}">{{ lead.status | title }}</span>
+            {% if lead.brand_tier == 'tier1_ultra_luxury' %}<span class="tier-badge tier-1">Ultra Luxury</span>
+            {% elif lead.brand_tier == 'tier2_luxury' %}<span class="tier-badge tier-2">Luxury</span>
+            {% elif lead.brand_tier == 'tier3_upper_upscale' %}<span class="tier-badge tier-3">Upper Upscale</span>
+            {% elif lead.brand_tier == 'tier4_upscale' %}<span class="tier-badge tier-4">Upscale</span>{% endif %}
+            {% if lead.source_urls and lead.source_urls | length > 1 %}<span class="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-purple-100 text-purple-700">{{ lead.source_urls | length }} sources</span>{% endif %}
             <span class="text-xs text-gray-400 ml-auto">ID: {{ lead.id }}</span>
         </div>
     </div>
-
-    <!-- Content - Scrollable -->
     <div class="max-h-[calc(100vh-320px)] overflow-y-auto">
-        
-        <!-- Toggle Edit Mode -->
         <div class="px-4 pt-3 flex justify-end">
-            <button @click="editing = !editing" 
-                    class="text-xs px-2.5 py-1 rounded-md transition-colors"
+            <button @click="editing = !editing" class="text-xs px-2.5 py-1 rounded-md transition-colors"
                     :class="editing ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-500 hover:bg-gray-200'">
-                <span x-show="!editing">✏️ Edit</span>
-                <span x-show="editing">🔒 Lock</span>
+                <span x-show="!editing">✏️ Edit</span><span x-show="editing">🔒 Lock</span>
             </button>
         </div>
-
         <form id="lead-edit-form" class="px-4 py-2 space-y-3 text-sm">
-            
-            <!-- Hotel Info -->
+            {% if lead.description %}
+            <div class="bg-amber-50 border border-amber-200 rounded-lg p-3" x-data="{ expanded: false }">
+                <div class="flex items-center justify-between mb-2">
+                    <h4 class="text-xs font-bold text-amber-800 uppercase tracking-wider flex items-center">
+                        <svg class="w-3.5 h-3.5 mr-1 text-amber-500" fill="currentColor" viewBox="0 0 20 20"><path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z"/></svg>
+                        Key Insights
+                    </h4>
+                    <button @click="expanded = !expanded" class="text-xs text-amber-600 hover:text-amber-800 font-medium">
+                        <span x-show="!expanded">Show more ▼</span><span x-show="expanded">Show less ▲</span>
+                    </button>
+                </div>
+                <ul class="insight-list text-xs text-gray-700" :class="{ 'max-h-[100px] overflow-hidden': !expanded }">
+                    {% for line in lead.description.replace('\r\n', '\n').replace('\r', '\n').split('\n') %}
+                    {% set clean = line.strip().lstrip('•-*·▸► ').strip() %}
+                    {% if clean %}<li>{{ clean }}</li>{% endif %}
+                    {% endfor %}
+                </ul>
+                <div x-show="!expanded" class="bg-gradient-to-t from-amber-50 to-transparent h-6 -mt-6 relative z-10 pointer-events-none"></div>
+            </div>
+            {% endif %}
             <fieldset class="space-y-2">
-                <legend class="text-xs font-semibold text-gray-400 uppercase tracking-wider">Hotel Info</legend>
-                
+                <legend class="text-xs font-bold text-gray-400 uppercase tracking-wider">Hotel Info</legend>
                 <div>
                     <label class="text-xs text-gray-500">Name</label>
-                    <input name="hotel_name" value="{{ lead.hotel_name or '' }}" 
-                           :disabled="!editing"
+                    <input name="hotel_name" value="{{ lead.hotel_name or '' }}" :disabled="!editing"
                            class="w-full mt-0.5 px-2 py-1.5 text-sm border rounded-md transition-colors"
-                           :class="editing ? 'border-blue-200 bg-white focus:ring-2 focus:ring-blue-500' : 'border-transparent bg-gray-50 text-gray-900'">
+                           :class="editing ? 'border-blue-300 bg-white focus:ring-2 focus:ring-blue-500' : 'border-transparent bg-gray-50'">
                 </div>
-
                 <div class="grid grid-cols-2 gap-2">
-                    <div>
-                        <label class="text-xs text-gray-500">Brand</label>
-                        <input name="brand" value="{{ lead.brand or '' }}"
-                               :disabled="!editing"
+                    <div><label class="text-xs text-gray-500">Brand</label>
+                        <input name="brand" value="{{ lead.brand or '' }}" :disabled="!editing"
                                class="w-full mt-0.5 px-2 py-1.5 text-sm border rounded-md transition-colors"
-                               :class="editing ? 'border-blue-200 bg-white' : 'border-transparent bg-gray-50'">
-                    </div>
-                    <div>
-                        <label class="text-xs text-gray-500">Type</label>
-                        <input name="hotel_type" value="{{ lead.hotel_type or '' }}"
-                               :disabled="!editing"
+                               :class="editing ? 'border-blue-300 bg-white' : 'border-transparent bg-gray-50'"></div>
+                    <div><label class="text-xs text-gray-500">Type</label>
+                        <input name="hotel_type" value="{{ lead.hotel_type or '' }}" :disabled="!editing"
                                class="w-full mt-0.5 px-2 py-1.5 text-sm border rounded-md transition-colors"
-                               :class="editing ? 'border-blue-200 bg-white' : 'border-transparent bg-gray-50'">
-                    </div>
+                               :class="editing ? 'border-blue-300 bg-white' : 'border-transparent bg-gray-50'"></div>
                 </div>
-
-                <div>
-                    <label class="text-xs text-gray-500">Tier</label>
-                    <select name="brand_tier" :disabled="!editing"
-                            class="w-full mt-0.5 px-2 py-1.5 text-sm border rounded-md transition-colors"
-                            :class="editing ? 'border-blue-200 bg-white' : 'border-transparent bg-gray-50'">
+                <div><label class="text-xs text-gray-500">Tier</label>
+                    <select name="brand_tier" :disabled="!editing" class="w-full mt-0.5 px-2 py-1.5 text-sm border rounded-md transition-colors"
+                            :class="editing ? 'border-blue-300 bg-white' : 'border-transparent bg-gray-50'">
                         <option value="">—</option>
                         <option value="tier1_ultra_luxury" {% if lead.brand_tier == 'tier1_ultra_luxury' %}selected{% endif %}>Tier 1 — Ultra Luxury</option>
                         <option value="tier2_luxury" {% if lead.brand_tier == 'tier2_luxury' %}selected{% endif %}>Tier 2 — Luxury</option>
@@ -99,214 +82,76 @@
                     </select>
                 </div>
             </fieldset>
-
-            <!-- Location -->
             <fieldset class="space-y-2 pt-2 border-t border-gray-100">
-                <legend class="text-xs font-semibold text-gray-400 uppercase tracking-wider">Location</legend>
+                <legend class="text-xs font-bold text-gray-400 uppercase tracking-wider">Location</legend>
                 <div class="grid grid-cols-3 gap-2">
-                    <div>
-                        <label class="text-xs text-gray-500">City</label>
-                        <input name="city" value="{{ lead.city or '' }}"
-                               :disabled="!editing"
-                               class="w-full mt-0.5 px-2 py-1.5 text-sm border rounded-md transition-colors"
-                               :class="editing ? 'border-blue-200 bg-white' : 'border-transparent bg-gray-50'">
-                    </div>
-                    <div>
-                        <label class="text-xs text-gray-500">State</label>
-                        <input name="state" value="{{ lead.state or '' }}"
-                               :disabled="!editing"
-                               class="w-full mt-0.5 px-2 py-1.5 text-sm border rounded-md transition-colors"
-                               :class="editing ? 'border-blue-200 bg-white' : 'border-transparent bg-gray-50'">
-                    </div>
-                    <div>
-                        <label class="text-xs text-gray-500">Country</label>
-                        <input name="country" value="{{ lead.country or 'USA' }}"
-                               :disabled="!editing"
-                               class="w-full mt-0.5 px-2 py-1.5 text-sm border rounded-md transition-colors"
-                               :class="editing ? 'border-blue-200 bg-white' : 'border-transparent bg-gray-50'">
-                    </div>
+                    <div><label class="text-xs text-gray-500">City</label><input name="city" value="{{ lead.city or '' }}" :disabled="!editing" class="w-full mt-0.5 px-2 py-1.5 text-sm border rounded-md" :class="editing ? 'border-blue-300 bg-white' : 'border-transparent bg-gray-50'"></div>
+                    <div><label class="text-xs text-gray-500">State</label><input name="state" value="{{ lead.state or '' }}" :disabled="!editing" class="w-full mt-0.5 px-2 py-1.5 text-sm border rounded-md" :class="editing ? 'border-blue-300 bg-white' : 'border-transparent bg-gray-50'"></div>
+                    <div><label class="text-xs text-gray-500">Country</label><input name="country" value="{{ lead.country or 'USA' }}" :disabled="!editing" class="w-full mt-0.5 px-2 py-1.5 text-sm border rounded-md" :class="editing ? 'border-blue-300 bg-white' : 'border-transparent bg-gray-50'"></div>
                 </div>
             </fieldset>
-
-            <!-- Opening Details -->
             <fieldset class="space-y-2 pt-2 border-t border-gray-100">
-                <legend class="text-xs font-semibold text-gray-400 uppercase tracking-wider">Opening Details</legend>
+                <legend class="text-xs font-bold text-gray-400 uppercase tracking-wider">Opening Details</legend>
                 <div class="grid grid-cols-2 gap-2">
-                    <div>
-                        <label class="text-xs text-gray-500">Opening Date</label>
-                        <input name="opening_date" value="{{ lead.opening_date or '' }}"
-                               :disabled="!editing"
-                               class="w-full mt-0.5 px-2 py-1.5 text-sm border rounded-md transition-colors"
-                               :class="editing ? 'border-blue-200 bg-white' : 'border-transparent bg-gray-50'">
-                    </div>
-                    <div>
-                        <label class="text-xs text-gray-500">Rooms</label>
-                        <input name="room_count" type="number" value="{{ lead.room_count or '' }}"
-                               :disabled="!editing"
-                               class="w-full mt-0.5 px-2 py-1.5 text-sm border rounded-md transition-colors"
-                               :class="editing ? 'border-blue-200 bg-white' : 'border-transparent bg-gray-50'">
-                    </div>
+                    <div><label class="text-xs text-gray-500">Opening Date</label><input name="opening_date" value="{{ lead.opening_date or '' }}" :disabled="!editing" class="w-full mt-0.5 px-2 py-1.5 text-sm border rounded-md" :class="editing ? 'border-blue-300 bg-white' : 'border-transparent bg-gray-50'"></div>
+                    <div><label class="text-xs text-gray-500">Rooms</label><input name="room_count" type="number" value="{{ lead.room_count or '' }}" :disabled="!editing" class="w-full mt-0.5 px-2 py-1.5 text-sm border rounded-md" :class="editing ? 'border-blue-300 bg-white' : 'border-transparent bg-gray-50'"></div>
                 </div>
-                {% if lead.estimated_revenue %}
-                <div>
-                    <label class="text-xs text-gray-500">Est. Revenue</label>
-                    <p class="mt-0.5 text-sm font-semibold text-emerald-600">${{ "{:,}".format(lead.estimated_revenue) }}</p>
-                </div>
-                {% endif %}
+                {% if lead.estimated_revenue %}<div><label class="text-xs text-gray-500">Est. Revenue</label><p class="mt-0.5 text-sm font-bold text-emerald-600">${{ "{:,}".format(lead.estimated_revenue) }}</p></div>{% endif %}
             </fieldset>
-
-            <!-- Stakeholders -->
             <fieldset class="space-y-2 pt-2 border-t border-gray-100">
-                <legend class="text-xs font-semibold text-gray-400 uppercase tracking-wider">Stakeholders</legend>
-                <div>
-                    <label class="text-xs text-gray-500">Management Company</label>
-                    <input name="management_company" value="{{ lead.management_company or '' }}"
-                           :disabled="!editing"
-                           class="w-full mt-0.5 px-2 py-1.5 text-sm border rounded-md transition-colors"
-                           :class="editing ? 'border-blue-200 bg-white' : 'border-transparent bg-gray-50'">
-                </div>
+                <legend class="text-xs font-bold text-gray-400 uppercase tracking-wider">Stakeholders</legend>
+                <div><label class="text-xs text-gray-500">Management Company</label><input name="management_company" value="{{ lead.management_company or '' }}" :disabled="!editing" class="w-full mt-0.5 px-2 py-1.5 text-sm border rounded-md" :class="editing ? 'border-blue-300 bg-white' : 'border-transparent bg-gray-50'"></div>
                 <div class="grid grid-cols-2 gap-2">
-                    <div>
-                        <label class="text-xs text-gray-500">Developer</label>
-                        <input name="developer" value="{{ lead.developer or '' }}"
-                               :disabled="!editing"
-                               class="w-full mt-0.5 px-2 py-1.5 text-sm border rounded-md transition-colors"
-                               :class="editing ? 'border-blue-200 bg-white' : 'border-transparent bg-gray-50'">
-                    </div>
-                    <div>
-                        <label class="text-xs text-gray-500">Owner</label>
-                        <input name="owner" value="{{ lead.owner or '' }}"
-                               :disabled="!editing"
-                               class="w-full mt-0.5 px-2 py-1.5 text-sm border rounded-md transition-colors"
-                               :class="editing ? 'border-blue-200 bg-white' : 'border-transparent bg-gray-50'">
-                    </div>
+                    <div><label class="text-xs text-gray-500">Developer</label><input name="developer" value="{{ lead.developer or '' }}" :disabled="!editing" class="w-full mt-0.5 px-2 py-1.5 text-sm border rounded-md" :class="editing ? 'border-blue-300 bg-white' : 'border-transparent bg-gray-50'"></div>
+                    <div><label class="text-xs text-gray-500">Owner</label><input name="owner" value="{{ lead.owner or '' }}" :disabled="!editing" class="w-full mt-0.5 px-2 py-1.5 text-sm border rounded-md" :class="editing ? 'border-blue-300 bg-white' : 'border-transparent bg-gray-50'"></div>
                 </div>
             </fieldset>
-
-            <!-- Contact -->
             <fieldset class="space-y-2 pt-2 border-t border-gray-100">
-                <legend class="text-xs font-semibold text-gray-400 uppercase tracking-wider">Contact</legend>
+                <legend class="text-xs font-bold text-gray-400 uppercase tracking-wider">Contact</legend>
                 <div class="grid grid-cols-2 gap-2">
-                    <div>
-                        <label class="text-xs text-gray-500">Name</label>
-                        <input name="contact_name" value="{{ lead.contact_name or '' }}"
-                               :disabled="!editing"
-                               class="w-full mt-0.5 px-2 py-1.5 text-sm border rounded-md transition-colors"
-                               :class="editing ? 'border-blue-200 bg-white' : 'border-transparent bg-gray-50'">
-                    </div>
-                    <div>
-                        <label class="text-xs text-gray-500">Title</label>
-                        <input name="contact_title" value="{{ lead.contact_title or '' }}"
-                               :disabled="!editing"
-                               class="w-full mt-0.5 px-2 py-1.5 text-sm border rounded-md transition-colors"
-                               :class="editing ? 'border-blue-200 bg-white' : 'border-transparent bg-gray-50'">
-                    </div>
+                    <div><label class="text-xs text-gray-500">Name</label><input name="contact_name" value="{{ lead.contact_name or '' }}" :disabled="!editing" class="w-full mt-0.5 px-2 py-1.5 text-sm border rounded-md" :class="editing ? 'border-blue-300 bg-white' : 'border-transparent bg-gray-50'"></div>
+                    <div><label class="text-xs text-gray-500">Title</label><input name="contact_title" value="{{ lead.contact_title or '' }}" :disabled="!editing" class="w-full mt-0.5 px-2 py-1.5 text-sm border rounded-md" :class="editing ? 'border-blue-300 bg-white' : 'border-transparent bg-gray-50'"></div>
                 </div>
                 <div class="grid grid-cols-2 gap-2">
-                    <div>
-                        <label class="text-xs text-gray-500">Email</label>
-                        <input name="contact_email" type="email" value="{{ lead.contact_email or '' }}"
-                               :disabled="!editing"
-                               class="w-full mt-0.5 px-2 py-1.5 text-sm border rounded-md transition-colors"
-                               :class="editing ? 'border-blue-200 bg-white' : 'border-transparent bg-gray-50'">
-                    </div>
-                    <div>
-                        <label class="text-xs text-gray-500">Phone</label>
-                        <input name="contact_phone" type="tel" value="{{ lead.contact_phone or '' }}"
-                               :disabled="!editing"
-                               class="w-full mt-0.5 px-2 py-1.5 text-sm border rounded-md transition-colors"
-                               :class="editing ? 'border-blue-200 bg-white' : 'border-transparent bg-gray-50'">
-                    </div>
+                    <div><label class="text-xs text-gray-500">Email</label><input name="contact_email" type="email" value="{{ lead.contact_email or '' }}" :disabled="!editing" class="w-full mt-0.5 px-2 py-1.5 text-sm border rounded-md" :class="editing ? 'border-blue-300 bg-white' : 'border-transparent bg-gray-50'"></div>
+                    <div><label class="text-xs text-gray-500">Phone</label><input name="contact_phone" type="tel" value="{{ lead.contact_phone or '' }}" :disabled="!editing" class="w-full mt-0.5 px-2 py-1.5 text-sm border rounded-md" :class="editing ? 'border-blue-300 bg-white' : 'border-transparent bg-gray-50'"></div>
                 </div>
             </fieldset>
-
-            <!-- Key Insights -->
-            {% if lead.description or editing %}
+            <fieldset class="pt-2 border-t border-gray-100" x-show="editing">
+                <legend class="text-xs font-bold text-gray-400 uppercase tracking-wider">Key Insights (Raw Edit)</legend>
+                <textarea name="description" rows="4" class="w-full mt-1 px-2 py-1.5 text-sm border border-blue-300 bg-white rounded-md">{{ lead.description or '' }}</textarea>
+            </fieldset>
             <fieldset class="pt-2 border-t border-gray-100">
-                <legend class="text-xs font-semibold text-gray-400 uppercase tracking-wider flex items-center">
-                    ⭐ Key Insights
-                </legend>
-                <textarea name="description" rows="4"
-                          :disabled="!editing"
-                          class="w-full mt-1 px-2 py-1.5 text-sm border rounded-md transition-colors whitespace-pre-line"
-                          :class="editing ? 'border-blue-200 bg-white focus:ring-2 focus:ring-blue-500' : 'border-transparent bg-amber-50 text-gray-700'">{{ lead.description or '' }}</textarea>
+                <legend class="text-xs font-bold text-gray-400 uppercase tracking-wider">Notes</legend>
+                <textarea name="notes" rows="2" placeholder="Add internal notes..." :disabled="!editing"
+                          class="w-full mt-1 px-2 py-1.5 text-sm border rounded-md" :class="editing ? 'border-blue-300 bg-white' : 'border-transparent bg-gray-50'">{{ lead.notes or '' }}</textarea>
             </fieldset>
-            {% endif %}
-
-            <!-- Notes -->
-            <fieldset class="pt-2 border-t border-gray-100">
-                <legend class="text-xs font-semibold text-gray-400 uppercase tracking-wider">Notes</legend>
-                <textarea name="notes" rows="2" placeholder="Add internal notes..."
-                          :disabled="!editing"
-                          class="w-full mt-1 px-2 py-1.5 text-sm border rounded-md transition-colors"
-                          :class="editing ? 'border-blue-200 bg-white' : 'border-transparent bg-gray-50'">{{ lead.notes or '' }}</textarea>
-            </fieldset>
-
-            <!-- Save Button (edit mode) -->
             <div x-show="editing" class="pt-2">
-                <button type="button" @click="saveLead()"
-                        class="w-full px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-md hover:bg-blue-700 transition-colors flex items-center justify-center">
-                    <span x-show="!saving">💾 Save Changes</span>
-                    <span x-show="saving">Saving...</span>
+                <button type="button" @click="saveLead()" class="w-full px-4 py-2 bg-brand-800 text-white text-sm font-medium rounded-lg hover:bg-brand-900 transition-colors flex items-center justify-center">
+                    <span x-show="!saving">💾 Save Changes</span><span x-show="saving">Saving...</span>
                 </button>
-                <p x-show="saveMsg" x-text="saveMsg" class="text-xs text-center mt-1"
-                   :class="saveError ? 'text-red-500' : 'text-emerald-600'"></p>
+                <p x-show="saveMsg" x-text="saveMsg" class="text-xs text-center mt-1" :class="saveError ? 'text-red-500' : 'text-emerald-600'"></p>
             </div>
         </form>
-
-        <!-- Source Provenance -->
         {% if lead.source_urls and lead.source_urls | length > 0 %}
         <div class="px-4 py-3 border-t border-gray-200 bg-gray-50">
-            <h4 class="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2 flex items-center">
-                <svg class="w-3.5 h-3.5 mr-1 text-purple-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1"/>
-                </svg>
-                Sources ({{ lead.source_urls | length }})
-            </h4>
-
-            <div class="space-y-2">
+            <h4 class="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">🔗 Sources ({{ lead.source_urls | length }})</h4>
+            <div class="space-y-1.5">
                 {% for url in lead.source_urls %}
-                <div class="bg-white rounded-md border border-gray-200 p-2.5" x-data="{ open: false }">
-                    <div class="flex items-start justify-between">
-                        <a href="{{ url }}" target="_blank" class="text-xs text-blue-600 hover:underline truncate flex-1 pr-2" title="{{ url }}">
-                            {{ url | truncate(60) }}
-                        </a>
+                <div class="bg-white rounded border border-gray-200 px-2.5 py-2" x-data="{ open: false }">
+                    <div class="flex items-center justify-between">
+                        <a href="{{ url }}" target="_blank" class="text-xs text-blue-600 hover:underline truncate flex-1 pr-2">{{ url | truncate(55) }}</a>
                         {% if lead.source_extractions and lead.source_extractions.get(url) %}
-                        <button @click="open = !open" class="text-xs text-gray-400 hover:text-gray-600 flex-shrink-0">
-                            <span x-show="!open">▶ Details</span>
-                            <span x-show="open">▼ Hide</span>
-                        </button>
+                        <button @click="open = !open" class="text-xs text-gray-400 hover:text-gray-600"><span x-show="!open">▶</span><span x-show="open">▼</span></button>
                         {% endif %}
                     </div>
-
                     {% if lead.source_extractions and lead.source_extractions.get(url) %}
                     {% set ext = lead.source_extractions[url] %}
-                    <div x-show="open" x-collapse class="mt-2 pt-2 border-t border-gray-100">
-                        <div class="grid grid-cols-2 gap-1 text-xs">
-                            {% if ext.get('hotel_name') %}
-                            <div><span class="text-gray-400">Name:</span> <span class="text-gray-700">{{ ext.hotel_name }}</span></div>
-                            {% endif %}
-                            {% if ext.get('city') %}
-                            <div><span class="text-gray-400">City:</span> <span class="text-gray-700">{{ ext.city }}</span></div>
-                            {% endif %}
-                            {% if ext.get('state') %}
-                            <div><span class="text-gray-400">State:</span> <span class="text-gray-700">{{ ext.state }}</span></div>
-                            {% endif %}
-                            {% if ext.get('room_count') %}
-                            <div><span class="text-gray-400">Rooms:</span> <span class="text-gray-700">{{ ext.room_count }}</span></div>
-                            {% endif %}
-                            {% if ext.get('opening_date') %}
-                            <div><span class="text-gray-400">Opening:</span> <span class="text-gray-700">{{ ext.opening_date }}</span></div>
-                            {% endif %}
-                            {% if ext.get('brand') %}
-                            <div><span class="text-gray-400">Brand:</span> <span class="text-gray-700">{{ ext.brand }}</span></div>
-                            {% endif %}
-                        </div>
-                        {% if ext.get('key_insights') %}
-                        <div class="mt-1.5 text-xs text-gray-600 bg-gray-50 rounded p-1.5">
-                            {{ ext.key_insights | truncate(200) }}
-                        </div>
-                        {% endif %}
+                    <div x-show="open" x-collapse class="mt-2 pt-2 border-t border-gray-100 grid grid-cols-2 gap-1 text-xs">
+                        {% if ext.get('hotel_name') %}<div><span class="text-gray-400">Name:</span> {{ ext.hotel_name }}</div>{% endif %}
+                        {% if ext.get('city') %}<div><span class="text-gray-400">City:</span> {{ ext.city }}</div>{% endif %}
+                        {% if ext.get('room_count') %}<div><span class="text-gray-400">Rooms:</span> {{ ext.room_count }}</div>{% endif %}
+                        {% if ext.get('opening_date') %}<div><span class="text-gray-400">Opening:</span> {{ ext.opening_date }}</div>{% endif %}
                     </div>
                     {% endif %}
                 </div>
@@ -315,118 +160,53 @@
         </div>
         {% elif lead.source_url %}
         <div class="px-4 py-3 border-t border-gray-200 bg-gray-50">
-            <h4 class="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Source</h4>
-            <a href="{{ lead.source_url }}" target="_blank" class="text-xs text-blue-600 hover:underline flex items-center">
-                <svg class="h-3 w-3 mr-1 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/>
-                </svg>
-                {{ lead.source_site or lead.source_url | truncate(50) }}
-            </a>
+            <h4 class="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">Source</h4>
+            <div class="text-xs text-gray-600 font-medium">🔗 {{ lead.source_site or 'Unknown' }}</div>
+            <a href="{{ lead.source_url }}" target="_blank" class="text-xs text-blue-600 hover:underline break-all">{{ lead.source_url }}</a>
         </div>
         {% endif %}
-
-        <!-- Timestamps -->
-        <div class="px-4 py-2 text-xs text-gray-400 border-t border-gray-100">
-            Added: {{ lead.created_at.strftime('%b %d, %Y %I:%M %p') if lead.created_at else '—' }}
-        </div>
+        <div class="px-4 py-2 text-xs text-gray-400 border-t border-gray-100">Added: {{ lead.created_at.strftime('%b %d, %Y %I:%M %p') if lead.created_at else '—' }}</div>
     </div>
-
-    <!-- Action Bar (sticky bottom) -->
     <div class="px-4 py-3 bg-gray-50 border-t border-gray-200">
         {% if lead.status == 'new' %}
         <div class="flex space-x-2">
-            <button hx-post="/api/dashboard/leads/{{ lead.id }}/approve"
-                    hx-swap="none"
-                    hx-on::after-request="window.location.reload()"
-                    class="flex-1 inline-flex justify-center items-center px-3 py-2.5 border border-transparent text-sm font-semibold rounded-lg text-white bg-emerald-600 hover:bg-emerald-700 transition-colors shadow-sm">
-                ✅ Approve
-            </button>
-            <button hx-post="/api/dashboard/leads/{{ lead.id }}/reject"
-                    hx-swap="none"
-                    hx-on::after-request="window.location.reload()"
-                    class="flex-1 inline-flex justify-center items-center px-3 py-2.5 border border-gray-300 text-sm font-semibold rounded-lg text-gray-600 bg-white hover:bg-gray-50 transition-colors">
-                ❌ Reject
-            </button>
+            <button hx-post="/api/dashboard/leads/{{ lead.id }}/approve" hx-swap="none" hx-on::after-request="window.location.reload()"
+                    class="flex-1 inline-flex justify-center items-center px-3 py-2.5 text-sm font-semibold rounded-lg text-white bg-emerald-600 hover:bg-emerald-700 shadow-sm">✅ Approve</button>
+            <button hx-post="/api/dashboard/leads/{{ lead.id }}/reject" hx-swap="none" hx-on::after-request="window.location.reload()"
+                    class="flex-1 inline-flex justify-center items-center px-3 py-2.5 border border-gray-300 text-sm font-semibold rounded-lg text-gray-600 bg-white hover:bg-gray-50">❌ Reject</button>
         </div>
         {% elif lead.status == 'approved' %}
         <div class="flex items-center justify-between">
-            <span class="inline-flex items-center text-emerald-600 text-sm font-medium">
-                ✅ Approved
-            </span>
-            <button hx-post="/api/dashboard/leads/{{ lead.id }}/restore"
-                    hx-swap="none"
-                    hx-on::after-request="window.location.reload()"
-                    class="text-xs text-gray-400 hover:text-gray-600 underline">
-                Move back to pipeline
-            </button>
+            <span class="text-emerald-600 text-sm font-medium">✅ Approved</span>
+            <button hx-post="/api/dashboard/leads/{{ lead.id }}/restore" hx-swap="none" hx-on::after-request="window.location.reload()" class="text-xs text-gray-400 hover:text-gray-600 underline">Move back</button>
         </div>
         {% elif lead.status == 'rejected' %}
         <div class="flex items-center justify-between">
-            <span class="inline-flex items-center text-red-500 text-sm font-medium">
-                ❌ Rejected
-                {% if lead.rejection_reason %}<span class="text-gray-400 ml-1 text-xs">({{ lead.rejection_reason }})</span>{% endif %}
-            </span>
-            <button hx-post="/api/dashboard/leads/{{ lead.id }}/restore"
-                    hx-swap="none"
-                    hx-on::after-request="window.location.reload()"
-                    class="text-xs text-blue-500 hover:text-blue-700 underline">
-                Restore to pipeline
-            </button>
+            <span class="text-red-500 text-sm font-medium">❌ Rejected{% if lead.rejection_reason %} <span class="text-gray-400 text-xs">({{ lead.rejection_reason }})</span>{% endif %}</span>
+            <button hx-post="/api/dashboard/leads/{{ lead.id }}/restore" hx-swap="none" hx-on::after-request="window.location.reload()" class="text-xs text-blue-500 hover:text-blue-700 underline">Restore</button>
         </div>
         {% endif %}
     </div>
 </div>
-
-<!-- Alpine.js Lead Editor -->
 <script>
 function leadEditor(leadId) {
     return {
-        editing: false,
-        saving: false,
-        saveMsg: '',
-        saveError: false,
-
+        editing: false, saving: false, saveMsg: '', saveError: false,
         async saveLead() {
-            this.saving = true;
-            this.saveMsg = '';
-            
+            this.saving = true; this.saveMsg = '';
             const form = document.getElementById('lead-edit-form');
             const formData = new FormData(form);
             const data = {};
-            
             for (const [key, value] of formData.entries()) {
-                if (key === 'room_count') {
-                    data[key] = value ? parseInt(value) : null;
-                } else {
-                    data[key] = value || null;
-                }
+                data[key] = key === 'room_count' ? (value ? parseInt(value) : null) : (value || null);
             }
-
             try {
-                const resp = await fetch(`/api/dashboard/leads/${leadId}/edit`, {
-                    method: 'PATCH',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(data)
-                });
-                
-                if (resp.ok) {
-                    this.saveMsg = '✅ Saved!';
-                    this.saveError = false;
-                    this.editing = false;
-                    // Refresh the row in the table
+                const resp = await fetch(`/api/dashboard/leads/${leadId}/edit`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) });
+                if (resp.ok) { this.saveMsg = '✅ Saved!'; this.saveError = false; this.editing = false;
                     htmx.ajax('GET', `/api/dashboard/leads/${leadId}/row`, {target: `#lead-row-${leadId}`, swap: 'outerHTML'});
-                } else {
-                    const err = await resp.json();
-                    this.saveMsg = '❌ ' + (err.detail || 'Save failed');
-                    this.saveError = true;
-                }
-            } catch (e) {
-                this.saveMsg = '❌ Network error';
-                this.saveError = true;
-            }
-            
-            this.saving = false;
-            setTimeout(() => { this.saveMsg = ''; }, 3000);
+                } else { const err = await resp.json(); this.saveMsg = '❌ ' + (err.detail || 'Save failed'); this.saveError = true; }
+            } catch (e) { this.saveMsg = '❌ Network error'; this.saveError = true; }
+            this.saving = false; setTimeout(() => { this.saveMsg = ''; }, 3000);
         }
     }
 }

@@ -1,11 +1,9 @@
 <!DOCTYPE html>
-<html lang="en" class="h-full bg-gray-100">
+<html lang="en" class="h-full bg-gray-50">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{% block title %}Smart Lead Hunter{% endblock %}</title>
-
-    <!-- Tailwind CSS (JIT compiler — SRI not applicable for dynamic output) -->
     <script src="https://cdn.tailwindcss.com"></script>
     <script>
         tailwind.config = {
@@ -13,148 +11,96 @@
                 extend: {
                     colors: {
                         'brand': {
-                            50: '#f0f9ff',
-                            100: '#e0f2fe',
-                            500: '#0ea5e9',
-                            600: '#0284c7',
-                            700: '#0369a1',
+                            50: '#f0f4f8', 100: '#d9e2ec', 200: '#bcccdc', 300: '#9fb3c8',
+                            400: '#829ab1', 500: '#627d98', 600: '#486581',
+                            700: '#334e68', 800: '#243b53', 900: '#102a43',
                         }
                     }
                 }
             }
         }
     </script>
-
-    <!--
-        M-15 FIX: CDN scripts now use pinned versions with SRI integrity hashes.
-        
-        Previously Alpine.js used wildcard version "3.x.x" which could silently
-        upgrade to a breaking or compromised version. Now all scripts are pinned
-        to exact versions with SHA-384 integrity checks.
-        
-        TO REGENERATE HASHES (when upgrading versions):
-            curl -sL <CDN_URL> | openssl dgst -sha384 -binary | openssl base64 -A
-        Or use https://www.srihash.org/
-    -->
-
-    <!-- HTMX 1.9.10 (pinned) -->
     <script src="https://cdn.jsdelivr.net/npm/htmx.org@1.9.10/dist/htmx.min.js"></script>
-
-    <!-- Alpine.js 3.14.3 (pinned — was 3.x.x wildcard) -->
     <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.3/dist/cdn.min.js"></script>
-
     <style>
-        /* Hide elements before Alpine.js initializes */
         [x-cloak] { display: none !important; }
-
-        /* HTMX loading indicator */
-        .htmx-request .htmx-indicator {
-            display: inline-block;
-        }
-        .htmx-indicator {
-            display: none;
-        }
-
-        /* Smooth transitions for HTMX swaps */
-        .htmx-swapping {
-            opacity: 0;
-            transition: opacity 0.2s ease-out;
-        }
-
-        /* Row highlight on hover */
-        .lead-row:hover {
-            background-color: #f0f9ff;
-        }
-
-        /* Slide-in animation for detail panel */
-        @keyframes slideIn {
-            from { transform: translateX(100%); opacity: 0; }
-            to { transform: translateX(0); opacity: 1; }
-        }
-        .slide-in {
-            animation: slideIn 0.3s ease-out;
-        }
+        .htmx-request .htmx-indicator { display: inline-block; }
+        .htmx-indicator { display: none; }
+        .htmx-swapping { opacity: 0; transition: opacity 0.2s ease-out; }
+        ::-webkit-scrollbar { width: 6px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 3px; }
+        ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+        .lead-row { transition: all 0.15s ease; }
+        .lead-row:hover { background-color: #f0f4f8; }
+        .lead-row.active { background-color: #e2e8f0; border-left: 3px solid #334e68; }
+        @keyframes slideIn { from { transform: translateX(12px); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+        .slide-in { animation: slideIn 0.25s ease-out; }
+        .tier-badge { font-size: 0.65rem; letter-spacing: 0.03em; padding: 2px 6px; border-radius: 4px; font-weight: 600; text-transform: uppercase; }
+        .tier-1 { background: #fef3c7; color: #92400e; border: 1px solid #fcd34d; }
+        .tier-2 { background: #ede9fe; color: #5b21b6; border: 1px solid #c4b5fd; }
+        .tier-3 { background: #dbeafe; color: #1e40af; border: 1px solid #93c5fd; }
+        .tier-4 { background: #f1f5f9; color: #475569; border: 1px solid #cbd5e1; }
+        .score-hot { background: linear-gradient(135deg, #fef2f2, #fee2e2); border: 2px solid #fca5a5; color: #dc2626; }
+        .score-warm { background: linear-gradient(135deg, #fff7ed, #ffedd5); border: 2px solid #fdba74; color: #ea580c; }
+        .score-cold { background: #f1f5f9; border: 2px solid #e2e8f0; color: #64748b; }
+        .insight-list li { position: relative; padding-left: 1.25rem; margin-bottom: 0.35rem; line-height: 1.5; }
+        .insight-list li::before { content: ''; position: absolute; left: 0; top: 0.55em; width: 6px; height: 6px; border-radius: 50%; background: #f59e0b; }
     </style>
 </head>
 <body class="h-full">
     <div class="min-h-full">
-        <!-- Navigation -->
-        <nav class="bg-white shadow-sm border-b border-gray-200">
-            <div class="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
-                <div class="flex h-16 justify-between">
-                    <div class="flex">
-                        <div class="flex flex-shrink-0 items-center">
-                            <a href="/dashboard" class="text-xl font-bold text-brand-600">Smart Lead Hunter</a>
-                        </div>
-                        <div class="hidden sm:ml-8 sm:flex sm:space-x-8">
+        <nav class="bg-white border-b border-gray-200 shadow-sm">
+            <div class="mx-auto max-w-[1440px] px-4 sm:px-6 lg:px-8">
+                <div class="flex h-14 items-center justify-between">
+                    <div class="flex items-center">
+                        <a href="/dashboard" class="flex items-center gap-3 mr-8">
+                            <img src="/static/img/ja-logo.jpg" alt="JA Uniforms" class="h-8 w-auto">
+                            <div class="hidden sm:block border-l border-gray-200 pl-3">
+                                <span class="text-sm font-bold text-brand-800 tracking-tight">Smart Lead Hunter</span>
+                            </div>
+                        </a>
+                        <div class="hidden sm:flex items-center space-x-1">
                             <a href="/dashboard?tab=pipeline"
-                               class="nav-link inline-flex items-center border-b-2 px-1 pt-1 text-sm font-medium {% if not request.query_params.get('score') and not request.query_params.get('location') %}border-brand-500 text-gray-900{% else %}border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700{% endif %}">
+                               class="px-3 py-1.5 rounded-md text-sm font-medium transition-colors {% if not request.query_params.get('score') and not request.query_params.get('location') %}bg-brand-800 text-white{% else %}text-gray-600 hover:bg-gray-100{% endif %}">
                                 Dashboard
                             </a>
                             <a href="/dashboard?tab=pipeline&score=hot"
-                               class="nav-link inline-flex items-center border-b-2 px-1 pt-1 text-sm font-medium {% if request.query_params.get('score') == 'hot' %}border-brand-500 text-gray-900{% else %}border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700{% endif %}">
+                               class="px-3 py-1.5 rounded-md text-sm font-medium transition-colors {% if request.query_params.get('score') == 'hot' %}bg-red-600 text-white{% else %}text-gray-600 hover:bg-gray-100{% endif %}">
                                 🔥 Hot Leads
                             </a>
                             <a href="/dashboard?tab=pipeline&location=florida"
-                               class="nav-link inline-flex items-center border-b-2 px-1 pt-1 text-sm font-medium {% if request.query_params.get('location') == 'florida' %}border-brand-500 text-gray-900{% else %}border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700{% endif %}">
+                               class="px-3 py-1.5 rounded-md text-sm font-medium transition-colors {% if request.query_params.get('location') == 'florida' %}bg-emerald-600 text-white{% else %}text-gray-600 hover:bg-gray-100{% endif %}">
                                 🌴 Florida
                             </a>
                             <a href="/dashboard?tab=pipeline&location=caribbean"
-                               class="nav-link inline-flex items-center border-b-2 px-1 pt-1 text-sm font-medium {% if request.query_params.get('location') == 'caribbean' %}border-brand-500 text-gray-900{% else %}border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700{% endif %}">
+                               class="px-3 py-1.5 rounded-md text-sm font-medium transition-colors {% if request.query_params.get('location') == 'caribbean' %}bg-cyan-600 text-white{% else %}text-gray-600 hover:bg-gray-100{% endif %}">
                                 🏝️ Caribbean
                             </a>
                         </div>
                     </div>
                     <div class="flex items-center">
-                        <span class="text-sm text-gray-500">J.A. Uniforms</span>
+                        <span class="text-xs text-gray-400">Hotel Lead Intelligence</span>
                     </div>
                 </div>
             </div>
         </nav>
-
-        <!-- Main Content -->
-        <main class="py-6">
-            {% block content %}{% endblock %}
-        </main>
+        <main class="py-4">{% block content %}{% endblock %}</main>
     </div>
-
-    <!-- Toast notifications container -->
     <div id="toast-container" class="fixed bottom-4 right-4 z-50 space-y-2"></div>
-
     <script>
-        // Toast notification helper
         function showToast(message, type = 'success') {
             const container = document.getElementById('toast-container');
-            const colors = {
-                success: 'bg-green-500',
-                error: 'bg-red-500',
-                info: 'bg-blue-500',
-                warning: 'bg-yellow-500'
-            };
-
+            const colors = { success: 'bg-emerald-600', error: 'bg-red-600', info: 'bg-brand-700', warning: 'bg-amber-500' };
             const toast = document.createElement('div');
-            toast.className = `${colors[type]} text-white px-6 py-3 rounded-lg shadow-lg transform transition-all duration-300 translate-y-0 opacity-100`;
+            toast.className = `${colors[type]} text-white px-5 py-3 rounded-lg shadow-lg text-sm font-medium transform transition-all duration-300`;
             toast.textContent = message;
             container.appendChild(toast);
-
-            setTimeout(() => {
-                toast.classList.add('opacity-0', 'translate-y-2');
-                setTimeout(() => toast.remove(), 300);
-            }, 3000);
+            setTimeout(() => { toast.classList.add('opacity-0', 'translate-y-2'); setTimeout(() => toast.remove(), 300); }, 3000);
         }
-
-        // Listen for HTMX events
         document.body.addEventListener('htmx:afterSwap', function(evt) {
-            // Handle toast messages from response headers
             const toast = evt.detail.xhr.getResponseHeader('HX-Trigger');
-            if (toast) {
-                try {
-                    const data = JSON.parse(toast);
-                    if (data.showToast) {
-                        showToast(data.showToast.message, data.showToast.type);
-                    }
-                } catch (e) {}
-            }
+            if (toast) { try { const data = JSON.parse(toast); if (data.showToast) showToast(data.showToast.message, data.showToast.type); } catch (e) {} }
         });
     </script>
 </body>

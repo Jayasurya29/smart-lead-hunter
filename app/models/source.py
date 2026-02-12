@@ -1,6 +1,7 @@
 """
 Source model - stores websites we scrape for hotel leads
 """
+
 from sqlalchemy import Column, String, Integer, DateTime, Text, Boolean, Numeric, ARRAY
 from datetime import datetime, timezone
 from sqlalchemy.dialects.postgresql import JSONB
@@ -10,25 +11,27 @@ from app.database import Base
 
 class Source(Base):
     """Websites we scrape for hotel openings"""
-    
+
     __tablename__ = "sources"
-    
+
     # Primary key
     id = Column(Integer, primary_key=True, autoincrement=True)
-    
+
     # Source Information
     name = Column(String(100), nullable=False)
     base_url = Column(String(500), nullable=False, unique=True)
-    source_type = Column(String(50), default="aggregator")  # chain_newsroom, luxury_independent, aggregator, caribbean, florida, industry, travel_pub, pr_wire
+    source_type = Column(
+        String(50), default="aggregator"
+    )  # chain_newsroom, luxury_independent, aggregator, caribbean, florida, industry, travel_pub, pr_wire
     priority = Column(Integer, default=5)  # 1-10 (10 = highest priority)
     entry_urls = Column(ARRAY(Text))  # Multiple URLs for fallback/self-healing
-    
+
     # Scraping Settings
     scrape_frequency = Column(String(20), default="daily")  # daily, weekly, monthly
     max_depth = Column(Integer, default=2)  # How deep to crawl links
     use_playwright = Column(Boolean, default=False)  # true = JS-heavy site
     is_active = Column(Boolean, default=True)
-    
+
     # Statistics & Tracking
     last_scraped_at = Column(DateTime(timezone=True))
     last_success_at = Column(DateTime(timezone=True))  # Last successful scrape
@@ -42,26 +45,34 @@ class Source(Base):
     discovery_interval_days = Column(Integer, default=7)
     avg_lead_yield = Column(Numeric(5, 2), default=0.00)
     total_scrapes = Column(Integer, default=0)
-    
+
     # Health Monitoring
-    health_status = Column(String(20), default="new")  # healthy, degraded, failing, dead, new
-    
+    health_status = Column(
+        String(20), default="new"
+    )  # healthy, degraded, failing, dead, new
+
     # Notes
     notes = Column(Text)
-    
+
     # Timestamps
-    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
-    updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
-    
+    created_at = Column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+    )
+    updated_at = Column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+    )
+
     def __repr__(self):
         return f"<Source(name='{self.name}', priority={self.priority}, health='{self.health_status}')>"
-    
+
     # Property to support both 'url' and 'base_url' access
     @property
     def url(self):
         """Alias for base_url for backward compatibility"""
         return self.base_url
-    
+
     def to_dict(self):
         """Convert to dictionary for API responses"""
         return {
@@ -76,8 +87,12 @@ class Source(Base):
             "max_depth": self.max_depth,
             "use_playwright": self.use_playwright,
             "is_active": self.is_active,
-            "last_scraped_at": self.last_scraped_at.isoformat() if self.last_scraped_at else None,
-            "last_success_at": self.last_success_at.isoformat() if self.last_success_at else None,
+            "last_scraped_at": self.last_scraped_at.isoformat()
+            if self.last_scraped_at
+            else None,
+            "last_success_at": self.last_success_at.isoformat()
+            if self.last_success_at
+            else None,
             "leads_found": self.leads_found,
             "success_rate": float(self.success_rate) if self.success_rate else 0.0,
             "consecutive_failures": self.consecutive_failures,
@@ -86,12 +101,16 @@ class Source(Base):
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
             "gold_urls": self.gold_urls or {},
-            "last_discovery_at": self.last_discovery_at.isoformat() if self.last_discovery_at else None,
+            "last_discovery_at": self.last_discovery_at.isoformat()
+            if self.last_discovery_at
+            else None,
             "discovery_interval_days": self.discovery_interval_days,
-            "avg_lead_yield": float(self.avg_lead_yield) if self.avg_lead_yield else 0.0,
-            "total_scrapes": self.total_scrapes or 0
+            "avg_lead_yield": float(self.avg_lead_yield)
+            if self.avg_lead_yield
+            else 0.0,
+            "total_scrapes": self.total_scrapes or 0,
         }
-    
+
     def record_success(self, leads_count: int = 0):
         """Record a successful scrape"""
         self.last_scraped_at = datetime.now(timezone.utc)
@@ -100,13 +119,13 @@ class Source(Base):
         self.consecutive_failures = 0
         self.health_status = "healthy"
         self._update_success_rate(True)
-    
+
     def record_failure(self):
         """Record a failed scrape"""
         self.last_scraped_at = datetime.now(timezone.utc)
         self.consecutive_failures = (self.consecutive_failures or 0) + 1
         self._update_success_rate(False)
-        
+
         # Update health status based on consecutive failures
         if self.consecutive_failures >= 10:
             self.health_status = "dead"
@@ -114,7 +133,7 @@ class Source(Base):
             self.health_status = "failing"
         elif self.consecutive_failures >= 3:
             self.health_status = "degraded"
-    
+
     def _update_success_rate(self, success: bool):
         """Update rolling success rate (simple approximation)"""
         current_rate = float(self.success_rate or 50.0)

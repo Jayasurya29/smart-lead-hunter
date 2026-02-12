@@ -26,7 +26,7 @@ SKIP FILTERS (Don't Save):
 """
 
 from datetime import datetime
-from typing import Optional, Dict, Tuple, List
+from typing import Dict, Tuple
 import re
 
 
@@ -61,7 +61,7 @@ def _brand_matches(brand: str, text: str) -> bool:
             # Escape regex special chars, wrap in word boundaries
             escaped = re.escape(stripped)
             _brand_patterns[stripped] = re.compile(
-                r'\b' + escaped + r'\b', re.IGNORECASE
+                r"\b" + escaped + r"\b", re.IGNORECASE
             )
         return bool(_brand_patterns[stripped].search(text))
     else:
@@ -75,10 +75,18 @@ def _brand_matches(brand: str, text: str) -> bool:
 # =============================================================================
 
 TIER1_ULTRA_LUXURY = [
-    "alila", "aman", "amangiri", "amanera", "amanyara", "armani hotel",
+    "alila",
+    "aman",
+    "amangiri",
+    "amanera",
+    "amanyara",
+    "armani hotel",
     "baccarat hotel",
-    "banyan tree", "belmond", "bulgari",
-    "capella", "cheval blanc",
+    "banyan tree",
+    "belmond",
+    "bulgari",
+    "capella",
+    "cheval blanc",
     "como hotels",
     "corinthia hotel",
     "dorchester collection",
@@ -86,132 +94,266 @@ TIER1_ULTRA_LUXURY = [
     "faena",
     "jade mountain",
     "leading hotels of the world",
-    "mandarin oriental", "mirbeau",
+    "mandarin oriental",
+    "mirbeau",
     "miraval",
     "nikki beach resort",
-    "oberoi", "oetker collection", "one&only", "one & only",
-    "peninsula", "preferred hotels",
-    "raffles", "rocco forte", "rosewood",
-    "six senses", "small luxury hotels",
+    "oberoi",
+    "oetker collection",
+    "one&only",
+    "one & only",
+    "peninsula",
+    "preferred hotels",
+    "raffles",
+    "rocco forte",
+    "rosewood",
+    "six senses",
+    "small luxury hotels",
     "the leading hotels",
     "viceroy",
 ]
 
 TIER2_LUXURY = [
     "acqualina",
-    "atlantis", "auberge",
+    "atlantis",
+    "auberge",
     "caesars palace",
     "conrad",
     "equinox hotel",
     "four seasons",
-    "langham", "le blanc", "loews", "lxr",
+    "langham",
+    "le blanc",
+    "loews",
+    "lxr",
     "mgm grand",
     "montage",
-    "nobu hotel", "nomad",
+    "nobu hotel",
+    "nomad",
     "park hyatt",
-    "regent", "ritz-carlton", "ritz carlton", "ritz-carlton reserve",
-    "st. regis", "st regis",
-    "the luxury collection", "luxury collection",
-    "waldorf astoria", "waldorf-astoria",
+    "regent",
+    "ritz-carlton",
+    "ritz carlton",
+    "ritz-carlton reserve",
+    "st. regis",
+    "st regis",
+    "the luxury collection",
+    "luxury collection",
+    "waldorf astoria",
+    "waldorf-astoria",
     "white elephant",
     "zoetry",
     "registry collection",
 ]
 
 TIER3_UPPER_UPSCALE = [
-    "1 hotel", "1hotel",
-    "ace hotel", "andaz",
-    "archer hotel", "autograph collection",
-    "canopy by hilton", "canopy", "curio collection", "curio",
-    "delano", "destination by hyatt", "dolce", "dream hotel",
-    "edition", "fairmont",
-    "graduate hotels", "graduate austin", "grand hyatt",
-    "graduate", "grand wailea",
-    "hard rock hotel", "hotel indigo", "hyatt centric", "hyatt regency",
-    "intercontinental", "impression by secrets",
+    "1 hotel",
+    "1hotel",
+    "ace hotel",
+    "andaz",
+    "archer hotel",
+    "autograph collection",
+    "canopy by hilton",
+    "canopy",
+    "curio collection",
+    "curio",
+    "delano",
+    "destination by hyatt",
+    "dolce",
+    "dream hotel",
+    "edition",
+    "fairmont",
+    "graduate hotels",
+    "graduate austin",
+    "grand hyatt",
+    "graduate",
+    "grand wailea",
+    "hard rock hotel",
+    "hotel indigo",
+    "hyatt centric",
+    "hyatt regency",
+    "intercontinental",
+    "impression by secrets",
     "jw marriott",
     "kimpton",
     "le meridien",
     "live aqua",
-    "mgallery", "mondrian",
+    "mgallery",
+    "mondrian",
     "mr. c",
     "newbury boston",
     "omni",
-    "pendry", "proper hotel",
+    "pendry",
+    "proper hotel",
     "renaissance",
-    "secrets resorts", "secrets", "signia", "sls", "sofitel", "swissotel",
-    "tapestry collection", "tapestry", "tempo by hilton", "the standard",
-    "thompson", "tribute portfolio",
-    "unbound collection", "unico",
-    "vignette collection", "virgin hotels",
+    "secrets resorts",
+    "secrets",
+    "signia",
+    "sls",
+    "sofitel",
+    "swissotel",
+    "tapestry collection",
+    "tapestry",
+    "tempo by hilton",
+    "the standard",
+    "thompson",
+    "tribute portfolio",
+    "unbound collection",
+    "unico",
+    "vignette collection",
+    "virgin hotels",
     "warwick",
-    "w hotel", "w hotels", "w miami", "w south beach", "w fort lauderdale",
-    "w new york", "w los angeles", "w hollywood", "w chicago", "w austin",
-    "zemi", "hyatt zilara", "hyatt ziva", "zilara", "ziva",
+    "w hotel",
+    "w hotels",
+    "w miami",
+    "w south beach",
+    "w fort lauderdale",
+    "w new york",
+    "w los angeles",
+    "w hollywood",
+    "w chicago",
+    "w austin",
+    "zemi",
+    "hyatt zilara",
+    "hyatt ziva",
+    "zilara",
+    "ziva",
 ]
 
 TIER4_UPSCALE = [
-    "breathless resorts", "breathless",
-    "citizenm", "club med",
+    "breathless resorts",
+    "breathless",
+    "citizenm",
+    "club med",
     "couples resort",
     "crowne plaza",
-    "delta hotels", "divi resorts",
-    "doubletree", "dreams resorts", "dreams",
+    "delta hotels",
+    "divi resorts",
+    "doubletree",
+    "dreams resorts",
+    "dreams",
     "el cid resort",
     "el san juan hotel",
-    "embassy suites", "even hotels",
+    "embassy suites",
+    "even hotels",
     "gaylord",
-    "hilton hotel", "hilton hotels", "hilton miami", "hilton fort lauderdale", "hilton los angeles", "hilton chicago", "hilton san", "hilton bay", "hilton resort", "moon palace",
+    "hilton hotel",
+    "hilton hotels",
+    "hilton miami",
+    "hilton fort lauderdale",
+    "hilton los angeles",
+    "hilton chicago",
+    "hilton san",
+    "hilton bay",
+    "hilton resort",
+    "moon palace",
     "novotel",
     "occidental",
     "outrigger",
     "pullman",
-    "riu palace", "riu",
+    "riu palace",
+    "riu",
     "royalton",
     "royalton vessence",
-    "sandals", "sheraton",
-    "sonesta hotel", "sonesta", "sunscape resorts",
-    "temptation resort", "sunscape",
+    "sandals",
+    "sheraton",
+    "sonesta hotel",
+    "sonesta",
+    "sunscape resorts",
+    "temptation resort",
+    "sunscape",
     "voco",
-    "westin", "wyndham grand",
-    "bahia principe", "barcelo", "iberostar", "karisma",
+    "westin",
+    "wyndham grand",
+    "bahia principe",
+    "barcelo",
+    "iberostar",
+    "karisma",
     "lopesan",
     "margaritaville",
-    "excellence resorts", "excellence", "palace resorts",
+    "excellence resorts",
+    "excellence",
+    "palace resorts",
     "princess hotel",
     "princess grand",
-    "princess senses", "paradisus",
+    "princess senses",
+    "paradisus",
 ]
 
 TIER5_SKIP = [
     "ac hotel",
     "apartment collection",
-    "apartment collection by hilton", "ac hotels", "aloft", "americinn", "avid hotels", "atwell suites",
-    "baymont", "best western",
-    "cambria", "candlewood", "caption by hyatt", "clarion", "comfort inn", "comfort suites", "country inn", "courtyard",
-    "days inn", "drury",
-    "econo lodge", "element", "everhome",
+    "apartment collection by hilton",
+    "ac hotels",
+    "aloft",
+    "americinn",
+    "avid hotels",
+    "atwell suites",
+    "baymont",
+    "best western",
+    "cambria",
+    "candlewood",
+    "caption by hyatt",
+    "clarion",
+    "comfort inn",
+    "comfort suites",
+    "country inn",
+    "courtyard",
+    "days inn",
+    "drury",
+    "econo lodge",
+    "element",
+    "everhome",
     "everhome suites",
     "extended stay",
-    "fairfield", "four points",
-    "garner", "glo",
-    "hampton", "hampton inn", "hawthorn", "hilton garden inn",
-    "holiday inn", "holiday inn express", "home2", "homewood",
-    "hyatt house", "hyatt place",
+    "fairfield",
+    "four points",
+    "garner",
+    "glo",
+    "hampton",
+    "hampton inn",
+    "hawthorn",
+    "hilton garden inn",
+    "holiday inn",
+    "holiday inn express",
+    "home2",
+    "homewood",
+    "hyatt house",
+    "hyatt place",
     "hyatt studios",
     "la quinta",
     "livaway",
-    "livaway suites", "livsmart",
-    "microtel", "motel 6",
+    "livaway suites",
+    "livsmart",
+    "microtel",
+    "motel 6",
     "my place",
-    "my place hotel", "motto", "moxy",
-    "park inn", "protea",
+    "my place hotel",
+    "motto",
+    "moxy",
+    "park inn",
+    "protea",
     "quality inn",
-    "radisson", "ramada", "red lion", "red roof", "residence inn", "rodeway",
-    "sleep inn", "spark by hilton", "springhill", "sojourn suites",
-    "staybridge", "studiores", "super 8",
-    "towneplace", "tru by hilton", "tru",
-    "wingate", "woodspring", "wyndham garden", "wyndham hotel", "wyndham hotels",
+    "radisson",
+    "ramada",
+    "red lion",
+    "red roof",
+    "residence inn",
+    "rodeway",
+    "sleep inn",
+    "spark by hilton",
+    "springhill",
+    "sojourn suites",
+    "staybridge",
+    "studiores",
+    "super 8",
+    "towneplace",
+    "tru by hilton",
+    "tru",
+    "wingate",
+    "woodspring",
+    "wyndham garden",
+    "wyndham hotel",
+    "wyndham hotels",
 ]
 
 # Tier name mapping for database storage
@@ -221,7 +363,7 @@ TIER_NAMES = {
     3: "tier3_upper_upscale",
     4: "tier4_upscale",
     5: "tier5_skip",
-    0: "unknown"
+    0: "unknown",
 }
 
 
@@ -282,194 +424,518 @@ def should_skip_brand(hotel_name: str) -> bool:
 
 # Primary Market - FLORIDA
 FLORIDA_KEYWORDS = [
-    "florida", "fl",
-    "miami", "miami beach", "south beach", "brickell", "coral gables", "coconut grove",
-    "orlando", "lake buena vista", "kissimmee",
-    "tampa", "st. petersburg", "clearwater",
-    "jacksonville", "ponte vedra", "amelia island",
-    "fort lauderdale", "hollywood fl", "dania beach",
-    "naples", "marco island", "bonita springs",
-    "key west", "key largo", "islamorada", "marathon fl", "florida keys",
-    "palm beach", "west palm beach", "boca raton", "delray beach", "jupiter",
-    "sarasota", "longboat key", "siesta key",
-    "destin", "pensacola", "panama city beach",
-    "fort myers", "sanibel", "captiva",
-    "daytona beach", "st. augustine",
-    "gainesville fl", "tallahassee",
+    "florida",
+    "fl",
+    "miami",
+    "miami beach",
+    "south beach",
+    "brickell",
+    "coral gables",
+    "coconut grove",
+    "orlando",
+    "lake buena vista",
+    "kissimmee",
+    "tampa",
+    "st. petersburg",
+    "clearwater",
+    "jacksonville",
+    "ponte vedra",
+    "amelia island",
+    "fort lauderdale",
+    "hollywood fl",
+    "dania beach",
+    "naples",
+    "marco island",
+    "bonita springs",
+    "key west",
+    "key largo",
+    "islamorada",
+    "marathon fl",
+    "florida keys",
+    "palm beach",
+    "west palm beach",
+    "boca raton",
+    "delray beach",
+    "jupiter",
+    "sarasota",
+    "longboat key",
+    "siesta key",
+    "destin",
+    "pensacola",
+    "panama city beach",
+    "fort myers",
+    "sanibel",
+    "captiva",
+    "daytona beach",
+    "st. augustine",
+    "gainesville fl",
+    "tallahassee",
 ]
 
 # Caribbean - YOUR SECONDARY MARKET
 CARIBBEAN_KEYWORDS = [
     # Bahamas
-    "bahamas", "nassau", "paradise island", "exuma", "harbour island", "bimini", "eleuthera",
+    "bahamas",
+    "nassau",
+    "paradise island",
+    "exuma",
+    "harbour island",
+    "bimini",
+    "eleuthera",
     # Cayman
-    "cayman islands", "grand cayman", "cayman",
+    "cayman islands",
+    "grand cayman",
+    "cayman",
     # Turks & Caicos
-    "turks and caicos", "turks & caicos", "providenciales", "turks", "grace bay",
+    "turks and caicos",
+    "turks & caicos",
+    "providenciales",
+    "turks",
+    "grace bay",
     # Jamaica
-    "jamaica", "montego bay", "ocho rios", "negril", "kingston jamaica",
+    "jamaica",
+    "montego bay",
+    "ocho rios",
+    "negril",
+    "kingston jamaica",
     # Barbados
-    "barbados", "bridgetown",
+    "barbados",
+    "bridgetown",
     # St. Lucia
-    "st. lucia", "saint lucia", "st lucia",
+    "st. lucia",
+    "saint lucia",
+    "st lucia",
     # Bermuda
     "bermuda",
     # ABC Islands
-    "aruba", "curacao", "bonaire",
+    "aruba",
+    "curacao",
+    "bonaire",
     # US Virgin Islands
-    "usvi", "u.s. virgin islands", "st. thomas", "st. john usvi", "st. croix",
+    "usvi",
+    "u.s. virgin islands",
+    "st. thomas",
+    "st. john usvi",
+    "st. croix",
     # British Virgin Islands
-    "bvi", "british virgin islands", "virgin gorda", "tortola",
+    "bvi",
+    "british virgin islands",
+    "virgin gorda",
+    "tortola",
     # Other Caribbean
     "anguilla",
-    "antigua", "antigua and barbuda",
-    "dominican republic", "punta cana", "santo domingo", "cap cana", "la romana",
-    "puerto rico", "san juan", "dorado", "vieques", "culebra",
-    "st. martin", "saint martin", "st. maarten", "sint maarten",
-    "grenada", "st. george's grenada",
-    "st. kitts", "saint kitts", "nevis", "st. kitts and nevis",
-    "trinidad", "tobago", "trinidad and tobago",
-    "martinique", "guadeloupe",
+    "antigua",
+    "antigua and barbuda",
+    "dominican republic",
+    "punta cana",
+    "santo domingo",
+    "cap cana",
+    "la romana",
+    "puerto rico",
+    "san juan",
+    "dorado",
+    "vieques",
+    "culebra",
+    "st. martin",
+    "saint martin",
+    "st. maarten",
+    "sint maarten",
+    "grenada",
+    "st. george's grenada",
+    "st. kitts",
+    "saint kitts",
+    "nevis",
+    "st. kitts and nevis",
+    "trinidad",
+    "tobago",
+    "trinidad and tobago",
+    "martinique",
+    "guadeloupe",
     "caribbean",
 ]
 
 # Strong US Markets (existing client presence)
 STRONG_US_KEYWORDS = [
     # California
-    "california", "los angeles", "san francisco", "san diego", "beverly hills",
-    "santa monica", "malibu", "napa", "laguna beach", "newport beach", "la jolla",
-    "palm springs", "carmel", "monterey", "hollywood ca",
+    "california",
+    "los angeles",
+    "san francisco",
+    "san diego",
+    "beverly hills",
+    "santa monica",
+    "malibu",
+    "napa",
+    "laguna beach",
+    "newport beach",
+    "la jolla",
+    "palm springs",
+    "carmel",
+    "monterey",
+    "hollywood ca",
     # New York
-    "new york", "manhattan", "brooklyn", "hamptons", "long island", "westchester",
+    "new york",
+    "manhattan",
+    "brooklyn",
+    "hamptons",
+    "long island",
+    "westchester",
     # Texas
-    "texas", "austin tx", "houston", "dallas", "san antonio", "fort worth",
+    "texas",
+    "austin tx",
+    "houston",
+    "dallas",
+    "san antonio",
+    "fort worth",
     # Georgia
-    "georgia", "atlanta", "savannah",
+    "georgia",
+    "atlanta",
+    "savannah",
     # Tennessee
-    "tennessee", "nashville", "memphis",
+    "tennessee",
+    "nashville",
+    "memphis",
     # South Carolina
-    "south carolina", "charleston sc", "myrtle beach", "hilton head",
+    "south carolina",
+    "charleston sc",
+    "myrtle beach",
+    "hilton head",
 ]
 
 # Other US States (lower priority but still US)
 OTHER_US_KEYWORDS = [
-    "alabama", "alaska", "arizona", "arkansas", "colorado", "connecticut",
-    "delaware", "hawaii", "idaho", "illinois", "indiana", "iowa", "kansas",
-    "kentucky", "louisiana", "maine", "maryland", "massachusetts", "michigan",
-    "minnesota", "mississippi", "missouri", "montana", "nebraska", "nevada",
-    "new hampshire", "new jersey", "new mexico", "north carolina", "north dakota",
-    "ohio", "oklahoma", "oregon", "pennsylvania", "rhode island",
-    "south dakota", "utah", "vermont", "virginia", "washington", "west virginia",
-    "wisconsin", "wyoming", "district of columbia", "washington dc", "d.c.",
+    "alabama",
+    "alaska",
+    "arizona",
+    "arkansas",
+    "colorado",
+    "connecticut",
+    "delaware",
+    "hawaii",
+    "idaho",
+    "illinois",
+    "indiana",
+    "iowa",
+    "kansas",
+    "kentucky",
+    "louisiana",
+    "maine",
+    "maryland",
+    "massachusetts",
+    "michigan",
+    "minnesota",
+    "mississippi",
+    "missouri",
+    "montana",
+    "nebraska",
+    "nevada",
+    "new hampshire",
+    "new jersey",
+    "new mexico",
+    "north carolina",
+    "north dakota",
+    "ohio",
+    "oklahoma",
+    "oregon",
+    "pennsylvania",
+    "rhode island",
+    "south dakota",
+    "utah",
+    "vermont",
+    "virginia",
+    "washington",
+    "west virginia",
+    "wisconsin",
+    "wyoming",
+    "district of columbia",
+    "washington dc",
+    "d.c.",
     # Common US cities not in strong markets
-    "chicago", "boston", "seattle", "denver", "phoenix", "las vegas", "portland",
-    "philadelphia", "new orleans", "scottsdale", "aspen", "vail", "park city",
+    "chicago",
+    "boston",
+    "seattle",
+    "denver",
+    "phoenix",
+    "las vegas",
+    "portland",
+    "philadelphia",
+    "new orleans",
+    "scottsdale",
+    "aspen",
+    "vail",
+    "park city",
     # US indicators
-    "usa", "united states", "u.s.a.", "america",
+    "usa",
+    "united states",
+    "u.s.a.",
+    "america",
 ]
 
 # International locations to SKIP
 INTERNATIONAL_SKIP = [
     # Canada
-    "canada", "toronto", "vancouver", "montreal", "calgary", "ottawa", "whistler",
-    "banff", "quebec", "british columbia", "ontario", "alberta",
-
+    "canada",
+    "toronto",
+    "vancouver",
+    "montreal",
+    "calgary",
+    "ottawa",
+    "whistler",
+    "banff",
+    "quebec",
+    "british columbia",
+    "ontario",
+    "alberta",
     # Mexico (not Caribbean)
-    "mexico", "mexico city", "cancun", "los cabos", "cabo san lucas", "riviera maya",
-    "playa del carmen", "tulum", "puerto vallarta", "guadalajara", "monterrey",
-
+    "mexico",
+    "mexico city",
+    "cancun",
+    "los cabos",
+    "cabo san lucas",
+    "riviera maya",
+    "playa del carmen",
+    "tulum",
+    "puerto vallarta",
+    "guadalajara",
+    "monterrey",
     # Europe
-    "europe", "european",
-    "united kingdom", "uk", "england", "london", "manchester", "scotland", "edinburgh",
-    "ireland", "dublin",
-    "france", "paris", "nice", "cannes", "monaco", "french riviera",
-    "italy", "rome", "milan", "milano", "florence", "venice", "tuscany", "sardinia",
-    "spain", "madrid", "barcelona", "marbella", "ibiza", "mallorca",
-    "germany", "berlin", "munich", "frankfurt", "hamburg",
-    "switzerland", "zurich", "geneva", "st. moritz", "gstaad",
-    "austria", "vienna", "salzburg",
-    "portugal", "lisbon", "porto", "algarve", "vilamoura",
-    "netherlands", "amsterdam", "holland",
-    "belgium", "brussels",
-    "greece", "athens", "santorini", "mykonos",
-    "croatia", "dubrovnik",
-    "czech republic", "prague",
-    "hungary", "budapest",
-    "poland", "warsaw",
-    "sweden", "stockholm",
-    "norway", "oslo",
-    "denmark", "copenhagen",
-    "finland", "helsinki",
-    "russia", "moscow", "st. petersburg russia",
-    "turkey", "istanbul", "bodrum",
-
+    "europe",
+    "european",
+    "united kingdom",
+    "uk",
+    "england",
+    "london",
+    "manchester",
+    "scotland",
+    "edinburgh",
+    "ireland",
+    "dublin",
+    "france",
+    "paris",
+    "nice",
+    "cannes",
+    "monaco",
+    "french riviera",
+    "italy",
+    "rome",
+    "milan",
+    "milano",
+    "florence",
+    "venice",
+    "tuscany",
+    "sardinia",
+    "spain",
+    "madrid",
+    "barcelona",
+    "marbella",
+    "ibiza",
+    "mallorca",
+    "germany",
+    "berlin",
+    "munich",
+    "frankfurt",
+    "hamburg",
+    "switzerland",
+    "zurich",
+    "geneva",
+    "st. moritz",
+    "gstaad",
+    "austria",
+    "vienna",
+    "salzburg",
+    "portugal",
+    "lisbon",
+    "porto",
+    "algarve",
+    "vilamoura",
+    "netherlands",
+    "amsterdam",
+    "holland",
+    "belgium",
+    "brussels",
+    "greece",
+    "athens",
+    "santorini",
+    "mykonos",
+    "croatia",
+    "dubrovnik",
+    "czech republic",
+    "prague",
+    "hungary",
+    "budapest",
+    "poland",
+    "warsaw",
+    "sweden",
+    "stockholm",
+    "norway",
+    "oslo",
+    "denmark",
+    "copenhagen",
+    "finland",
+    "helsinki",
+    "russia",
+    "moscow",
+    "st. petersburg russia",
+    "turkey",
+    "istanbul",
+    "bodrum",
     # Asia
-    "asia", "asian",
-    "china", "beijing", "shanghai", "hong kong", "shenzhen", "guangzhou", "dalian",
-    "suzhou", "chengdu", "hangzhou",
-    "japan", "tokyo", "kyoto", "osaka",
-    "south korea", "korea", "seoul", "busan",
+    "asia",
+    "asian",
+    "china",
+    "beijing",
+    "shanghai",
+    "hong kong",
+    "shenzhen",
+    "guangzhou",
+    "dalian",
+    "suzhou",
+    "chengdu",
+    "hangzhou",
+    "japan",
+    "tokyo",
+    "kyoto",
+    "osaka",
+    "south korea",
+    "korea",
+    "seoul",
+    "busan",
     "singapore",
-    "thailand", "bangkok", "phuket", "chiang mai", "koh samui",
-    "vietnam", "hanoi", "ho chi minh", "nha trang",
-    "indonesia", "bali", "jakarta",
-    "malaysia", "kuala lumpur",
-    "philippines", "manila", "boracay",
-    "india", "mumbai", "delhi", "new delhi", "bengaluru", "bangalore", "goa", "jaipur",
-    "sri lanka", "colombo",
-    "maldives", "male",
-    "cambodia", "siem reap",
-    "myanmar", "burma",
-    "taiwan", "taipei", "kaohsiung",
-
+    "thailand",
+    "bangkok",
+    "phuket",
+    "chiang mai",
+    "koh samui",
+    "vietnam",
+    "hanoi",
+    "ho chi minh",
+    "nha trang",
+    "indonesia",
+    "bali",
+    "jakarta",
+    "malaysia",
+    "kuala lumpur",
+    "philippines",
+    "manila",
+    "boracay",
+    "india",
+    "mumbai",
+    "delhi",
+    "new delhi",
+    "bengaluru",
+    "bangalore",
+    "goa",
+    "jaipur",
+    "sri lanka",
+    "colombo",
+    "maldives",
+    "male",
+    "cambodia",
+    "siem reap",
+    "myanmar",
+    "burma",
+    "taiwan",
+    "taipei",
+    "kaohsiung",
     # Middle East
-    "middle east", "makkah", "mecca", "medina",
-    "united arab emirates", "uae", "dubai", "abu dhabi",
-    "saudi arabia", "riyadh", "jeddah", "red sea",
-    "qatar", "doha",
-    "bahrain", "manama",
-    "oman", "muscat",
+    "middle east",
+    "makkah",
+    "mecca",
+    "medina",
+    "united arab emirates",
+    "uae",
+    "dubai",
+    "abu dhabi",
+    "saudi arabia",
+    "riyadh",
+    "jeddah",
+    "red sea",
+    "qatar",
+    "doha",
+    "bahrain",
+    "manama",
+    "oman",
+    "muscat",
     "kuwait",
-    "israel", "tel aviv", "jerusalem",
-    "jordan", "amman", "dead sea",
-    "lebanon", "beirut",
-    "egypt", "cairo", "sharm el sheikh",
-    "morocco", "marrakech", "casablanca",
-
+    "israel",
+    "tel aviv",
+    "jerusalem",
+    "jordan",
+    "amman",
+    "dead sea",
+    "lebanon",
+    "beirut",
+    "egypt",
+    "cairo",
+    "sharm el sheikh",
+    "morocco",
+    "marrakech",
+    "casablanca",
     # Africa
-    "africa", "african",
-    "south africa", "cape town", "johannesburg",
-    "kenya", "nairobi", "mombasa",
-    "tanzania", "zanzibar", "serengeti",
-    "rwanda", "kigali",
+    "africa",
+    "african",
+    "south africa",
+    "cape town",
+    "johannesburg",
+    "kenya",
+    "nairobi",
+    "mombasa",
+    "tanzania",
+    "zanzibar",
+    "serengeti",
+    "rwanda",
+    "kigali",
     "mauritius",
     "seychelles",
     "botswana",
     "namibia",
     "zimbabwe",
-
     # Australia & Pacific
-    "australia", "sydney", "melbourne", "brisbane", "perth", "gold coast",
-    "new zealand", "auckland", "queenstown",
+    "australia",
+    "sydney",
+    "melbourne",
+    "brisbane",
+    "perth",
+    "gold coast",
+    "new zealand",
+    "auckland",
+    "queenstown",
     "fiji",
-    "french polynesia", "bora bora", "tahiti",
-
+    "french polynesia",
+    "bora bora",
+    "tahiti",
     # South America
     "south america",
-    "brazil", "sao paulo", "rio de janeiro", "rio",
-    "argentina", "buenos aires",
-    "chile", "santiago",
-    "colombia", "bogota", "cartagena",
-    "peru", "lima", "cusco",
-    "ecuador", "quito",
-    "uruguay", "montevideo",
-
+    "brazil",
+    "sao paulo",
+    "rio de janeiro",
+    "rio",
+    "argentina",
+    "buenos aires",
+    "chile",
+    "santiago",
+    "colombia",
+    "bogota",
+    "cartagena",
+    "peru",
+    "lima",
+    "cusco",
+    "ecuador",
+    "quito",
+    "uruguay",
+    "montevideo",
     # Central America (not Caribbean)
-    "costa rica", "san jose costa rica", "guanacaste",
-    "panama", "panama city",
-    "belize", "belize city",
-    "guatemala", "guatemala city",
-    "honduras", "nicaragua", "el salvador",
+    "costa rica",
+    "san jose costa rica",
+    "guanacaste",
+    "panama",
+    "panama city",
+    "belize",
+    "belize city",
+    "guatemala",
+    "guatemala city",
+    "honduras",
+    "nicaragua",
+    "el salvador",
 ]
 
 # Location type mapping for database
@@ -479,11 +945,13 @@ LOCATION_TYPES = {
     "strong_us": "usa",
     "other_us": "usa",
     "unknown_us": "usa",
-    "international": "international"
+    "international": "international",
 }
 
 
-def get_location_score(city: str = None, state: str = None, country: str = None) -> Tuple[int, str, str]:
+def get_location_score(
+    city: str = None, state: str = None, country: str = None
+) -> Tuple[int, str, str]:
     """
     Score location based on market priority.
 
@@ -493,7 +961,7 @@ def get_location_score(city: str = None, state: str = None, country: str = None)
     - Strong US Markets: +15 pts, "usa"
     - Other US: +10 pts, "usa"
     - International: SKIP (return -1), "international"
-    
+
     FIX: Check US/Caribbean BEFORE international keywords.
     Previously, "Rome, Georgia, USA" was wrongly skipped because
     "rome" (an international keyword) was found as a substring before
@@ -504,7 +972,7 @@ def get_location_score(city: str = None, state: str = None, country: str = None)
     location_parts = [
         str(city or "").lower().strip(),
         str(state or "").lower().strip(),
-        str(country or "").lower().strip()
+        str(country or "").lower().strip(),
     ]
     location_text = " ".join(location_parts)
     country_lower = str(country or "").lower().strip()
@@ -525,10 +993,24 @@ def get_location_score(city: str = None, state: str = None, country: str = None)
     )
 
     caribbean_countries = [
-        "bahamas", "jamaica", "barbados", "bermuda", "aruba", "curacao",
-        "dominican republic", "puerto rico", "trinidad and tobago",
-        "cayman islands", "turks and caicos", "st. lucia", "antigua",
-        "grenada", "st. kitts", "anguilla", "bvi", "usvi"
+        "bahamas",
+        "jamaica",
+        "barbados",
+        "bermuda",
+        "aruba",
+        "curacao",
+        "dominican republic",
+        "puerto rico",
+        "trinidad and tobago",
+        "cayman islands",
+        "turks and caicos",
+        "st. lucia",
+        "antigua",
+        "grenada",
+        "st. kitts",
+        "anguilla",
+        "bvi",
+        "usvi",
     ]
     is_caribbean = any(cc in country_lower for cc in caribbean_countries)
 
@@ -573,7 +1055,9 @@ def get_location_score(city: str = None, state: str = None, country: str = None)
     return (10, "Unknown - Assume US", "usa")
 
 
-def should_skip_location(city: str = None, state: str = None, country: str = None) -> bool:
+def should_skip_location(
+    city: str = None, state: str = None, country: str = None
+) -> bool:
     """Check if location should be filtered out (international)"""
     score, _, _ = get_location_score(city, state, country)
     return score == -1
@@ -583,13 +1067,14 @@ def should_skip_location(city: str = None, state: str = None, country: str = Non
 # TIMING SCORING (25 pts max)
 # =============================================================================
 
+
 def get_timing_score(opening_date: str = None) -> Tuple[int, str, int]:
     """
     Score based on opening year.
 
     P-01 FIX: Now uses current_year dynamically instead of hardcoded 2026/2027/2028.
     This means the scoring stays correct as years roll over without code changes.
-    
+
     Logic: current year or earlier = URGENT, +1 = Hot, +2 = Warm, +3 or later = Track
 
     Returns: (points, timing_tier, year)
@@ -601,7 +1086,7 @@ def get_timing_score(opening_date: str = None) -> Tuple[int, str, int]:
     current_year = datetime.now().year
 
     # Try to extract year from date string
-    year_match = re.search(r'20\d{2}', date_str)
+    year_match = re.search(r"20\d{2}", date_str)
     if year_match:
         year = int(year_match.group())
     else:
@@ -631,6 +1116,7 @@ def get_timing_score(opening_date: str = None) -> Tuple[int, str, int]:
 # ROOM COUNT SCORING (15 pts max)
 # =============================================================================
 
+
 def get_room_count_score(room_count: int = None) -> Tuple[int, str]:
     """
     Score based on number of rooms.
@@ -644,7 +1130,7 @@ def get_room_count_score(room_count: int = None) -> Tuple[int, str]:
         rooms = int(room_count)
     except (ValueError, TypeError):
         if isinstance(room_count, str):
-            match = re.search(r'\d+', room_count)
+            match = re.search(r"\d+", room_count)
             if match:
                 rooms = int(match.group())
             else:
@@ -670,10 +1156,9 @@ def get_room_count_score(room_count: int = None) -> Tuple[int, str]:
 # CONTACT INFO SCORING (8 pts max)
 # =============================================================================
 
+
 def get_contact_score(
-    contact_name: str = None,
-    contact_email: str = None,
-    contact_phone: str = None
+    contact_name: str = None, contact_email: str = None, contact_phone: str = None
 ) -> Tuple[int, str, Dict]:
     """
     Score based on contact information availability.
@@ -682,7 +1167,11 @@ def get_contact_score(
     breakdown = {}
 
     # Check for name
-    if contact_name and str(contact_name).strip() and str(contact_name).lower() not in ["none", "unknown", "n/a", ""]:
+    if (
+        contact_name
+        and str(contact_name).strip()
+        and str(contact_name).lower() not in ["none", "unknown", "n/a", ""]
+    ):
         points += 3
         breakdown["name"] = 3
 
@@ -692,8 +1181,12 @@ def get_contact_score(
         breakdown["email"] = 3
 
     # Check for phone
-    if contact_phone and str(contact_phone).strip() and str(contact_phone).lower() not in ["none", "unknown", "n/a", ""]:
-        if re.search(r'\d{3,}', str(contact_phone)):
+    if (
+        contact_phone
+        and str(contact_phone).strip()
+        and str(contact_phone).lower() not in ["none", "unknown", "n/a", ""]
+    ):
+        if re.search(r"\d{3,}", str(contact_phone)):
             points += 2
             breakdown["phone"] = 2
 
@@ -714,26 +1207,52 @@ def get_contact_score(
 # NEW BUILD SCORING (4 pts max)
 # =============================================================================
 
-def get_new_build_score(project_type: str = None, description: str = None) -> Tuple[int, str]:
+
+def get_new_build_score(
+    project_type: str = None, description: str = None
+) -> Tuple[int, str]:
     """
     Score based on whether it's a new build, conversion, or renovation.
     """
     combined_text = f"{project_type or ''} {description or ''}".lower()
 
-    new_build_keywords = ["new build", "new construction", "ground up", "new hotel",
-                          "new resort", "new opening", "newly built", "brand new"]
+    new_build_keywords = [
+        "new build",
+        "new construction",
+        "ground up",
+        "new hotel",
+        "new resort",
+        "new opening",
+        "newly built",
+        "brand new",
+    ]
     for keyword in new_build_keywords:
         if keyword in combined_text:
             return (4, "New Build")
 
-    conversion_keywords = ["conversion", "converting", "rebranding", "rebrand",
-                          "formerly", "was previously", "changing to", "becoming"]
+    conversion_keywords = [
+        "conversion",
+        "converting",
+        "rebranding",
+        "rebrand",
+        "formerly",
+        "was previously",
+        "changing to",
+        "becoming",
+    ]
     for keyword in conversion_keywords:
         if keyword in combined_text:
             return (3, "Brand Conversion")
 
-    renovation_keywords = ["renovation", "renovating", "refurbishment", "refresh",
-                          "remodel", "upgrade", "restoration"]
+    renovation_keywords = [
+        "renovation",
+        "renovating",
+        "refurbishment",
+        "refresh",
+        "remodel",
+        "upgrade",
+        "restoration",
+    ]
     for keyword in renovation_keywords:
         if keyword in combined_text:
             return (2, "Renovation")
@@ -747,11 +1266,13 @@ def get_new_build_score(project_type: str = None, description: str = None) -> Tu
 
 EXISTING_CLIENT_BRANDS = [
     "grand hyatt",
-    "graduate", "graduate hotels",
+    "graduate",
+    "graduate hotels",
     "loews",
     "equinox hotel",
     "four seasons",
-    "ritz-carlton", "ritz carlton",
+    "ritz-carlton",
+    "ritz carlton",
     "hilton",
     "kimpton",
     "intercontinental",
@@ -765,8 +1286,10 @@ EXISTING_CLIENT_BRANDS = [
     "sheraton",
     "sonesta hotel",
     "autograph collection",
-    "st. regis", "st regis",
-    "w hotel", "w hotels",
+    "st. regis",
+    "st regis",
+    "w hotel",
+    "w hotels",
     "andaz",
     "archer hotel",
     "park hyatt",
@@ -775,7 +1298,9 @@ EXISTING_CLIENT_BRANDS = [
 ]
 
 
-def get_existing_client_score(hotel_name: str = None, brand: str = None) -> Tuple[int, str]:
+def get_existing_client_score(
+    hotel_name: str = None, brand: str = None
+) -> Tuple[int, str]:
     """
     Score based on whether the brand is an existing client.
     """
@@ -791,6 +1316,7 @@ def get_existing_client_score(hotel_name: str = None, brand: str = None) -> Tupl
 # =============================================================================
 # MAIN SCORING FUNCTION
 # =============================================================================
+
 
 def calculate_lead_score(
     hotel_name: str,
@@ -827,7 +1353,7 @@ def calculate_lead_score(
         "brand_tier": None,
         "location_type": None,
         "opening_year": None,
-        "breakdown": {}
+        "breakdown": {},
     }
 
     # 1. BRAND TIER (25 pts max)
@@ -837,39 +1363,45 @@ def calculate_lead_score(
     if brand_tier_num == 5:
         result["should_save"] = False
         result["skip_reason"] = f"Budget brand: {hotel_name}"
-        result["breakdown"]["brand"] = {"points": 0, "tier": brand_tier_name, "skip": True}
+        result["breakdown"]["brand"] = {
+            "points": 0,
+            "tier": brand_tier_name,
+            "skip": True,
+        }
         return result
 
     result["breakdown"]["brand"] = {
         "points": brand_points,
         "tier": brand_tier_name,
-        "tier_num": brand_tier_num
+        "tier_num": brand_tier_num,
     }
     result["total_score"] += brand_points
 
     # 2. LOCATION (20 pts max)
-    location_points, location_tier, location_type = get_location_score(city, state, country)
+    location_points, location_tier, location_type = get_location_score(
+        city, state, country
+    )
     result["location_type"] = location_type
 
     if location_points == -1:
         result["should_save"] = False
-        result["skip_reason"] = f"International: {city}, {state}, {country} ({location_tier})"
-        result["breakdown"]["location"] = {"points": 0, "tier": location_tier, "skip": True}
+        result["skip_reason"] = (
+            f"International: {city}, {state}, {country} ({location_tier})"
+        )
+        result["breakdown"]["location"] = {
+            "points": 0,
+            "tier": location_tier,
+            "skip": True,
+        }
         return result
 
-    result["breakdown"]["location"] = {
-        "points": location_points,
-        "tier": location_tier
-    }
+    result["breakdown"]["location"] = {"points": location_points, "tier": location_tier}
     result["total_score"] += location_points
 
     # 3. TIMING (25 pts max)
     timing_points, timing_tier, opening_year = get_timing_score(opening_date)
     result["opening_year"] = opening_year
-    result["breakdown"]["timing"] = {
-        "points": timing_points,
-        "tier": timing_tier
-    }
+    result["breakdown"]["timing"] = {"points": timing_points, "tier": timing_tier}
 
     # Reject leads with opening dates in the past (already opened)
     if opening_year and opening_year < datetime.now().year:
@@ -881,10 +1413,7 @@ def calculate_lead_score(
 
     # 4. ROOM COUNT (15 pts max)
     room_points, room_tier = get_room_count_score(room_count)
-    result["breakdown"]["rooms"] = {
-        "points": room_points,
-        "tier": room_tier
-    }
+    result["breakdown"]["rooms"] = {"points": room_points, "tier": room_tier}
     result["total_score"] += room_points
 
     # 5. CONTACT INFO (8 pts max)
@@ -894,23 +1423,20 @@ def calculate_lead_score(
     result["breakdown"]["contact"] = {
         "points": contact_points,
         "tier": contact_tier,
-        "detail": contact_breakdown
+        "detail": contact_breakdown,
     }
     result["total_score"] += contact_points
 
     # 6. NEW BUILD (4 pts max)
     build_points, build_tier = get_new_build_score(project_type, description)
-    result["breakdown"]["new_build"] = {
-        "points": build_points,
-        "tier": build_tier
-    }
+    result["breakdown"]["new_build"] = {"points": build_points, "tier": build_tier}
     result["total_score"] += build_points
 
     # 7. EXISTING CLIENT (3 pts max)
     client_points, client_tier = get_existing_client_score(hotel_name, brand)
     result["breakdown"]["existing_client"] = {
         "points": client_points,
-        "tier": client_tier
+        "tier": client_tier,
     }
     result["total_score"] += client_points
 
@@ -931,6 +1457,7 @@ def calculate_lead_score(
 # QUICK SCORE FUNCTION (for test_scrape.py)
 # =============================================================================
 
+
 def quick_score(
     hotel_name: str,
     city: str = None,
@@ -938,11 +1465,11 @@ def quick_score(
     country: str = None,
     opening_date: str = None,
     room_count: int = None,
-    brand: str = None
+    brand: str = None,
 ) -> Tuple[int, bool, str, str, str]:
     """
     Quick scoring for scraper - returns essential info only.
-    
+
     Returns: (score, should_save, skip_reason, brand_tier, location_type)
     """
     result = calculate_lead_score(
@@ -952,15 +1479,15 @@ def quick_score(
         country=country,
         opening_date=opening_date,
         room_count=room_count,
-        brand=brand
+        brand=brand,
     )
-    
+
     return (
         result["total_score"],
         result["should_save"],
         result["skip_reason"],
         result["brand_tier"],
-        result["location_type"]
+        result["location_type"],
     )
 
 
@@ -968,38 +1495,39 @@ def quick_score(
 # LEAD SCORER CLASS (for scraping_tasks.py compatibility)
 # =============================================================================
 
+
 class LeadScorer:
     """
     Lead scoring class - wrapper around scoring functions.
-    
+
     Usage:
         scorer = LeadScorer()
         breakdown = scorer.score_with_breakdown(hotel_dict)
-        
+
         if scorer.is_budget_brand(hotel_dict):
             print("Skip this one")
     """
-    
+
     def score(self, hotel: Dict) -> int:
         """
         Score a hotel and return just the total score.
-        
+
         Args:
             hotel: Dict with hotel_name, city, state, country, opening_date, room_count, etc.
-            
+
         Returns:
             int: Total score (0-100)
         """
         result = self.score_with_breakdown(hotel)
         return result.total
-    
-    def score_with_breakdown(self, hotel: Dict) -> 'ScoreBreakdown':
+
+    def score_with_breakdown(self, hotel: Dict) -> "ScoreBreakdown":
         """
         Score a hotel and return detailed breakdown.
-        
+
         Args:
             hotel: Dict with hotel data
-            
+
         Returns:
             ScoreBreakdown object with all scoring details
         """
@@ -1018,10 +1546,10 @@ class LeadScorer:
             description=hotel.get("description"),
             brand=hotel.get("brand"),
         )
-        
+
         # Convert to ScoreBreakdown object
         breakdown = result.get("breakdown", {})
-        
+
         return ScoreBreakdown(
             total=result.get("total_score", 0),
             should_save=result.get("should_save", True),
@@ -1039,26 +1567,24 @@ class LeadScorer:
             new_build=breakdown.get("new_build", {}).get("points", 0),
             existing_client=breakdown.get("existing_client", {}).get("points", 0),
         )
-    
+
     def is_budget_brand(self, hotel: Dict) -> bool:
         """Check if hotel is a budget brand (should be skipped)"""
         hotel_name = hotel.get("hotel_name", "")
         return should_skip_brand(hotel_name)
-    
+
     def should_skip(self, hotel: Dict) -> bool:
         """Check if hotel should be skipped (budget brand or international)"""
         # Check brand
         if self.is_budget_brand(hotel):
             return True
-        
+
         # Check location
         if should_skip_location(
-            hotel.get("city"),
-            hotel.get("state"),
-            hotel.get("country")
+            hotel.get("city"), hotel.get("state"), hotel.get("country")
         ):
             return True
-        
+
         return False
 
 
@@ -1066,6 +1592,7 @@ class ScoreBreakdown:
     """
     Score breakdown object returned by LeadScorer.score_with_breakdown()
     """
+
     def __init__(
         self,
         total: int = 0,
@@ -1097,7 +1624,7 @@ class ScoreBreakdown:
         self.contact = contact
         self.new_build = new_build
         self.existing_client = existing_client
-    
+
     def to_dict(self) -> Dict:
         """Convert to dictionary for JSON storage"""
         return {
@@ -1122,7 +1649,7 @@ class ScoreBreakdown:
 def score_lead(hotel: Dict) -> int:
     """
     Quick function to score a lead.
-    
+
     Usage:
         from app.services.scorer import score_lead
         score = score_lead(hotel_dict)
@@ -1134,6 +1661,7 @@ def score_lead(hotel: Dict) -> int:
 # =============================================================================
 # UTILITY FUNCTIONS
 # =============================================================================
+
 
 def format_score_breakdown(result: Dict) -> str:
     """Format score breakdown for display"""
@@ -1148,13 +1676,27 @@ def format_score_breakdown(result: Dict) -> str:
 
     breakdown = result["breakdown"]
 
-    lines.append(f"Brand:     {breakdown['brand']['points']:>2} pts - {breakdown['brand']['tier']}")
-    lines.append(f"Location:  {breakdown['location']['points']:>2} pts - {breakdown['location']['tier']}")
-    lines.append(f"Timing:    {breakdown['timing']['points']:>2} pts - {breakdown['timing']['tier']}")
-    lines.append(f"Rooms:     {breakdown['rooms']['points']:>2} pts - {breakdown['rooms']['tier']}")
-    lines.append(f"Contact:   {breakdown['contact']['points']:>2} pts - {breakdown['contact']['tier']}")
-    lines.append(f"Build:     {breakdown['new_build']['points']:>2} pts - {breakdown['new_build']['tier']}")
-    lines.append(f"Client:    {breakdown['existing_client']['points']:>2} pts - {breakdown['existing_client']['tier']}")
+    lines.append(
+        f"Brand:     {breakdown['brand']['points']:>2} pts - {breakdown['brand']['tier']}"
+    )
+    lines.append(
+        f"Location:  {breakdown['location']['points']:>2} pts - {breakdown['location']['tier']}"
+    )
+    lines.append(
+        f"Timing:    {breakdown['timing']['points']:>2} pts - {breakdown['timing']['tier']}"
+    )
+    lines.append(
+        f"Rooms:     {breakdown['rooms']['points']:>2} pts - {breakdown['rooms']['tier']}"
+    )
+    lines.append(
+        f"Contact:   {breakdown['contact']['points']:>2} pts - {breakdown['contact']['tier']}"
+    )
+    lines.append(
+        f"Build:     {breakdown['new_build']['points']:>2} pts - {breakdown['new_build']['tier']}"
+    )
+    lines.append(
+        f"Client:    {breakdown['existing_client']['points']:>2} pts - {breakdown['existing_client']['tier']}"
+    )
 
     return "\n".join(lines)
 
@@ -1167,31 +1709,26 @@ if __name__ == "__main__":
     print("=" * 70)
     print("SCORER TEST")
     print("=" * 70)
-    
+
     test_cases = [
         # Should SKIP - International
         ("Four Seasons Toronto", "Toronto", None, "Canada"),
         ("Hilton Makkah", "Makkah", None, "Saudi Arabia"),
         ("Hyatt Regency Vilamoura", "Vilamoura", "Algarve", "Portugal"),
-        
         # Should SAVE - Florida
         ("Four Seasons Fort Lauderdale", "Fort Lauderdale", "Florida", "USA"),
         ("Ritz-Carlton Miami Beach", "Miami Beach", "FL", "USA"),
-        
         # Should SAVE - Caribbean
         ("Ritz-Carlton Grand Cayman", "Grand Cayman", None, "Cayman Islands"),
         ("Four Seasons Bahamas", "Nassau", None, "Bahamas"),
-        
         # Should SKIP - Budget
         ("Hampton Inn Orlando", "Orlando", "Florida", "USA"),
         ("Holiday Inn Miami", "Miami", "Florida", "USA"),
-        
         # M-07: FALSE POSITIVE TESTS - these should NOT match budget brands
         ("Trump International Miami", "Miami", "Florida", "USA"),
         ("The Glorious Hotel Miami", "Miami Beach", "FL", "USA"),
         ("Global Luxury Resort Naples", "Naples", "FL", "USA"),
         ("Triumph Hotel Nashville", "Nashville", "TN", "USA"),
-        
         # M-07: TRUE POSITIVE TESTS - these SHOULD match
         ("Tru by Hilton Orlando", "Orlando", "FL", "USA"),
         ("Glo Hotel Downtown", "Tampa", "FL", "USA"),
@@ -1204,18 +1741,18 @@ if __name__ == "__main__":
             city=city,
             state=state,
             country=country,
-            opening_date="2026"
+            opening_date="2026",
         )
-        
+
         status = "SAVE" if should_save else "SKIP"
         reason = skip_reason or f"Score: {score}"
         print(f"{status:4} | {hotel:40} | {reason}")
-    
+
     # Test the LeadScorer class
     print("\n" + "=" * 70)
     print("LEADSCORER CLASS TEST")
     print("=" * 70)
-    
+
     scorer = LeadScorer()
     test_hotel = {
         "hotel_name": "Four Seasons Miami Beach",
@@ -1224,9 +1761,9 @@ if __name__ == "__main__":
         "country": "USA",
         "opening_date": "2026",
         "room_count": 200,
-        "contact_email": "sales@fourseasons.com"
+        "contact_email": "sales@fourseasons.com",
     }
-    
+
     breakdown = scorer.score_with_breakdown(test_hotel)
     print(f"Hotel: {test_hotel['hotel_name']}")
     print(f"Total Score: {breakdown.total}")

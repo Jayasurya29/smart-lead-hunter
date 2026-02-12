@@ -1,109 +1,64 @@
-<!-- Lead Row Partial -->
-<tr id="lead-row-{{ lead.id }}"
-    data-lead-row
-    hx-get="/api/dashboard/leads/{{ lead.id }}"
-    hx-target="#detail-panel"
-    hx-swap="innerHTML"
-    class="cursor-pointer hover:bg-blue-50 transition-colors duration-150">
-    
-    <!-- Score -->
+<tr id="lead-row-{{ lead.id }}" data-lead-row
+    hx-get="/api/dashboard/leads/{{ lead.id }}" hx-target="#detail-panel" hx-swap="innerHTML"
+    class="lead-row cursor-pointer transition-colors duration-150">
     <td class="px-3 py-3 whitespace-nowrap">
         {% if lead.lead_score and lead.lead_score >= 70 %}
-        <span class="inline-flex items-center justify-center w-10 h-10 rounded-full text-sm font-bold bg-red-100 text-red-700 ring-2 ring-red-200">
-            {{ lead.lead_score }}
-        </span>
+        <span class="inline-flex items-center justify-center w-10 h-10 rounded-full text-sm font-bold score-hot">{{ lead.lead_score }}</span>
         {% elif lead.lead_score and lead.lead_score >= 50 %}
-        <span class="inline-flex items-center justify-center w-10 h-10 rounded-full text-sm font-bold bg-orange-100 text-orange-700 ring-2 ring-orange-200">
-            {{ lead.lead_score }}
-        </span>
+        <span class="inline-flex items-center justify-center w-10 h-10 rounded-full text-sm font-bold score-warm">{{ lead.lead_score }}</span>
         {% elif lead.lead_score %}
-        <span class="inline-flex items-center justify-center w-10 h-10 rounded-full text-sm font-bold bg-gray-100 text-gray-600">
-            {{ lead.lead_score }}
-        </span>
+        <span class="inline-flex items-center justify-center w-10 h-10 rounded-full text-sm font-bold score-cold">{{ lead.lead_score }}</span>
         {% else %}
-        <span class="inline-flex items-center justify-center w-10 h-10 rounded-full text-sm font-bold bg-gray-50 text-gray-400">
-            ?
-        </span>
+        <span class="inline-flex items-center justify-center w-10 h-10 rounded-full text-sm font-bold bg-gray-50 text-gray-400">?</span>
         {% endif %}
     </td>
-
-    <!-- Hotel -->
     <td class="px-3 py-3">
-        <div class="text-sm font-medium text-gray-900 truncate max-w-[220px]" title="{{ lead.hotel_name }}">
-            {{ lead.hotel_name }}
-        </div>
-        {% if lead.brand %}
-        <div class="text-xs text-gray-500 truncate max-w-[220px]">{{ lead.brand }}</div>
-        {% endif %}
+        <div class="text-sm font-semibold text-gray-900 truncate max-w-[220px]" title="{{ lead.hotel_name }}">{{ lead.hotel_name }}</div>
+        {% if lead.brand %}<div class="text-xs text-gray-500 truncate max-w-[220px]">{{ lead.brand }}</div>{% endif %}
     </td>
-
-    <!-- Location -->
+    <td class="px-3 py-3 whitespace-nowrap">
+        {% if lead.brand_tier == 'tier1_ultra_luxury' %}<span class="tier-badge tier-1">Ultra Lux</span>
+        {% elif lead.brand_tier == 'tier2_luxury' %}<span class="tier-badge tier-2">Luxury</span>
+        {% elif lead.brand_tier == 'tier3_upper_upscale' %}<span class="tier-badge tier-3">Upper Ups</span>
+        {% elif lead.brand_tier == 'tier4_upscale' %}<span class="tier-badge tier-4">Upscale</span>
+        {% else %}<span class="tier-badge" style="background:#f8fafc;color:#94a3b8;border:1px solid #e2e8f0;">—</span>{% endif %}
+    </td>
     <td class="px-3 py-3 whitespace-nowrap">
         <div class="text-sm text-gray-900">{{ lead.city or 'Unknown' }}{% if lead.state %}, {{ lead.state }}{% endif %}</div>
         {% if lead.location_type %}
         <span class="inline-flex items-center mt-0.5 px-1.5 py-0.5 rounded text-xs font-medium
-            {% if lead.location_type == 'florida' %}bg-green-100 text-green-700
-            {% elif lead.location_type == 'caribbean' %}bg-blue-100 text-blue-700
-            {% else %}bg-gray-100 text-gray-600{% endif %}">
-            {{ lead.location_type | title }}
-        </span>
-        {% endif %}
+            {% if lead.location_type == 'florida' %}bg-emerald-50 text-emerald-700 border border-emerald-200
+            {% elif lead.location_type == 'caribbean' %}bg-cyan-50 text-cyan-700 border border-cyan-200
+            {% else %}bg-gray-50 text-gray-600 border border-gray-200{% endif %}">
+            {% if lead.location_type == 'florida' %}🌴{% elif lead.location_type == 'caribbean' %}🏝️{% endif %} {{ lead.location_type | title }}
+        </span>{% endif %}
     </td>
-
-    <!-- Opening -->
-    <td class="px-3 py-3 whitespace-nowrap text-sm text-gray-600">
-        {{ lead.opening_date or lead.opening_year or 'TBD' }}
-    </td>
-
-    <!-- Sources (Pipeline tab only) -->
+    <td class="px-3 py-3 whitespace-nowrap text-sm text-gray-600">{{ lead.opening_date or lead.opening_year or 'TBD' }}</td>
     {% if lead.status == 'new' %}
     <td class="px-3 py-3 whitespace-nowrap text-center">
         {% set source_count = (lead.source_urls | length) if lead.source_urls else 1 %}
-        {% if source_count > 1 %}
-        <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold bg-purple-100 text-purple-700" title="{{ source_count }} sources">
-            {{ source_count }}x
-        </span>
-        {% else %}
-        <span class="text-xs text-gray-400">1</span>
-        {% endif %}
+        {% if source_count > 1 %}<span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold bg-purple-100 text-purple-700">{{ source_count }}x</span>
+        {% else %}<span class="text-xs text-gray-400">1</span>{% endif %}
     </td>
     {% endif %}
-
-    <!-- Actions -->
     <td class="px-3 py-3 whitespace-nowrap text-center" onclick="event.stopPropagation()">
         {% if lead.status == 'new' %}
         <div class="flex items-center justify-center space-x-1">
-            <button hx-post="/api/dashboard/leads/{{ lead.id }}/approve"
-                    hx-target="#lead-row-{{ lead.id }}"
-                    hx-swap="outerHTML"
-                    class="p-1.5 rounded-md text-green-600 hover:bg-green-50 transition-colors" title="Approve">
-                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
-                </svg>
+            <button hx-post="/api/dashboard/leads/{{ lead.id }}/approve" hx-target="#lead-row-{{ lead.id }}" hx-swap="outerHTML"
+                    class="p-1.5 rounded-md text-emerald-600 hover:bg-emerald-50 transition-colors" title="Approve">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
             </button>
-            <button hx-post="/api/dashboard/leads/{{ lead.id }}/reject"
-                    hx-target="#lead-row-{{ lead.id }}"
-                    hx-swap="outerHTML"
-                    class="p-1.5 rounded-md text-red-600 hover:bg-red-50 transition-colors" title="Reject">
-                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
-                </svg>
+            <button hx-post="/api/dashboard/leads/{{ lead.id }}/reject" hx-target="#lead-row-{{ lead.id }}" hx-swap="outerHTML"
+                    class="p-1.5 rounded-md text-red-500 hover:bg-red-50 transition-colors" title="Reject">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
             </button>
         </div>
         {% elif lead.status == 'approved' %}
-        <span class="inline-flex items-center text-emerald-600">
-            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
-            </svg>
-        </span>
+        <span class="text-emerald-600"><svg class="w-4 h-4 inline" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg></span>
         {% elif lead.status == 'rejected' %}
-        <button hx-post="/api/dashboard/leads/{{ lead.id }}/restore"
-                hx-target="#lead-row-{{ lead.id }}"
-                hx-swap="outerHTML"
-                class="p-1.5 rounded-md text-blue-600 hover:bg-blue-50 transition-colors" title="Restore to Pipeline">
-            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6"/>
-            </svg>
+        <button hx-post="/api/dashboard/leads/{{ lead.id }}/restore" hx-target="#lead-row-{{ lead.id }}" hx-swap="outerHTML"
+                class="p-1.5 rounded-md text-blue-600 hover:bg-blue-50 transition-colors" title="Restore">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6"/></svg>
         </button>
         {% endif %}
     </td>
