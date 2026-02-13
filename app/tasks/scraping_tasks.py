@@ -22,6 +22,7 @@ Usage:
 
 import asyncio
 import logging
+import sys
 from datetime import datetime, timezone
 from typing import Optional, List, Dict, Any
 
@@ -49,9 +50,6 @@ logger = logging.getLogger(__name__)
 # AFTER: Use asyncio.Runner (Python 3.11+) which maintains a single event
 # loop across calls within the same worker process. Falls back to the old
 # pattern on Python < 3.11.
-
-import sys
-
 if sys.version_info >= (3, 11):
     # Python 3.11+: Use asyncio.Runner for connection reuse
     import threading

@@ -28,6 +28,7 @@ import json
 import uuid
 
 from app.config import settings
+from app.logging_config import setup_logging
 from app.database import get_db, init_db, async_session
 from app.models import PotentialLead, Source, ScrapeLog
 from app.services.utils import normalize_hotel_name
@@ -254,7 +255,6 @@ async def lifespan(app: FastAPI):
 # -----------------------------------------------------------------------------
 # FastAPI App
 # -----------------------------------------------------------------------------
-from app.logging_config import setup_logging
 
 setup_logging()
 
