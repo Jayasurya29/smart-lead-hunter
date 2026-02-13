@@ -1,0 +1,12 @@
+venv/
+.git/
+__pycache__/
+*.pyc
+.env
+logs/
+output/
+blobs/
+database/
+.pytest_cache/
+.ruff_cache/
+node_modules/

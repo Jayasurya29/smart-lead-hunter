@@ -104,5 +104,17 @@
             if (toast) { try { const data = JSON.parse(toast); if (data.showToast) showToast(data.showToast.message, data.showToast.type); } catch (e) {} }
         });
     </script>
+    <script>
+    document.body.addEventListener('htmx:responseError', function(e) {
+        if (e.detail.target && e.detail.target.id === 'stats-container') {
+            setTimeout(function() { htmx.trigger(e.detail.target, 'load'); }, 2000);
+        }
+    });
+    document.body.addEventListener('htmx:timeout', function(e) {
+        if (e.detail.target && e.detail.target.id === 'stats-container') {
+            setTimeout(function() { htmx.trigger(e.detail.target, 'load'); }, 2000);
+        }
+    });
+    </script>
 </body>
 </html>

@@ -18,7 +18,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libpq-dev \
     && rm -rf /var/lib/apt/lists/*
 
+
 COPY requirements.txt .
+# Install CPU-only PyTorch first (saves ~4GB vs full CUDA version)
+RUN pip install --no-cache-dir --prefix=/install \
+    torch --index-url https://download.pytorch.org/whl/cpu
 RUN pip install --no-cache-dir --prefix=/install -r requirements.txt
 
 # --------------- Stage 2: Runtime ---------------

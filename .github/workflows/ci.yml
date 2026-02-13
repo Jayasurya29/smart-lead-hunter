@@ -68,7 +68,7 @@ jobs:
           GEMINI_API_KEY: test-key-not-real
           ENVIRONMENT: test
         run: pytest tests/ -v --tb=short --cov=app --cov-report=term-missing
-        
+
       - name: Free disk space
         run: |
           sudo rm -rf /usr/share/dotnet

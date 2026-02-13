@@ -3,12 +3,12 @@
 {% block content %}
 <div class="bg-gray-50 w-full">
     <!-- Stats -->
-    <div id="stats-container" hx-get="/api/dashboard/stats" hx-trigger="load, every 30s" hx-swap="innerHTML">
-        <div class="animate-pulse h-20 bg-gray-100 rounded-xl mx-6 lg:mx-10 mt-4"></div>
+    <div id="stats-container" hx-get="/api/dashboard/stats" hx-trigger="load, every 30s" hx-swap="innerHTML" hx-timeout="10000">
+        <div class="animate-pulse h-20 bg-gray-100 rounded-xl mx-6 lg:mx-10 mt-2"></div>
     </div>
 
     <!-- Tabs + Run Scrape -->
-    <div class="px-6 lg:px-10 mt-4">
+    <div class="px-6 lg:px-10 mt-1">
         <div class="flex items-center justify-between">
             <nav class="flex space-x-1 bg-white rounded-lg shadow-sm p-1 border border-gray-200">
                 <a href="/dashboard?tab=pipeline{% if request.query_params.get('score') %}&score={{ request.query_params.get('score') }}{% endif %}"
