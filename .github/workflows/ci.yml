@@ -68,6 +68,13 @@ jobs:
           GEMINI_API_KEY: test-key-not-real
           ENVIRONMENT: test
         run: pytest tests/ -v --tb=short --cov=app --cov-report=term-missing
-
+        
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet
+          sudo rm -rf /opt/ghc
+          sudo rm -rf /usr/local/share/boost
+          docker system prune -af
+          df -h
       - name: Build Docker image
         run: docker build -t smart-lead-hunter:test .
