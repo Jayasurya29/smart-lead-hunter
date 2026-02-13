@@ -34,6 +34,19 @@
         </span>{% endif %}
     </td>
     <td class="px-3 py-3 whitespace-nowrap text-sm text-gray-600">{{ lead.opening_date or lead.opening_year or 'TBD' }}</td>
+    <!-- Added timestamp -->
+    <td class="px-3 py-3 whitespace-nowrap">
+        {% if lead.created_at %}
+        <div class="text-xs text-gray-500" title="{{ lead.created_at.strftime('%b %d, %Y %I:%M %p') if lead.created_at else '' }}">
+            {{ lead.created_at.strftime('%b %d') if lead.created_at else '—' }}
+        </div>
+        <div class="text-[10px] text-gray-400">
+            {{ lead.created_at.strftime('%I:%M %p') if lead.created_at else '' }}
+        </div>
+        {% else %}
+        <span class="text-xs text-gray-400">—</span>
+        {% endif %}
+    </td>
     {% if lead.status == 'new' %}
     <td class="px-3 py-3 whitespace-nowrap text-center">
         {% set source_count = (lead.source_urls | length) if lead.source_urls else 1 %}
@@ -52,14 +65,40 @@
                     class="p-1.5 rounded-md text-red-500 hover:bg-red-50 transition-colors" title="Reject">
                 <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
             </button>
+            <button hx-post="/api/dashboard/leads/{{ lead.id }}/delete" hx-target="#lead-row-{{ lead.id }}" hx-swap="outerHTML"
+                    hx-confirm="Delete this lead? It can be restored later."
+                    class="p-1.5 rounded-md text-gray-400 hover:text-red-500 hover:bg-red-50 transition-colors" title="Delete">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
+            </button>
         </div>
         {% elif lead.status == 'approved' %}
-        <span class="text-emerald-600"><svg class="w-4 h-4 inline" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg></span>
+        <div class="flex items-center justify-center space-x-1">
+            <span class="text-emerald-600"><svg class="w-4 h-4 inline" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg></span>
+            <button hx-post="/api/dashboard/leads/{{ lead.id }}/delete" hx-target="#lead-row-{{ lead.id }}" hx-swap="outerHTML"
+                    hx-confirm="Delete this lead?"
+                    class="p-1.5 rounded-md text-gray-400 hover:text-red-500 hover:bg-red-50 transition-colors" title="Delete">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
+            </button>
+        </div>
         {% elif lead.status == 'rejected' %}
-        <button hx-post="/api/dashboard/leads/{{ lead.id }}/restore" hx-target="#lead-row-{{ lead.id }}" hx-swap="outerHTML"
-                class="p-1.5 rounded-md text-blue-600 hover:bg-blue-50 transition-colors" title="Restore">
-            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6"/></svg>
-        </button>
+        <div class="flex items-center justify-center space-x-1">
+            <button hx-post="/api/dashboard/leads/{{ lead.id }}/restore" hx-target="#lead-row-{{ lead.id }}" hx-swap="outerHTML"
+                    class="p-1.5 rounded-md text-blue-600 hover:bg-blue-50 transition-colors" title="Restore">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6"/></svg>
+            </button>
+            <button hx-post="/api/dashboard/leads/{{ lead.id }}/delete" hx-target="#lead-row-{{ lead.id }}" hx-swap="outerHTML"
+                    hx-confirm="Delete this lead?"
+                    class="p-1.5 rounded-md text-gray-400 hover:text-red-500 hover:bg-red-50 transition-colors" title="Delete">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
+            </button>
+        </div>
+        {% elif lead.status == 'deleted' %}
+        <div class="flex items-center justify-center space-x-1">
+            <button hx-post="/api/dashboard/leads/{{ lead.id }}/restore" hx-target="#lead-row-{{ lead.id }}" hx-swap="outerHTML"
+                    class="p-1.5 rounded-md text-blue-600 hover:bg-blue-50 transition-colors" title="Restore">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6"/></svg>
+            </button>
+        </div>
         {% endif %}
     </td>
 </tr>

@@ -1,12 +1,14 @@
 {% extends "base.html" %}
 {% block title %}Dashboard - Smart Lead Hunter{% endblock %}
 {% block content %}
-<div class="min-h-screen bg-gray-50 max-w-[1440px] mx-auto">
+<div class="bg-gray-50 w-full">
+    <!-- Stats -->
     <div id="stats-container" hx-get="/api/dashboard/stats" hx-trigger="load, every 30s" hx-swap="innerHTML">
-        <div class="animate-pulse h-20 bg-gray-100 rounded-xl mx-6 mt-4"></div>
+        <div class="animate-pulse h-20 bg-gray-100 rounded-xl mx-6 lg:mx-10 mt-4"></div>
     </div>
 
-    <div class="px-6 mt-4">
+    <!-- Tabs + Run Scrape -->
+    <div class="px-6 lg:px-10 mt-4">
         <div class="flex items-center justify-between">
             <nav class="flex space-x-1 bg-white rounded-lg shadow-sm p-1 border border-gray-200">
                 <a href="/dashboard?tab=pipeline{% if request.query_params.get('score') %}&score={{ request.query_params.get('score') }}{% endif %}"
@@ -27,9 +29,15 @@
                     ❌ Rejected
                     {% if rejected_count %}<span class="ml-1.5 px-1.5 py-0.5 text-xs rounded-full {% if active_tab == 'rejected' %}bg-red-500 text-white{% else %}bg-gray-200 text-gray-600{% endif %}">{{ rejected_count }}</span>{% endif %}
                 </a>
+                <a href="/dashboard?tab=deleted"
+                   class="px-4 py-2 text-sm font-medium rounded-md transition-all duration-200
+                          {% if active_tab == 'deleted' %}bg-gray-700 text-white shadow{% else %}text-gray-600 hover:text-gray-900 hover:bg-gray-50{% endif %}">
+                    🗑️ Deleted
+                    {% if deleted_count %}<span class="ml-1.5 px-1.5 py-0.5 text-xs rounded-full {% if active_tab == 'deleted' %}bg-gray-600 text-white{% else %}bg-gray-200 text-gray-600{% endif %}">{{ deleted_count }}</span>{% endif %}
+                </a>
             </nav>
             <button onclick="window.dispatchEvent(new CustomEvent('open-scrape-modal'))"
-                    class="inline-flex items-center px-4 py-2 bg-brand-800 text-white text-sm font-medium rounded-lg hover:bg-brand-900 shadow-sm transition-all">
+                    class="inline-flex items-center px-5 py-2.5 bg-brand-800 text-white text-sm font-semibold rounded-lg hover:bg-brand-900 shadow-sm transition-all">
                 <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
                 </svg>
@@ -38,87 +46,89 @@
         </div>
     </div>
 
-    <div class="px-6 mt-4 flex gap-6" x-data="dashboardFilters()">
+    <!-- Filters + Content -->
+    <div class="px-6 lg:px-10 mt-4 flex gap-6">
+        <!-- Main Content -->
         <div class="flex-1 min-w-0">
+            <!-- Search & Filters -->
             <div class="bg-white rounded-lg shadow-sm border border-gray-200 p-4 mb-4">
-                <form id="filter-form" method="GET" action="/dashboard" class="flex flex-wrap items-end gap-3">
+                <form id="filter-form" method="GET" action="/dashboard" onsubmit="cleanFilterForm(this)">
                     <input type="hidden" name="tab" value="{{ active_tab }}">
-                    <div class="flex-1 min-w-[200px]">
-                        <label class="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1">Search</label>
-                        <div class="relative">
-                            <svg class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+
+                    <!-- Search Bar — Pure client-side filtering, no page reload -->
+                    <div class="relative mb-3">
+                        <div class="absolute left-4 top-1/2 -translate-y-1/2">
+                            <svg class="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
                             </svg>
-                            <input type="text" name="search" value="{{ request.query_params.get('search', '') }}"
-                                   placeholder="Hotel name, city, brand..."
-                                   @input.debounce.400ms="submitForm()"
-                                   class="w-full pl-10 pr-3 py-2 text-sm border border-gray-200 rounded-lg focus:ring-2 focus:ring-brand-500 focus:border-transparent bg-gray-50 focus:bg-white transition-colors">
                         </div>
+                        <input type="text" name="search" id="search-input"
+                               value=""
+                               oninput="liveFilter(this.value); toggleClear();"
+                               onkeydown="if(event.key==='Escape'){this.value='';liveFilter('');toggleClear();}"
+                               placeholder="Search hotels, brands, cities, states..."
+                               class="w-full pl-12 pr-10 py-3 text-sm border border-gray-200 rounded-xl focus:ring-2 focus:ring-brand-500 focus:border-transparent bg-gray-50 focus:bg-white transition-all placeholder-gray-400">
+                        <button type="button" id="search-clear" style="display:none"
+                                onclick="document.getElementById('search-input').value='';liveFilter('');toggleClear();"
+                                class="absolute right-3 top-1/2 -translate-y-1/2 p-1 rounded-full hover:bg-gray-200 text-gray-400 hover:text-gray-600 transition-colors">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+                            </svg>
+                        </button>
                     </div>
-                    <div class="w-[130px]">
-                        <label class="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1">Score</label>
-                        <select name="score" @change="submitForm()" class="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:ring-2 focus:ring-brand-500 bg-gray-50">
-                            <option value="">All</option>
+
+                    <!-- Filter Row -->
+                    <div class="flex flex-wrap items-center gap-2">
+                        <span class="text-xs font-semibold text-gray-400 uppercase tracking-wider mr-1">Filters:</span>
+                        <select name="score" onchange="this.form.submit()" class="px-3 py-1.5 text-xs border border-gray-200 rounded-lg focus:ring-2 focus:ring-brand-500 bg-gray-50 cursor-pointer">
+                            <option value="">All Scores</option>
                             <option value="hot" {% if request.query_params.get('score') == 'hot' %}selected{% endif %}>🔥 Hot (70+)</option>
                             <option value="warm" {% if request.query_params.get('score') == 'warm' %}selected{% endif %}>⚡ Warm (50-69)</option>
                             <option value="cold" {% if request.query_params.get('score') == 'cold' %}selected{% endif %}>❄️ Cold (&lt;50)</option>
                         </select>
-                    </div>
-                    <div class="w-[130px]">
-                        <label class="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1">Location</label>
-                        <select name="location" @change="submitForm()" class="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:ring-2 focus:ring-brand-500 bg-gray-50">
-                            <option value="">All</option>
+                        <select name="location" onchange="this.form.submit()" class="px-3 py-1.5 text-xs border border-gray-200 rounded-lg focus:ring-2 focus:ring-brand-500 bg-gray-50 cursor-pointer">
+                            <option value="">All Locations</option>
                             <option value="florida" {% if request.query_params.get('location') == 'florida' %}selected{% endif %}>🌴 Florida</option>
                             <option value="caribbean" {% if request.query_params.get('location') == 'caribbean' %}selected{% endif %}>🏝️ Caribbean</option>
                             <option value="usa" {% if request.query_params.get('location') == 'usa' %}selected{% endif %}>🇺🇸 USA</option>
                         </select>
-                    </div>
-                    <div class="w-[150px]">
-                        <label class="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1">Tier</label>
-                        <select name="tier" @change="submitForm()" class="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:ring-2 focus:ring-brand-500 bg-gray-50">
+                        <select name="tier" onchange="this.form.submit()" class="px-3 py-1.5 text-xs border border-gray-200 rounded-lg focus:ring-2 focus:ring-brand-500 bg-gray-50 cursor-pointer">
                             <option value="">All Tiers</option>
                             <option value="tier1_ultra_luxury" {% if request.query_params.get('tier') == 'tier1_ultra_luxury' %}selected{% endif %}>✨ Ultra Luxury</option>
                             <option value="tier2_luxury" {% if request.query_params.get('tier') == 'tier2_luxury' %}selected{% endif %}>💎 Luxury</option>
                             <option value="tier3_upper_upscale" {% if request.query_params.get('tier') == 'tier3_upper_upscale' %}selected{% endif %}>⭐ Upper Upscale</option>
                             <option value="tier4_upscale" {% if request.query_params.get('tier') == 'tier4_upscale' %}selected{% endif %}>🏨 Upscale</option>
                         </select>
-                    </div>
-                    <div class="w-[110px]">
-                        <label class="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1">Opening</label>
-                        <select name="opening_year" @change="submitForm()" class="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:ring-2 focus:ring-brand-500 bg-gray-50">
+                        <select name="opening_year" onchange="this.form.submit()" class="px-3 py-1.5 text-xs border border-gray-200 rounded-lg focus:ring-2 focus:ring-brand-500 bg-gray-50 cursor-pointer">
                             <option value="">All Years</option>
                             <option value="2025" {% if request.query_params.get('opening_year') == '2025' %}selected{% endif %}>2025</option>
                             <option value="2026" {% if request.query_params.get('opening_year') == '2026' %}selected{% endif %}>2026</option>
                             <option value="2027" {% if request.query_params.get('opening_year') == '2027' %}selected{% endif %}>2027</option>
                             <option value="2028" {% if request.query_params.get('opening_year') == '2028' %}selected{% endif %}>2028+</option>
                         </select>
-                    </div>
-                    <div class="w-[140px]">
-                        <label class="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1">Sort By</label>
-                        <select name="sort" @change="submitForm()" class="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:ring-2 focus:ring-brand-500 bg-gray-50">
+
+                        <div class="border-l border-gray-200 h-5 mx-1"></div>
+
+                        <select name="sort" onchange="this.form.submit()" class="px-3 py-1.5 text-xs border border-gray-200 rounded-lg focus:ring-2 focus:ring-brand-500 bg-gray-50 cursor-pointer">
                             <option value="score_desc" {% if request.query_params.get('sort', 'score_desc') == 'score_desc' %}selected{% endif %}>Score ↓</option>
                             <option value="score_asc" {% if request.query_params.get('sort') == 'score_asc' %}selected{% endif %}>Score ↑</option>
-                            <option value="newest" {% if request.query_params.get('sort') == 'newest' %}selected{% endif %}>Newest First</option>
+                            <option value="newest" {% if request.query_params.get('sort') == 'newest' %}selected{% endif %}>Recently Added</option>
                             <option value="oldest" {% if request.query_params.get('sort') == 'oldest' %}selected{% endif %}>Oldest First</option>
                             <option value="name_asc" {% if request.query_params.get('sort') == 'name_asc' %}selected{% endif %}>Name A-Z</option>
                             <option value="opening" {% if request.query_params.get('sort') == 'opening' %}selected{% endif %}>Opening Date</option>
                         </select>
                     </div>
-                    <a href="/dashboard?tab={{ active_tab }}" class="px-3 py-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition-colors" title="Reset filters">
-                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
-                        </svg>
-                    </a>
                 </form>
             </div>
 
+            <!-- Leads Table -->
             <div class="bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden">
                 <div class="px-4 py-3 border-b border-gray-100 flex items-center justify-between">
                     <div>
                         <span class="text-sm font-bold text-gray-800">
-                            {% if active_tab == 'pipeline' %}📥 Pipeline{% elif active_tab == 'approved' %}✅ Approved{% else %}❌ Rejected{% endif %}
+                            {% if active_tab == 'pipeline' %}📥 Pipeline{% elif active_tab == 'approved' %}✅ Approved{% elif active_tab == 'deleted' %}🗑️ Deleted{% else %}❌ Rejected{% endif %}
                         </span>
-                        <span class="text-xs text-gray-400 ml-2">({{ leads|length }} total)</span>
+                        <span class="text-xs text-gray-400 ml-2">({{ total_count if total_count is defined else leads|length }} total)</span>
                     </div>
                     {% if leads|length > 0 %}<span class="text-xs text-gray-400">Click row for details</span>{% endif %}
                 </div>
@@ -131,15 +141,16 @@
                                 <th class="px-3 py-2.5 text-left text-xs font-bold text-gray-500 uppercase tracking-wider w-24">Tier</th>
                                 <th class="px-3 py-2.5 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">Location</th>
                                 <th class="px-3 py-2.5 text-left text-xs font-bold text-gray-500 uppercase tracking-wider w-28">Opening</th>
+                                <th class="px-3 py-2.5 text-left text-xs font-bold text-gray-500 uppercase tracking-wider w-28">Added</th>
                                 {% if active_tab == 'pipeline' %}
                                 <th class="px-3 py-2.5 text-left text-xs font-bold text-gray-500 uppercase tracking-wider w-16">Src</th>
                                 {% endif %}
-                                <th class="px-3 py-2.5 text-center text-xs font-bold text-gray-500 uppercase tracking-wider w-24">Actions</th>
+                                <th class="px-3 py-2.5 text-center text-xs font-bold text-gray-500 uppercase tracking-wider w-28">Actions</th>
                             </tr>
                         </thead>
                         <tbody class="divide-y divide-gray-50">
                             {% for lead in leads %}{% include "partials/lead_row.html" %}{% else %}
-                            <tr><td colspan="7" class="px-6 py-12 text-center text-gray-400">
+                            <tr><td colspan="8" class="px-6 py-12 text-center text-gray-400">
                                 <p class="text-sm font-medium">No leads found</p>
                                 <p class="text-xs mt-1">Try adjusting your filters or run a new scrape</p>
                             </td></tr>{% endfor %}
@@ -150,16 +161,25 @@
                 <div class="px-4 py-3 border-t border-gray-100 flex items-center justify-between bg-gray-50">
                     <span class="text-xs text-gray-500">Page {{ current_page }} of {{ total_pages }}</span>
                     <div class="flex gap-1">
+                        {% if current_page > 1 %}
+                        <a href="/dashboard?tab={{ active_tab }}&page={{ current_page - 1 }}{% if request.query_params.get('search') %}&search={{ request.query_params.get('search') }}{% endif %}{% if request.query_params.get('score') %}&score={{ request.query_params.get('score') }}{% endif %}{% if request.query_params.get('location') %}&location={{ request.query_params.get('location') }}{% endif %}{% if request.query_params.get('tier') %}&tier={{ request.query_params.get('tier') }}{% endif %}{% if request.query_params.get('opening_year') %}&opening_year={{ request.query_params.get('opening_year') }}{% endif %}{% if request.query_params.get('sort') %}&sort={{ request.query_params.get('sort') }}{% endif %}"
+                           class="px-2.5 py-1 text-xs rounded bg-gray-100 text-gray-600 hover:bg-gray-200">← Prev</a>
+                        {% endif %}
                         {% for p in range(1, total_pages + 1) %}
                         <a href="/dashboard?tab={{ active_tab }}&page={{ p }}{% if request.query_params.get('search') %}&search={{ request.query_params.get('search') }}{% endif %}{% if request.query_params.get('score') %}&score={{ request.query_params.get('score') }}{% endif %}{% if request.query_params.get('location') %}&location={{ request.query_params.get('location') }}{% endif %}{% if request.query_params.get('tier') %}&tier={{ request.query_params.get('tier') }}{% endif %}{% if request.query_params.get('opening_year') %}&opening_year={{ request.query_params.get('opening_year') }}{% endif %}{% if request.query_params.get('sort') %}&sort={{ request.query_params.get('sort') }}{% endif %}"
                            class="px-2.5 py-1 text-xs rounded {% if p == current_page %}bg-brand-800 text-white{% else %}bg-gray-100 text-gray-600 hover:bg-gray-200{% endif %}">{{ p }}</a>
                         {% endfor %}
+                        {% if current_page < total_pages %}
+                        <a href="/dashboard?tab={{ active_tab }}&page={{ current_page + 1 }}{% if request.query_params.get('search') %}&search={{ request.query_params.get('search') }}{% endif %}{% if request.query_params.get('score') %}&score={{ request.query_params.get('score') }}{% endif %}{% if request.query_params.get('location') %}&location={{ request.query_params.get('location') }}{% endif %}{% if request.query_params.get('tier') %}&tier={{ request.query_params.get('tier') }}{% endif %}{% if request.query_params.get('opening_year') %}&opening_year={{ request.query_params.get('opening_year') }}{% endif %}{% if request.query_params.get('sort') %}&sort={{ request.query_params.get('sort') }}{% endif %}"
+                           class="px-2.5 py-1 text-xs rounded bg-gray-100 text-gray-600 hover:bg-gray-200">Next →</a>
+                        {% endif %}
                     </div>
                 </div>
                 {% endif %}
             </div>
         </div>
 
+        <!-- Detail Panel -->
         <div class="w-[420px] flex-shrink-0">
             <div id="detail-panel" class="sticky top-4">
                 <div class="bg-white rounded-lg shadow-sm border border-gray-200 p-8 text-center">
@@ -174,13 +194,80 @@
     </div>
 </div>
 {% include "partials/scrape_modal.html" %}
+
 <script>
-function dashboardFilters() {
-    return {
-        submitForm() { document.getElementById('filter-form').submit(); },
-        clearSearch() { document.querySelector('input[name="search"]').value = ''; this.submitForm(); }
+/* Pure client-side live search — NO page reload */
+function liveFilter(query) {
+    var q = query.toLowerCase().trim();
+    var rows = document.querySelectorAll('#leads-table tbody tr');
+    var visible = 0;
+
+    rows.forEach(function(row) {
+        if (!row.getAttribute('id')) return; // skip non-lead rows
+        if (!q) {
+            row.style.display = '';
+            visible++;
+        } else {
+            var text = row.textContent.toLowerCase();
+            var match = text.indexOf(q) !== -1;
+            row.style.display = match ? '' : 'none';
+            if (match) visible++;
+        }
+    });
+
+    // Update count display
+    var countEl = document.querySelector('.text-xs.text-gray-400.ml-2');
+    if (countEl) {
+        if (q) {
+            countEl.textContent = '(' + visible + ' matching)';
+        } else {
+            countEl.textContent = '({{ total_count if total_count is defined else leads|length }} total)';
+        }
     }
 }
+
+function toggleClear() {
+    var inp = document.getElementById('search-input');
+    var btn = document.getElementById('search-clear');
+    if (btn) btn.style.display = inp.value.length > 0 ? 'block' : 'none';
+}
+
+/* Client-side live search
+
+function filterLeadsTable(query) {
+    const q = query.toLowerCase().trim();
+    const rows = document.querySelectorAll('#leads-table tbody tr');
+    const clearBtn = document.getElementById('search-clear');
+    let visibleCount = 0;
+
+    if (clearBtn) clearBtn.style.display = q.length > 0 ? 'block' : 'none';
+
+    rows.forEach(row => {
+        if (!q) {
+            row.style.display = '';
+            visibleCount++;
+            return;
+        }
+        const text = row.textContent.toLowerCase();
+        const match = text.includes(q);
+        row.style.display = match ? '' : 'none';
+        if (match) visibleCount++;
+    });
+
+    // Update the count display
+    const countEl = document.querySelector('#leads-table').closest('.bg-white')?.querySelector('.text-xs.text-gray-400');
+    if (countEl && q) countEl.textContent = `(${visibleCount} matching)`;
+}
+
+/* Remove empty params before form submit to keep URLs clean */
+function cleanFilterForm(form) {
+    const inputs = form.querySelectorAll('select, input[type="text"]');
+    inputs.forEach(input => {
+        if (!input.value) input.disabled = true;
+    });
+    return true;
+}
+
 document.addEventListener('htmx:afterSwap', function(e) {
     if (e.detail.target.id === 'detail-panel') {
         document.querySelectorAll('tr[data-lead-row]').forEach(r => r.classList.remove('active'));

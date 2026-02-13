@@ -427,6 +427,9 @@ async def _get_dashboard_stats(db: AsyncSession) -> dict:
             func.count(PotentialLead.id)
             .filter(PotentialLead.created_at >= week_start)
             .label("this_week"),
+            func.count(PotentialLead.id)
+            .filter(PotentialLead.status == "deleted")
+            .label("deleted"),
         )
     )
     lr = lead_result.one()
@@ -435,7 +438,7 @@ async def _get_dashboard_stats(db: AsyncSession) -> dict:
     source_result = await db.execute(
         select(
             func.count(Source.id).label("total"),
-            func.count(Source.id).filter(Source.is_active).label("active"),
+            func.count(Source.id).filter(Source.is_active.is_(True)).label("active"),
             func.count(Source.id)
             .filter(Source.health_status == "healthy")
             .label("healthy"),
@@ -453,6 +456,7 @@ async def _get_dashboard_stats(db: AsyncSession) -> dict:
         "warm_leads": lr.warm or 0,
         "leads_today": lr.today or 0,
         "leads_this_week": lr.this_week or 0,
+        "deleted_leads": lr.deleted or 0,
         "total_sources": sr.total or 0,
         "active_sources": sr.active or 0,
         "healthy_sources": sr.healthy or 0,
@@ -858,7 +862,7 @@ async def list_sources(
     query = select(Source)
 
     if active_only:
-        query = query.where(Source.is_active)
+        query = query.where(Source.is_active.is_(True))
     if source_type:
         query = query.where(Source.source_type == source_type)
     if min_priority:
@@ -878,7 +882,8 @@ async def list_healthy_sources(db: AsyncSession = Depends(get_db)):
     query = (
         select(Source)
         .where(
-            Source.is_active, Source.health_status.in_(["healthy", "new", "degraded"])
+            Source.is_active.is_(True),
+            Source.health_status.in_(["healthy", "new", "degraded"]),
         )
         .order_by(Source.priority.desc())
     )
@@ -1043,12 +1048,6 @@ async def get_scrape_logs(
 # -----------------------------------------------------------------------------
 # Dashboard Endpoints (HTMX + Jinja2)
 # -----------------------------------------------------------------------------
-# Static files
-from fastapi.staticfiles import StaticFiles as _SF
-
-app.mount("/static", _SF(directory="app/static"), name="static")
-
-
 @app.get("/dashboard", response_class=HTMLResponse, tags=["Dashboard"])
 async def dashboard_page(
     request: Request,
@@ -1058,6 +1057,7 @@ async def dashboard_page(
     score: str = "",
     location: str = "",
     tier: str = "",
+    sort: str = "score_desc",
     db: AsyncSession = Depends(get_db),
 ):
     """Dashboard page with Pipeline/Approved/Rejected tabs"""
@@ -1067,6 +1067,7 @@ async def dashboard_page(
     tab_status_map = {
         "pipeline": "new",
         "approved": "approved",
+        "deleted": "deleted",
         "rejected": "rejected",
     }
     status = tab_status_map.get(tab, "new")
@@ -1096,8 +1097,20 @@ async def dashboard_page(
     if tier:
         query = query.where(PotentialLead.brand_tier == tier)
 
-    # Order
-    query = query.order_by(PotentialLead.lead_score.desc().nullslast())
+    # Order — support sort parameter
+    sort = request.query_params.get("sort", "score_desc")
+    if sort == "newest":
+        query = query.order_by(PotentialLead.created_at.desc().nullslast())
+    elif sort == "oldest":
+        query = query.order_by(PotentialLead.created_at.asc().nullslast())
+    elif sort == "score_asc":
+        query = query.order_by(PotentialLead.lead_score.asc().nullslast())
+    elif sort == "name_asc":
+        query = query.order_by(PotentialLead.hotel_name.asc())
+    elif sort == "opening":
+        query = query.order_by(PotentialLead.opening_date.asc().nullslast())
+    else:
+        query = query.order_by(PotentialLead.lead_score.desc().nullslast())
 
     # Pagination
     per_page = 25
@@ -1113,11 +1126,6 @@ async def dashboard_page(
     result = await db.execute(query.offset(offset).limit(per_page))
     leads = result.scalars().all()
 
-    # Tab counts
-    for tab_name, tab_status in tab_status_map.items():
-        await db.execute(select(func.count()).where(PotentialLead.status == tab_status))
-        # We'll pass these as pipeline_count, approved_count, rejected_count
-
     pipeline_count_r = await db.execute(
         select(func.count()).where(PotentialLead.status == "new")
     )
@@ -1126,6 +1134,9 @@ async def dashboard_page(
     )
     rejected_count_r = await db.execute(
         select(func.count()).where(PotentialLead.status == "rejected")
+    )
+    deleted_count_r = await db.execute(
+        select(func.count()).where(PotentialLead.status == "deleted")
     )
 
     return templates.TemplateResponse(
@@ -1139,6 +1150,8 @@ async def dashboard_page(
             "pipeline_count": pipeline_count_r.scalar() or 0,
             "approved_count": approved_count_r.scalar() or 0,
             "rejected_count": rejected_count_r.scalar() or 0,
+            "deleted_count": deleted_count_r.scalar() or 0,
+            "total_count": total_count,
         },
     )
 
@@ -1420,6 +1433,38 @@ async def dashboard_restore_lead(
     )
 
 
+@app.post(
+    "/api/dashboard/leads/{lead_id}/delete",
+    response_class=HTMLResponse,
+    tags=["Dashboard"],
+)
+async def dashboard_delete_lead(
+    request: Request, lead_id: int, db: AsyncSession = Depends(get_db)
+):
+    """Soft-delete a lead (can be restored from Deleted tab)"""
+    result = await db.execute(select(PotentialLead).where(PotentialLead.id == lead_id))
+    lead = result.scalar_one_or_none()
+
+    if not lead:
+        return HTMLResponse(
+            content="<div class='text-red-500 p-2'>Lead not found</div>",
+            status_code=404,
+        )
+
+    lead.status = "deleted"
+
+    from datetime import datetime, timezone
+
+    lead.updated_at = datetime.now(timezone.utc)
+
+    await db.commit()
+    await db.refresh(lead)
+
+    return templates.TemplateResponse(
+        "partials/lead_row.html", {"request": request, "lead": lead}
+    )
+
+
 @app.get("/api/dashboard/sources/list", tags=["Dashboard"])
 async def dashboard_sources_list(db: AsyncSession = Depends(get_db)):
     """Return all sources with metadata for scrape modal source selection."""
@@ -1427,7 +1472,7 @@ async def dashboard_sources_list(db: AsyncSession = Depends(get_db)):
 
     result = await db.execute(
         select(Source)
-        .where(Source.is_active)
+        .where(Source.is_active.is_(True))
         .order_by(Source.priority.desc(), Source.name)
     )
     sources = result.scalars().all()
@@ -1624,7 +1669,7 @@ async def scrape_with_progress(request: Request):
             async with async_session() as session:
                 result = await session.execute(
                     select(Source)
-                    .where(Source.is_active)
+                    .where(Source.is_active.is_(True))
                     .order_by(Source.priority.desc())
                 )
                 sources = result.scalars().all()
@@ -1634,7 +1679,7 @@ async def scrape_with_progress(request: Request):
                 sources = [s for s in sources if s.id in config_source_ids]
 
             total_sources = len(sources)
-            [s.name for s in sources]
+            # source_names = [s.name for s in sources]
 
             yield f"data: {json.dumps({'type': 'info', 'message': f'Found {total_sources} active sources to scrape'})}\n\n"
 
@@ -2196,7 +2241,15 @@ async def extract_url_stream(request: Request):
                     ) as client:
                         resp = await client.get(target_url)
                         if resp.status_code == 200:
-                            page_content = resp.text
+                            # Strip HTML to clean text (same as scraping engine)
+                            from bs4 import BeautifulSoup
+
+                            soup = BeautifulSoup(resp.text, "lxml")
+                            for s in soup(
+                                ["script", "style", "nav", "footer", "header"]
+                            ):
+                                s.decompose()
+                            page_content = soup.get_text(separator="\n", strip=True)
                             yield f"data: {json.dumps({'type': 'source_complete', 'source': 'URL Extract', 'current': 1, 'total': 1, 'pages': 1})}\n\n"
                             yield f"data: {json.dumps({'type': 'info', 'message': f'Page fetched (fallback): {len(page_content):,} chars'})}\n\n"
                         else:
