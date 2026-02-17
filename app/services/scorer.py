@@ -74,7 +74,12 @@ def _brand_matches(brand: str, text: str) -> bool:
 # BRAND TIER CLASSIFICATION (25 pts max)
 # =============================================================================
 
+# =============================================================================
+# TIER 1: ULTRA LUXURY (25 pts) — $600+/night ADR
+# The absolute pinnacle. Bespoke service, iconic properties.
+# =============================================================================
 TIER1_ULTRA_LUXURY = [
+    # ── Independent Ultra-Luxury Brands ──
     "alila",
     "aman",
     "amangiri",
@@ -88,20 +93,22 @@ TIER1_ULTRA_LUXURY = [
     "capella",
     "cheval blanc",
     "como hotels",
-    "corinthia hotel",
+    "como shambhala",
+    "corinthia",
     "dorchester collection",
     "eden rock",
     "faena",
     "jade mountain",
     "leading hotels of the world",
     "mandarin oriental",
-    "mirbeau",
-    "miraval",
-    "nikki beach resort",
+    "nihi",  # Nihi Sumba — ultra exclusive
     "oberoi",
     "oetker collection",
     "one&only",
     "one & only",
+    "one and only",  # Alternate spelling
+    "oneandonly",
+    "palazzo versace",
     "peninsula",
     "preferred hotels",
     "raffles",
@@ -110,100 +117,267 @@ TIER1_ULTRA_LUXURY = [
     "six senses",
     "small luxury hotels",
     "the leading hotels",
+    "soneva",  # Soneva Fushi/Jani
+    "the brando",  # Tetiaroa ultra-luxury
+    "zannier",  # Zannier Hotels
+    "patina hotels",  # Capella sister brand
+    "patina maldives",
     "viceroy",
+    # ── Hyatt Ultra-Luxury ──
+    "park hyatt",
+    "miraval",  # Hyatt wellness ultra-luxury
+    "impression by secrets",  # Hyatt ultra-luxury all-inclusive
+    # ── Caribbean/US Ultra-Luxury Independents ──
+    "secret bay",  # Dominica
+    "curtain bluff",  # Antigua
+    "half moon",  # Jamaica
+    "round hill",  # Jamaica
+    "jumby bay",  # Oetker, Antigua
+    "tryall club",  # Jamaica
+    "hermitage bay",  # Antigua
+    "peter island",  # BVI
+    "necker island",  # Virgin's private island
+    "oil nut bay",  # BVI
+    "casa de campo",  # Dominican Republic
+    "cap juluca",  # Anguilla (Belmond)
+    "sandy lane",  # Barbados
+    "carlisle bay",  # Antigua
+    "sugar beach viceroy",  # St. Lucia
+    "ladera resort",  # St. Lucia
+    "belle mont farm",  # St. Kitts (Kittitian Hill)
+    "ambergris cay",  # Turks & Caicos
+    "parrot cay",  # Turks & Caicos (COMO)
+    "grace bay club",  # Turks & Caicos
+    "the palms turks",  # Turks & Caicos
+    # ── US Ultra-Luxury Independents ──
+    "the setai",  # Miami Beach
+    "the carlyle",  # NYC
+    "the mark hotel",  # NYC
+    "the mark",
+    "hotel bel-air",  # LA (Dorchester)
+    "the plaza hotel",  # NYC
+    "the plaza",
+    "the breakers",  # Palm Beach
+    "breakers palm beach",
+    "little palm island",  # Florida Keys
+    "the cloister",  # Sea Island, Georgia
+    "sea island",  # Georgia
+    "blackberry farm",  # Tennessee
+    "blackberry mountain",  # Tennessee
+    "triple creek ranch",  # Montana
+    "the resort at pelican hill",  # Newport Beach
+    "pelican hill",
+    "montage palmetto bluff",
+    "montage laguna beach",
+    "montage deer valley",
+    "montage kapalua bay",
+    "montage los cabos",
+    "montage big sky",
+    "montage healdsburg",
 ]
 
+# =============================================================================
+# TIER 2: LUXURY (20 pts) — $350-600+/night ADR
+# World-class brands. Exceptional service and amenities.
+# =============================================================================
 TIER2_LUXURY = [
-    "acqualina",
-    "atlantis",
-    "auberge",
-    "caesars palace",
-    "conrad",
-    "equinox hotel",
+    # ── Major Chain Luxury ──
+    "auberge",  # Auberge Resorts Collection
+    "conrad",  # Hilton luxury
     "four seasons",
     "langham",
-    "le blanc",
-    "loews",
-    "lxr",
-    "mgm grand",
-    "montage",
+    "lxr",  # Hilton LXR collection
+    "montage",  # Montage (general)
     "nobu hotel",
-    "nomad",
-    "park hyatt",
-    "regent",
+    "nomad",  # Hilton NoMad Hotels
+    "regent",  # IHG luxury
     "ritz-carlton",
     "ritz carlton",
     "ritz-carlton reserve",
-    "st. regis",
+    "st. regis",  # Marriott luxury
     "st regis",
-    "the luxury collection",
+    "the luxury collection",  # Marriott
     "luxury collection",
-    "waldorf astoria",
+    "waldorf astoria",  # Hilton
     "waldorf-astoria",
-    "white elephant",
-    "zoetry",
+    "white elephant",  # Nantucket
+    "zoetry",  # Hyatt ultra all-inclusive
     "registry collection",
+    # ── Marriott Luxury ──
+    "edition",  # Marriott EDITION
+    "w hotel",  # Marriott W Hotels (luxury lifestyle)
+    "w hotels",
+    # ── Las Vegas / Resort Luxury ──
+    "wynn",  # Wynn Resorts
+    "encore",  # Wynn sister brand
+    "bellagio",  # MGM luxury icon
+    "the venetian",  # Las Vegas luxury
+    "venetian",
+    "palazzo",  # Las Vegas luxury (Venetian)
+    "cosmopolitan",  # Las Vegas luxury
+    "aria",  # MGM luxury
+    "mgm grand",
+    "caesars palace",
+    "fontainebleau",  # Miami Beach / Las Vegas
+    # ── US Luxury Independents ──
+    "acqualina",  # Sunny Isles, FL
+    "atlantis",  # Bahamas / Dubai
+    "eau palm beach",  # Florida
+    "nemacolin",  # Pennsylvania
+    "greenbrier",  # West Virginia
+    "the biltmore",  # Coral Gables
+    "the shore club",  # Miami Beach (Auberge)
+    "shore club",
+    "eden roc",  # Miami Beach
+    "faena miami",
+    "the surf club",  # Four Seasons Surf Club
+    "equinox hotel",
+    "boca raton resort",  # Waldorf managed
+    "salamander",  # Salamander Resort & Spa
+    "salamander resort",
+    "the broadmoor",  # Colorado Springs
+    "sanctuary cap cana",  # Dominican Republic
+    "soho house",  # Members club/hotel
+    "soho beach house",
+    "life house",  # Boutique luxury chain
+    "loews",
+    "le blanc",
+    "the raleigh",  # Miami Beach
+    # ── Caribbean Luxury ──
+    "baha mar",  # Bahamas
+    "rosewood baha mar",
+    "the cove atlantis",  # Bahamas
+    "albany bahamas",
+    "baker's bay",  # Bahamas
+    "kamalame cay",  # Bahamas
+    "musha cay",  # Bahamas
+    "dorado beach",  # PR (Ritz-Carlton Reserve)
+    "the loren",  # Bermuda
+    "hamilton princess",  # Bermuda
+    "tucker's point",  # Bermuda
+    "the cliff hotel",  # Barbados
+    "cobblers cove",  # Barbados
+    "the crane",  # Barbados
+    "hodges bay",  # Antigua
+    "tamarind",  # Barbados (Elegant Hotels)
+    "the house barbados",
+    "le barthélemy",  # St. Barts
+    "hotel le toiny",  # St. Barts
+    "hotel saint-barth isle de france",
+    "kempinski",  # European luxury chain
+    # ── Accor Luxury ──
+    "fairmont",  # Accor luxury
+    "sofitel legend",  # Accor top tier
 ]
 
+# =============================================================================
+# TIER 3: UPPER UPSCALE (15 pts) — $200-400/night ADR
+# Premium brands. Full service with elevated amenities.
+# =============================================================================
 TIER3_UPPER_UPSCALE = [
-    "1 hotel",
-    "1hotel",
-    "ace hotel",
-    "andaz",
-    "archer hotel",
+    # ── Marriott Upper Upscale ──
     "autograph collection",
+    "design hotels",  # Marriott partnership
+    "jw marriott",
+    "le meridien",
+    "marriott marquis",
+    "renaissance",
+    "sheraton",  # Marriott premium
+    "tribute portfolio",
+    "westin",  # Marriott premium
+    "delta hotels",
+    "gaylord",  # Marriott convention
+    # ── Hilton Upper Upscale ──
     "canopy by hilton",
     "canopy",
     "curio collection",
     "curio",
-    "delano",
+    "signia",  # Hilton meetings/events
+    "signia by hilton",
+    "tempo by hilton",
+    "tapestry collection",
+    "tapestry",
+    # ── Hyatt Upper Upscale ──
+    "andaz",
     "destination by hyatt",
-    "dolce",
-    "dream hotel",
-    "edition",
-    "fairmont",
-    "graduate hotels",
-    "graduate austin",
     "grand hyatt",
-    "graduate",
-    "grand wailea",
-    "hard rock hotel",
-    "hotel indigo",
     "hyatt centric",
     "hyatt regency",
+    "thompson",  # Hyatt lifestyle luxury
+    "the standard",  # Hyatt (acquired Standard International)
+    "unbound collection",
+    "dream hotel",  # Hyatt lifestyle
+    "jdv by hyatt",  # Joie de Vivre
+    "bunkhouse",  # Hyatt boutique
+    "unscripted by hyatt",  # Hyatt upscale boutique
+    # ── Hyatt All-Inclusive (Upper) ──
+    "hyatt zilara",
+    "hyatt ziva",
+    "zilara",
+    "ziva",
+    "hyatt vivid",
+    # ── IHG Upper Upscale ──
     "intercontinental",
-    "impression by secrets",
-    "jw marriott",
     "kimpton",
-    "le meridien",
-    "live aqua",
-    "mgallery",
+    "vignette collection",
+    "hotel indigo",
+    "hualuxe",  # IHG China luxury
+    # ── Other Chain Upper Upscale ──
+    "sofitel",  # Accor
+    "mgallery",  # Accor
+    "swissotel",  # Accor
+    "pullman",  # Accor
+    "pendry",
+    "proper hotel",
+    "sls",
     "mondrian",
+    "delano",
+    "1 hotel",
+    "1hotel",
+    "ace hotel",
+    "archer hotel",
+    "hard rock hotel",
+    "virgin hotels",
+    "warwick",
     "mr. c",
     "newbury boston",
     "omni",
-    "pendry",
-    "proper hotel",
-    "renaissance",
+    "graduate hotels",
+    "graduate",
+    "dolce",
+    "live aqua",
+    "unico",
     "secrets resorts",
     "secrets",
-    "signia",
-    "sls",
-    "sofitel",
-    "swissotel",
-    "tapestry collection",
-    "tapestry",
-    "tempo by hilton",
-    "the standard",
-    "thompson",
-    "tribute portfolio",
-    "unbound collection",
-    "unico",
-    "vignette collection",
-    "virgin hotels",
-    "warwick",
-    "w hotel",
-    "w hotels",
+    "nikki beach resort",
+    # ── Disney Resort Hotels (Full-Service) ──
+    "disney",
+    "disney hotel",
+    "disney lodge",
+    "disney resort",
+    "disney lakeshore",  # Disney upcoming
+    "disney grand floridian",
+    "disney riviera",
+    "disney contemporary",
+    "disney polynesian",
+    "disney animal kingdom lodge",
+    "disney wilderness lodge",
+    "disney yacht club",
+    "disney beach club",
+    "disney boardwalk",
+    "gran destino",
+    "disney coronado springs",
+    # ── Caribbean Upper Upscale ──
+    "el san juan hotel",
+    "condado vanderbilt",  # Puerto Rico
+    "la concha",  # Puerto Rico
+    "caribe hilton",  # Puerto Rico
+    "zemi",
+    # ── US Upper Upscale Independents ──
+    "the ned",  # Soho House sister
+    "hoxton",  # Ennismore
+    "the goodtime hotel",  # Miami Beach
+    "proper",
     "w miami",
     "w south beach",
     "w fort lauderdale",
@@ -212,149 +386,256 @@ TIER3_UPPER_UPSCALE = [
     "w hollywood",
     "w chicago",
     "w austin",
-    "zemi",
-    "hyatt zilara",
-    "hyatt ziva",
-    "zilara",
-    "ziva",
+    "grand wailea",
 ]
 
+# =============================================================================
+# TIER 4: UPSCALE (10 pts) — $130-250/night ADR
+# Full-service brands. Solid amenities, meetings capability.
+# =============================================================================
 TIER4_UPSCALE = [
-    "breathless resorts",
-    "breathless",
-    "citizenm",
-    "club med",
-    "couples resort",
-    "crowne plaza",
-    "delta hotels",
-    "divi resorts",
+    # ── Marriott Upscale ──
+    "marriott hotel",
+    "marriott hotels",
+    # ── Hilton Upscale ──
     "doubletree",
-    "dreams resorts",
-    "dreams",
-    "el cid resort",
-    "el san juan hotel",
     "embassy suites",
-    "even hotels",
-    "gaylord",
     "hilton hotel",
     "hilton hotels",
+    "hilton resort",
     "hilton miami",
     "hilton fort lauderdale",
     "hilton los angeles",
     "hilton chicago",
     "hilton san",
     "hilton bay",
-    "hilton resort",
+    # ── IHG Upscale ──
+    "crowne plaza",
+    "voco",
+    "even hotels",
+    # ── Hyatt Upscale ──
+    "hyatt hotels",
+    # ── All-Inclusive Upscale ──
+    "breathless resorts",
+    "breathless",
+    "club med",
+    "couples resort",
+    "dreams resorts",
+    "dreams",
+    "excellence resorts",
+    "excellence",
+    "iberostar",
+    "karisma",
     "moon palace",
-    "novotel",
-    "occidental",
-    "outrigger",
-    "pullman",
-    "riu palace",
-    "riu",
+    "palace resorts",
+    "paradisus",
     "royalton",
     "royalton vessence",
     "sandals",
-    "sheraton",
-    "sonesta hotel",
-    "sonesta",
     "sunscape resorts",
-    "temptation resort",
     "sunscape",
-    "voco",
-    "westin",
-    "wyndham grand",
+    "temptation resort",
+    "now resorts",
+    "now sapphire",
+    "now jade",
+    "planet hollywood",
+    "nickelodeon resort",
+    "azul beach",
+    "el dorado",
+    "generations",
+    "hideaway at royalton",
+    # ── Caribbean/Mexico Upscale ──
     "bahia principe",
     "barcelo",
-    "iberostar",
-    "karisma",
+    "catalonia",
+    "divi resorts",
+    "el cid resort",
+    "fiesta americana",
+    "garza blanca",
+    "hotel xcaret",
+    "xcaret",
     "lopesan",
-    "margaritaville",
-    "excellence resorts",
-    "excellence",
-    "palace resorts",
+    "occidental",
+    "playa hotels",
+    "playa resorts",
     "princess hotel",
     "princess grand",
     "princess senses",
-    "paradisus",
+    "riu palace",
+    "riu",
+    "vidanta",
+    "valentin imperial",
+    "hard rock",
+    # ── Other Upscale ──
+    "citizenm",
+    "novotel",
+    "outrigger",
+    "sonesta hotel",
+    "sonesta",
+    "wyndham grand",
+    "margaritaville",
+    # ── Accor Upscale ──
+    "mercure",
+    "movenpick",
+    "25hours",
 ]
 
+# =============================================================================
+# TIER 5: BUDGET / SELECT-SERVICE (SKIP — 0 pts)
+# Limited service. Small rooms. No uniform program opportunity.
+# =============================================================================
 TIER5_SKIP = [
+    # ── Marriott Select/Economy ──
     "ac hotel",
-    "apartment collection",
-    "apartment collection by hilton",
     "ac hotels",
     "aloft",
-    "americinn",
+    "city express",
+    "courtyard",
+    "element",
+    "fairfield",
+    "four points",
+    "moxy",
+    "protea",
+    "springhill",
+    "studiores",
+    "towneplace",
+    "residence inn",
+    "series by marriott",
+    "sonder",
+    "postcard cabins",
+    # ── Hilton Select/Economy ──
+    "hampton",
+    "hampton inn",
+    "hilton garden inn",
+    "home2",
+    "homewood",
+    "spark by hilton",
+    "tempo",
+    "motto",
+    "livaway",
+    "livaway suites",
+    "livsmart",
+    "garner",
+    # ── Hyatt Select/Economy ──
+    "caption by hyatt",
+    "hyatt house",
+    "hyatt place",
+    "hyatt studios",
+    "hyatt select",
+    "urcove",
+    # ── IHG Select/Economy ──
     "avid hotels",
     "atwell suites",
+    "candlewood",
+    "holiday inn",
+    "holiday inn express",
+    "staybridge",
+    "garner hotels",
+    # ── Wyndham Economy ──
+    "americinn",
     "baymont",
+    "days inn",
+    "hawthorn",
+    "la quinta",
+    "microtel",
+    "ramada",
+    "super 8",
+    "wingate",
+    "wyndham garden",
+    "wyndham hotel",
+    "wyndham hotels",
+    "tryp",
+    # ── Choice Hotels Economy ──
     "best western",
     "cambria",
-    "candlewood",
-    "caption by hyatt",
     "clarion",
     "comfort inn",
     "comfort suites",
     "country inn",
-    "courtyard",
-    "days inn",
-    "drury",
     "econo lodge",
-    "element",
+    "quality inn",
+    "sleep inn",
+    "woodspring",
+    "rodeway",
+    # ── Other Economy ──
+    "apartment collection",
+    "apartment collection by hilton",
+    "drury",
     "everhome",
     "everhome suites",
     "extended stay",
-    "fairfield",
-    "four points",
-    "garner",
     "glo",
-    "hampton",
-    "hampton inn",
-    "hawthorn",
-    "hilton garden inn",
-    "holiday inn",
-    "holiday inn express",
-    "home2",
-    "homewood",
-    "hyatt house",
-    "hyatt place",
-    "hyatt studios",
-    "la quinta",
-    "livaway",
-    "livaway suites",
-    "livsmart",
-    "microtel",
     "motel 6",
     "my place",
     "my place hotel",
-    "motto",
-    "moxy",
     "park inn",
-    "protea",
-    "quality inn",
     "radisson",
-    "ramada",
     "red lion",
     "red roof",
-    "residence inn",
-    "rodeway",
-    "sleep inn",
-    "spark by hilton",
-    "springhill",
     "sojourn suites",
-    "staybridge",
-    "studiores",
-    "super 8",
-    "towneplace",
     "tru by hilton",
     "tru",
-    "wingate",
-    "woodspring",
-    "wyndham garden",
-    "wyndham hotel",
-    "wyndham hotels",
+    # ── Accor Economy ──
+    "ibis",
+    "ibis budget",
+    "ibis styles",
+    "adagio",
+    "greet",
+    "jo&joe",
 ]
+
+
+if __name__ == "__main__":
+    # Quick stats
+    print(f"Tier 1 (Ultra Luxury) : {len(TIER1_ULTRA_LUXURY)} brands")
+    print(f"Tier 2 (Luxury)       : {len(TIER2_LUXURY)} brands")
+    print(f"Tier 3 (Upper Upscale): {len(TIER3_UPPER_UPSCALE)} brands")
+    print(f"Tier 4 (Upscale)      : {len(TIER4_UPSCALE)} brands")
+    print(f"Tier 5 (Skip)         : {len(TIER5_SKIP)} brands")
+    print(
+        f"TOTAL                 : {len(TIER1_ULTRA_LUXURY) + len(TIER2_LUXURY) + len(TIER3_UPPER_UPSCALE) + len(TIER4_UPSCALE) + len(TIER5_SKIP)} brands"
+    )
+
+    # Test the gaps from discovery run
+    test_brands = [
+        "One&Only",
+        "Disney Lakeshore Lodge",
+        "Shore Club",
+        "Crowne Plaza",
+        "Le Meridien",
+        "Signia by Hilton",
+        "Aman",
+        "Ritz-Carlton",
+        "InterContinental",
+        "Auberge",
+        "Waldorf Astoria",
+        "Wynn",
+        "Fontainebleau",
+        "Bellagio",
+        "Park Hyatt",
+        "Half Moon",
+        "Curtain Bluff",
+    ]
+    print("\n--- Test Results ---")
+    for name in test_brands:
+        name_lower = name.lower()
+        found = False
+        for tier_num, tier_name, tier_list in [
+            (1, "Ultra Luxury", TIER1_ULTRA_LUXURY),
+            (2, "Luxury", TIER2_LUXURY),
+            (3, "Upper Upscale", TIER3_UPPER_UPSCALE),
+            (4, "Upscale", TIER4_UPSCALE),
+            (5, "Skip", TIER5_SKIP),
+        ]:
+            for brand in tier_list:
+                if brand in name_lower:
+                    print(f"  {name:35s} → Tier {tier_num} ({tier_name})")
+                    found = True
+                    break
+            if found:
+                break
+        if not found:
+            print(f"  {name:35s} → Tier 0 (UNKNOWN)")
 
 # Tier name mapping for database storage
 TIER_NAMES = {

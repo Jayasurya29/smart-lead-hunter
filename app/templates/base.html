@@ -48,41 +48,83 @@
         .insight-list li::before { content: ''; position: absolute; left: 0; top: 0.55em; width: 6px; height: 6px; border-radius: 50%; background: #f59e0b; }
         @keyframes fadeUp { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
         .fade-up { animation: fadeUp 0.3s ease-out; }
+        /* ── Dynamic hover action buttons ── */
+        .row-actions {
+            position: absolute;
+            right: 8px;
+            top: 50%;
+            transform: translateY(-50%) translateX(4px);
+            display: flex;
+            align-items: center;
+            gap: 2px;
+            background: rgba(255,255,255,0.95);
+            backdrop-filter: blur(4px);
+            box-shadow: 0 1px 6px rgba(0,0,0,0.12);
+            border-radius: 8px;
+            padding: 3px 6px;
+            border: 1px solid #e5e7eb;
+            z-index: 20;
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.15s ease, transform 0.15s ease;
+        }
+        .lead-row:hover .row-actions {
+            opacity: 1;
+            transform: translateY(-50%) translateX(0);
+            pointer-events: auto;
+        }
     </style>
 </head>
 <body class="h-full">
     <div class="min-h-full">
-        <!-- HEADER — Dark, centered, prominent -->
-        <nav class="bg-brand-900 shadow-lg">
-            <div class="w-full px-6 lg:px-10">
-                <!-- Top: Logo + Brand centered -->
-                <div class="flex flex-col items-center pt-5 pb-3">
-                    <a href="/dashboard" class="flex items-center gap-5">
-                        <img src="/static/img/ja-logo.jpg" alt="JA Uniforms" class="h-[68px] w-auto rounded-xl shadow-md border-2 border-white/20">
-                        <div>
-                            <span class="text-2xl font-bold text-white tracking-tight leading-none">Smart Lead Hunter</span>
-                            <span class="block text-[11px] text-brand-300 mt-1 tracking-widest uppercase">Hotel Intelligence Platform</span>
-                        </div>
-                    </a>
-                </div>
-                <!-- Bottom: Navigation centered -->
-                <div class="flex items-center justify-center pb-4 space-x-2">
+        <!-- ═══ NAVBAR — White, 80px, logo fills height ═══ -->
+        <nav class="bg-white border-b border-gray-200 shadow-sm h-[80px] flex-shrink-0">
+            <div class="w-full h-full px-10 lg:px-16 flex items-center justify-between">
+
+                <!-- LEFT: Logo + Brand Name -->
+                <a href="/dashboard" class="flex items-center gap-10 h-full py-0 flex-shrink-0">
+                    <img src="/static/img/logo.svg" alt="JA Uniforms"
+                         class="h-full w-auto object-contain py-2"
+                         style="min-width: 100px;">
+                    <span class="text-xl font-bold text-brand-900 tracking-tight ml-12">Smart Lead Hunter</span>
+                </a>
+
+                <!-- CENTER: Navigation Links -->
+                <div class="flex items-center gap-1.5">
                     <a href="/dashboard?tab=pipeline"
-                       class="px-4 py-2 rounded-lg text-sm font-semibold transition-all {% if not request.query_params.get('score') and not request.query_params.get('location') %}bg-white text-brand-900 shadow{% else %}text-brand-200 hover:bg-white/10 hover:text-white{% endif %}">
+                       class="px-5 py-2.5 rounded-lg text-base font-semibold transition-all {% if not request.query_params.get('score') and not request.query_params.get('location') %}bg-brand-900 text-white shadow-sm{% else %}text-gray-500 hover:bg-gray-100 hover:text-gray-900{% endif %}">
                         📊 Dashboard
                     </a>
                     <a href="/dashboard?tab=pipeline&score=hot"
-                       class="px-4 py-2 rounded-lg text-sm font-semibold transition-all {% if request.query_params.get('score') == 'hot' %}bg-red-500 text-white shadow{% else %}text-brand-200 hover:bg-white/10 hover:text-white{% endif %}">
-                        🔥 Hot Leads
+                       class="px-5 py-2.5 rounded-lg text-base font-semibold transition-all {% if request.query_params.get('score') == 'hot' %}bg-red-500 text-white shadow{% else %}text-gray-500 hover:bg-gray-100 hover:text-gray-900{% endif %}">
+                        🔥 Hot
                     </a>
                     <a href="/dashboard?tab=pipeline&location=florida"
-                       class="px-4 py-2 rounded-lg text-sm font-semibold transition-all {% if request.query_params.get('location') == 'florida' %}bg-emerald-500 text-white shadow{% else %}text-brand-200 hover:bg-white/10 hover:text-white{% endif %}">
+                       class="px-5 py-2.5 rounded-lg text-base font-semibold transition-all {% if request.query_params.get('location') == 'florida' %}bg-emerald-500 text-white shadow{% else %}text-gray-500 hover:bg-gray-100 hover:text-gray-900{% endif %}">
                         🌴 Florida
                     </a>
                     <a href="/dashboard?tab=pipeline&location=caribbean"
-                       class="px-4 py-2 rounded-lg text-sm font-semibold transition-all {% if request.query_params.get('location') == 'caribbean' %}bg-cyan-500 text-white shadow{% else %}text-brand-200 hover:bg-white/10 hover:text-white{% endif %}">
+                       class="px-5 py-2.5 rounded-lg text-base font-semibold transition-all {% if request.query_params.get('location') == 'caribbean' %}bg-cyan-500 text-white shadow{% else %}text-gray-500 hover:bg-gray-100 hover:text-gray-900{% endif %}">
                         🏝️ Caribbean
                     </a>
+                </div>
+
+                <!-- RIGHT: Action Buttons -->
+                <div class="flex items-center gap-2.5 flex-shrink-0">
+                    <button onclick="window.dispatchEvent(new CustomEvent('open-scrape-modal'))"
+                            class="inline-flex items-center gap-2 px-5 py-2.5 bg-emerald-600 text-white text-sm font-semibold rounded-lg hover:bg-emerald-500 transition-colors shadow-sm">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+                        </svg>
+                        Run Scrape
+                    </button>
+                    <button onclick="window.dispatchEvent(new CustomEvent('open-discovery-modal'))"
+                            class="inline-flex items-center gap-2 px-5 py-2.5 bg-brand-700 text-white text-sm font-semibold rounded-lg hover:bg-brand-600 transition-colors shadow-sm">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3.055 11H5a2 2 0 012 2v1a2 2 0 002 2 2 2 0 012 2v2.945M8 3.935V5.5A2.5 2.5 0 0010.5 8h.5a2 2 0 012 2 2 2 0 104 0 2 2 0 012-2h1.064M15 20.488V18a2 2 0 012-2h3.064"/>
+                        </svg>
+                        Discovery
+                    </button>
                 </div>
             </div>
         </nav>

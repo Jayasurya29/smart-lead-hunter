@@ -43,6 +43,7 @@ _pending_extract_url = ""
 scrape_cancellations: set = set()
 _scrape_lock = asyncio.Lock()
 _pending_scrape_config: dict = {}
+_pending_discovery_config = {}
 
 # Configure logging
 logging.basicConfig(
@@ -2403,3 +2404,209 @@ async def cancel_scrape(scrape_id: str):
             scrape_cancellations.add(scrape_id)
             return {"status": "cancelling", "message": "Cancellation requested"}
     return {"status": "not_found", "message": "Scrape job not found"}
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# ENDPOINT: Start Discovery (stores config, returns immediately)
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+@app.post("/api/dashboard/discovery/start", tags=["Dashboard"])
+async def discovery_start(request: Request):
+    """Trigger a web discovery run from the dashboard"""
+    global _pending_discovery_config
+    try:
+        body = await request.json()
+        mode = body.get("mode", "full")
+        extract_leads = body.get("extract_leads", True)
+        dry_run = body.get("dry_run", False)
+
+        _pending_discovery_config = {
+            "mode": mode,
+            "extract_leads": extract_leads,
+            "dry_run": dry_run,
+        }
+
+        logger.info(
+            f"Dashboard: Discovery triggered (mode={mode}, leads={extract_leads}, dry_run={dry_run})"
+        )
+
+        return {
+            "status": "started",
+            "message": f"Discovery started ({mode} mode)",
+            "mode": mode,
+        }
+    except Exception as e:
+        logger.error(f"Dashboard: Failed to trigger discovery: {e}")
+        return {"status": "error", "message": f"Failed: {str(e)}"}
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# ENDPOINT: Discovery SSE Stream (asyncio-based, matches v5 engine)
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+@app.get("/api/dashboard/discovery/stream", tags=["Dashboard"])
+async def discovery_stream(request: Request):
+    """SSE endpoint for real-time web discovery progress."""
+
+    global _pending_discovery_config
+    config = dict(_pending_discovery_config)
+    _pending_discovery_config = {}
+
+    mode = config.get("mode", "full")
+    extract_leads = config.get("extract_leads", True)
+    dry_run = config.get("dry_run", False)
+
+    async def event_generator():
+        try:
+            import sys
+            import os
+
+            sys.path.insert(0, os.getcwd())
+
+            yield f"data: {json.dumps({'type': 'phase', 'message': '🌐 Initializing Web Discovery Engine v5...'})}\n\n"
+
+            # v5 constructor: no use_ai param, uses IntelligentPipeline automatically
+            max_queries = 5 if mode == "quick" else None
+            start_time = datetime.now(timezone.utc)
+
+            progress_queue = asyncio.Queue()
+
+            async def run_discovery():
+                try:
+                    from discover_sources import WebDiscoveryEngine
+
+                    eng = WebDiscoveryEngine(
+                        dry_run=dry_run,
+                        min_quality=35,
+                        sources_only=not extract_leads,
+                    )
+                    await eng.initialize()
+
+                    # Intercept print() to stream progress as SSE events
+                    import builtins
+
+                    original_print = builtins.print
+
+                    def progress_print(*args, **kwargs):
+                        msg = " ".join(str(a) for a in args)
+                        msg = msg.strip()
+                        if msg:
+                            # Classify message type for frontend styling
+                            msg_type = "info"
+                            if any(
+                                s in msg
+                                for s in ["✅", "✨", "Found", "Added", "QUALIFIED"]
+                            ):
+                                msg_type = "success"
+                            elif any(s in msg for s in ["❌", "Error", "Failed"]):
+                                msg_type = "error"
+                            elif any(s in msg for s in ["⚠️", "Warning", "Skip", "⚪"]):
+                                msg_type = "warning"
+                            elif any(
+                                s in msg
+                                for s in ["📡", "🔍", "🧪", "🤖", "💾", "Phase", "═══"]
+                            ):
+                                msg_type = "phase"
+
+                            progress_queue.put_nowait(
+                                {
+                                    "type": msg_type,
+                                    "message": msg,
+                                }
+                            )
+
+                            # Push live stats from the engine
+                            try:
+                                progress_queue.put_nowait(
+                                    {
+                                        "type": "stats",
+                                        "queries": eng.stats.get("search_results", 0),
+                                        "domains": (
+                                            eng.stats.get("search_results", 0)
+                                            - eng.stats.get("already_known", 0)
+                                            - eng.stats.get("blacklisted", 0)
+                                        ),
+                                        "sources": len(eng.discovered),
+                                        "leads": len(eng.extracted_leads),
+                                    }
+                                )
+                            except Exception:
+                                pass
+
+                        original_print(*args, **kwargs)
+
+                    builtins.print = progress_print
+
+                    try:
+                        await eng.run(max_queries=max_queries)
+                    finally:
+                        builtins.print = original_print
+                        await eng.close()
+
+                    # Final completion event with stats
+                    elapsed = (datetime.now(timezone.utc) - start_time).total_seconds()
+                    progress_queue.put_nowait(
+                        {
+                            "type": "complete",
+                            "message": f"✅ Discovery complete in {elapsed:.0f}s",
+                            "stats": {
+                                "queries": eng.stats.get("search_results", 0),
+                                "domains": (
+                                    eng.stats.get("search_results", 0)
+                                    - eng.stats.get("already_known", 0)
+                                    - eng.stats.get("blacklisted", 0)
+                                ),
+                                "sources": len(eng.discovered),
+                                "leads": len(eng.extracted_leads),
+                            },
+                        }
+                    )
+
+                except Exception as e:
+                    logger.error(f"Discovery error: {e}")
+                    import traceback
+
+                    traceback.print_exc()
+                    progress_queue.put_nowait(
+                        {
+                            "type": "complete",
+                            "message": f"❌ Discovery failed: {str(e)}",
+                            "stats": {},
+                        }
+                    )
+
+            # Run on the MAIN event loop (no threading — avoids AsyncEngine conflicts)
+            task = asyncio.create_task(run_discovery())
+
+            # Stream progress messages to frontend
+            while True:
+                if await request.is_disconnected():
+                    task.cancel()
+                    break
+
+                try:
+                    msg = progress_queue.get_nowait()
+                    yield f"data: {json.dumps(msg)}\n\n"
+
+                    if msg.get("type") == "complete":
+                        break
+                except asyncio.QueueEmpty:
+                    await asyncio.sleep(0.3)
+
+        except Exception as e:
+            logger.error(f"Discovery stream error: {e}")
+            yield f"data: {json.dumps({'type': 'complete', 'message': f'❌ Stream error: {str(e)}', 'stats': {}})}\n\n"
+
+    from starlette.responses import StreamingResponse
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )

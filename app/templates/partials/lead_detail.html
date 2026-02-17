@@ -1,8 +1,8 @@
 <!-- Lead Detail Panel - Editable with Source Provenance -->
-<div class="bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden" x-data="leadEditor({{ lead.id }})">
+<div class="bg-white overflow-hidden slide-in" x-data="leadEditor({{ lead.id }})">
     
     <!-- Header -->
-    <div class="px-4 py-3 bg-gradient-to-r {% if lead.lead_score and lead.lead_score >= 70 %}from-red-50 to-orange-50 border-b border-red-100{% elif lead.lead_score and lead.lead_score >= 50 %}from-orange-50 to-amber-50 border-b border-orange-100{% else %}from-gray-50 to-white border-b border-gray-200{% endif %}">
+    <div class="px-5 py-3 bg-gradient-to-r {% if lead.lead_score and lead.lead_score >= 70 %}from-red-50 to-orange-50 border-b border-red-100{% elif lead.lead_score and lead.lead_score >= 50 %}from-orange-50 to-amber-50 border-b border-orange-100{% else %}from-gray-50 to-white border-b border-gray-200{% endif %}">
         <div class="flex items-center justify-between">
             <h3 class="text-sm font-bold text-gray-900 truncate pr-2" title="{{ lead.hotel_name }}">
                 {{ lead.hotel_name }}
@@ -43,10 +43,10 @@
     </div>
 
     <!-- Content - Scrollable -->
-    <div class="max-h-[calc(100vh-320px)] overflow-y-auto">
+    <div class="overflow-y-auto" style="max-height: calc(100vh - 220px);">
         
         <!-- Toggle Edit Mode -->
-        <div class="px-4 pt-3 flex justify-end">
+        <div class="px-5 pt-3 flex justify-end">
             <button @click="editing = !editing" 
                     class="text-xs px-2.5 py-1 rounded-md transition-colors"
                     :class="editing ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-500 hover:bg-gray-200'">
@@ -55,7 +55,7 @@
             </button>
         </div>
 
-        <form id="lead-edit-form" class="px-4 py-2 space-y-3 text-sm">
+        <form id="lead-edit-form" class="px-5 py-2 space-y-3 text-sm">
             
             <!-- Hotel Info -->
             <fieldset class="space-y-2">
@@ -224,13 +224,11 @@
                 <legend class="text-xs font-semibold text-gray-400 uppercase tracking-wider flex items-center">
                     ⭐ Key Insights
                 </legend>
-                <!-- Edit mode: textarea -->
                 <div x-show="editing">
                     <textarea name="description" rows="6"
                               class="w-full mt-1 px-2 py-1.5 text-sm border border-blue-200 bg-white rounded-md focus:ring-2 focus:ring-blue-500 whitespace-pre-line">{{ lead.description or '' }}</textarea>
                     <p class="text-[10px] text-gray-400 mt-0.5">One insight per line for bullet formatting</p>
                 </div>
-                <!-- View mode: bullet points, expandable -->
                 <div x-show="!editing" class="mt-1">
                     <div class="px-3 py-2 bg-amber-50 rounded-md relative"
                          :class="expanded ? '' : 'max-h-[7rem] overflow-hidden'"
@@ -283,7 +281,7 @@
 
         <!-- Source Provenance -->
         {% if lead.source_urls and lead.source_urls | length > 0 %}
-        <div class="px-4 py-3 border-t border-gray-200 bg-gray-50">
+        <div class="px-5 py-3 border-t border-gray-200 bg-gray-50">
             <h4 class="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2 flex items-center">
                 <svg class="w-3.5 h-3.5 mr-1 text-purple-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1"/>
@@ -322,7 +320,7 @@
             </div>
         </div>
         {% elif lead.source_url %}
-        <div class="px-4 py-3 border-t border-gray-200 bg-gray-50">
+        <div class="px-5 py-3 border-t border-gray-200 bg-gray-50">
             <h4 class="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Source</h4>
             <div class="space-y-1">
                 <div class="flex items-center text-xs text-gray-600 font-medium">🔗 {{ lead.source_site or 'Unknown Source' }}</div>
@@ -332,7 +330,7 @@
         {% endif %}
 
         <!-- Timestamps -->
-        <div class="px-4 py-2 text-xs text-gray-400 border-t border-gray-100 flex items-center justify-between">
+        <div class="px-5 py-2 text-xs text-gray-400 border-t border-gray-100 flex items-center justify-between">
             <span>Added: {{ lead.created_at.strftime('%b %d, %Y %I:%M %p') if lead.created_at else '—' }}</span>
             {% if lead.updated_at and lead.updated_at != lead.created_at %}
             <span>Updated: {{ lead.updated_at.strftime('%b %d, %Y') if lead.updated_at else '' }}</span>
@@ -341,7 +339,7 @@
     </div>
 
     <!-- Action Bar -->
-    <div class="px-4 py-3 bg-gray-50 border-t border-gray-200">
+    <div class="px-5 py-3 bg-gray-50 border-t border-gray-200">
         {% if lead.status == 'new' %}
         <div class="flex space-x-2">
             <button hx-post="/api/dashboard/leads/{{ lead.id }}/approve" hx-swap="none" hx-on::after-request="window.location.reload()"

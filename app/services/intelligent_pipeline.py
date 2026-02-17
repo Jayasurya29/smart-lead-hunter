@@ -80,7 +80,7 @@ class PipelineConfig:
 
     # Content limits — Pro handles larger context, send more content
     classifier_content_limit: int = 5000  # Chars for classification (was 3000)
-    extractor_content_limit: int = 15000  # Chars for extraction (was 8000)
+    extractor_content_limit: int = 30000  # Chars for extraction (was 8000)
 
     # Redis extraction cache (skip re-extraction for same content)
     redis_cache_enabled: bool = True
@@ -289,6 +289,7 @@ class PipelineResult:
     leads_medium_quality: int = 0
     leads_low_quality: int = 0
     final_leads: List[ExtractedLead] = field(default_factory=list)
+    relevant_urls: List[str] = field(default_factory=list)
     total_time_seconds: float = 0.0
     classification_time_ms: int = 0
     extraction_time_ms: int = 0
@@ -1164,6 +1165,7 @@ Return [] if no new hotels found."""
     ) -> List[ExtractedLead]:
         """Extract leads from content with retry logic and Redis caching."""
         self._stats["extracted"] += 1
+        model = self.config.extractor_model
 
         # Truncate content (use config limit — Pro handles more context)
         truncated = (
@@ -1222,7 +1224,7 @@ Return [] if no new hotels found."""
                     await asyncio.sleep(self.config.min_delay_seconds - elapsed)
 
                 response = await self._client.post(
-                    f"https://generativelanguage.googleapis.com/v1beta/models/{self.config.extractor_model}:generateContent",
+                    f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent",
                     headers={"x-goog-api-key": self.api_key},
                     json={
                         "contents": [
@@ -1457,7 +1459,7 @@ class LeadValidator:
         # Rule 3: Opening date should be current year or later (not ancient)
         current_year = datetime.now().year
         opening_year = self._extract_year(lead.opening_date)
-        if opening_year and opening_year < current_year:
+        if opening_year and opening_year < current_year - 1:
             return self._reject(
                 "past_opening", f"Old opening ({opening_year}): '{name}'"
             )
@@ -1685,38 +1687,12 @@ class IntelligentPipeline:
         )
         classification_start = time.time()
 
-        # URLs that are ALWAYS relevant (dedicated openings pages) - skip classifier
-        ALWAYS_RELEVANT_PATTERNS = [
-            "openings",
-            "new-hotels",
-            "new-openings",
-            "pipeline",
-            "hotel-openings",
-            "2026-openings",
-            "2027-openings",
-        ]
-
         async def classify_one(page):
             async with sem:
                 url = page.get("url", "")
                 content = page.get("content", "") or page.get("text", "")
                 if not content or len(content) < 100:
                     return None
-
-                # Skip classification for dedicated openings pages
-                url_lower = url.lower()
-                if any(pattern in url_lower for pattern in ALWAYS_RELEVANT_PATTERNS):
-                    logger.info(f"   ⚡ Auto-relevant (openings page): {url[:70]}...")
-                    auto_result = ClassificationResult(
-                        url=url,
-                        summary="Dedicated openings page - auto-classified",
-                        is_relevant=True,
-                        confidence=1.0,
-                        reasoning="URL matches openings page pattern - skip classifier",
-                        processing_time_ms=0,
-                    )
-                    return (page, auto_result)
-
                 result = await self.classifier.classify(url, content)
                 return (page, result)
 
@@ -1795,21 +1771,25 @@ class IntelligentPipeline:
 
         # Filter by threshold
         final_leads = [
-            ld
-            for ld in qualified_leads
-            if ld.qualification_score >= self.config.qualification_threshold
+            lead
+            for lead in qualified_leads
+            if lead.qualification_score >= self.config.qualification_threshold
         ]
 
         # Categorize
-        high_quality = len([ld for ld in final_leads if ld.qualification_score >= 70])
-        medium_quality = len(
-            [ld for ld in final_leads if 40 <= ld.qualification_score < 70]
+        high_quality = len(
+            [lead for lead in final_leads if lead.qualification_score >= 70]
         )
-        low_quality = len([ld for ld in final_leads if ld.qualification_score < 40])
+        medium_quality = len(
+            [lead for lead in final_leads if 40 <= lead.qualification_score < 70]
+        )
+        low_quality = len(
+            [lead for lead in final_leads if lead.qualification_score < 40]
+        )
 
         # Count by priority
-        hot_leads = len([ld for ld in final_leads if "HOT" in ld.lead_priority])
-        warm_leads = len([ld for ld in final_leads if "WARM" in ld.lead_priority])
+        hot_leads = len([lead for lead in final_leads if "HOT" in lead.lead_priority])
+        warm_leads = len([lead for lead in final_leads if "WARM" in lead.lead_priority])
 
         total_time = time.time() - start_time
 
@@ -1817,7 +1797,7 @@ class IntelligentPipeline:
         avg_confidence = sum(classification_confidences) / max(
             len(classification_confidences), 1
         )
-        avg_score = sum(ld.qualification_score for ld in final_leads) / max(
+        avg_score = sum(lead.qualification_score for lead in final_leads) / max(
             len(final_leads), 1
         )
         cache_hits = self.extractor._stats.get("cache_hits", 0)
@@ -1864,6 +1844,7 @@ class IntelligentPipeline:
             leads_medium_quality=medium_quality,
             leads_low_quality=low_quality,
             final_leads=final_leads,
+            relevant_urls=[p["url"] for p in relevant_pages],
             total_time_seconds=total_time,
             classification_time_ms=classification_time,
             extraction_time_ms=extraction_time,
@@ -1988,19 +1969,17 @@ async def main():
     pipeline = IntelligentPipeline(config)
 
     # Test content
-    test_content = """
-    Ritz-Carlton Announces New Luxury Hotel in Miami Beach
 
-    The Ritz-Carlton Hotel Company announced plans for a new 200-room luxury
-    resort in Miami Beach, Florida, expected to open in Q2 2026.
-
-    The property will feature a full-service spa, three restaurants, and
-    15,000 square feet of meeting space. The hotel will hire approximately
-    400 staff members.
-
-    "We're excited to expand our presence in South Florida," said John Smith,
-    General Manager.
-    """
+    test_content = (
+        "Ritz-Carlton Announces New Luxury Hotel in Miami Beach\n\n"
+        "The Ritz-Carlton Hotel Company announced plans for a new 200-room luxury "
+        "resort in Miami Beach, Florida, expected to open in Q2 2026.\n\n"
+        "The property will feature a full-service spa, three restaurants, and "
+        "15,000 square feet of meeting space. The hotel will hire approximately "
+        "400 staff members.\n\n"
+        '"We\'re excited to expand our presence in South Florida," said John Smith, '
+        "General Manager."
+    )
 
     result = await pipeline.extract(test_content, "https://test.com", "Test")
 
