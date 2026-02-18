@@ -19,7 +19,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 from pathlib import Path
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, text, or_, case
@@ -136,8 +136,7 @@ class LeadResponse(LeadBase):
     created_at: datetime
     updated_at: Optional[datetime] = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class LeadListResponse(BaseModel):
@@ -191,8 +190,7 @@ class SourceResponse(BaseModel):
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class ScrapeLogResponse(BaseModel):
@@ -210,8 +208,7 @@ class ScrapeLogResponse(BaseModel):
     leads_duplicate: int = 0
     leads_skipped: int = 0
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class StatsResponse(BaseModel):
@@ -1246,9 +1243,9 @@ async def dashboard_page(
     _tc = _tab_counts_r.one()
 
     return templates.TemplateResponse(
+        request,
         "dashboard.html",
         {
-            "request": request,
             "leads": leads,
             "active_tab": tab,
             "current_page": page,
@@ -1267,9 +1264,7 @@ async def dashboard_stats_partial(request: Request, db: AsyncSession = Depends(g
     """HTMX partial: Stats cards"""
     stats = await _get_dashboard_stats(db)
 
-    return templates.TemplateResponse(
-        "partials/stats.html", {"request": request, "stats": stats}
-    )
+    return templates.TemplateResponse(request, "partials/stats.html", {"stats": stats})
 
 
 @app.get("/api/dashboard/leads", response_class=HTMLResponse, tags=["Dashboard"])
@@ -1328,9 +1323,9 @@ async def dashboard_leads_partial(
     pages = (total + per_page - 1) // per_page if total > 0 else 1
 
     return templates.TemplateResponse(
+        request,
         "partials/lead_list.html",
         {
-            "request": request,
             "leads": leads,
             "pagination": {
                 "total": total,
@@ -1359,7 +1354,7 @@ async def dashboard_lead_detail_partial(
         )
 
     return templates.TemplateResponse(
-        "partials/lead_detail.html", {"request": request, "lead": lead}
+        request, "partials/lead_detail.html", {"lead": lead}
     )
 
 
@@ -1378,9 +1373,7 @@ async def dashboard_lead_row_partial(
     if not lead:
         return HTMLResponse(content="", status_code=404)
 
-    return templates.TemplateResponse(
-        "partials/lead_row.html", {"request": request, "lead": lead}
-    )
+    return templates.TemplateResponse(request, "partials/lead_row.html", {"lead": lead})
 
 
 @app.patch("/api/dashboard/leads/{lead_id}/edit", tags=["Dashboard"])
@@ -1471,9 +1464,7 @@ async def dashboard_approve_lead(
 
     logger.info(f"Dashboard: Approved lead {lead.hotel_name} (ID: {lead.id})")
 
-    return templates.TemplateResponse(
-        "partials/lead_row.html", {"request": request, "lead": lead}
-    )
+    return templates.TemplateResponse(request, "partials/lead_row.html", {"lead": lead})
 
 
 @app.post(
@@ -1506,9 +1497,7 @@ async def dashboard_reject_lead(
         f"Dashboard: Rejected lead {lead.hotel_name} (ID: {lead.id}, Reason: {reason})"
     )
 
-    return templates.TemplateResponse(
-        "partials/lead_row.html", {"request": request, "lead": lead}
-    )
+    return templates.TemplateResponse(request, "partials/lead_row.html", {"lead": lead})
 
 
 @app.post(
@@ -1537,9 +1526,7 @@ async def dashboard_restore_lead(
     await db.commit()
     await db.refresh(lead)
 
-    return templates.TemplateResponse(
-        "partials/lead_row.html", {"request": request, "lead": lead}
-    )
+    return templates.TemplateResponse(request, "partials/lead_row.html", {"lead": lead})
 
 
 @app.post(
@@ -1567,9 +1554,7 @@ async def dashboard_delete_lead(
     await db.commit()
     await db.refresh(lead)
 
-    return templates.TemplateResponse(
-        "partials/lead_row.html", {"request": request, "lead": lead}
-    )
+    return templates.TemplateResponse(request, "partials/lead_row.html", {"lead": lead})
 
 
 @app.get("/api/dashboard/sources/list", tags=["Dashboard"])
