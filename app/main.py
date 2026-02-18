@@ -16,7 +16,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException, Depends, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse, StreamingResponse
+from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
@@ -33,17 +33,19 @@ from app.logging_config import setup_logging
 from app.database import get_db, init_db, async_session
 from app.models import PotentialLead, Source, ScrapeLog
 from app.services.utils import normalize_hotel_name
+from app.middleware.auth import APIKeyMiddleware
 
 # Global dict to track active scrape jobs and their progress
 # Protected by _scrape_lock for async-safe mutation within a single worker.
 # NOTE: For multi-worker uvicorn (--workers >1), migrate to Redis hash/pub-sub.
 active_scrapes: dict = {}
-_pending_scrape_config = {}
-_pending_extract_url = ""
 scrape_cancellations: set = set()
 _scrape_lock = asyncio.Lock()
-_pending_scrape_config: dict = {}
-_pending_discovery_config = {}
+
+# Keyed by unique ID to prevent race conditions between concurrent users (Audit Fix #3)
+_pending_configs: dict = {}  # scrape_id -> {mode, source_ids, ...}
+_pending_extract_urls: dict = {}  # extract_id -> url
+_pending_discovery_configs: dict = {}  # discovery_id -> {mode, extract_leads, dry_run}
 
 # Configure logging
 logging.basicConfig(
@@ -287,6 +289,7 @@ app.add_middleware(
     allow_methods=["GET", "POST", "PATCH", "DELETE"],
     allow_headers=["Content-Type", "Authorization", "X-Requested-With"],
 )
+app.add_middleware(APIKeyMiddleware)
 
 
 # P-03: Simple in-memory rate limiter for API endpoints
@@ -1063,8 +1066,6 @@ async def dashboard_page(
     db: AsyncSession = Depends(get_db),
 ):
     """Dashboard page with Pipeline/Approved/Rejected tabs"""
-    from sqlalchemy import select, func
-
     # Map tab to status
     tab_status_map = {
         "pipeline": "new",
@@ -1077,9 +1078,10 @@ async def dashboard_page(
     # Base query
     query = select(PotentialLead).where(PotentialLead.status == status)
 
-    # Filters
+    # Filters (Audit Fix #6: escape LIKE wildcards in search input)
     if search:
-        search_term = f"%{search}%"
+        safe_search = escape_like(search)
+        search_term = f"%{safe_search}%"
         query = query.where(
             or_(
                 PotentialLead.hotel_name.ilike(search_term),
@@ -1290,8 +1292,6 @@ async def dashboard_edit_lead(
     lead = result.scalar_one_or_none()
 
     if not lead:
-        from fastapi.responses import JSONResponse
-
         return JSONResponse(content={"detail": "Lead not found"}, status_code=404)
 
     # Editable fields whitelist
@@ -1323,18 +1323,22 @@ async def dashboard_edit_lead(
             if value == "" or value is None:
                 setattr(lead, field, None)
             elif field == "room_count":
-                setattr(lead, field, int(value) if value else None)
+                try:
+                    setattr(lead, field, int(value) if value else None)
+                except (ValueError, TypeError):
+                    pass  # Skip invalid room_count
             else:
                 setattr(lead, field, str(value))
 
-    from datetime import datetime, timezone
+    # Audit Fix: Keep normalized name in sync when hotel_name changes
+    if "hotel_name" in data and data["hotel_name"]:
+        lead.hotel_name_normalized = normalize_hotel_name(data["hotel_name"])
 
+    # Audit Fix 5b: Wrap room_count safely
     lead.updated_at = datetime.now(timezone.utc)
 
     await db.commit()
     await db.refresh(lead)
-
-    from fastapi.responses import JSONResponse
 
     return JSONResponse(content={"status": "ok", "id": lead.id})
 
@@ -1423,8 +1427,6 @@ async def dashboard_restore_lead(
     lead.status = "new"
     lead.rejection_reason = None
 
-    from datetime import datetime, timezone
-
     lead.updated_at = datetime.now(timezone.utc)
 
     await db.commit()
@@ -1454,8 +1456,6 @@ async def dashboard_delete_lead(
         )
 
     lead.status = "deleted"
-
-    from datetime import datetime, timezone
 
     lead.updated_at = datetime.now(timezone.utc)
 
@@ -1593,17 +1593,10 @@ async def dashboard_trigger_scrape(request: Request):
         mode = body.get("mode", "full")
         source_ids = body.get("source_ids", [])
 
-        # Store the scrape config in a global so the SSE stream can pick it up
-        import uuid
-
         scrape_id = str(uuid.uuid4())
-
-        # Store config for the SSE endpoint to use
-        global _pending_scrape_config
-        _pending_scrape_config = {
+        _pending_configs[scrape_id] = {
             "mode": mode,
             "source_ids": source_ids,
-            "scrape_id": scrape_id,
         }
 
         logger.info(
@@ -1635,12 +1628,20 @@ async def dashboard_trigger_scrape(request: Request):
 async def scrape_with_progress(request: Request):
     """SSE endpoint for real-time scrape progress using the orchestrator pipeline"""
 
-    scrape_id = str(uuid.uuid4())
+    # Get scrape config by ID from query param (Audit Fix #3 — race-safe)
+    scrape_id = request.query_params.get("scrape_id", "")
+    if not scrape_id or scrape_id not in _pending_configs:
 
-    # Get scrape config from the POST trigger
-    global _pending_scrape_config
-    scrape_config = dict(_pending_scrape_config)
-    _pending_scrape_config = {}
+        async def no_config():
+            err = {
+                "type": "error",
+                "message": "No scrape config found. Please trigger scrape again.",
+            }
+            yield "data: " + json.dumps(err) + "\n\n"
+
+        return StreamingResponse(no_config(), media_type="text/event-stream")
+
+    scrape_config = _pending_configs.pop(scrape_id)
     config_source_ids = scrape_config.get("source_ids", [])
 
     async with _scrape_lock:
@@ -2140,9 +2141,9 @@ async def dashboard_extract_url(request: Request):
         if not url.startswith("http"):
             url = "https://" + url
 
-        # Store for SSE stream to pick up
-        global _pending_extract_url
-        _pending_extract_url = url
+        # Store keyed by unique ID (Audit Fix #3 — race-safe)
+        extract_id = str(uuid.uuid4())
+        _pending_extract_urls[extract_id] = url
 
         logger.info(f"Dashboard: URL extract triggered for {url}")
 
@@ -2150,6 +2151,7 @@ async def dashboard_extract_url(request: Request):
             "status": "started",
             "message": "Extracting leads from URL",
             "url": url,
+            "extract_id": extract_id,
         }
     except Exception as e:
         logger.error(f"Dashboard: Failed to trigger URL extract: {e}")
@@ -2163,9 +2165,8 @@ async def dashboard_extract_url(request: Request):
 async def extract_url_stream(request: Request):
     """SSE endpoint for real-time URL extraction progress"""
 
-    global _pending_extract_url
-    target_url = _pending_extract_url
-    _pending_extract_url = ""
+    extract_id = request.query_params.get("extract_id", "")
+    target_url = _pending_extract_urls.pop(extract_id, "") if extract_id else ""
 
     if not target_url:
 
@@ -2414,14 +2415,15 @@ async def cancel_scrape(scrape_id: str):
 @app.post("/api/dashboard/discovery/start", tags=["Dashboard"])
 async def discovery_start(request: Request):
     """Trigger a web discovery run from the dashboard"""
-    global _pending_discovery_config
     try:
         body = await request.json()
         mode = body.get("mode", "full")
         extract_leads = body.get("extract_leads", True)
         dry_run = body.get("dry_run", False)
 
-        _pending_discovery_config = {
+        # Store keyed by unique ID (Audit Fix #3 — race-safe)
+        discovery_id = str(uuid.uuid4())
+        _pending_discovery_configs[discovery_id] = {
             "mode": mode,
             "extract_leads": extract_leads,
             "dry_run": dry_run,
@@ -2435,6 +2437,7 @@ async def discovery_start(request: Request):
             "status": "started",
             "message": f"Discovery started ({mode} mode)",
             "mode": mode,
+            "discovery_id": discovery_id,
         }
     except Exception as e:
         logger.error(f"Dashboard: Failed to trigger discovery: {e}")
@@ -2450,9 +2453,9 @@ async def discovery_start(request: Request):
 async def discovery_stream(request: Request):
     """SSE endpoint for real-time web discovery progress."""
 
-    global _pending_discovery_config
-    config = dict(_pending_discovery_config)
-    _pending_discovery_config = {}
+    # Get config by discovery_id query param (Audit Fix #3 — race-safe)
+    discovery_id = request.query_params.get("discovery_id", "")
+    config = _pending_discovery_configs.pop(discovery_id, {}) if discovery_id else {}
 
     mode = config.get("mode", "full")
     extract_leads = config.get("extract_leads", True)

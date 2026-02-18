@@ -1,15 +1,14 @@
 """
 Database connection and session management
 """
+
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 from sqlalchemy.orm import declarative_base
 from collections.abc import AsyncGenerator
 from app.config import settings
 
 # Convert postgres:// to postgresql+asyncpg:// for async support
-database_url = settings.database_url.replace(
-    "postgresql://", "postgresql+asyncpg://"
-)
+database_url = settings.database_url.replace("postgresql://", "postgresql+asyncpg://")
 
 # Create async engine
 # M6: echo=False always (never log SQL in production — leaks data)
@@ -25,11 +24,7 @@ engine = create_async_engine(
 )
 
 # Create async session factory
-async_session = async_sessionmaker(
-    engine,
-    class_=AsyncSession,
-    expire_on_commit=False
-)
+async_session = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
 # Base class for models
 Base = declarative_base()

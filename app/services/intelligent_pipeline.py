@@ -47,6 +47,37 @@ from app.services.scorer import (
     calculate_lead_score,
 )
 
+
+def _safe_int(value, default: int = 0) -> int:
+    """Safely parse int from various formats: 200, '200', 'approximately 200', None"""
+    if value is None:
+        return default
+    if isinstance(value, int):
+        return value
+    try:
+        return int(value)
+    except (ValueError, TypeError):
+        match = re.search(r"\d+", str(value))
+        return int(match.group()) if match else default
+
+
+def _safe_int(value, default: int = 0) -> int:
+    """Safely parse an integer from various formats (Audit Fix #5).
+
+    Handles: 200, "200", "approximately 200", "200-300", "200+", None
+    """
+    if value is None:
+        return default
+    if isinstance(value, int):
+        return value
+    try:
+        return int(value)
+    except (ValueError, TypeError):
+        # Extract first number from string
+        match = re.search(r"\d+", str(value))
+        return int(match.group()) if match else default
+
+
 logger = logging.getLogger(__name__)
 
 
@@ -836,7 +867,7 @@ Respond in JSON:
                 if response.status_code in (429, 503):
                     wait = (2**attempt) * 2
                     logger.warning(
-                        f"Classifier {response.status_code}, retry {attempt+1}/{max_retries} in {wait}s"
+                        f"Classifier {response.status_code}, retry {attempt + 1}/{max_retries} in {wait}s"
                     )
                     await asyncio.sleep(wait)
                     continue
@@ -852,17 +883,19 @@ Respond in JSON:
                         text = text.replace("```json", "").replace("```", "").strip()
                         # Balanced brace matching (handles nested braces in reasoning text)
                         data = None
-                        start = text.find("{")
-                        if start != -1:
+                        brace_start = text.find(
+                            "{"
+                        )  # Audit Fix #4: was `start` — shadowed timing var
+                        if brace_start != -1:
                             depth = 0
-                            for i in range(start, len(text)):
+                            for i in range(brace_start, len(text)):
                                 if text[i] == "{":
                                     depth += 1
                                 elif text[i] == "}":
                                     depth -= 1
                                     if depth == 0:
                                         try:
-                                            data = json.loads(text[start : i + 1])
+                                            data = json.loads(text[brace_start : i + 1])
                                         except json.JSONDecodeError:
                                             pass
                                         break
@@ -906,7 +939,7 @@ Respond in JSON:
             except httpx.TimeoutException:
                 wait = (2**attempt) * 2
                 logger.warning(
-                    f"Classifier timeout, retry {attempt+1}/{max_retries} in {wait}s"
+                    f"Classifier timeout, retry {attempt + 1}/{max_retries} in {wait}s"
                 )
                 await asyncio.sleep(wait)
                 continue
@@ -1192,7 +1225,7 @@ Return [] if no new hotels found."""
                         country=hotel.get("country", "USA"),
                         opening_date=hotel.get("opening_date", ""),
                         opening_status=hotel.get("opening_status", ""),
-                        room_count=int(hotel.get("room_count", 0) or 0),
+                        room_count=_safe_int(hotel.get("room_count")),  # Audit Fix #5,
                         management_company=hotel.get("management_company", ""),
                         developer=hotel.get("developer", ""),
                         owner=hotel.get("owner", ""),
@@ -1273,14 +1306,14 @@ Return [] if no new hotels found."""
                 if response.status_code == 429:
                     wait = (2**attempt) * 2  # 2s, 4s, 8s
                     logger.warning(
-                        f"Rate limited (429), retry {attempt+1}/{max_retries} in {wait}s"
+                        f"Rate limited (429), retry {attempt + 1}/{max_retries} in {wait}s"
                     )
                     await asyncio.sleep(wait)
                     continue
                 elif response.status_code == 503:
                     wait = (2**attempt) * 3  # 3s, 6s, 12s
                     logger.warning(
-                        f"Service unavailable (503), retry {attempt+1}/{max_retries} in {wait}s"
+                        f"Service unavailable (503), retry {attempt + 1}/{max_retries} in {wait}s"
                     )
                     await asyncio.sleep(wait)
                     continue
@@ -1297,17 +1330,21 @@ Return [] if no new hotels found."""
                         # Try to find JSON array with balanced bracket matching
                         # (greedy r'\[.*\]' would capture garbage between multiple arrays)
                         hotels = None
-                        start = text.find("[")
-                        if start != -1:
+                        bracket_start = text.find(
+                            "["
+                        )  # Audit Fix #4: was `start` — shadowed timing var
+                        if bracket_start != -1:
                             depth = 0
-                            for i in range(start, len(text)):
+                            for i in range(bracket_start, len(text)):
                                 if text[i] == "[":
                                     depth += 1
                                 elif text[i] == "]":
                                     depth -= 1
                                     if depth == 0:
                                         try:
-                                            hotels = json.loads(text[start : i + 1])
+                                            hotels = json.loads(
+                                                text[bracket_start : i + 1]
+                                            )
                                         except json.JSONDecodeError:
                                             pass
                                         break
@@ -1332,7 +1369,9 @@ Return [] if no new hotels found."""
                                 country=hotel.get("country", "USA"),
                                 opening_date=hotel.get("opening_date", ""),
                                 opening_status=hotel.get("opening_status", ""),
-                                room_count=int(hotel.get("room_count", 0) or 0),
+                                room_count=_safe_int(
+                                    hotel.get("room_count")
+                                ),  # Audit Fix #5,
                                 management_company=hotel.get("management_company", ""),
                                 developer=hotel.get("developer", ""),
                                 owner=hotel.get("owner", ""),
@@ -1372,11 +1411,11 @@ Return [] if no new hotels found."""
                 if attempt >= 1:
                     model = "gemini-2.5-flash"
                     logger.warning(
-                        f"Timeout on {url}, falling back to {model}, retry {attempt+1}/{max_retries} in {wait}s"
+                        f"Timeout on {url}, falling back to {model}, retry {attempt + 1}/{max_retries} in {wait}s"
                     )
                 else:
                     logger.warning(
-                        f"Timeout on {url}, retry {attempt+1}/{max_retries} in {wait}s"
+                        f"Timeout on {url}, retry {attempt + 1}/{max_retries} in {wait}s"
                     )
                 await asyncio.sleep(wait)
 
@@ -1651,9 +1690,9 @@ class IntelligentPipeline:
         # Concurrency limit from config (default 10)
         sem = asyncio.Semaphore(self.config.max_concurrent_requests)
 
-        logger.info(f"\n{'='*60}")
+        logger.info(f"\n{'=' * 60}")
         logger.info(f"🧠 INTELLIGENT PIPELINE - {len(pages)} pages")
-        logger.info(f"{'='*60}")
+        logger.info(f"{'=' * 60}")
 
         # =====================================================================
         # STAGE 1: QUICK REJECT (FREE - no AI cost)
@@ -1807,9 +1846,9 @@ class IntelligentPipeline:
         )
 
         # Summary
-        logger.info(f"\n{'='*60}")
+        logger.info(f"\n{'=' * 60}")
         logger.info("🎯 PIPELINE COMPLETE")
-        logger.info(f"{'='*60}")
+        logger.info(f"{'=' * 60}")
         logger.info(f"🚫 Quick Reject: {rejected_count} junk URLs filtered (FREE)")
         logger.info(
             f"📊 Classified: {len(relevant_pages)} relevant / {len(pages_after_reject)} checked (avg confidence: {avg_confidence:.2f})"

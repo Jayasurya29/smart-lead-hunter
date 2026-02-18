@@ -34,8 +34,7 @@ def _get_valid_api_key() -> str:
     key = os.getenv("API_AUTH_KEY", "")
     if not key:
         raise RuntimeError(
-            "API_AUTH_KEY not set in environment. "
-            "Add API_AUTH_KEY=<your-key> to .env"
+            "API_AUTH_KEY not set in environment. Add API_AUTH_KEY=<your-key> to .env"
         )
     return key
 

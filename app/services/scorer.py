@@ -1947,9 +1947,9 @@ def score_lead(hotel: Dict) -> int:
 def format_score_breakdown(result: Dict) -> str:
     """Format score breakdown for display"""
     lines = []
-    lines.append(f"{'='*60}")
+    lines.append(f"{'=' * 60}")
     lines.append(f"TOTAL SCORE: {result['total_score']}/100 [{result['score_tier']}]")
-    lines.append(f"{'='*60}")
+    lines.append(f"{'=' * 60}")
 
     if not result["should_save"]:
         lines.append(f"!! SKIP: {result['skip_reason']}")

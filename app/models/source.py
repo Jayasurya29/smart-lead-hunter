@@ -40,7 +40,9 @@ class Source(Base):
     consecutive_failures = Column(Integer, default=0)  # For health monitoring
 
     # Gold URL Tracking
-    gold_urls = Column(JSONB, default={})
+    gold_urls = Column(
+        JSONB, default=dict
+    )  # Audit Fix #7: callable, not mutable literal
     last_discovery_at = Column(DateTime(timezone=True))
     discovery_interval_days = Column(Integer, default=7)
     avg_lead_yield = Column(Numeric(5, 2), default=0.00)
