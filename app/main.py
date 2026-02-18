@@ -2115,7 +2115,7 @@ async def scrape_with_progress(request: Request):
 # ADD these to app/main.py
 #
 # STEP 1: Add this global variable near the other globals (around line 50-60,
-#          near where _pending_scrape_config is defined):
+#          near where _pending_configs is defined):
 #
 #     _pending_extract_url = ""
 #
