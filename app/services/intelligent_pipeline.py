@@ -82,6 +82,76 @@ logger = logging.getLogger(__name__)
 
 
 # =============================================================================
+# GEMINI CIRCUIT BREAKER
+# =============================================================================
+# Prevents wasted API calls when Gemini is down or rate-limited.
+# After FAILURE_THRESHOLD consecutive failures, the breaker "opens" and
+# rejects calls immediately for RECOVERY_TIMEOUT seconds.
+# After timeout, allows ONE test call ("half-open"). If it succeeds,
+# the breaker closes and normal operation resumes.
+
+
+class GeminiCircuitBreaker:
+    """Circuit breaker for Gemini API calls."""
+
+    FAILURE_THRESHOLD = 5  # consecutive failures to trip
+    RECOVERY_TIMEOUT = 300  # seconds before retry (5 min)
+
+    # States
+    CLOSED = "closed"  # normal operation
+    OPEN = "open"  # rejecting calls
+    HALF_OPEN = "half_open"  # testing with one call
+
+    def __init__(self):
+        self.state = self.CLOSED
+        self.failure_count = 0
+        self.last_failure_time = 0.0
+        self._lock = None  # lazy init for async
+
+    def can_call(self) -> bool:
+        """Check if a Gemini call should be attempted."""
+        if self.state == self.CLOSED:
+            return True
+        if self.state == self.OPEN:
+            if time.time() - self.last_failure_time >= self.RECOVERY_TIMEOUT:
+                self.state = self.HALF_OPEN
+                logger.info("Circuit breaker HALF-OPEN: testing Gemini...")
+                return True
+            return False
+        # HALF_OPEN: allow one test call
+        return True
+
+    def record_success(self):
+        """Record a successful Gemini call."""
+        if self.state == self.HALF_OPEN:
+            logger.info("Circuit breaker CLOSED: Gemini recovered")
+        self.state = self.CLOSED
+        self.failure_count = 0
+
+    def record_failure(self):
+        """Record a failed Gemini call."""
+        self.failure_count += 1
+        self.last_failure_time = time.time()
+        if self.failure_count >= self.FAILURE_THRESHOLD:
+            self.state = self.OPEN
+            logger.warning(
+                f"Circuit breaker OPEN: {self.failure_count} consecutive Gemini failures. "
+                f"Rejecting calls for {self.RECOVERY_TIMEOUT}s."
+            )
+        elif self.state == self.HALF_OPEN:
+            self.state = self.OPEN
+            logger.warning("Circuit breaker re-OPENED: test call failed")
+
+    @property
+    def is_open(self) -> bool:
+        return self.state == self.OPEN
+
+
+# Module-level singleton shared by classifier and extractor
+_gemini_breaker = GeminiCircuitBreaker()
+
+
+# =============================================================================
 # CONFIGURATION
 # =============================================================================
 
@@ -825,7 +895,15 @@ Respond in JSON:
         await self._client.aclose()
 
     async def classify(self, url: str, content: str) -> ClassificationResult:
-        """Classify content relevance with retry logic."""
+        """Classify content relevance with retry logic and circuit breaker."""
+        if not _gemini_breaker.can_call():
+            logger.warning(f"Circuit breaker OPEN — skipping classify for {url}")
+            return ClassificationResult(
+                is_relevant=False,
+                confidence=0.0,
+                reason="Circuit breaker open",
+                category="skipped",
+            )
         start = time.time()
 
         # Truncate for classification (use config limit)
@@ -901,6 +979,8 @@ Respond in JSON:
                                         break
                         if data is None:
                             self._stats["errors"] += 1
+                            _gemini_breaker.record_success()
+                            _gemini_breaker.record_success()
                             return ClassificationResult(
                                 url=url,
                                 summary="JSON parse failed",
@@ -926,6 +1006,8 @@ Respond in JSON:
                     )
 
                 # Non-retryable error
+                _gemini_breaker.record_failure()
+                _gemini_breaker.record_failure()
                 self._stats["errors"] += 1
                 return ClassificationResult(
                     url=url,
@@ -1399,7 +1481,8 @@ Return [] if no new hotels found."""
 
                     return leads
 
-                # Non-retryable error (400, 401, 403, etc.)
+                # Non-retryable error
+                _gemini_breaker.record_failure()  # (400, 401, 403, etc.)
                 logger.error(
                     f"Extraction failed: HTTP {response.status_code} for {url}"
                 )
