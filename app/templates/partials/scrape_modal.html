@@ -530,7 +530,7 @@ function scrapeController() {
                 
                 if (resp.ok && data.status !== 'error') {
                     this.log('success', 'URL extract started');
-                    this.connectSSE('/api/dashboard/extract-url/stream');
+                    this.connectSSE('/api/dashboard/extract-url/stream?extract_id=' + data.extract_id);
                 } else {
                     this.handleError(data.message || 'Failed to start URL extract');
                 }
@@ -560,7 +560,7 @@ function scrapeController() {
                 
                 if (resp.ok) {
                     this.log('success', `Scrape queued (${this.scrapeMode} mode)`);
-                    this.connectSSE('/api/dashboard/scrape/stream');
+                    this.connectSSE('/api/dashboard/scrape/stream?scrape_id=' + data.scrape_id);
                 } else {
                     this.handleError(data.detail || 'Failed to start');
                 }

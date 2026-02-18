@@ -227,6 +227,7 @@ function discoveryModal() {
                     }),
                 });
                 const data = await resp.json();
+                this._discoveryId = data.discovery_id || '';
                 if (data.status === 'error') {
                     this.addLog('error', '❌ ' + data.message);
                     this.running = false;
@@ -242,7 +243,7 @@ function discoveryModal() {
 
             // 2. Connect to SSE stream
             const startTime = Date.now();
-            this.eventSource = new EventSource('/api/dashboard/discovery/stream');
+            this.eventSource = new EventSource('/api/dashboard/discovery/stream?discovery_id=' + this._discoveryId);
 
             this.eventSource.onmessage = (event) => {
                 try {
