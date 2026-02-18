@@ -1144,18 +1144,19 @@ Return [] if no new hotels found."""
 
         # Redis extraction cache — skip re-extraction for identical content
         self._redis = None
+        self._redis_ready = False
         if config.redis_cache_enabled:
             try:
-                import redis
+                import redis.asyncio as aioredis
 
-                self._redis = redis.from_url(
+                self._redis = aioredis.from_url(
                     config.redis_url,
                     socket_timeout=2,
                     socket_connect_timeout=2,
                     decode_responses=True,
                 )
-                self._redis.ping()
-                logger.info("Extraction cache: Redis connected")
+                self._redis_ready = True
+                logger.info("Extraction cache: async Redis configured")
             except Exception as e:
                 logger.warning(
                     f"Extraction cache: Redis unavailable ({e}), caching disabled"
@@ -1167,25 +1168,25 @@ Return [] if no new hotels found."""
         """Generate a stable hash for content + URL."""
         return hashlib.sha256(f"{url}:{content[:15000]}".encode()).hexdigest()[:16]
 
-    def _cache_get(self, cache_key: str) -> Optional[List[dict]]:
-        """Try to get cached extraction results."""
-        if not self._redis:
+    async def _cache_get(self, cache_key: str) -> Optional[List[dict]]:
+        """Try to get cached extraction results (async)."""
+        if not self._redis or not self._redis_ready:
             return None
         try:
-            cached = self._redis.get(f"extract:{cache_key}")
+            cached = await self._redis.get(f"extract:{cache_key}")
             if cached:
                 return json.loads(cached)
         except Exception:
             pass
         return None
 
-    def _cache_set(self, cache_key: str, leads_data: List[dict]):
-        """Cache extraction results."""
-        if not self._redis:
+    async def _cache_set(self, cache_key: str, leads_data: List[dict]):
+        """Cache extraction results (async)."""
+        if not self._redis or not self._redis_ready:
             return
         try:
             ttl = self.config.redis_cache_ttl_hours * 3600
-            self._redis.setex(
+            await self._redis.setex(
                 f"extract:{cache_key}",
                 ttl,
                 json.dumps(leads_data),
@@ -1209,7 +1210,7 @@ Return [] if no new hotels found."""
 
         # ── CHECK CACHE FIRST ──
         cache_key = self._content_hash(truncated, url)
-        cached_data = self._cache_get(cache_key)
+        cached_data = await self._cache_get(cache_key)
         if cached_data is not None:
             self._stats["cache_hits"] += 1
             logger.debug(f"Cache hit for {url[:60]}")
@@ -1394,7 +1395,7 @@ Return [] if no new hotels found."""
 
                     # Cache the raw hotel dicts for future runs
                     if leads and isinstance(hotels, list):
-                        self._cache_set(cache_key, hotels)
+                        await self._cache_set(cache_key, hotels)
 
                     return leads
 
@@ -1434,6 +1435,11 @@ Return [] if no new hotels found."""
 
     async def close(self):
         await self._client.aclose()
+        if self._redis:
+            try:
+                await self._redis.aclose()
+            except Exception:
+                pass
 
 
 # =============================================================================

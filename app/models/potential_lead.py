@@ -11,6 +11,7 @@ from sqlalchemy import (
     CheckConstraint,
     Numeric,
     ForeignKey,
+    Index,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from datetime import datetime, timezone
@@ -28,6 +29,15 @@ class PotentialLead(Base):
     """Scraped leads waiting for review"""
 
     __tablename__ = "potential_leads"
+
+    __table_args__ = (
+        Index("ix_leads_status_score", "status", "lead_score"),
+        Index("ix_leads_status_created", "status", "created_at"),
+        Index("ix_leads_location_type", "location_type"),
+        Index("ix_leads_brand_tier", "brand_tier"),
+        Index("ix_leads_normalized_name", "hotel_name_normalized"),
+        Index("ix_leads_source_id", "source_id"),
+    )
 
     # Primary key
     id = Column(Integer, primary_key=True, autoincrement=True)
