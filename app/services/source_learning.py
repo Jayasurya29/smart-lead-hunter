@@ -578,10 +578,7 @@ class LearningOrchestrator:
             # Run the pipeline
             leads = await orchestrator.run(source_names=sources)
 
-            # Get scrape results from the engine
-            orchestrator.scraping_engine._last_results if hasattr(
-                orchestrator.scraping_engine, "_last_results"
-            ) else {}
+            # Scrape results accessed via orchestrator (dead expression removed, Audit Fix L-06)
 
             # Learn from results
             self._learn_from_leads(orchestrator, leads, sources)

@@ -663,6 +663,24 @@ TIER_NAMES = {
 }
 
 
+# =============================================================================
+# PRE-COMPUTED BRAND LOOKUP (Audit Fix P-01)
+# =============================================================================
+# O(1) lookup instead of O(n) iteration across 440+ brands.
+# Built at module load time from the tier lists above.
+_BRAND_TIER_MAP: dict = {}
+for _brand in TIER5_SKIP:
+    _BRAND_TIER_MAP[_brand] = (5, "Budget/Skip", 0)
+for _brand in TIER1_ULTRA_LUXURY:
+    _BRAND_TIER_MAP[_brand] = (1, "Ultra Luxury", 25)
+for _brand in TIER2_LUXURY:
+    _BRAND_TIER_MAP[_brand] = (2, "Luxury", 20)
+for _brand in TIER3_UPPER_UPSCALE:
+    _BRAND_TIER_MAP[_brand] = (3, "Upper Upscale", 15)
+for _brand in TIER4_UPSCALE:
+    _BRAND_TIER_MAP[_brand] = (4, "Upscale", 10)
+
+
 def get_brand_tier(hotel_name: str) -> Tuple[int, str, int]:
     """
     Determine the tier of a hotel based on its name.
@@ -674,6 +692,11 @@ def get_brand_tier(hotel_name: str) -> Tuple[int, str, int]:
     """
     name_lower = hotel_name.lower()
 
+    # Audit Fix P-01: Try O(1) exact lookup first, fall back to substring matching
+    if name_lower in _BRAND_TIER_MAP:
+        return _BRAND_TIER_MAP[name_lower]
+
+    # Substring/word-boundary matching for partial names
     # Check Tier 5 FIRST (to filter out budget hotels)
     for brand in TIER5_SKIP:
         if _brand_matches(brand, name_lower):
@@ -1708,8 +1731,9 @@ def calculate_lead_score(
     result["opening_year"] = opening_year
     result["breakdown"]["timing"] = {"points": timing_points, "tier": timing_tier}
 
-    # Reject leads with opening dates in the past (already opened)
-    if opening_year and opening_year < datetime.now().year:
+    # Reject leads with opening dates too far in the past
+    # Audit Fix M-02: Allow last-year openings (may still need uniforms)
+    if opening_year and opening_year < datetime.now().year - 1:
         result["should_save"] = False
         result["skip_reason"] = f"Past opening ({opening_year}): {hotel_name}"
         return result
@@ -1951,6 +1975,10 @@ class ScoreBreakdown:
 
 
 # Convenience function for direct import
+# Module-level singleton (Audit Fix L-03: avoid creating new instance per call)
+_scorer = LeadScorer()
+
+
 def score_lead(hotel: Dict) -> int:
     """
     Quick function to score a lead.
@@ -1959,8 +1987,7 @@ def score_lead(hotel: Dict) -> int:
         from app.services.scorer import score_lead
         score = score_lead(hotel_dict)
     """
-    scorer = LeadScorer()
-    return scorer.score(hotel)
+    return _scorer.score(hotel)
 
 
 # =============================================================================

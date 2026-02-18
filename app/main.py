@@ -48,10 +48,7 @@ _pending_configs: dict = {}  # scrape_id -> {mode, source_ids, ...}
 _pending_extract_urls: dict = {}  # extract_id -> url
 _pending_discovery_configs: dict = {}  # discovery_id -> {mode, extract_leads, dry_run}
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-)
+# Logging configured by setup_logging() in lifespan
 logger = logging.getLogger(__name__)
 
 
@@ -1505,7 +1502,6 @@ async def dashboard_delete_lead(
 @app.get("/api/dashboard/sources/list", tags=["Dashboard"])
 async def dashboard_sources_list(db: AsyncSession = Depends(get_db)):
     """Return all sources with metadata for scrape modal source selection."""
-    from datetime import timedelta
 
     result = await db.execute(
         select(Source)

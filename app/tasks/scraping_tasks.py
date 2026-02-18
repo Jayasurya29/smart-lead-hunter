@@ -671,8 +671,9 @@ def sync_approved_to_insightly() -> Dict[str, Any]:
     logger.info("📤 Syncing to Insightly...")
 
     async def _sync():
-        from app.services.insightly import insightly_client
+        from app.services.insightly import get_insightly_client
 
+        insightly_client = get_insightly_client()
         if not insightly_client.enabled:
             return {"success": False, "error": "Insightly not configured"}
 
@@ -737,7 +738,7 @@ def convert_lead_to_insightly(lead_id: int) -> Dict[str, Any]:
     logger.info(f"📤 Converting lead {lead_id} to Insightly")
 
     async def _convert():
-        from app.services.insightly import insightly_client
+        from app.services.insightly import get_insightly_client
 
         async with async_session() as session:
             result = await session.execute(
@@ -751,6 +752,7 @@ def convert_lead_to_insightly(lead_id: int) -> Dict[str, Any]:
         if not lead.insightly_id:
             return {"success": False, "error": "Lead not synced to Insightly yet"}
 
+        insightly_client = get_insightly_client()
         result = await insightly_client.convert_to_lead(lead.insightly_id)
 
         if result:

@@ -58,7 +58,7 @@ except ImportError:
         return False
 
 
-logging.basicConfig(level=logging.INFO)
+# logging configured by app startup
 logger = logging.getLogger(__name__)
 
 
@@ -202,9 +202,9 @@ class ContentCache:
             key = self._get_key(url)
             if key in self._cache:
                 entry = self._cache[key]
-                if datetime.now() - entry["timestamp"] < self.ttl:
+                if datetime.now(timezone.utc) - entry["timestamp"] < self.ttl:
                     # M-06: Update access time for LRU tracking
-                    entry["last_access"] = datetime.now()
+                    entry["last_access"] = datetime.now(timezone.utc)
                     result = entry["result"]
                     result.is_cached = True
                     return result
@@ -217,7 +217,7 @@ class ContentCache:
             # M-06: Evict oldest entries if at capacity
             if len(self._cache) >= self.max_entries:
                 self._evict_lru()
-            now = datetime.now()
+            now = datetime.now(timezone.utc)
             self._cache[self._get_key(url)] = {
                 "result": result,
                 "timestamp": now,

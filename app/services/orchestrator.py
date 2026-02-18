@@ -322,7 +322,7 @@ class LeadHunterOrchestrator:
             if ld.get("contact_name"):
                 self.stats.leads_with_contact_name += 1
 
-        self.stats.end_time = datetime.now()
+        self.stats.end_time = datetime.now(timezone.utc)
 
         # Record learnings
         if LEARNING_AVAILABLE:

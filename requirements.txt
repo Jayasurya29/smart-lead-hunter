@@ -49,15 +49,15 @@ aiofiles>=23.2.1
 # AI EXTRACTION - FREE STACK
 # =============================================================================
 # Google Gemini (PRIMARY - free tier available)
-google-generativeai>=0.4.0
+# google-generativeai>=0.4.0  # Unused: using raw httpx (Audit Fix L-04)
 
 # Ollama (BACKUP - runs locally, unlimited, free)
-ollama>=0.1.6
+# ollama>=0.1.6  # Unused: backup only (Audit Fix L-04)
 
 # =============================================================================
 # NLP & TEXT PROCESSING
 # =============================================================================
-spacy>=3.7.0
+# spacy>=3.7.0  # Unused: ~200MB savings (Audit Fix L-05)
 # After install: python -m spacy download en_core_web_sm
 
 # =============================================================================
@@ -71,7 +71,7 @@ python-dateutil>=2.8.2
 # DEDUPLICATION & MATCHING
 # =============================================================================
 rapidfuzz>=3.6.0
-sentence-transformers>=2.2.2
+# sentence-transformers>=2.2.2  # Unused (Audit Fix L-05)
 
 # =============================================================================
 # TASK QUEUE & SCHEDULING
