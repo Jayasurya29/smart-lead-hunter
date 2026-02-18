@@ -207,6 +207,14 @@ TIER2_LUXURY = [
     "edition",  # Marriott EDITION
     "w hotel",  # Marriott W Hotels (luxury lifestyle)
     "w hotels",
+    "w miami",  # Moved from T3 -> T2 (Audit Fix H-07: W Hotels are luxury)
+    "w south beach",
+    "w fort lauderdale",
+    "w new york",
+    "w los angeles",
+    "w hollywood",
+    "w chicago",
+    "w austin",
     # ── Las Vegas / Resort Luxury ──
     "wynn",  # Wynn Resorts
     "encore",  # Wynn sister brand
@@ -378,14 +386,6 @@ TIER3_UPPER_UPSCALE = [
     "hoxton",  # Ennismore
     "the goodtime hotel",  # Miami Beach
     "proper",
-    "w miami",
-    "w south beach",
-    "w fort lauderdale",
-    "w new york",
-    "w los angeles",
-    "w hollywood",
-    "w chicago",
-    "w austin",
     "grand wailea",
 ]
 
@@ -1324,9 +1324,16 @@ def get_location_score(
             return (15, "Caribbean", "caribbean")
 
     # ── STEP 4: Check international keywords (only for non-US locations) ──
-    for intl_keyword in INTERNATIONAL_SKIP:
-        if intl_keyword in location_text:
-            return (-1, f"International - SKIP ({intl_keyword})", "international")
+    # Audit Fix H-09: Only check international keywords if state or country
+    # is populated. When both are empty, city alone could be a US city with
+    # an international name (Rome GA, Naples FL, Paris TX, Milan TN, etc.)
+    has_geo_context = bool(state_lower and state_lower not in ("none", "null")) or bool(
+        country_lower and country_lower not in ("none", "null", "")
+    )
+    if has_geo_context:
+        for intl_keyword in INTERNATIONAL_SKIP:
+            if intl_keyword in location_text:
+                return (-1, f"International - SKIP ({intl_keyword})", "international")
 
     # ── STEP 5: If country is specified and not matched above, it's international ──
     if country_lower and country_lower not in ["", "none", "null"]:

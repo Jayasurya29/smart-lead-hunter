@@ -26,6 +26,7 @@ from sqlalchemy import select, func, text, or_
 
 import asyncio
 import json
+import re
 import uuid
 
 from app.config import settings
@@ -300,6 +301,20 @@ _RATE_LIMIT_MAX = 60  # requests per window
 _RATE_LIMIT_WINDOW = 60.0  # seconds
 _RATE_LIMIT_MAX_ENTRIES = 10000  # max tracked IPs before forced eviction
 _rate_limit_last_cleanup = 0.0
+
+
+def _safe_error(e: Exception, fallback: str = "Operation failed") -> str:
+    """Sanitize error message for frontend (Audit Fix C-03).
+    Strips URLs, API keys, and long tracebacks."""
+    msg = str(e)
+    # Remove anything that looks like a URL with params (could contain keys)
+    msg = re.sub(r"https?://[^\s]+", "[URL removed]", msg)
+    # Remove anything that looks like an API key
+    msg = re.sub(r"[A-Za-z0-9_-]{20,}", "[REDACTED]", msg)
+    # Truncate
+    if len(msg) > 120:
+        msg = msg[:120] + "..."
+    return msg or fallback
 
 
 def _cleanup_rate_limit_store(now: float) -> None:
@@ -1612,7 +1627,10 @@ async def dashboard_trigger_scrape(request: Request):
         }
     except Exception as e:
         logger.error(f"Dashboard: Failed to trigger scrape: {e}")
-        return {"status": "error", "message": f"Failed to start scrape: {str(e)}"}
+        return {
+            "status": "error",
+            "message": f"Failed to start scrape: {_safe_error(e)}",
+        }
 
 
 # -----------------------------------------------------------------------------
@@ -1761,6 +1779,10 @@ async def scrape_with_progress(request: Request):
                                 await orchestrator.scraping_engine.rate_limiter.acquire(
                                     gold_url
                                 )
+                                # Disconnect check before scrape call (Audit Fix C-05)
+                                if await request.is_disconnected():
+                                    return
+
                                 result = await orchestrator.scraping_engine.http_scraper.scrape(
                                     gold_url
                                 )
@@ -1847,7 +1869,7 @@ async def scrape_with_progress(request: Request):
 
                 except Exception as e:
                     logger.error(f"Source {source_name} failed: {e}")
-                    yield f"data: {json.dumps({'type': 'url_error', 'url': source.base_url[:60], 'error': str(e)[:100]})}\n\n"
+                    yield f"data: {json.dumps({'type': 'url_error', 'url': source.base_url[:60], 'error': _safe_error(e, 'Scrape failed')})}\n\n"
 
                 # Rate limiting between sources
                 await asyncio.sleep(1)
@@ -1865,6 +1887,10 @@ async def scrape_with_progress(request: Request):
                 {"url": p["url"], "content": p["content"], "source": p["source_name"]}
                 for p in all_pages
             ]
+
+            # Disconnect check before Gemini processing (Audit Fix C-05)
+            if await request.is_disconnected():
+                return
 
             pipeline_result = await orchestrator.pipeline.process_pages(
                 pages_for_pipeline, source_name="Dashboard Scrape"
@@ -2086,7 +2112,7 @@ async def scrape_with_progress(request: Request):
 
         except Exception as e:
             logger.error(f"Scrape stream error: {e}")
-            yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
+            yield f"data: {json.dumps({'type': 'error', 'message': _safe_error(e, 'Scrape failed')})}\n\n"
         finally:
             async with _scrape_lock:
                 active_scrapes.pop(scrape_id, None)
@@ -2155,7 +2181,7 @@ async def dashboard_extract_url(request: Request):
         }
     except Exception as e:
         logger.error(f"Dashboard: Failed to trigger URL extract: {e}")
-        return {"status": "error", "message": f"Failed: {str(e)}"}
+        return {"status": "error", "message": f"Failed: {_safe_error(e)}"}
 
 
 # --- ENDPOINT 2: SSE stream for URL extraction progress ---
@@ -2228,7 +2254,7 @@ async def extract_url_stream(request: Request):
                 else:
                     yield f"data: {json.dumps({'type': 'info', 'message': 'HTTP scraper failed, trying fallback...'})}\n\n"
             except Exception as e:
-                yield f"data: {json.dumps({'type': 'info', 'message': f'HTTP scraper error: {str(e)[:60]}, trying fallback...'})}\n\n"
+                yield f"data: {json.dumps({'type': 'info', 'message': f'HTTP scraper error: {_safe_error(e, "fetch failed")}, trying fallback...'})}\n\n"
 
             # Fallback: try with httpx directly
             if not page_content:
@@ -2259,7 +2285,7 @@ async def extract_url_stream(request: Request):
                             yield f"data: {json.dumps({'type': 'error', 'message': f'Failed to fetch URL: HTTP {resp.status_code}'})}\n\n"
                             return
                 except Exception as e2:
-                    yield f"data: {json.dumps({'type': 'error', 'message': f'All fetch methods failed: {str(e2)[:80]}'})}\n\n"
+                    yield f"data: {json.dumps({'type': 'error', 'message': f'All fetch methods failed: {_safe_error(e2, "fetch failed")}'})}\n\n"
                     return
 
             if not page_content:
@@ -2286,6 +2312,10 @@ async def extract_url_stream(request: Request):
                     "source": source_label,
                 }
             ]
+
+            # Disconnect check before Gemini processing (Audit Fix C-05)
+            if await request.is_disconnected():
+                return
 
             pipeline_result = await orchestrator.pipeline.process_pages(
                 pages_for_pipeline,
@@ -2382,11 +2412,8 @@ async def extract_url_stream(request: Request):
             yield f"data: {json.dumps({'type': 'complete', 'stats': final_stats, 'duration_seconds': duration})}\n\n"
 
         except Exception as e:
-            logger.error(f"URL extract stream error: {e}")
-            import traceback
-
-            traceback.print_exc()
-            yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
+            logger.error(f"URL extract stream error: {e}", exc_info=True)
+            yield f"data: {json.dumps({'type': 'error', 'message': _safe_error(e, 'Extraction failed')})}\n\n"
         finally:
             if orchestrator:
                 try:
@@ -2441,7 +2468,7 @@ async def discovery_start(request: Request):
         }
     except Exception as e:
         logger.error(f"Dashboard: Failed to trigger discovery: {e}")
-        return {"status": "error", "message": f"Failed: {str(e)}"}
+        return {"status": "error", "message": f"Failed: {_safe_error(e)}"}
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -2568,14 +2595,11 @@ async def discovery_stream(request: Request):
                     )
 
                 except Exception as e:
-                    logger.error(f"Discovery error: {e}")
-                    import traceback
-
-                    traceback.print_exc()
+                    logger.error(f"Discovery error: {e}", exc_info=True)
                     progress_queue.put_nowait(
                         {
                             "type": "complete",
-                            "message": f"❌ Discovery failed: {str(e)}",
+                            "message": f"❌ Discovery failed: {_safe_error(e, 'Discovery error')}",
                             "stats": {},
                         }
                     )
@@ -2600,7 +2624,7 @@ async def discovery_stream(request: Request):
 
         except Exception as e:
             logger.error(f"Discovery stream error: {e}")
-            yield f"data: {json.dumps({'type': 'complete', 'message': f'❌ Stream error: {str(e)}', 'stats': {}})}\n\n"
+            yield f"data: {json.dumps({'type': 'complete', 'message': f'❌ Stream error: {_safe_error(e, 'Stream failed')}', 'stats': {}})}\n\n"
 
     from starlette.responses import StreamingResponse
 
