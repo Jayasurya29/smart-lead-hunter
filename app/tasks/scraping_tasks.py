@@ -33,7 +33,6 @@ from app.tasks.celery_app import celery_app, BaseTask
 from app.database import async_session
 from app.models import PotentialLead, Source, ScrapeLog
 from app.services.intelligent_pipeline import LeadExtractionPipeline
-from app.services.scorer import LeadScorer
 from app.services.utils import normalize_hotel_name
 
 logger = logging.getLogger(__name__)
@@ -359,17 +358,22 @@ async def scrape_url_async(url: str, use_playwright: bool = False) -> Optional[s
 
 
 async def process_scraped_content(
-    text: str, source_url: str, source_site: str
+    text: str,
+    source_url: str,
+    source_site: str,
+    pipeline: "LeadExtractionPipeline" = None,
 ) -> Dict[str, Any]:
     """Process scraped content: extract, score, and save leads.
 
     M-13 FIX: Uses a single shared DB session for all leads from one page
     instead of opening a new connection per lead.
+    Audit Fix M-06: Accepts optional pipeline to avoid creating new instance per call.
     """
     stats = {"leads_found": 0, "leads_saved": 0, "leads_skipped": 0, "errors": []}
 
     try:
-        pipeline = LeadExtractionPipeline()
+        if pipeline is None:
+            pipeline = LeadExtractionPipeline()
         result = await pipeline.extract(
             text, source_url=source_url, source_name=source_site
         )
@@ -390,10 +394,11 @@ async def process_scraped_content(
                     hotel["source_url"] = source_url
                     hotel["source_site"] = source_site
 
-                    scorer = LeadScorer()
-                    breakdown = scorer.score_with_breakdown(hotel)
+                    from app.services.scorer import _scorer
 
-                    if scorer.is_budget_brand(hotel):
+                    breakdown = _scorer.score_with_breakdown(hotel)
+
+                    if _scorer.is_budget_brand(hotel):
                         logger.info(f"Skipping budget brand: {hotel.get('hotel_name')}")
                         stats["leads_skipped"] += 1
                         continue

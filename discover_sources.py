@@ -38,7 +38,7 @@ from typing import Optional
 from urllib.parse import urlparse, quote_plus, urljoin
 
 import httpx
-from sqlalchemy import select
+from sqlalchemy import select, or_
 
 from app.database import async_session
 from app.models import Source
@@ -1286,7 +1286,15 @@ class WebDiscoveryEngine:
         async with async_session() as session:
             for src in qualified:
                 existing = await session.execute(
-                    select(Source).where(Source.base_url.ilike(f"%{src['domain']}%"))
+                    # Audit Fix P-02: Exact domain match instead of ILIKE scan
+                    select(Source).where(
+                        or_(
+                            Source.base_url == src["domain"],
+                            Source.base_url == f"https://{src['domain']}",
+                            Source.base_url == f"http://{src['domain']}",
+                            Source.base_url.like(f"%://{src['domain']}/%"),
+                        )
+                    )
                 )
                 if existing.scalar_one_or_none():
                     continue

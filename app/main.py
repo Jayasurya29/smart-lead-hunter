@@ -318,6 +318,25 @@ def _safe_error(e: Exception, fallback: str = "Operation failed") -> str:
 MAX_BODY_SIZE = 1_048_576  # 1 MB
 
 
+# Audit Fix H-05: CSRF protection for state-mutating endpoints.
+# HTMX sends X-Requested-With by default. Requiring this header
+# prevents cross-origin form submissions (CORS preflight blocks it).
+def _require_ajax(request: Request):
+    """Dependency that rejects non-AJAX requests to prevent CSRF."""
+    requested_with = request.headers.get("x-requested-with", "")
+    content_type = request.headers.get("content-type", "")
+    # Allow: HTMX requests, JSON API calls, or explicit XMLHttpRequest
+    if (
+        "xmlhttprequest" in requested_with.lower()
+        or "hx-request" in request.headers
+        or "application/json" in content_type
+    ):
+        return True
+    raise HTTPException(
+        status_code=403, detail="CSRF check failed: missing required header"
+    )
+
+
 async def _checked_json(request: Request, max_size: int = MAX_BODY_SIZE) -> dict:
     """Parse JSON body with size limit to prevent DoS."""
     body = await request.body()
@@ -1315,7 +1334,10 @@ async def dashboard_lead_row_partial(
 
 @app.patch("/api/dashboard/leads/{lead_id}/edit", tags=["Dashboard"])
 async def dashboard_edit_lead(
-    lead_id: int, request: Request, db: AsyncSession = Depends(get_db)
+    lead_id: int,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    _csrf=Depends(_require_ajax),
 ):
     """Edit lead fields from the detail panel"""
     data = await _checked_json(request)
@@ -2171,7 +2193,7 @@ async def scrape_with_progress(request: Request):
 
 
 @app.post("/api/dashboard/extract-url", tags=["Dashboard"])
-async def dashboard_extract_url(request: Request):
+async def dashboard_extract_url(request: Request, _csrf=Depends(_require_ajax)):
     """Accept a URL for direct lead extraction"""
     try:
         body = await _checked_json(request)
@@ -2259,12 +2281,9 @@ async def extract_url_stream(request: Request):
                         page_content.strip().startswith("<")
                         and len(page_content) > 30000
                     ):
-                        from bs4 import BeautifulSoup
+                        from app.services.utils import clean_html_to_text
 
-                        soup = BeautifulSoup(page_content, "lxml")
-                        for s in soup(["script", "style", "nav", "footer", "header"]):
-                            s.decompose()
-                        page_content = soup.get_text(separator="\n", strip=True)
+                        page_content = clean_html_to_text(page_content)
                     yield f"data: {json.dumps({'type': 'source_complete', 'source': 'URL Extract', 'current': 1, 'total': 1, 'pages': 1})}\n\n"
                     yield f"data: {json.dumps({'type': 'info', 'message': f'Page fetched: {len(page_content):,} chars'})}\n\n"
                 else:
@@ -2287,14 +2306,10 @@ async def extract_url_stream(request: Request):
                         resp = await client.get(target_url)
                         if resp.status_code == 200:
                             # Strip HTML to clean text (same as scraping engine)
-                            from bs4 import BeautifulSoup
 
-                            soup = BeautifulSoup(resp.text, "lxml")
-                            for s in soup(
-                                ["script", "style", "nav", "footer", "header"]
-                            ):
-                                s.decompose()
-                            page_content = soup.get_text(separator="\n", strip=True)
+                            from app.services.utils import clean_html_to_text
+
+                            page_content = clean_html_to_text(resp.text)
                             yield f"data: {json.dumps({'type': 'source_complete', 'source': 'URL Extract', 'current': 1, 'total': 1, 'pages': 1})}\n\n"
                             yield f"data: {json.dumps({'type': 'info', 'message': f'Page fetched (fallback): {len(page_content):,} chars'})}\n\n"
                         else:
@@ -2441,7 +2456,7 @@ async def extract_url_stream(request: Request):
 
 
 @app.post("/api/dashboard/scrape/cancel/{scrape_id}", tags=["Dashboard"])
-async def cancel_scrape(scrape_id: str):
+async def cancel_scrape(scrape_id: str, _csrf=Depends(_require_ajax)):
     """Cancel an active scrape job"""
     async with _scrape_lock:
         if scrape_id in active_scrapes:
@@ -2456,7 +2471,7 @@ async def cancel_scrape(scrape_id: str):
 
 
 @app.post("/api/dashboard/discovery/start", tags=["Dashboard"])
-async def discovery_start(request: Request):
+async def discovery_start(request: Request, _csrf=Depends(_require_ajax)):
     """Trigger a web discovery run from the dashboard"""
     try:
         body = await _checked_json(request)

@@ -70,6 +70,30 @@ def _brand_matches(brand: str, text: str) -> bool:
         return brand.lower() in text.lower()
 
 
+# Short-keyword threshold for location matching (Audit Fix M-03 audit)
+_LOC_SHORT_THRESHOLD = 3
+_loc_patterns: dict = {}
+
+
+def _location_keyword_matches(keyword: str, text: str) -> bool:
+    """Match location keyword with word-boundary awareness for short keywords.
+
+    Prevents 'fl' matching 'buffalo', 'rio' matching 'ontario', etc.
+    Short keywords (<= 3 chars) use regex word boundaries.
+    Longer keywords use plain substring matching (safe enough).
+    """
+    stripped = keyword.strip()
+    if len(stripped) <= _LOC_SHORT_THRESHOLD:
+        if stripped not in _loc_patterns:
+            import re
+
+            escaped = re.escape(stripped)
+            _loc_patterns[stripped] = re.compile(r"\b" + escaped + r"\b", re.IGNORECASE)
+        return bool(_loc_patterns[stripped].search(text))
+    else:
+        return stripped in text
+
+
 # =============================================================================
 # BRAND TIER CLASSIFICATION (25 pts max)
 # =============================================================================
@@ -1337,17 +1361,17 @@ def get_location_score(
     if is_us:
         # Check Florida first (Primary Market - 53% of business)
         for fl_keyword in FLORIDA_KEYWORDS:
-            if fl_keyword in location_text:
+            if _location_keyword_matches(fl_keyword, location_text):
                 return (20, "Florida", "florida")
 
         # Check Strong US Markets
         for us_keyword in STRONG_US_KEYWORDS:
-            if us_keyword in location_text:
+            if _location_keyword_matches(us_keyword, location_text):
                 return (15, "Strong US Market", "usa")
 
         # Check Other US States
         for us_keyword in OTHER_US_KEYWORDS:
-            if us_keyword in location_text:
+            if _location_keyword_matches(us_keyword, location_text):
                 return (10, "Other US", "usa")
 
         # USA but unrecognized sub-market
@@ -1358,7 +1382,7 @@ def get_location_score(
         return (15, "Caribbean", "caribbean")
 
     for carib_keyword in CARIBBEAN_KEYWORDS:
-        if carib_keyword in location_text:
+        if _location_keyword_matches(carib_keyword, location_text):
             return (15, "Caribbean", "caribbean")
 
     # ── STEP 4: Check international keywords (only for non-US locations) ──
@@ -1370,7 +1394,7 @@ def get_location_score(
     )
     if has_geo_context:
         for intl_keyword in INTERNATIONAL_SKIP:
-            if intl_keyword in location_text:
+            if _location_keyword_matches(intl_keyword, location_text):
                 return (-1, f"International - SKIP ({intl_keyword})", "international")
 
     # ── STEP 5: If country is specified and not matched above, it's international ──

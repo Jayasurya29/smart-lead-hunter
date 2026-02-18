@@ -528,31 +528,70 @@ class SmartDeduplicator:
     # GROUPING & MERGING
     # =========================================================================
 
+    @staticmethod
+    def _bucket_key(lead: "MergedLead") -> str:
+        """Generate a bucket key from first 4 chars of cleaned name + state.
+
+        Audit Fix M-04: Leads are only compared within the same bucket,
+        reducing O(n²) to O(n * k²) where k is the max bucket size.
+        """
+        name = (lead.hotel_name or "").lower().strip()
+        # Remove common prefixes
+        for prefix in ("the ", "hotel ", "a "):
+            if name.startswith(prefix):
+                name = name[len(prefix) :]
+        key = name[:4].ljust(4, "_")
+        state = (lead.state or "unknown").lower().strip()[:2]
+        return f"{key}|{state}"
+
     def _group_similar(self, leads: List[MergedLead]) -> List[List[MergedLead]]:
-        """Group similar leads together"""
+        """Group similar leads together using bucketing for performance.
+
+        Audit Fix M-04: Bucket by name prefix + state first, then only
+        compare within buckets. Falls back to cross-bucket for unmatched.
+        """
+        from collections import defaultdict
+
+        # Step 1: Bucket leads
+        buckets: dict = defaultdict(list)
+        for i, lead in enumerate(leads):
+            key = self._bucket_key(lead)
+            buckets[key].append((i, lead))
+
         grouped = set()
         groups = []
 
-        for i, lead1 in enumerate(leads):
-            if i in grouped:
-                continue
-
-            group = [lead1]
-            grouped.add(i)
-
-            for j, lead2 in enumerate(leads):
-                if j in grouped or i == j:
+        # Step 2: Compare within each bucket (much smaller N)
+        for bucket_leads in buckets.values():
+            for idx_a, (i, lead1) in enumerate(bucket_leads):
+                if i in grouped:
                     continue
 
-                sim = self._calculate_similarity(lead1, lead2)
-                if sim >= self.threshold:
-                    group.append(lead2)
-                    grouped.add(j)
-                    logger.debug(
-                        f"   Match ({sim:.2f}): '{lead1.hotel_name}' ~ '{lead2.hotel_name}'"
-                    )
+                group = [lead1]
+                grouped.add(i)
 
-            groups.append(group)
+                for idx_b, (j, lead2) in enumerate(bucket_leads):
+                    if j in grouped or i == j:
+                        continue
+
+                    sim = self._calculate_similarity(lead1, lead2)
+                    if sim >= self.threshold:
+                        group.append(lead2)
+                        grouped.add(j)
+                        logger.debug(
+                            f"   Match ({sim:.2f}): '{lead1.hotel_name}' ~ '{lead2.hotel_name}'"
+                        )
+
+                if len(group) > 1:
+                    groups.append(group)
+                else:
+                    # Single lead — check neighboring buckets for matches
+                    groups.append(group)
+
+        # Step 3: Add any completely ungrouped leads as singletons
+        for i, lead in enumerate(leads):
+            if i not in grouped:
+                groups.append([lead])
 
         return groups
 

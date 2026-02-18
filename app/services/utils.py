@@ -26,3 +26,32 @@ def normalize_hotel_name(name: str) -> str:
         return ""
     # Remove all non-alphanumeric except spaces, then collapse whitespace
     return re.sub(r"\s+", " ", re.sub(r"[^a-z0-9\s]", "", name.lower())).strip()
+
+
+def clean_html_to_text(html: str) -> str:
+    """Strip HTML to clean text for lead extraction.
+
+    Audit Fix M-10: Centralized from 6+ duplicate implementations.
+    Removes script, style, nav, footer, header, noscript, svg, iframe, aside tags.
+    """
+    import re as _re
+    from bs4 import BeautifulSoup
+
+    soup = BeautifulSoup(html, "lxml")
+    for tag in soup(
+        [
+            "script",
+            "style",
+            "nav",
+            "footer",
+            "header",
+            "noscript",
+            "svg",
+            "iframe",
+            "aside",
+        ]
+    ):
+        tag.decompose()
+    text = soup.get_text(separator="\n", strip=True)
+    text = _re.sub(r"\n{3,}", "\n\n", text)
+    return text
