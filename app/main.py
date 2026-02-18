@@ -536,17 +536,65 @@ async def root():
 
 @app.get("/health", tags=["Health"])
 async def health_check(db: AsyncSession = Depends(get_db)):
-    """Health check endpoint"""
+    """Health check endpoint — verifies DB, Gemini API, and Redis."""
+    components = {}
+
+    # 1. Database
     try:
         await db.execute(text("SELECT 1"))
-        db_status = "healthy"
+        components["database"] = "healthy"
     except Exception as e:
-        db_status = f"unhealthy: {e}"
+        components["database"] = f"unhealthy: {_safe_error(e)}"
+
+    # 2. Gemini API
+    try:
+        import httpx
+
+        gemini_key = (
+            settings.gemini_api_key if hasattr(settings, "gemini_api_key") else None
+        )
+        if not gemini_key:
+            components["gemini"] = "not configured"
+        else:
+            gemini_model = getattr(settings, "gemini_model", "gemini-2.0-flash")
+            url = f"https://generativelanguage.googleapis.com/v1beta/models/{gemini_model}?key={gemini_key}"
+            async with httpx.AsyncClient(timeout=5.0) as client:
+                resp = await client.get(url)
+            if resp.status_code == 200:
+                components["gemini"] = "healthy"
+            else:
+                components["gemini"] = f"error: HTTP {resp.status_code}"
+    except Exception as e:
+        components["gemini"] = f"unhealthy: {_safe_error(e)}"
+
+    # 3. Redis
+    try:
+        redis_url = getattr(settings, "redis_url", None)
+        if not redis_url:
+            components["redis"] = "not configured"
+        else:
+            import redis.asyncio as aioredis
+
+            r = aioredis.from_url(redis_url, socket_connect_timeout=3)
+            await r.ping()
+            await r.aclose()
+            components["redis"] = "healthy"
+    except Exception as e:
+        components["redis"] = f"unhealthy: {_safe_error(e)}"
+
+    # Overall status
+    healthy_count = sum(1 for v in components.values() if v == "healthy")
+    if healthy_count == len(components):
+        overall = "healthy"
+    elif components.get("database") == "healthy":
+        overall = "degraded"
+    else:
+        overall = "unhealthy"
 
     return {
-        "status": "healthy" if db_status == "healthy" else "degraded",
+        "status": overall,
         "timestamp": datetime.now(timezone.utc).isoformat(),
-        "components": {"database": db_status},
+        "components": components,
     }
 
 
