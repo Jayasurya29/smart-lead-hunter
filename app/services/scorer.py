@@ -153,10 +153,10 @@ TIER1_ULTRA_LUXURY = [
     "the setai",  # Miami Beach
     "the carlyle",  # NYC
     "the mark hotel",  # NYC
-    "the mark",
+    # "the mark",  # Removed: too generic (Audit Fix M-04)
     "hotel bel-air",  # LA (Dorchester)
     "the plaza hotel",  # NYC
-    "the plaza",
+    # "the plaza",  # Removed: too generic (Audit Fix M-04)
     "the breakers",  # Palm Beach
     "breakers palm beach",
     "little palm island",  # Florida Keys
@@ -217,13 +217,18 @@ TIER2_LUXURY = [
     "w austin",
     # ── Las Vegas / Resort Luxury ──
     "wynn",  # Wynn Resorts
-    "encore",  # Wynn sister brand
+    "encore at wynn",  # Wynn sister brand (Audit Fix M-04: was bare "encore")
+    "encore las vegas",
+    "encore boston",
     "bellagio",  # MGM luxury icon
     "the venetian",  # Las Vegas luxury
     "venetian",
     "palazzo",  # Las Vegas luxury (Venetian)
-    "cosmopolitan",  # Las Vegas luxury
-    "aria",  # MGM luxury
+    "cosmopolitan las vegas",  # (Audit Fix M-04: was bare "cosmopolitan")
+    "cosmopolitan hotel",
+    "cosmopolitan of las vegas",
+    "aria resort",  # MGM luxury (Audit Fix M-04: was bare "aria")
+    "aria las vegas",
     "mgm grand",
     "caesars palace",
     "fontainebleau",  # Miami Beach / Las Vegas
@@ -302,7 +307,7 @@ TIER3_UPPER_UPSCALE = [
     "curio",
     "signia",  # Hilton meetings/events
     "signia by hilton",
-    "tempo by hilton",
+    # "tempo by hilton",  # Removed from T3: midscale brand, already in T5 (Audit Fix M-08)
     "tapestry collection",
     "tapestry",
     # ── Hyatt Upper Upscale ──
@@ -510,6 +515,16 @@ TIER5_SKIP = [
     "home2",
     "homewood",
     "spark by hilton",
+    # ── Disney Budget/Value (Audit Fix M-10) ──
+    "disney all-star",
+    "disney all star",
+    "disney pop century",
+    "disney art of animation",
+    "disney caribbean beach",
+    "disney port orleans",
+    "disney movie",  # All-Star Movies
+    "disney music",  # All-Star Music
+    "disney sports",  # All-Star Sports
     "tempo",
     "motto",
     "livaway",
@@ -1373,10 +1388,12 @@ def get_timing_score(opening_date: str = None) -> Tuple[int, str, int]:
     date_str = str(opening_date).lower()
     current_year = datetime.now().year
 
-    # Try to extract year from date string
-    year_match = re.search(r"20\d{2}", date_str)
-    if year_match:
-        year = int(year_match.group())
+    # Try to extract year(s) from date string
+    # Audit Fix M-03: Use max() to get latest year, not first match.
+    # E.g. "Opening 2025, delayed to 2027" should score 2027.
+    year_matches = re.findall(r"20\d{2}", date_str)
+    if year_matches:
+        year = max(int(y) for y in year_matches)
     else:
         # Check for relative year references
         if "this year" in date_str:

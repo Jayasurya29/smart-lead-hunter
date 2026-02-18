@@ -317,6 +317,20 @@ def _safe_error(e: Exception, fallback: str = "Operation failed") -> str:
     return msg or fallback
 
 
+# Audit Fix M-05: Request body size limit (1 MB)
+MAX_BODY_SIZE = 1_048_576  # 1 MB
+
+
+async def _checked_json(request: Request, max_size: int = MAX_BODY_SIZE) -> dict:
+    """Parse JSON body with size limit to prevent DoS."""
+    body = await request.body()
+    if len(body) > max_size:
+        raise HTTPException(status_code=413, detail="Request body too large")
+    import json as _json
+
+    return _json.loads(body)
+
+
 def _cleanup_rate_limit_store(now: float) -> None:
     """Evict expired rate limit entries to prevent unbounded memory growth.
 
@@ -1145,18 +1159,24 @@ async def dashboard_page(
     result = await db.execute(query.offset(offset).limit(per_page))
     leads = result.scalars().all()
 
-    pipeline_count_r = await db.execute(
-        select(func.count()).where(PotentialLead.status == "new")
+    # Audit Fix M-01: Single query for all tab counts (was 4 separate queries)
+    _tab_counts_r = await db.execute(
+        select(
+            func.count(PotentialLead.id)
+            .filter(PotentialLead.status == "new")
+            .label("new"),
+            func.count(PotentialLead.id)
+            .filter(PotentialLead.status == "approved")
+            .label("approved"),
+            func.count(PotentialLead.id)
+            .filter(PotentialLead.status == "rejected")
+            .label("rejected"),
+            func.count(PotentialLead.id)
+            .filter(PotentialLead.status == "deleted")
+            .label("deleted"),
+        )
     )
-    approved_count_r = await db.execute(
-        select(func.count()).where(PotentialLead.status == "approved")
-    )
-    rejected_count_r = await db.execute(
-        select(func.count()).where(PotentialLead.status == "rejected")
-    )
-    deleted_count_r = await db.execute(
-        select(func.count()).where(PotentialLead.status == "deleted")
-    )
+    _tc = _tab_counts_r.one()
 
     return templates.TemplateResponse(
         "dashboard.html",
@@ -1166,10 +1186,10 @@ async def dashboard_page(
             "active_tab": tab,
             "current_page": page,
             "total_pages": total_pages,
-            "pipeline_count": pipeline_count_r.scalar() or 0,
-            "approved_count": approved_count_r.scalar() or 0,
-            "rejected_count": rejected_count_r.scalar() or 0,
-            "deleted_count": deleted_count_r.scalar() or 0,
+            "pipeline_count": _tc.new or 0,
+            "approved_count": _tc.approved or 0,
+            "rejected_count": _tc.rejected or 0,
+            "deleted_count": _tc.deleted or 0,
             "total_count": total_count,
         },
     )
@@ -1301,7 +1321,7 @@ async def dashboard_edit_lead(
     lead_id: int, request: Request, db: AsyncSession = Depends(get_db)
 ):
     """Edit lead fields from the detail panel"""
-    data = await request.json()
+    data = await _checked_json(request)
 
     result = await db.execute(select(PotentialLead).where(PotentialLead.id == lead_id))
     lead = result.scalar_one_or_none()
@@ -1601,7 +1621,7 @@ async def dashboard_trigger_scrape(request: Request):
         # Parse request body (may be empty for backwards compat)
         body = {}
         try:
-            body = await request.json()
+            body = await _checked_json(request)
         except Exception:
             pass
 
@@ -2158,7 +2178,7 @@ async def scrape_with_progress(request: Request):
 async def dashboard_extract_url(request: Request):
     """Accept a URL for direct lead extraction"""
     try:
-        body = await request.json()
+        body = await _checked_json(request)
         url = (body.get("url") or "").strip()
 
         if not url:
@@ -2443,7 +2463,7 @@ async def cancel_scrape(scrape_id: str):
 async def discovery_start(request: Request):
     """Trigger a web discovery run from the dashboard"""
     try:
-        body = await request.json()
+        body = await _checked_json(request)
         mode = body.get("mode", "full")
         extract_leads = body.get("extract_leads", True)
         dry_run = body.get("dry_run", False)
@@ -2514,40 +2534,52 @@ async def discovery_stream(request: Request):
                     )
                     await eng.initialize()
 
-                    # Intercept print() to stream progress as SSE events
-                    import builtins
+                    # Audit Fix M-09: Use contextlib.redirect_stdout instead of
+                    # monkey-patching builtins.print (global mutation).
+                    import io
+                    import contextlib
 
-                    original_print = builtins.print
+                    def _classify_msg_type(msg):
+                        if any(
+                            s in msg
+                            for s in ["\u2705", "\u2728", "Found", "Added", "QUALIFIED"]
+                        ):
+                            return "success"
+                        if any(s in msg for s in ["\u274c", "Error", "Failed"]):
+                            return "error"
+                        if any(
+                            s in msg
+                            for s in ["\u26a0\ufe0f", "Warning", "Skip", "\u26aa"]
+                        ):
+                            return "warning"
+                        if any(
+                            s in msg
+                            for s in [
+                                "\U0001f4e1",
+                                "\U0001f50d",
+                                "\U0001f9ea",
+                                "\U0001f916",
+                                "\U0001f4be",
+                                "Phase",
+                                "\u2550\u2550\u2550",
+                            ]
+                        ):
+                            return "phase"
+                        return "info"
 
-                    def progress_print(*args, **kwargs):
-                        msg = " ".join(str(a) for a in args)
-                        msg = msg.strip()
-                        if msg:
-                            # Classify message type for frontend styling
-                            msg_type = "info"
-                            if any(
-                                s in msg
-                                for s in ["✅", "✨", "Found", "Added", "QUALIFIED"]
-                            ):
-                                msg_type = "success"
-                            elif any(s in msg for s in ["❌", "Error", "Failed"]):
-                                msg_type = "error"
-                            elif any(s in msg for s in ["⚠️", "Warning", "Skip", "⚪"]):
-                                msg_type = "warning"
-                            elif any(
-                                s in msg
-                                for s in ["📡", "🔍", "🧪", "🤖", "💾", "Phase", "═══"]
-                            ):
-                                msg_type = "phase"
+                    class _ProgressWriter(io.TextIOBase):
+                        """Captures print() output and routes to SSE queue."""
 
+                        def write(self, text):
+                            msg = text.strip()
+                            if not msg:
+                                return len(text)
                             progress_queue.put_nowait(
                                 {
-                                    "type": msg_type,
+                                    "type": _classify_msg_type(msg),
                                     "message": msg,
                                 }
                             )
-
-                            # Push live stats from the engine
                             try:
                                 progress_queue.put_nowait(
                                     {
@@ -2564,15 +2596,12 @@ async def discovery_stream(request: Request):
                                 )
                             except Exception:
                                 pass
-
-                        original_print(*args, **kwargs)
-
-                    builtins.print = progress_print
+                            return len(text)
 
                     try:
-                        await eng.run(max_queries=max_queries)
+                        with contextlib.redirect_stdout(_ProgressWriter()):
+                            await eng.run(max_queries=max_queries)
                     finally:
-                        builtins.print = original_print
                         await eng.close()
 
                     # Final completion event with stats
