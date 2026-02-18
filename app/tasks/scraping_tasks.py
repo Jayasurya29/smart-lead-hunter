@@ -131,7 +131,7 @@ async def save_lead_to_db(
         logger.error(f"Failed to save lead: {e}")
         if owns_session:
             await session.rollback()
-        return None
+        return {"success": False, "error": "Unexpected error"}
 
 
 async def _save_lead_impl(
@@ -152,7 +152,7 @@ async def _save_lead_impl(
 
     if existing:
         logger.info(f"Duplicate found: {hotel.get('hotel_name')}")
-        return None
+        return {"success": False, "error": "Operation failed"}
 
     lead = PotentialLead(
         hotel_name=hotel.get("hotel_name"),
@@ -272,7 +272,7 @@ async def _get_shared_browser():
                 logger.info("Shared Playwright browser launched")
             except ImportError:
                 logger.warning("Playwright not available")
-                return None
+                return {"success": False, "error": "Unexpected error"}
     return _playwright_browser
 
 
@@ -350,11 +350,11 @@ async def scrape_url_async(url: str, use_playwright: bool = False) -> Optional[s
                 return soup.get_text(" ", strip=True)
             else:
                 logger.warning(f"HTTP {response.status_code} for {url}")
-                return None
+                return {"success": False, "error": "Operation failed"}
 
     except Exception as e:
         logger.error(f"Scrape failed for {url}: {e}")
-        return None
+        return {"success": False, "error": "Content fetch failed"}
 
 
 async def process_scraped_content(

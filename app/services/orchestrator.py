@@ -15,6 +15,12 @@ Usage:
         orchestrator = LeadHunterOrchestrator()
         await orchestrator.run()
 """
+# Error Handling Convention (Audit Fix Q-03):
+# - API endpoints (main.py): return {"status": "error", "message": _safe_error(e)}
+# - Background tasks (scraping_tasks.py): return {"success": False, "error": "description"}
+# - Service methods (orchestrator, pipeline): raise exceptions for unexpected errors,
+#   return result objects (with .success field) for expected failures
+# - SSE streams: yield {"type": "error", "message": _safe_error(e)} then return
 
 import asyncio
 import json

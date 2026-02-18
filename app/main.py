@@ -22,7 +22,7 @@ from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
 from pathlib import Path
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func, text, or_
+from sqlalchemy import select, func, text, or_, case
 
 import asyncio
 import json
@@ -446,52 +446,57 @@ async def _get_dashboard_stats(db: AsyncSession) -> dict:
     today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
     week_start = today_start - timedelta(days=now.weekday())
 
-    # -- Single query for ALL lead counts --
+    # -- Single query for ALL lead counts (Audit Fix P-04: portable case() syntax) --
     lead_result = await db.execute(
         select(
             func.count(PotentialLead.id).label("total"),
-            func.count(PotentialLead.id)
-            .filter(PotentialLead.status == "new")
-            .label("new"),
-            func.count(PotentialLead.id)
-            .filter(PotentialLead.status == "approved")
-            .label("approved"),
-            func.count(PotentialLead.id)
-            .filter(PotentialLead.status == "pending")
-            .label("pending"),
-            func.count(PotentialLead.id)
-            .filter(PotentialLead.status.in_(["rejected", "bad"]))
-            .label("rejected"),
-            func.count(PotentialLead.id)
-            .filter(PotentialLead.lead_score >= settings.hot_lead_threshold)
-            .label("hot"),
-            func.count(PotentialLead.id)
-            .filter(
-                PotentialLead.lead_score >= settings.warm_lead_threshold,
-                PotentialLead.lead_score < settings.hot_lead_threshold,
-            )
-            .label("warm"),
-            func.count(PotentialLead.id)
-            .filter(PotentialLead.created_at >= today_start)
-            .label("today"),
-            func.count(PotentialLead.id)
-            .filter(PotentialLead.created_at >= week_start)
-            .label("this_week"),
-            func.count(PotentialLead.id)
-            .filter(PotentialLead.status == "deleted")
-            .label("deleted"),
+            func.sum(case((PotentialLead.status == "new", 1), else_=0)).label("new"),
+            func.sum(case((PotentialLead.status == "approved", 1), else_=0)).label(
+                "approved"
+            ),
+            func.sum(case((PotentialLead.status == "pending", 1), else_=0)).label(
+                "pending"
+            ),
+            func.sum(
+                case((PotentialLead.status.in_(["rejected", "bad"]), 1), else_=0)
+            ).label("rejected"),
+            func.sum(
+                case(
+                    (PotentialLead.lead_score >= settings.hot_lead_threshold, 1),
+                    else_=0,
+                )
+            ).label("hot"),
+            func.sum(
+                case(
+                    (
+                        (PotentialLead.lead_score >= settings.warm_lead_threshold)
+                        & (PotentialLead.lead_score < settings.hot_lead_threshold),
+                        1,
+                    ),
+                    else_=0,
+                )
+            ).label("warm"),
+            func.sum(case((PotentialLead.created_at >= today_start, 1), else_=0)).label(
+                "today"
+            ),
+            func.sum(case((PotentialLead.created_at >= week_start, 1), else_=0)).label(
+                "this_week"
+            ),
+            func.sum(case((PotentialLead.status == "deleted", 1), else_=0)).label(
+                "deleted"
+            ),
         )
     )
     lr = lead_result.one()
 
-    # -- Single query for ALL source counts --
+    # -- Single query for ALL source counts (Audit Fix P-04) --
     source_result = await db.execute(
         select(
             func.count(Source.id).label("total"),
-            func.count(Source.id).filter(Source.is_active.is_(True)).label("active"),
-            func.count(Source.id)
-            .filter(Source.health_status == "healthy")
-            .label("healthy"),
+            func.sum(case((Source.is_active.is_(True), 1), else_=0)).label("active"),
+            func.sum(case((Source.health_status == "healthy", 1), else_=0)).label(
+                "healthy"
+            ),
         )
     )
     sr = source_result.one()
@@ -1175,21 +1180,19 @@ async def dashboard_page(
     result = await db.execute(query.offset(offset).limit(per_page))
     leads = result.scalars().all()
 
-    # Audit Fix M-01: Single query for all tab counts (was 4 separate queries)
+    # Audit Fix M-01 + P-04: Single query, portable case() syntax
     _tab_counts_r = await db.execute(
         select(
-            func.count(PotentialLead.id)
-            .filter(PotentialLead.status == "new")
-            .label("new"),
-            func.count(PotentialLead.id)
-            .filter(PotentialLead.status == "approved")
-            .label("approved"),
-            func.count(PotentialLead.id)
-            .filter(PotentialLead.status == "rejected")
-            .label("rejected"),
-            func.count(PotentialLead.id)
-            .filter(PotentialLead.status == "deleted")
-            .label("deleted"),
+            func.sum(case((PotentialLead.status == "new", 1), else_=0)).label("new"),
+            func.sum(case((PotentialLead.status == "approved", 1), else_=0)).label(
+                "approved"
+            ),
+            func.sum(case((PotentialLead.status == "rejected", 1), else_=0)).label(
+                "rejected"
+            ),
+            func.sum(case((PotentialLead.status == "deleted", 1), else_=0)).label(
+                "deleted"
+            ),
         )
     )
     _tc = _tab_counts_r.one()
@@ -1907,7 +1910,7 @@ async def scrape_with_progress(request: Request):
 
                 except Exception as e:
                     logger.error(f"Source {source_name} failed: {e}")
-                    yield f"data: {json.dumps({'type': 'url_error', 'url': source.base_url[:60], 'error': _safe_error(e, 'Scrape failed')})}\n\n"
+                    yield f"data: {json.dumps({'type': 'url_error', 'url': source.base_url[:60], 'error': _safe_error(e)})}\n\n"
 
                 # Rate limiting between sources
                 await asyncio.sleep(1)
@@ -2150,7 +2153,7 @@ async def scrape_with_progress(request: Request):
 
         except Exception as e:
             logger.error(f"Scrape stream error: {e}")
-            yield f"data: {json.dumps({'type': 'error', 'message': _safe_error(e, 'Scrape failed')})}\n\n"
+            yield f"data: {json.dumps({'type': 'error', 'message': _safe_error(e)})}\n\n"
         finally:
             async with _scrape_lock:
                 active_scrapes.pop(scrape_id, None)
@@ -2289,7 +2292,8 @@ async def extract_url_stream(request: Request):
                 else:
                     yield f"data: {json.dumps({'type': 'info', 'message': 'HTTP scraper failed, trying fallback...'})}\n\n"
             except Exception as e:
-                yield f"data: {json.dumps({'type': 'info', 'message': f'HTTP scraper error: {_safe_error(e, "fetch failed")}, trying fallback...'})}\n\n"
+                _err_msg = f"HTTP scraper error: {_safe_error(e)}, trying fallback..."
+                yield f"data: {json.dumps({'type': 'info', 'message': _err_msg})}\n\n"
 
             # Fallback: try with httpx directly
             if not page_content:
@@ -2316,7 +2320,8 @@ async def extract_url_stream(request: Request):
                             yield f"data: {json.dumps({'type': 'error', 'message': f'Failed to fetch URL: HTTP {resp.status_code}'})}\n\n"
                             return
                 except Exception as e2:
-                    yield f"data: {json.dumps({'type': 'error', 'message': f'All fetch methods failed: {_safe_error(e2, "fetch failed")}'})}\n\n"
+                    _err = f"All fetch methods failed: {_safe_error(e2)}"
+                    yield "data: {json.dumps({'type': 'error', 'message': _err})}\n\n"
                     return
 
             if not page_content:
@@ -2444,7 +2449,7 @@ async def extract_url_stream(request: Request):
 
         except Exception as e:
             logger.error(f"URL extract stream error: {e}", exc_info=True)
-            yield f"data: {json.dumps({'type': 'error', 'message': _safe_error(e, 'Extraction failed')})}\n\n"
+            yield f"data: {json.dumps({'type': 'error', 'message': _safe_error(e)})}\n\n"
         finally:
             if orchestrator:
                 try:
@@ -2639,7 +2644,7 @@ async def discovery_stream(request: Request):
                     progress_queue.put_nowait(
                         {
                             "type": "complete",
-                            "message": f"❌ Discovery failed: {_safe_error(e, 'Discovery error')}",
+                            "message": f"❌ Discovery failed: {_safe_error(e)}",
                             "stats": {},
                         }
                     )
@@ -2664,7 +2669,7 @@ async def discovery_stream(request: Request):
 
         except Exception as e:
             logger.error(f"Discovery stream error: {e}")
-            yield f"data: {json.dumps({'type': 'complete', 'message': f'❌ Stream error: {_safe_error(e, 'Stream failed')}', 'stats': {}})}\n\n"
+            yield f"data: {json.dumps({'type': 'complete', 'message': f'❌ Stream error: {_safe_error(e)}', 'stats': {}})}\n\n"
 
     from starlette.responses import StreamingResponse
 
