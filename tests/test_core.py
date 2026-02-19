@@ -9,13 +9,13 @@ Top 5 tests covering the highest-risk areas:
 4. Pipeline - classification, extraction parsing
 """
 
-import pytest
 import json
 
 
 # ============================================================
 # TEST 1: Scorer
 # ============================================================
+
 
 class TestScorer:
     """Tests for app.services.scorer"""
@@ -55,7 +55,6 @@ class TestScorer:
         assert tier_num == 0
         assert tier_name == "Unknown"
 
-
     def test_score_range(self):
         """Total score stays within 0-100"""
         from app.services.scorer import calculate_lead_score
@@ -71,7 +70,6 @@ class TestScorer:
         score = result["total_score"] if isinstance(result, dict) else result
         assert 0 <= score <= 100
 
-
     def test_score_empty_lead(self):
         """Empty/minimal lead doesn't crash, gets low score"""
         from app.services.scorer import calculate_lead_score
@@ -86,6 +84,7 @@ class TestScorer:
 # TEST 2: Deduplicator
 # ============================================================
 
+
 class TestDeduplicator:
     """Tests for app.services.smart_deduplicator"""
 
@@ -95,8 +94,16 @@ class TestDeduplicator:
 
         dedup = SmartDeduplicator(threshold=0.75)
         leads = [
-            {"hotel_name": "Rosewood Miami Beach", "city": "Miami", "source_url": "site-a.com"},
-            {"hotel_name": "Rosewood Miami Beach", "city": "Miami", "source_url": "site-b.com"},
+            {
+                "hotel_name": "Rosewood Miami Beach",
+                "city": "Miami",
+                "source_url": "site-a.com",
+            },
+            {
+                "hotel_name": "Rosewood Miami Beach",
+                "city": "Miami",
+                "source_url": "site-b.com",
+            },
         ]
         merged = dedup.deduplicate(leads)
         assert len(merged) == 1
@@ -132,17 +139,26 @@ class TestDeduplicator:
         dedup = SmartDeduplicator(threshold=0.75)
         leads = [
             {"hotel_name": "Aman New York", "city": "New York", "contact_email": ""},
-            {"hotel_name": "Aman New York", "city": "New York", "contact_email": "info@aman.com", "room_count": 83},
+            {
+                "hotel_name": "Aman New York",
+                "city": "New York",
+                "contact_email": "info@aman.com",
+                "room_count": 83,
+            },
         ]
         merged = dedup.deduplicate(leads)
         assert len(merged) == 1
         result = merged[0] if isinstance(merged[0], dict) else merged[0].to_dict()
-        assert result.get("contact_email") == "info@aman.com" or result.get("room_count") == 83
+        assert (
+            result.get("contact_email") == "info@aman.com"
+            or result.get("room_count") == 83
+        )
 
 
 # ============================================================
 # TEST 3: URL Filter
 # ============================================================
+
 
 class TestURLFilter:
     """Tests for app.services.url_filter"""
@@ -154,7 +170,7 @@ class TestURLFilter:
         f = URLFilter()
         result = f.should_scrape("https://marriott.com/careers/job-listing")
         assert result.should_scrape is False
-    
+
     def test_blocks_login_pages(self):
         """Career/auth pages are blocked"""
         from app.services.url_filter import URLFilter
@@ -168,7 +184,9 @@ class TestURLFilter:
         from app.services.url_filter import URLFilter
 
         f = URLFilter()
-        result = f.should_scrape("https://hospitalitynet.org/news/new-hotel-opening-2027")
+        result = f.should_scrape(
+            "https://hospitalitynet.org/news/new-hotel-opening-2027"
+        )
         assert result.should_scrape is True
 
     def test_priority_scoring(self):
@@ -186,6 +204,7 @@ class TestURLFilter:
 # TEST 4: Pipeline JSON Parsing
 # ============================================================
 
+
 class TestPipelineParsing:
     """Tests for intelligent_pipeline JSON extraction"""
 
@@ -193,13 +212,13 @@ class TestPipelineParsing:
         """Balanced bracket parser handles nested JSON (H4/M1 fix)"""
         text = 'Here is the result: {"hotel_name": "Test", "details": {"rooms": 100}} and more text'
 
-        start = text.index('{')
+        start = text.index("{")
         depth = 0
         end = start
         for i, c in enumerate(text[start:], start):
-            if c == '{':
+            if c == "{":
                 depth += 1
-            elif c == '}':
+            elif c == "}":
                 depth -= 1
                 if depth == 0:
                     end = i + 1

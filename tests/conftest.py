@@ -47,18 +47,26 @@ async def _patch_engine():
 
 @pytest_asyncio.fixture(scope="session", autouse=True)
 async def _cleanup_stale_data(_patch_engine):
-    """Remove any leftover __TEST__ data from prior crashed runs."""
-    from app.database import async_session
+    """Create tables if needed, then remove leftover __TEST__ data."""
+    from app.database import engine, async_session, Base
     from app.models.potential_lead import PotentialLead
     from app.models.source import Source
     from sqlalchemy import delete
 
-    async with async_session() as session:
-        await session.execute(
-            delete(PotentialLead).where(PotentialLead.hotel_name.like("__TEST__%"))
-        )
-        await session.execute(delete(Source).where(Source.name.like("__TEST__%")))
-        await session.commit()
+    # Ensure tables exist (needed in CI)
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+
+    # Clean stale test data
+    try:
+        async with async_session() as session:
+            await session.execute(
+                delete(PotentialLead).where(PotentialLead.hotel_name.like("__TEST__%"))
+            )
+            await session.execute(delete(Source).where(Source.name.like("__TEST__%")))
+            await session.commit()
+    except Exception:
+        pass  # Tables may be empty
     yield
 
 
