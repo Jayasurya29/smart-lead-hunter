@@ -33,7 +33,6 @@ from app.tasks.celery_app import celery_app, BaseTask
 from app.database import async_session
 from app.models import PotentialLead, Source, ScrapeLog
 from app.services.intelligent_pipeline import LeadExtractionPipeline
-from app.services.utils import normalize_hotel_name
 
 logger = logging.getLogger(__name__)
 
@@ -139,60 +138,18 @@ async def _save_lead_impl(
     session,
     commit: bool = True,
 ) -> Optional[int]:
-    """Internal implementation for save_lead_to_db."""
-    # Use shared normalization (matches orchestrator's logic)
-    normalized_name = normalize_hotel_name(hotel.get("hotel_name") or "")
+    """Internal implementation — uses shared lead factory."""
+    from app.services.lead_factory import save_lead_to_db as factory_save
 
-    result = await session.execute(
-        select(PotentialLead).where(
-            PotentialLead.hotel_name_normalized == normalized_name
-        )
-    )
-    existing = result.scalar_one_or_none()
+    result = await factory_save(hotel, session, commit=commit)
 
-    if existing:
+    if result["status"] == "saved":
+        return result["id"]
+    elif result["status"] in ("duplicate", "enriched"):
         logger.info(f"Duplicate found: {hotel.get('hotel_name')}")
         return {"success": False, "error": "Operation failed"}
-
-    lead = PotentialLead(
-        hotel_name=hotel.get("hotel_name"),
-        hotel_name_normalized=normalized_name,
-        brand=hotel.get("brand"),
-        hotel_type=hotel.get("hotel_type"),
-        hotel_website=hotel.get("hotel_website"),
-        city=hotel.get("city"),
-        state=hotel.get("state"),
-        country=hotel.get("country", "USA"),
-        contact_name=hotel.get("contact_name"),
-        contact_title=hotel.get("contact_title"),
-        contact_email=hotel.get("contact_email"),
-        contact_phone=hotel.get("contact_phone"),
-        opening_date=hotel.get("opening_date"),
-        room_count=hotel.get("room_count"),
-        description=hotel.get("description"),
-        key_insights=hotel.get("key_insights"),
-        management_company=hotel.get("management_company"),
-        developer=hotel.get("developer"),
-        owner=hotel.get("owner"),
-        lead_score=hotel.get("lead_score"),
-        score_breakdown=hotel.get("score_breakdown"),
-        source_url=hotel.get("source_url"),
-        source_site=hotel.get("source_site"),
-        status="new",
-        raw_data=hotel,
-    )
-
-    session.add(lead)
-
-    if commit:
-        await session.commit()
-        await session.refresh(lead)
     else:
-        # Flush to get the ID without committing
-        await session.flush()
-
-    logger.info(f"✅ Saved lead: {lead.hotel_name} (ID: {lead.id})")
-    return lead.id
+        return {"success": False, "error": result.get("reason", "Skipped")}
 
 
 async def create_scrape_log(source_id: int) -> int:

@@ -2515,5 +2515,1982 @@
     "recommended_priority": 4,
     "is_worth_scraping": true,
     "notes": []
+  },
+  "Hotel Online - Hotels": {
+    "name": "Hotel Online - Hotels",
+    "domain": "hotel-online.com",
+    "entry_url": "https://www.hotel-online.com",
+    "total_urls_tested": 20,
+    "urls_with_leads": 4,
+    "urls_without_leads": 16,
+    "total_leads_found": 4,
+    "usa_caribbean_leads": 0,
+    "gold_patterns": [],
+    "junk_patterns": [],
+    "maybe_patterns": [
+      "",
+      "/news/[^/]+"
+    ],
+    "pattern_stats": {
+      "": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/news/[^/]+": {
+        "tested": 19,
+        "leads": 4,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      }
+    },
+    "lead_yield_rate": 0.2,
+    "usa_caribbean_rate": 0.0,
+    "avg_confidence": 0.0,
+    "first_tested": "2026-02-19T15:16:30.147417",
+    "last_tested": "2026-02-19T15:16:30.148423",
+    "last_updated": "2026-02-19T15:16:30.148423",
+    "recommended_max_pages": 50,
+    "recommended_priority": 6,
+    "is_worth_scraping": true,
+    "notes": []
+  },
+  "Travelandtourworld - Hotels": {
+    "name": "Travelandtourworld - Hotels",
+    "domain": "travelandtourworld.com",
+    "entry_url": "https://www.travelandtourworld.com",
+    "total_urls_tested": 20,
+    "urls_with_leads": 0,
+    "urls_without_leads": 20,
+    "total_leads_found": 0,
+    "usa_caribbean_leads": 0,
+    "gold_patterns": [],
+    "junk_patterns": [
+      "/news/article/[^/]+/"
+    ],
+    "maybe_patterns": [
+      ""
+    ],
+    "pattern_stats": {
+      "": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/news/article/[^/]+/": {
+        "tested": 19,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      }
+    },
+    "lead_yield_rate": 0.0,
+    "usa_caribbean_rate": 0.0,
+    "avg_confidence": 0.0,
+    "first_tested": "2026-02-19T15:16:30.148423",
+    "last_tested": "2026-02-19T15:16:30.148423",
+    "last_updated": "2026-02-19T15:16:30.148423",
+    "recommended_max_pages": 20,
+    "recommended_priority": 4,
+    "is_worth_scraping": false,
+    "notes": []
+  },
+  "Observer - Hotels": {
+    "name": "Observer - Hotels",
+    "domain": "observer.com",
+    "entry_url": "https://observer.com",
+    "total_urls_tested": 20,
+    "urls_with_leads": 1,
+    "urls_without_leads": 19,
+    "total_leads_found": 1,
+    "usa_caribbean_leads": 0,
+    "gold_patterns": [],
+    "junk_patterns": [
+      "/\\d+/02/[^/]+/"
+    ],
+    "maybe_patterns": [
+      "",
+      "/list/[^/]+/"
+    ],
+    "pattern_stats": {
+      "": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/list/[^/]+/": {
+        "tested": 1,
+        "leads": 1,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/\\d+/02/[^/]+/": {
+        "tested": 18,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      }
+    },
+    "lead_yield_rate": 0.05,
+    "usa_caribbean_rate": 0.0,
+    "avg_confidence": 0.0,
+    "first_tested": "2026-02-19T15:16:30.148423",
+    "last_tested": "2026-02-19T15:16:30.148423",
+    "last_updated": "2026-02-19T15:16:30.148423",
+    "recommended_max_pages": 20,
+    "recommended_priority": 4,
+    "is_worth_scraping": true,
+    "notes": []
+  },
+  "Robbreport - Hotels": {
+    "name": "Robbreport - Hotels",
+    "domain": "robbreport.com",
+    "entry_url": "https://robbreport.com",
+    "total_urls_tested": 1,
+    "urls_with_leads": 0,
+    "urls_without_leads": 1,
+    "total_leads_found": 0,
+    "usa_caribbean_leads": 0,
+    "gold_patterns": [],
+    "junk_patterns": [],
+    "maybe_patterns": [
+      ""
+    ],
+    "pattern_stats": {
+      "": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      }
+    },
+    "lead_yield_rate": 0.0,
+    "usa_caribbean_rate": 0.0,
+    "avg_confidence": 0.0,
+    "first_tested": "2026-02-19T15:16:30.148423",
+    "last_tested": "2026-02-19T15:16:30.148423",
+    "last_updated": "2026-02-19T15:16:30.148423",
+    "recommended_max_pages": 20,
+    "recommended_priority": 4,
+    "is_worth_scraping": true,
+    "notes": []
+  },
+  "Travelmarketreport - Hotels": {
+    "name": "Travelmarketreport - Hotels",
+    "domain": "travelmarketreport.com",
+    "entry_url": "https://www.travelmarketreport.com",
+    "total_urls_tested": 6,
+    "urls_with_leads": 1,
+    "urls_without_leads": 5,
+    "total_leads_found": 1,
+    "usa_caribbean_leads": 0,
+    "gold_patterns": [],
+    "junk_patterns": [],
+    "maybe_patterns": [
+      "",
+      "/canada/hotels-resorts/articles/[^/]+",
+      "/news/articles/[^/]+",
+      "/canada/news/articles/[^/]+"
+    ],
+    "pattern_stats": {
+      "": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/canada/hotels-resorts/articles/[^/]+": {
+        "tested": 1,
+        "leads": 1,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/news/articles/[^/]+": {
+        "tested": 2,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/canada/news/articles/[^/]+": {
+        "tested": 2,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      }
+    },
+    "lead_yield_rate": 0.16666666666666666,
+    "usa_caribbean_rate": 0.0,
+    "avg_confidence": 0.0,
+    "first_tested": "2026-02-19T15:16:30.148423",
+    "last_tested": "2026-02-19T15:16:30.148423",
+    "last_updated": "2026-02-19T15:16:30.148423",
+    "recommended_max_pages": 30,
+    "recommended_priority": 6,
+    "is_worth_scraping": true,
+    "notes": []
+  },
+  "Hotelinvestmenttoday - Hotels": {
+    "name": "Hotelinvestmenttoday - Hotels",
+    "domain": "hotelinvestmenttoday.com",
+    "entry_url": "https://www.hotelinvestmenttoday.com",
+    "total_urls_tested": 2,
+    "urls_with_leads": 0,
+    "urls_without_leads": 2,
+    "total_leads_found": 0,
+    "usa_caribbean_leads": 0,
+    "gold_patterns": [],
+    "junk_patterns": [],
+    "maybe_patterns": [
+      "",
+      "/Forecasts/[^/]+"
+    ],
+    "pattern_stats": {
+      "": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/Forecasts/[^/]+": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      }
+    },
+    "lead_yield_rate": 0.0,
+    "usa_caribbean_rate": 0.0,
+    "avg_confidence": 0.0,
+    "first_tested": "2026-02-19T15:16:30.148423",
+    "last_tested": "2026-02-19T15:16:30.148423",
+    "last_updated": "2026-02-19T15:16:30.148423",
+    "recommended_max_pages": 20,
+    "recommended_priority": 4,
+    "is_worth_scraping": true,
+    "notes": []
+  },
+  "Opulist - Hotels": {
+    "name": "Opulist - Hotels",
+    "domain": "opulist.co",
+    "entry_url": "https://opulist.co",
+    "total_urls_tested": 2,
+    "urls_with_leads": 1,
+    "urls_without_leads": 1,
+    "total_leads_found": 1,
+    "usa_caribbean_leads": 0,
+    "gold_patterns": [],
+    "junk_patterns": [],
+    "maybe_patterns": [
+      "",
+      "/blog/[^/]+"
+    ],
+    "pattern_stats": {
+      "": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/blog/[^/]+": {
+        "tested": 1,
+        "leads": 1,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      }
+    },
+    "lead_yield_rate": 0.5,
+    "usa_caribbean_rate": 0.0,
+    "avg_confidence": 0.0,
+    "first_tested": "2026-02-19T15:16:30.148423",
+    "last_tested": "2026-02-19T15:16:30.148423",
+    "last_updated": "2026-02-19T15:16:30.148423",
+    "recommended_max_pages": 100,
+    "recommended_priority": 8,
+    "is_worth_scraping": true,
+    "notes": []
+  },
+  "Justluxe - Hotels": {
+    "name": "Justluxe - Hotels",
+    "domain": "justluxe.com",
+    "entry_url": "https://www.justluxe.com",
+    "total_urls_tested": 3,
+    "urls_with_leads": 2,
+    "urls_without_leads": 1,
+    "total_leads_found": 2,
+    "usa_caribbean_leads": 0,
+    "gold_patterns": [],
+    "junk_patterns": [],
+    "maybe_patterns": [
+      "",
+      "/travel/hotels/[^/]+/",
+      "/date/\\d+/10/\\d+/"
+    ],
+    "pattern_stats": {
+      "": {
+        "tested": 1,
+        "leads": 1,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/travel/hotels/[^/]+/": {
+        "tested": 1,
+        "leads": 1,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/date/\\d+/10/\\d+/": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      }
+    },
+    "lead_yield_rate": 0.6666666666666666,
+    "usa_caribbean_rate": 0.0,
+    "avg_confidence": 0.0,
+    "first_tested": "2026-02-19T15:16:30.148423",
+    "last_tested": "2026-02-19T15:16:30.148423",
+    "last_updated": "2026-02-19T15:16:30.148423",
+    "recommended_max_pages": 100,
+    "recommended_priority": 8,
+    "is_worth_scraping": true,
+    "notes": []
+  },
+  "Miaminewtimes - Hotels": {
+    "name": "Miaminewtimes - Hotels",
+    "domain": "miaminewtimes.com",
+    "entry_url": "https://www.miaminewtimes.com",
+    "total_urls_tested": 20,
+    "urls_with_leads": 0,
+    "urls_without_leads": 20,
+    "total_leads_found": 0,
+    "usa_caribbean_leads": 0,
+    "gold_patterns": [],
+    "junk_patterns": [
+      "/news/[^/]+/"
+    ],
+    "maybe_patterns": [
+      "",
+      "/arts-culture/[^/]+/",
+      "/news/"
+    ],
+    "pattern_stats": {
+      "": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/arts-culture/[^/]+/": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/news/[^/]+/": {
+        "tested": 17,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/news/": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      }
+    },
+    "lead_yield_rate": 0.0,
+    "usa_caribbean_rate": 0.0,
+    "avg_confidence": 0.0,
+    "first_tested": "2026-02-19T15:16:30.148423",
+    "last_tested": "2026-02-19T15:16:30.149422",
+    "last_updated": "2026-02-19T15:16:30.149422",
+    "recommended_max_pages": 20,
+    "recommended_priority": 4,
+    "is_worth_scraping": false,
+    "notes": []
+  },
+  "Tophotel - Hotels": {
+    "name": "Tophotel - Hotels",
+    "domain": "tophotel.news",
+    "entry_url": "https://tophotel.news",
+    "total_urls_tested": 1,
+    "urls_with_leads": 1,
+    "urls_without_leads": 0,
+    "total_leads_found": 1,
+    "usa_caribbean_leads": 0,
+    "gold_patterns": [],
+    "junk_patterns": [],
+    "maybe_patterns": [
+      ""
+    ],
+    "pattern_stats": {
+      "": {
+        "tested": 1,
+        "leads": 1,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      }
+    },
+    "lead_yield_rate": 1.0,
+    "usa_caribbean_rate": 0.0,
+    "avg_confidence": 0.0,
+    "first_tested": "2026-02-19T15:16:30.149422",
+    "last_tested": "2026-02-19T15:16:30.149422",
+    "last_updated": "2026-02-19T15:16:30.149422",
+    "recommended_max_pages": 100,
+    "recommended_priority": 8,
+    "is_worth_scraping": true,
+    "notes": []
+  },
+  "Thesuperprime - Hotels": {
+    "name": "Thesuperprime - Hotels",
+    "domain": "thesuperprime.com",
+    "entry_url": "https://thesuperprime.com",
+    "total_urls_tested": 20,
+    "urls_with_leads": 0,
+    "urls_without_leads": 20,
+    "total_leads_found": 0,
+    "usa_caribbean_leads": 0,
+    "gold_patterns": [],
+    "junk_patterns": [
+      "/news/[^/]+/"
+    ],
+    "maybe_patterns": [
+      "",
+      "/lifestyle/[^/]+/",
+      "/news/"
+    ],
+    "pattern_stats": {
+      "": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/lifestyle/[^/]+/": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/news/[^/]+/": {
+        "tested": 17,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/news/": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      }
+    },
+    "lead_yield_rate": 0.0,
+    "usa_caribbean_rate": 0.0,
+    "avg_confidence": 0.0,
+    "first_tested": "2026-02-19T15:16:30.149422",
+    "last_tested": "2026-02-19T15:16:30.149422",
+    "last_updated": "2026-02-19T15:16:30.149422",
+    "recommended_max_pages": 20,
+    "recommended_priority": 4,
+    "is_worth_scraping": false,
+    "notes": []
+  },
+  "Smartflyer - Hotels": {
+    "name": "Smartflyer - Hotels",
+    "domain": "smartflyer.com",
+    "entry_url": "https://smartflyer.com",
+    "total_urls_tested": 16,
+    "urls_with_leads": 3,
+    "urls_without_leads": 13,
+    "total_leads_found": 3,
+    "usa_caribbean_leads": 0,
+    "gold_patterns": [],
+    "junk_patterns": [],
+    "maybe_patterns": [
+      "",
+      "/story/2026-new-hotels/",
+      "/news/hotels-resorts/delano-miami-beach-florida/",
+      "/news/hotels-resorts/[^/]+/",
+      "/emea/releases/[^/]+",
+      "/news/boutique-lifestyle/",
+      "/news/hotels-resorts/",
+      "/news/boutique-lifestyle/[^/]+/",
+      "/news/hotels-resorts/nomade-temple-madrid-spain/",
+      "/news/f-b/delilah-dallas-supper-club/",
+      "/news/development-destinations/corinthia-lake-como-italy/",
+      "/news/development-destinations/",
+      "/news/f-b/[^/]+/",
+      "/news/retail-commercial/[^/]+/"
+    ],
+    "pattern_stats": {
+      "": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/story/2026-new-hotels/": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/news/hotels-resorts/delano-miami-beach-florida/": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/news/hotels-resorts/[^/]+/": {
+        "tested": 2,
+        "leads": 1,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/emea/releases/[^/]+": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/news/boutique-lifestyle/": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/news/hotels-resorts/": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/news/boutique-lifestyle/[^/]+/": {
+        "tested": 2,
+        "leads": 1,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/news/hotels-resorts/nomade-temple-madrid-spain/": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/news/f-b/delilah-dallas-supper-club/": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/news/development-destinations/corinthia-lake-como-italy/": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/news/development-destinations/": {
+        "tested": 1,
+        "leads": 1,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/news/f-b/[^/]+/": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/news/retail-commercial/[^/]+/": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      }
+    },
+    "lead_yield_rate": 0.1875,
+    "usa_caribbean_rate": 0.0,
+    "avg_confidence": 0.0,
+    "first_tested": "2026-02-19T15:16:30.149422",
+    "last_tested": "2026-02-19T15:16:30.149422",
+    "last_updated": "2026-02-19T15:16:30.149422",
+    "recommended_max_pages": 30,
+    "recommended_priority": 6,
+    "is_worth_scraping": true,
+    "notes": []
+  },
+  "Strategistico - Hotels": {
+    "name": "Strategistico - Hotels",
+    "domain": "strategistico.com",
+    "entry_url": "https://www.strategistico.com",
+    "total_urls_tested": 2,
+    "urls_with_leads": 1,
+    "urls_without_leads": 1,
+    "total_leads_found": 1,
+    "usa_caribbean_leads": 0,
+    "gold_patterns": [],
+    "junk_patterns": [],
+    "maybe_patterns": [
+      "",
+      "/newest-resorts-in-orlando-fl/"
+    ],
+    "pattern_stats": {
+      "": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/newest-resorts-in-orlando-fl/": {
+        "tested": 1,
+        "leads": 1,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      }
+    },
+    "lead_yield_rate": 0.5,
+    "usa_caribbean_rate": 0.0,
+    "avg_confidence": 0.0,
+    "first_tested": "2026-02-19T15:16:30.149422",
+    "last_tested": "2026-02-19T15:16:30.149422",
+    "last_updated": "2026-02-19T15:16:30.149422",
+    "recommended_max_pages": 100,
+    "recommended_priority": 8,
+    "is_worth_scraping": true,
+    "notes": []
+  },
+  "Tripcast360 - Hotels": {
+    "name": "Tripcast360 - Hotels",
+    "domain": "tripcast360.com",
+    "entry_url": "https://www.tripcast360.com",
+    "total_urls_tested": 2,
+    "urls_with_leads": 1,
+    "urls_without_leads": 1,
+    "total_leads_found": 1,
+    "usa_caribbean_leads": 0,
+    "gold_patterns": [],
+    "junk_patterns": [],
+    "maybe_patterns": [
+      "",
+      "/[^/]+/"
+    ],
+    "pattern_stats": {
+      "": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/[^/]+/": {
+        "tested": 1,
+        "leads": 1,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      }
+    },
+    "lead_yield_rate": 0.5,
+    "usa_caribbean_rate": 0.0,
+    "avg_confidence": 0.0,
+    "first_tested": "2026-02-19T15:16:30.149422",
+    "last_tested": "2026-02-19T15:16:30.149422",
+    "last_updated": "2026-02-19T15:16:30.149422",
+    "recommended_max_pages": 100,
+    "recommended_priority": 8,
+    "is_worth_scraping": true,
+    "notes": []
+  },
+  "Lumenafl - Hotels": {
+    "name": "Lumenafl - Hotels",
+    "domain": "lumenafl.com",
+    "entry_url": "https://lumenafl.com",
+    "total_urls_tested": 7,
+    "urls_with_leads": 2,
+    "urls_without_leads": 5,
+    "total_leads_found": 2,
+    "usa_caribbean_leads": 0,
+    "gold_patterns": [],
+    "junk_patterns": [],
+    "maybe_patterns": [
+      "",
+      "/[^/]+/",
+      "/story/money/business/\\d+/05/\\d+/[^/]+/\\d+/",
+      "/story/news/local/\\d+/02/\\d+/[^/]+/88761081007",
+      "/news/business",
+      "/story/news/\\d+/05/\\d+/[^/]+/1121089001",
+      "/story/money/business/\\d+/05/\\d+/[^/]+/73504145007"
+    ],
+    "pattern_stats": {
+      "": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/[^/]+/": {
+        "tested": 1,
+        "leads": 1,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/story/money/business/\\d+/05/\\d+/[^/]+/\\d+/": {
+        "tested": 1,
+        "leads": 1,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/story/news/local/\\d+/02/\\d+/[^/]+/88761081007": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/news/business": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/story/news/\\d+/05/\\d+/[^/]+/1121089001": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/story/money/business/\\d+/05/\\d+/[^/]+/73504145007": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      }
+    },
+    "lead_yield_rate": 0.2857142857142857,
+    "usa_caribbean_rate": 0.0,
+    "avg_confidence": 0.0,
+    "first_tested": "2026-02-19T15:16:30.149422",
+    "last_tested": "2026-02-19T15:16:30.149422",
+    "last_updated": "2026-02-19T15:16:30.149422",
+    "recommended_max_pages": 50,
+    "recommended_priority": 6,
+    "is_worth_scraping": true,
+    "notes": []
+  },
+  "Thepointsguy - Hotels": {
+    "name": "Thepointsguy - Hotels",
+    "domain": "thepointsguy.com",
+    "entry_url": "https://thepointsguy.com",
+    "total_urls_tested": 20,
+    "urls_with_leads": 2,
+    "urls_without_leads": 18,
+    "total_leads_found": 2,
+    "usa_caribbean_leads": 0,
+    "gold_patterns": [],
+    "junk_patterns": [],
+    "maybe_patterns": [
+      "",
+      "/news/[^/]+/",
+      "/news/ihg-noted-collection/",
+      "/news/",
+      "/news/news-details/\\d+/[^/]+/default.aspx",
+      "/news/apartment-collection-by-hilton/",
+      "/news/hilton-outset-collection/",
+      "/news/unscripted-by-hyatt-new-brand/",
+      "/news/ihg-one-rewards-flash-sale/"
+    ],
+    "pattern_stats": {
+      "": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/news/[^/]+/": {
+        "tested": 12,
+        "leads": 1,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/news/ihg-noted-collection/": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/news/": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/news/news-details/\\d+/[^/]+/default.aspx": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/news/apartment-collection-by-hilton/": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/news/hilton-outset-collection/": {
+        "tested": 1,
+        "leads": 1,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/news/unscripted-by-hyatt-new-brand/": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/news/ihg-one-rewards-flash-sale/": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      }
+    },
+    "lead_yield_rate": 0.1,
+    "usa_caribbean_rate": 0.0,
+    "avg_confidence": 0.0,
+    "first_tested": "2026-02-19T15:16:30.149422",
+    "last_tested": "2026-02-19T15:16:30.149422",
+    "last_updated": "2026-02-19T15:16:30.149422",
+    "recommended_max_pages": 30,
+    "recommended_priority": 6,
+    "is_worth_scraping": true,
+    "notes": []
+  },
+  "Puntacanaupdates - Hotels": {
+    "name": "Puntacanaupdates - Hotels",
+    "domain": "puntacanaupdates.com",
+    "entry_url": "https://puntacanaupdates.com",
+    "total_urls_tested": 6,
+    "urls_with_leads": 1,
+    "urls_without_leads": 5,
+    "total_leads_found": 1,
+    "usa_caribbean_leads": 0,
+    "gold_patterns": [],
+    "junk_patterns": [],
+    "maybe_patterns": [
+      "",
+      "/\\d+/01/[^/]+/",
+      "/\\d+/02/[^/]+/"
+    ],
+    "pattern_stats": {
+      "": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/\\d+/01/[^/]+/": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/\\d+/02/[^/]+/": {
+        "tested": 4,
+        "leads": 1,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      }
+    },
+    "lead_yield_rate": 0.16666666666666666,
+    "usa_caribbean_rate": 0.0,
+    "avg_confidence": 0.0,
+    "first_tested": "2026-02-19T15:16:30.149422",
+    "last_tested": "2026-02-19T15:16:30.150421",
+    "last_updated": "2026-02-19T15:16:30.150421",
+    "recommended_max_pages": 30,
+    "recommended_priority": 6,
+    "is_worth_scraping": true,
+    "notes": []
+  },
+  "Newsamericasnow - Hotels": {
+    "name": "Newsamericasnow - Hotels",
+    "domain": "newsamericasnow.com",
+    "entry_url": "https://www.newsamericasnow.com",
+    "total_urls_tested": 2,
+    "urls_with_leads": 1,
+    "urls_without_leads": 1,
+    "total_leads_found": 1,
+    "usa_caribbean_leads": 0,
+    "gold_patterns": [],
+    "junk_patterns": [],
+    "maybe_patterns": [
+      "",
+      "/[^/]+/"
+    ],
+    "pattern_stats": {
+      "": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/[^/]+/": {
+        "tested": 1,
+        "leads": 1,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      }
+    },
+    "lead_yield_rate": 0.5,
+    "usa_caribbean_rate": 0.0,
+    "avg_confidence": 0.0,
+    "first_tested": "2026-02-19T15:16:30.150421",
+    "last_tested": "2026-02-19T15:16:30.150421",
+    "last_updated": "2026-02-19T15:16:30.150421",
+    "recommended_max_pages": 100,
+    "recommended_priority": 8,
+    "is_worth_scraping": true,
+    "notes": []
+  },
+  "Tboacademy - Hotels": {
+    "name": "Tboacademy - Hotels",
+    "domain": "tboacademy.com",
+    "entry_url": "https://www.tboacademy.com",
+    "total_urls_tested": 2,
+    "urls_with_leads": 0,
+    "urls_without_leads": 2,
+    "total_leads_found": 0,
+    "usa_caribbean_leads": 0,
+    "gold_patterns": [],
+    "junk_patterns": [],
+    "maybe_patterns": [
+      "",
+      "/blog/caribbean-new-hotels-2026/"
+    ],
+    "pattern_stats": {
+      "": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/blog/caribbean-new-hotels-2026/": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      }
+    },
+    "lead_yield_rate": 0.0,
+    "usa_caribbean_rate": 0.0,
+    "avg_confidence": 0.0,
+    "first_tested": "2026-02-19T15:16:30.150421",
+    "last_tested": "2026-02-19T15:16:30.150421",
+    "last_updated": "2026-02-19T15:16:30.150421",
+    "recommended_max_pages": 20,
+    "recommended_priority": 4,
+    "is_worth_scraping": true,
+    "notes": []
+  },
+  "Ftnnews - Hotels": {
+    "name": "Ftnnews - Hotels",
+    "domain": "ftnnews.com",
+    "entry_url": "https://ftnnews.com",
+    "total_urls_tested": 1,
+    "urls_with_leads": 0,
+    "urls_without_leads": 1,
+    "total_leads_found": 0,
+    "usa_caribbean_leads": 0,
+    "gold_patterns": [],
+    "junk_patterns": [],
+    "maybe_patterns": [
+      ""
+    ],
+    "pattern_stats": {
+      "": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      }
+    },
+    "lead_yield_rate": 0.0,
+    "usa_caribbean_rate": 0.0,
+    "avg_confidence": 0.0,
+    "first_tested": "2026-02-19T15:16:30.150421",
+    "last_tested": "2026-02-19T15:16:30.150421",
+    "last_updated": "2026-02-19T15:16:30.150421",
+    "recommended_max_pages": 20,
+    "recommended_priority": 4,
+    "is_worth_scraping": true,
+    "notes": []
+  },
+  "Hotelsmag - Hotels": {
+    "name": "Hotelsmag - Hotels",
+    "domain": "hotelsmag.com",
+    "entry_url": "https://hotelsmag.com",
+    "total_urls_tested": 9,
+    "urls_with_leads": 0,
+    "urls_without_leads": 9,
+    "total_leads_found": 0,
+    "usa_caribbean_leads": 0,
+    "gold_patterns": [],
+    "junk_patterns": [
+      "/news/[^/]+/"
+    ],
+    "maybe_patterns": [
+      "",
+      "/news/highline-pittsburgh-marriott/",
+      "/news/melia-whale-lagoon-maldives/",
+      "/news/"
+    ],
+    "pattern_stats": {
+      "": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/news/[^/]+/": {
+        "tested": 5,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/news/highline-pittsburgh-marriott/": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/news/melia-whale-lagoon-maldives/": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/news/": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      }
+    },
+    "lead_yield_rate": 0.0,
+    "usa_caribbean_rate": 0.0,
+    "avg_confidence": 0.0,
+    "first_tested": "2026-02-19T15:16:30.150421",
+    "last_tested": "2026-02-19T15:16:30.150421",
+    "last_updated": "2026-02-19T15:16:30.150421",
+    "recommended_max_pages": 20,
+    "recommended_priority": 4,
+    "is_worth_scraping": true,
+    "notes": []
+  },
+  "Staymagazine - Hotels": {
+    "name": "Staymagazine - Hotels",
+    "domain": "staymagazine.ca",
+    "entry_url": "https://www.staymagazine.ca",
+    "total_urls_tested": 1,
+    "urls_with_leads": 0,
+    "urls_without_leads": 1,
+    "total_leads_found": 0,
+    "usa_caribbean_leads": 0,
+    "gold_patterns": [],
+    "junk_patterns": [],
+    "maybe_patterns": [
+      ""
+    ],
+    "pattern_stats": {
+      "": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      }
+    },
+    "lead_yield_rate": 0.0,
+    "usa_caribbean_rate": 0.0,
+    "avg_confidence": 0.0,
+    "first_tested": "2026-02-19T15:16:30.150421",
+    "last_tested": "2026-02-19T15:16:30.150421",
+    "last_updated": "2026-02-19T15:16:30.150421",
+    "recommended_max_pages": 20,
+    "recommended_priority": 4,
+    "is_worth_scraping": true,
+    "notes": []
+  },
+  "Northstar Meetings - Hotels": {
+    "name": "Northstar Meetings - Hotels",
+    "domain": "northstarmeetingsgroup.com",
+    "entry_url": "https://www.northstarmeetingsgroup.com/news/hotels-resorts",
+    "total_urls_tested": 20,
+    "urls_with_leads": 1,
+    "urls_without_leads": 19,
+    "total_leads_found": 1,
+    "usa_caribbean_leads": 0,
+    "gold_patterns": [],
+    "junk_patterns": [
+      "/News/Hotels-and-Resorts/[^/]+"
+    ],
+    "maybe_patterns": [
+      "/news/hotels-resorts",
+      "/News/Hotels-and-Resorts",
+      "/hotel-guides",
+      "/News/Hotels-and-Resorts/hotels-opening-in-2026",
+      "/News/Hotels-and-Resorts/International-Hotel-Openings",
+      "/News/Hotels-and-Resorts/2025-Hotel-Renovations",
+      "/News/Hotels-and-Resorts/Opal-Collection-meeting-sites"
+    ],
+    "pattern_stats": {
+      "/news/hotels-resorts": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/News/Hotels-and-Resorts": {
+        "tested": 2,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/hotel-guides": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/News/Hotels-and-Resorts/[^/]+": {
+        "tested": 12,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/News/Hotels-and-Resorts/hotels-opening-in-2026": {
+        "tested": 1,
+        "leads": 1,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/News/Hotels-and-Resorts/International-Hotel-Openings": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/News/Hotels-and-Resorts/2025-Hotel-Renovations": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/News/Hotels-and-Resorts/Opal-Collection-meeting-sites": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      }
+    },
+    "lead_yield_rate": 0.05,
+    "usa_caribbean_rate": 0.0,
+    "avg_confidence": 0.0,
+    "first_tested": "2026-02-19T15:16:30.150421",
+    "last_tested": "2026-02-19T15:16:30.150421",
+    "last_updated": "2026-02-19T15:16:30.150421",
+    "recommended_max_pages": 20,
+    "recommended_priority": 4,
+    "is_worth_scraping": true,
+    "notes": []
+  },
+  "Miami CVB - New Hotels": {
+    "name": "Miami CVB - New Hotels",
+    "domain": "miamiandbeaches.com",
+    "entry_url": "https://www.miamiandbeaches.com/hotels/new-and-renovated-miami-hotels",
+    "total_urls_tested": 2,
+    "urls_with_leads": 1,
+    "urls_without_leads": 1,
+    "total_leads_found": 1,
+    "usa_caribbean_leads": 0,
+    "gold_patterns": [],
+    "junk_patterns": [],
+    "maybe_patterns": [
+      "/hotels/new-and-renovated-miami-hotels",
+      "/travel-trade/press-room"
+    ],
+    "pattern_stats": {
+      "/hotels/new-and-renovated-miami-hotels": {
+        "tested": 1,
+        "leads": 1,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/travel-trade/press-room": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      }
+    },
+    "lead_yield_rate": 0.5,
+    "usa_caribbean_rate": 0.0,
+    "avg_confidence": 0.0,
+    "first_tested": "2026-02-19T15:16:30.150421",
+    "last_tested": "2026-02-19T15:16:30.150421",
+    "last_updated": "2026-02-19T15:16:30.150421",
+    "recommended_max_pages": 100,
+    "recommended_priority": 8,
+    "is_worth_scraping": true,
+    "notes": []
+  },
+  "New Hotels 2027": {
+    "name": "New Hotels 2027",
+    "domain": "newhotelsopening.com",
+    "entry_url": "https://www.newhotelsopening.com/hotel-openings-2027",
+    "total_urls_tested": 50,
+    "urls_with_leads": 12,
+    "urls_without_leads": 38,
+    "total_leads_found": 12,
+    "usa_caribbean_leads": 0,
+    "gold_patterns": [],
+    "junk_patterns": [],
+    "maybe_patterns": [
+      "/hotel-openings-2027",
+      "/new-hotels-in-atlanta.html",
+      "/new-hotels-in-austin-tx.html",
+      "/[^/]+",
+      "/new-hotels-in-dallas-tx.html",
+      "/new-hotels-in-hawaii.html",
+      "/new-hotels-in-houston-tx.html",
+      "/new-hotels-in-los-angeles.html",
+      "/new-hotels-in-miami.html",
+      "/new-hotels-in-nyc.html",
+      "/new-hotels-in-phoenix.html",
+      "/new-hotels-in-usa.html",
+      "/new-hotels-in-montreal.html",
+      "/new-hotels-in-toronto.html",
+      "/new-hotels-in-cancun.html",
+      "/new-hotels-in-barbados.html",
+      "/new-hotels-in-jamaica.html",
+      "/new-hotels-in-london.html",
+      "/new-hotels-in-paris.html",
+      "/new-hotels-in-bali.html",
+      "/new-hotels-in-bangkok.html",
+      "/new-hotels-in-hong-kong.html",
+      "/new-hotels-in-tokyo.html",
+      "/new-hotels-opening-blog.html",
+      "/new-hotels-in-kennesaw-ga.html",
+      "/new-hotels-in-conyers-ga.html",
+      "/new-hotels-in-georgia.html",
+      "/new-hotels-in-athens-ga.html",
+      "/new-hotels-in-augusta-ga.html",
+      "/new-hotels-in-canton-ga.html",
+      "/new-hotels-in-columbus-ga.html",
+      "/new-hotels-in-macon-ga.html",
+      "/new-hotels-in-pooler-ga.html",
+      "/new-hotels-in-savannah-ga.html",
+      "/new-hotels-in-valdosta-ga.html"
+    ],
+    "pattern_stats": {
+      "/hotel-openings-2027": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/new-hotels-in-atlanta.html": {
+        "tested": 1,
+        "leads": 1,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/new-hotels-in-austin-tx.html": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/[^/]+": {
+        "tested": 16,
+        "leads": 4,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/new-hotels-in-dallas-tx.html": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/new-hotels-in-hawaii.html": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/new-hotels-in-houston-tx.html": {
+        "tested": 1,
+        "leads": 1,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/new-hotels-in-los-angeles.html": {
+        "tested": 1,
+        "leads": 1,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/new-hotels-in-miami.html": {
+        "tested": 1,
+        "leads": 1,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/new-hotels-in-nyc.html": {
+        "tested": 1,
+        "leads": 1,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/new-hotels-in-phoenix.html": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/new-hotels-in-usa.html": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/new-hotels-in-montreal.html": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/new-hotels-in-toronto.html": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/new-hotels-in-cancun.html": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/new-hotels-in-barbados.html": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/new-hotels-in-jamaica.html": {
+        "tested": 1,
+        "leads": 1,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/new-hotels-in-london.html": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/new-hotels-in-paris.html": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/new-hotels-in-bali.html": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/new-hotels-in-bangkok.html": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/new-hotels-in-hong-kong.html": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/new-hotels-in-tokyo.html": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/new-hotels-opening-blog.html": {
+        "tested": 1,
+        "leads": 1,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/new-hotels-in-kennesaw-ga.html": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/new-hotels-in-conyers-ga.html": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/new-hotels-in-georgia.html": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/new-hotels-in-athens-ga.html": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/new-hotels-in-augusta-ga.html": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/new-hotels-in-canton-ga.html": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/new-hotels-in-columbus-ga.html": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/new-hotels-in-macon-ga.html": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/new-hotels-in-pooler-ga.html": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/new-hotels-in-savannah-ga.html": {
+        "tested": 1,
+        "leads": 1,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/new-hotels-in-valdosta-ga.html": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      }
+    },
+    "lead_yield_rate": 0.24,
+    "usa_caribbean_rate": 0.0,
+    "avg_confidence": 0.0,
+    "first_tested": "2026-02-19T15:16:30.150421",
+    "last_tested": "2026-02-19T15:16:30.151149",
+    "last_updated": "2026-02-19T15:16:30.151149",
+    "recommended_max_pages": 50,
+    "recommended_priority": 6,
+    "is_worth_scraping": true,
+    "notes": []
+  },
+  "New Hotels 2026": {
+    "name": "New Hotels 2026",
+    "domain": "newhotelsopening.com",
+    "entry_url": "https://www.newhotelsopening.com/hotel-openings-2026",
+    "total_urls_tested": 100,
+    "urls_with_leads": 17,
+    "urls_without_leads": 83,
+    "total_leads_found": 17,
+    "usa_caribbean_leads": 0,
+    "gold_patterns": [],
+    "junk_patterns": [],
+    "maybe_patterns": [
+      "/hotel-openings-2026",
+      "/new-hotels-in-atlanta.html",
+      "/new-hotels-in-austin-tx.html",
+      "/[^/]+",
+      "/new-hotels-in-dallas-tx.html",
+      "/new-hotels-in-hawaii.html",
+      "/new-hotels-in-houston-tx.html",
+      "/new-hotels-in-los-angeles.html",
+      "/new-hotels-in-miami.html",
+      "/new-hotels-in-nyc.html",
+      "/new-hotels-in-phoenix.html",
+      "/new-hotels-in-usa.html",
+      "/new-hotels-in-montreal.html",
+      "/new-hotels-in-toronto.html",
+      "/new-hotels-in-cancun.html",
+      "/new-hotels-in-barbados.html",
+      "/new-hotels-in-jamaica.html",
+      "/new-hotels-in-london.html",
+      "/new-hotels-in-paris.html",
+      "/new-hotels-in-bali.html",
+      "/new-hotels-in-bangkok.html",
+      "/new-hotels-in-hong-kong.html",
+      "/new-hotels-in-tokyo.html",
+      "/new-hotels-opening-blog.html",
+      "/new-hotels-in-kennesaw-ga.html",
+      "/new-hotels-in-conyers-ga.html",
+      "/new-hotels-in-georgia.html",
+      "/new-hotels-in-athens-ga.html",
+      "/new-hotels-in-augusta-ga.html",
+      "/new-hotels-in-canton-ga.html",
+      "/new-hotels-in-columbus-ga.html",
+      "/new-hotels-in-macon-ga.html",
+      "/new-hotels-in-pooler-ga.html",
+      "/new-hotels-in-savannah-ga.html",
+      "/new-hotels-in-valdosta-ga.html",
+      "/new-hotels-in-amarillo-tx.html",
+      "/new-hotels-in-anaheim-ca.html",
+      "/new-hotels-in-anchorage.html",
+      "/new-hotels-in-baton-rouge.html",
+      "/new-hotels-in-boise-id.html",
+      "/new-hotels-in-boston.html",
+      "/new-hotels-in-boulder-co.html",
+      "/new-hotels-in-bozeman-mt.html",
+      "/new-hotels-in-cheyenne-wy.html",
+      "/new-hotels-in-chicago.html",
+      "/new-hotels-in-cincinnati.html",
+      "/new-hotels-in-columbus-oh.html",
+      "/new-hotels-in-delaware.html",
+      "/new-hotels-in-destin-fl.html",
+      "/new-hotels-in-detroit-mi.html",
+      "/new-hotels-in-denver.html",
+      "/new-hotels-in-fargo-nd.html",
+      "/new-hotels-in-florence-ky.html",
+      "/new-hotels-in-hilton-head.html",
+      "/new-hotels-in-jackson-ms.html",
+      "/new-hotels-in-kansas-city.html",
+      "/new-hotels-in-lubbock-tx.html",
+      "/new-hotels-in-memphis-tn.html",
+      "/new-hotels-in-miami-beach.html",
+      "/new-hotels-in-minneapolis.html",
+      "/new-hotels-in-new-jersey.html",
+      "/new-hotels-in-new-orleans.html",
+      "/new-hotels-in-omaha-ne.html",
+      "/new-hotels-in-abilene-tx.html"
+    ],
+    "pattern_stats": {
+      "/hotel-openings-2026": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/new-hotels-in-atlanta.html": {
+        "tested": 1,
+        "leads": 1,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/new-hotels-in-austin-tx.html": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/[^/]+": {
+        "tested": 37,
+        "leads": 6,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/new-hotels-in-dallas-tx.html": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/new-hotels-in-hawaii.html": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/new-hotels-in-houston-tx.html": {
+        "tested": 1,
+        "leads": 1,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/new-hotels-in-los-angeles.html": {
+        "tested": 1,
+        "leads": 1,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/new-hotels-in-miami.html": {
+        "tested": 1,
+        "leads": 1,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/new-hotels-in-nyc.html": {
+        "tested": 1,
+        "leads": 1,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/new-hotels-in-phoenix.html": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/new-hotels-in-usa.html": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/new-hotels-in-montreal.html": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/new-hotels-in-toronto.html": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/new-hotels-in-cancun.html": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/new-hotels-in-barbados.html": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/new-hotels-in-jamaica.html": {
+        "tested": 1,
+        "leads": 1,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/new-hotels-in-london.html": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/new-hotels-in-paris.html": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/new-hotels-in-bali.html": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/new-hotels-in-bangkok.html": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/new-hotels-in-hong-kong.html": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/new-hotels-in-tokyo.html": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/new-hotels-opening-blog.html": {
+        "tested": 1,
+        "leads": 1,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/new-hotels-in-kennesaw-ga.html": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/new-hotels-in-conyers-ga.html": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/new-hotels-in-georgia.html": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/new-hotels-in-athens-ga.html": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/new-hotels-in-augusta-ga.html": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/new-hotels-in-canton-ga.html": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/new-hotels-in-columbus-ga.html": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/new-hotels-in-macon-ga.html": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/new-hotels-in-pooler-ga.html": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/new-hotels-in-savannah-ga.html": {
+        "tested": 1,
+        "leads": 1,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/new-hotels-in-valdosta-ga.html": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/new-hotels-in-amarillo-tx.html": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/new-hotels-in-anaheim-ca.html": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/new-hotels-in-anchorage.html": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/new-hotels-in-baton-rouge.html": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/new-hotels-in-boise-id.html": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/new-hotels-in-boston.html": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/new-hotels-in-boulder-co.html": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/new-hotels-in-bozeman-mt.html": {
+        "tested": 1,
+        "leads": 1,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/new-hotels-in-cheyenne-wy.html": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/new-hotels-in-chicago.html": {
+        "tested": 1,
+        "leads": 1,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/new-hotels-in-cincinnati.html": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/new-hotels-in-columbus-oh.html": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/new-hotels-in-delaware.html": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/new-hotels-in-destin-fl.html": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/new-hotels-in-detroit-mi.html": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/new-hotels-in-denver.html": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/new-hotels-in-fargo-nd.html": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/new-hotels-in-florence-ky.html": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/new-hotels-in-hilton-head.html": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/new-hotels-in-jackson-ms.html": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/new-hotels-in-kansas-city.html": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/new-hotels-in-lubbock-tx.html": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/new-hotels-in-memphis-tn.html": {
+        "tested": 1,
+        "leads": 1,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/new-hotels-in-miami-beach.html": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/new-hotels-in-minneapolis.html": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/new-hotels-in-new-jersey.html": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/new-hotels-in-new-orleans.html": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/new-hotels-in-omaha-ne.html": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      },
+      "/new-hotels-in-abilene-tx.html": {
+        "tested": 1,
+        "leads": 0,
+        "total_quality": 0.0,
+        "usa_caribbean": 0
+      }
+    },
+    "lead_yield_rate": 0.17,
+    "usa_caribbean_rate": 0.0,
+    "avg_confidence": 0.0,
+    "first_tested": "2026-02-19T15:16:30.151149",
+    "last_tested": "2026-02-19T15:16:30.152362",
+    "last_updated": "2026-02-19T15:16:30.152362",
+    "recommended_max_pages": 30,
+    "recommended_priority": 6,
+    "is_worth_scraping": true,
+    "notes": []
   }
 }

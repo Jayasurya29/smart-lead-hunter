@@ -802,55 +802,30 @@ async def get_lead(lead_id: int, db: AsyncSession = Depends(get_db)):
 
 @app.post("/leads", response_model=LeadResponse, tags=["Leads"])
 async def create_lead(lead_data: LeadCreate, db: AsyncSession = Depends(get_db)):
-    """Create a new lead manually"""
-    # Use shared normalization (consistent with orchestrator + Celery paths)
-    normalized_name = normalize_hotel_name(lead_data.hotel_name)
+    """Create a new lead manually — routed through shared lead factory."""
+    from app.services.lead_factory import save_lead_to_db
 
-    # Check for duplicate before inserting
-    existing = await db.execute(
-        select(PotentialLead).where(
-            PotentialLead.hotel_name_normalized == normalized_name
-        )
-    )
-    if existing.scalar_one_or_none():
+    lead_dict = lead_data.model_dump()
+    lead_dict["source_site"] = lead_dict.get("source_site") or "manual"
+
+    result = await save_lead_to_db(lead_dict, db, commit=True)
+
+    if result["status"] == "skipped":
+        raise HTTPException(status_code=422, detail=result["reason"])
+    if result["status"] in ("duplicate", "enriched"):
         raise HTTPException(
             status_code=409,
-            detail=f"A lead with a similar name already exists: '{lead_data.hotel_name}'",
+            detail=f"A lead with a similar name already exists (ID: {result['id']})",
         )
 
-    lead = PotentialLead(
-        hotel_name=lead_data.hotel_name,
-        hotel_name_normalized=normalized_name,
-        contact_email=lead_data.contact_email,
-        contact_phone=lead_data.contact_phone,
-        contact_name=lead_data.contact_name,
-        contact_title=lead_data.contact_title,
-        city=lead_data.city,
-        state=lead_data.state,
-        country=lead_data.country,
-        opening_date=lead_data.opening_date,
-        room_count=lead_data.room_count,
-        hotel_type=lead_data.hotel_type,
-        brand=lead_data.brand,
-        brand_tier=lead_data.brand_tier,
-        location_type=lead_data.location_type,
-        hotel_website=lead_data.hotel_website,
-        description=lead_data.description,
-        notes=lead_data.notes,
-        source_url=lead_data.source_url,
-        source_site=lead_data.source_site or "manual",
-        status="new",
-        lead_score=lead_data.lead_score,
-    )
-
-    db.add(lead)
-    await db.commit()
-    await db.refresh(lead)
+    # Fetch the saved lead for response
+    lead = (
+        await db.execute(select(PotentialLead).where(PotentialLead.id == result["id"]))
+    ).scalar_one()
 
     logger.info(
         f"Created lead: {lead.hotel_name} (ID: {lead.id}, Score: {lead.lead_score})"
     )
-
     return LeadResponse.model_validate(lead)
 
 
