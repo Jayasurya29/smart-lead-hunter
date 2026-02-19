@@ -16,6 +16,7 @@ import pytest_asyncio
 import httpx
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
 from sqlalchemy.pool import NullPool
+from sqlalchemy import delete, text
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
@@ -51,10 +52,10 @@ async def _cleanup_stale_data(_patch_engine):
     from app.database import engine, async_session, Base
     from app.models.potential_lead import PotentialLead
     from app.models.source import Source
-    from sqlalchemy import delete
 
-    # Ensure tables exist (needed in CI)
+    # Ensure pgvector extension + tables exist (needed in CI)
     async with engine.begin() as conn:
+        await conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
         await conn.run_sync(Base.metadata.create_all)
 
     # Clean stale test data
