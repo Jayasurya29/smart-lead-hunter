@@ -15,13 +15,14 @@ import re
 import time
 from collections import deque
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 from enum import Enum
 from typing import Any, Dict, List, Optional, Set
 from urllib.parse import urljoin, urlparse
 
 import httpx
 from bs4 import BeautifulSoup
+from app.services.utils import local_now
 
 try:
     from app.services.url_filter import URLFilter
@@ -111,7 +112,7 @@ class ScrapeResult:
     error: Optional[str] = None
     status_code: Optional[int] = None
     content_hash: Optional[str] = None
-    scraped_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    scraped_at: datetime = field(default_factory=lambda: local_now())
     crawl_time_ms: int = 0
     crawler_used: str = "unknown"
     is_cached: bool = False
@@ -202,9 +203,9 @@ class ContentCache:
             key = self._get_key(url)
             if key in self._cache:
                 entry = self._cache[key]
-                if datetime.now(timezone.utc) - entry["timestamp"] < self.ttl:
+                if local_now() - entry["timestamp"] < self.ttl:
                     # M-06: Update access time for LRU tracking
-                    entry["last_access"] = datetime.now(timezone.utc)
+                    entry["last_access"] = local_now()
                     result = entry["result"]
                     result.is_cached = True
                     return result
@@ -217,7 +218,7 @@ class ContentCache:
             # M-06: Evict oldest entries if at capacity
             if len(self._cache) >= self.max_entries:
                 self._evict_lru()
-            now = datetime.now(timezone.utc)
+            now = local_now()
             self._cache[self._get_key(url)] = {
                 "result": result,
                 "timestamp": now,

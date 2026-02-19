@@ -20,13 +20,14 @@ import asyncio
 import json
 import logging
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 
 # Database
 from app.database import async_session
+from app.services.utils import local_now
 
 logger = logging.getLogger(__name__)
 
@@ -58,7 +59,7 @@ except ImportError:
 class PipelineStats:
     """Statistics from a pipeline run"""
 
-    start_time: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    start_time: datetime = field(default_factory=lambda: local_now())
     end_time: Optional[datetime] = None
 
     sources_attempted: int = 0

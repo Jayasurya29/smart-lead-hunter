@@ -11,14 +11,13 @@ Used by:
 """
 
 import logging
-from datetime import datetime, timezone
 from typing import Dict, Optional, Tuple
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.potential_lead import PotentialLead
-from app.services.utils import normalize_hotel_name
+from app.services.utils import normalize_hotel_name, local_now
 from app.services.scorer import calculate_lead_score
 
 logger = logging.getLogger(__name__)
@@ -118,9 +117,9 @@ def prepare_lead(
         score_breakdown=score_result.get("breakdown", {}),
         status="new",
         raw_data=lead_dict.get("raw_data"),
-        scraped_at=datetime.now(timezone.utc),
-        created_at=datetime.now(timezone.utc),
-        updated_at=datetime.now(timezone.utc),
+        scraped_at=local_now(),
+        created_at=local_now(),
+        updated_at=local_now(),
     )
 
     return lead, None, score_result
@@ -199,7 +198,7 @@ def enrich_existing_lead(existing: PotentialLead, lead_dict: Dict) -> bool:
             enriched = True
 
     if enriched:
-        existing.updated_at = datetime.now(timezone.utc)
+        existing.updated_at = local_now()
 
     return enriched
 

@@ -4,9 +4,9 @@ Scrape Log model - tracks history of scraping runs
 
 from sqlalchemy import Column, String, Integer, DateTime, Text, ForeignKey
 from sqlalchemy.dialects.postgresql import JSONB
-from datetime import datetime, timezone
 
 from app.database import Base
+from app.services.utils import local_now
 
 
 class ScrapeLog(Base):
@@ -24,7 +24,7 @@ class ScrapeLog(Base):
     started_at = Column(
         DateTime(timezone=True),
         nullable=False,
-        default=lambda: datetime.now(timezone.utc),
+        default=lambda: local_now(),
     )
     completed_at = Column(DateTime(timezone=True))
 
@@ -44,9 +44,7 @@ class ScrapeLog(Base):
     errors = Column(JSONB)  # Array of error details
 
     # Timestamps
-    created_at = Column(
-        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
-    )
+    created_at = Column(DateTime(timezone=True), default=lambda: local_now())
 
     def __repr__(self):
         return f"<ScrapeLog(id={self.id}, source_id={self.source_id}, status='{self.status}', leads={self.leads_found})>"
@@ -75,7 +73,7 @@ class ScrapeLog(Base):
         self, leads_new: int = 0, leads_duplicate: int = 0, leads_skipped: int = 0
     ):
         """Mark scrape as successfully completed"""
-        self.completed_at = datetime.now(timezone.utc)
+        self.completed_at = local_now()
         self.status = "success"
         self.leads_new = leads_new
         self.leads_duplicate = leads_duplicate
@@ -84,14 +82,14 @@ class ScrapeLog(Base):
 
     def mark_failed(self, error_message: str, errors: list = None):
         """Mark scrape as failed"""
-        self.completed_at = datetime.now(timezone.utc)
+        self.completed_at = local_now()
         self.status = "failed"
         self.error_message = error_message
         self.errors = errors
 
     def mark_partial(self, error_message: str, leads_new: int = 0):
         """Mark scrape as partially completed (some errors but got some leads)"""
-        self.completed_at = datetime.now(timezone.utc)
+        self.completed_at = local_now()
         self.status = "partial"
         self.error_message = error_message
         self.leads_new = leads_new

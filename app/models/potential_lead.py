@@ -14,7 +14,6 @@ from sqlalchemy import (
     Index,
 )
 from sqlalchemy.dialects.postgresql import JSONB
-from datetime import datetime, timezone
 
 # L2 FIX: Guard pgvector import — makes it optional for dev/test environments
 try:
@@ -23,6 +22,7 @@ except ImportError:
     Vector = None
 
 from app.database import Base
+from app.services.utils import local_now
 
 
 class PotentialLead(Base):
@@ -89,9 +89,7 @@ class PotentialLead(Base):
     source_id = Column(Integer, ForeignKey("sources.id"))
     source_url = Column(Text)
     source_site = Column(String(100))
-    scraped_at = Column(
-        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
-    )
+    scraped_at = Column(DateTime(timezone=True), default=lambda: local_now())
 
     # Workflow Status
     status = Column(
@@ -120,13 +118,11 @@ class PotentialLead(Base):
     source_extractions = Column(JSONB, default=dict)
 
     # Timestamps
-    created_at = Column(
-        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
-    )
+    created_at = Column(DateTime(timezone=True), default=lambda: local_now())
     updated_at = Column(
         DateTime(timezone=True),
-        default=lambda: datetime.now(timezone.utc),
-        onupdate=lambda: datetime.now(timezone.utc),
+        default=lambda: local_now(),
+        onupdate=lambda: local_now(),
     )
 
     def __repr__(self):

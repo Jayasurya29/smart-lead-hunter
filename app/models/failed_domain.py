@@ -1,7 +1,8 @@
 from sqlalchemy import Column, Integer, String, DateTime, Text
 from sqlalchemy.sql import func
-from datetime import datetime, timezone, timedelta
+from datetime import timedelta
 from app.database import Base
+from app.services.utils import local_now
 
 
 class FailedDomain(Base):
@@ -22,12 +23,12 @@ class FailedDomain(Base):
         """Check if this domain should be skipped (still in cooldown)."""
         if self.retry_after is None:
             return True
-        now = datetime.now(timezone.utc)
+        now = local_now()
         return now < self.retry_after
 
     def record_failure(self, reason: str = None):
         """Record another failure for this domain."""
-        now = datetime.now(timezone.utc)
+        now = local_now()
         self.fail_count = (self.fail_count or 0) + 1
         self.last_failed = now
         self.failed_at = now

@@ -3,10 +3,10 @@ Source model - stores websites we scrape for hotel leads
 """
 
 from sqlalchemy import Column, String, Integer, DateTime, Text, Boolean, Numeric, ARRAY
-from datetime import datetime, timezone
 from sqlalchemy.dialects.postgresql import JSONB
 
 from app.database import Base
+from app.services.utils import local_now
 
 
 class Source(Base):
@@ -57,13 +57,11 @@ class Source(Base):
     notes = Column(Text)
 
     # Timestamps
-    created_at = Column(
-        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
-    )
+    created_at = Column(DateTime(timezone=True), default=lambda: local_now())
     updated_at = Column(
         DateTime(timezone=True),
-        default=lambda: datetime.now(timezone.utc),
-        onupdate=lambda: datetime.now(timezone.utc),
+        default=lambda: local_now(),
+        onupdate=lambda: local_now(),
     )
 
     def __repr__(self):
@@ -115,8 +113,8 @@ class Source(Base):
 
     def record_success(self, leads_count: int = 0):
         """Record a successful scrape"""
-        self.last_scraped_at = datetime.now(timezone.utc)
-        self.last_success_at = datetime.now(timezone.utc)
+        self.last_scraped_at = local_now()
+        self.last_success_at = local_now()
         self.leads_found = (self.leads_found or 0) + leads_count
         self.consecutive_failures = 0
         self.health_status = "healthy"
@@ -124,7 +122,7 @@ class Source(Base):
 
     def record_failure(self):
         """Record a failed scrape"""
-        self.last_scraped_at = datetime.now(timezone.utc)
+        self.last_scraped_at = local_now()
         self.consecutive_failures = (self.consecutive_failures or 0) + 1
         self._update_success_rate(False)
 

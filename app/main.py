@@ -10,7 +10,7 @@ Run with:
 import logging
 import time
 from collections import defaultdict
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timedelta
 from typing import Optional, List
 from contextlib import asynccontextmanager
 
@@ -33,7 +33,7 @@ from app.config import settings
 from app.logging_config import setup_logging
 from app.database import get_db, init_db, async_session
 from app.models import PotentialLead, Source, ScrapeLog
-from app.services.utils import normalize_hotel_name
+from app.services.utils import normalize_hotel_name, local_now
 from app.middleware.auth import APIKeyMiddleware
 
 # Global dict to track active scrape jobs and their progress
@@ -439,7 +439,7 @@ async def _get_dashboard_stats(db: AsyncSession) -> dict:
     Uses SQLAlchemy conditional aggregation:  count() + filter()
     so the database scans the leads table once and the sources table once.
     """
-    now = datetime.now(timezone.utc)
+    now = local_now()
     today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
     week_start = today_start - timedelta(days=now.weekday())
 
@@ -590,7 +590,7 @@ async def health_check(db: AsyncSession = Depends(get_db)):
 
     return {
         "status": overall,
-        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "timestamp": local_now().isoformat(),
         "components": components,
     }
 
@@ -844,7 +844,7 @@ async def update_lead(
     for field, value in update_data.items():
         setattr(lead, field, value)
 
-    lead.updated_at = datetime.now(timezone.utc)
+    lead.updated_at = local_now()
 
     await db.commit()
     await db.refresh(lead)
@@ -864,7 +864,7 @@ async def approve_lead(lead_id: int, db: AsyncSession = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Lead not found")
 
     lead.status = "approved"
-    lead.updated_at = datetime.now(timezone.utc)
+    lead.updated_at = local_now()
 
     await db.commit()
     await db.refresh(lead)
@@ -893,7 +893,7 @@ async def reject_lead(
     lead.status = "rejected"
     lead.rejection_reason = reason
     lead.notes = f"{lead.notes or ''}\nRejected: {reason or 'No reason given'}".strip()
-    lead.updated_at = datetime.now(timezone.utc)
+    lead.updated_at = local_now()
 
     await db.commit()
     await db.refresh(lead)
@@ -1031,7 +1031,7 @@ async def toggle_source(source_id: int, db: AsyncSession = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Source not found")
 
     source.is_active = not source.is_active
-    source.updated_at = datetime.now(timezone.utc)
+    source.updated_at = local_now()
 
     await db.commit()
     await db.refresh(source)
@@ -1055,7 +1055,7 @@ async def reset_source_health(source_id: int, db: AsyncSession = Depends(get_db)
 
     source.health_status = "new"
     source.consecutive_failures = 0
-    source.updated_at = datetime.now(timezone.utc)
+    source.updated_at = local_now()
 
     await db.commit()
     await db.refresh(source)
@@ -1408,7 +1408,7 @@ async def dashboard_edit_lead(
         lead.hotel_name_normalized = normalize_hotel_name(data["hotel_name"])
 
     # Audit Fix 5b: Wrap room_count safely
-    lead.updated_at = datetime.now(timezone.utc)
+    lead.updated_at = local_now()
 
     await db.commit()
     await db.refresh(lead)
@@ -1432,7 +1432,7 @@ async def dashboard_approve_lead(
         return HTMLResponse(content="Lead not found", status_code=404)
 
     lead.status = "approved"
-    lead.updated_at = datetime.now(timezone.utc)
+    lead.updated_at = local_now()
 
     await db.commit()
     await db.refresh(lead)
@@ -1463,7 +1463,7 @@ async def dashboard_reject_lead(
     lead.status = "rejected"
     lead.rejection_reason = reason
     lead.notes = f"{lead.notes or ''}\nRejected: {reason or 'No reason given'}".strip()
-    lead.updated_at = datetime.now(timezone.utc)
+    lead.updated_at = local_now()
 
     await db.commit()
     await db.refresh(lead)
@@ -1496,7 +1496,7 @@ async def dashboard_restore_lead(
     lead.status = "new"
     lead.rejection_reason = None
 
-    lead.updated_at = datetime.now(timezone.utc)
+    lead.updated_at = local_now()
 
     await db.commit()
     await db.refresh(lead)
@@ -1524,7 +1524,7 @@ async def dashboard_delete_lead(
 
     lead.status = "deleted"
 
-    lead.updated_at = datetime.now(timezone.utc)
+    lead.updated_at = local_now()
 
     await db.commit()
     await db.refresh(lead)
@@ -1543,7 +1543,7 @@ async def dashboard_sources_list(db: AsyncSession = Depends(get_db)):
     )
     sources = result.scalars().all()
 
-    now = datetime.now(timezone.utc)
+    now = local_now()
 
     # Build category counts
     cat_counts = {}
@@ -1753,7 +1753,7 @@ async def scrape_with_progress(request: Request):
 
             yield f"data: {json.dumps({'type': 'info', 'message': f'Found {total_sources} active sources to scrape'})}\n\n"
 
-            start_time = datetime.now(timezone.utc)
+            start_time = local_now()
 
             # --- PHASE 1: SCRAPE all sources via the engine ---
             yield f"data: {json.dumps({'type': 'info', 'message': 'Phase 1: Scraping sources...'})}\n\n"
@@ -1796,7 +1796,7 @@ async def scrape_with_progress(request: Request):
                 if use_gold and source.last_discovery_at:
                     discovery_interval = source.discovery_interval_days or 7
                     days_since_discovery = (
-                        datetime.now(timezone.utc) - source.last_discovery_at
+                        local_now() - source.last_discovery_at
                     ).total_seconds() / 86400
                     if days_since_discovery >= discovery_interval:
                         needs_rediscovery = True
@@ -2056,7 +2056,7 @@ async def scrape_with_progress(request: Request):
                             continue
 
                         source_obj.total_scrapes = (source_obj.total_scrapes or 0) + 1
-                        source_obj.last_scraped_at = datetime.now(timezone.utc)
+                        source_obj.last_scraped_at = local_now()
 
                         source_leads = (
                             sum(url_lead_map.get(src.id, {}).values())
@@ -2068,7 +2068,7 @@ async def scrape_with_progress(request: Request):
                             source_obj.leads_found = (
                                 source_obj.leads_found or 0
                             ) + source_leads
-                            source_obj.last_success_at = datetime.now(timezone.utc)
+                            source_obj.last_success_at = local_now()
                             source_obj.consecutive_failures = 0
                             source_obj.health_status = "healthy"
 
@@ -2080,7 +2080,7 @@ async def scrape_with_progress(request: Request):
 
                         # Update gold URLs
                         gold = dict(source_obj.gold_urls or {})
-                        now_str = datetime.now(timezone.utc).isoformat()
+                        now_str = local_now().isoformat()
 
                         if src.id in url_lead_map:
                             for url, count in url_lead_map[src.id].items():
@@ -2130,7 +2130,7 @@ async def scrape_with_progress(request: Request):
                                     )
 
                         source_obj.gold_urls = gold
-                        source_obj.last_discovery_at = datetime.now(timezone.utc)
+                        source_obj.last_discovery_at = local_now()
 
                     await stats_session.commit()
 
@@ -2145,7 +2145,7 @@ async def scrape_with_progress(request: Request):
                 yield f"data: {json.dumps({'type': 'info', 'message': f'Warning: Source stats update failed: {str(gold_err)[:50]}'})}\n\n"
 
             # --- COMPLETE ---
-            end_time = datetime.now(timezone.utc)
+            end_time = local_now()
             duration = (end_time - start_time).total_seconds()
 
             final_stats = {
@@ -2271,7 +2271,7 @@ async def extract_url_stream(request: Request):
 
             yield f"data: {json.dumps({'type': 'info', 'message': 'Pipeline ready.'})}\n\n"
 
-            start_time = datetime.now(timezone.utc)
+            start_time = local_now()
 
             # --- PHASE 1: SCRAPE the URL ---
             yield f"data: {json.dumps({'type': 'source_start', 'source': 'URL Extract', 'current': 1, 'total': 1, 'mode': 'direct'})}\n\n"
@@ -2371,7 +2371,7 @@ async def extract_url_stream(request: Request):
 
             if leads_extracted == 0:
                 yield f"data: {json.dumps({'type': 'info', 'message': 'No hotel leads found on this page. Try a different URL with hotel opening announcements.'})}\n\n"
-                end_time = datetime.now(timezone.utc)
+                end_time = local_now()
                 duration = (end_time - start_time).total_seconds()
                 yield f"data: {json.dumps({'type': 'complete', 'stats': {'sources_scraped': 1, 'urls_scraped': 1, 'leads_found': 0, 'leads_saved': 0, 'leads_skipped': 0}, 'duration_seconds': duration})}\n\n"
                 return
@@ -2442,7 +2442,7 @@ async def extract_url_stream(request: Request):
                 yield f"data: {json.dumps({'type': 'info', 'message': f'Saved {leads_saved} new leads, {leads_dupes} already existed'})}\n\n"
 
             # --- COMPLETE ---
-            end_time = datetime.now(timezone.utc)
+            end_time = local_now()
             duration = (end_time - start_time).total_seconds()
 
             final_stats = {
@@ -2543,7 +2543,7 @@ async def discovery_stream(request: Request):
 
             # v5 constructor: no use_ai param, uses IntelligentPipeline automatically
             max_queries = 5 if mode == "quick" else None
-            start_time = datetime.now(timezone.utc)
+            start_time = local_now()
 
             progress_queue = asyncio.Queue()
 
@@ -2629,7 +2629,7 @@ async def discovery_stream(request: Request):
                         await eng.close()
 
                     # Final completion event with stats
-                    elapsed = (datetime.now(timezone.utc) - start_time).total_seconds()
+                    elapsed = (local_now() - start_time).total_seconds()
                     progress_queue.put_nowait(
                         {
                             "type": "complete",

@@ -5,6 +5,15 @@ Common functions used across modules to prevent logic divergence.
 """
 
 import re
+from datetime import datetime
+from zoneinfo import ZoneInfo
+
+LOCAL_TZ = ZoneInfo("America/New_York")
+
+
+def local_now() -> datetime:
+    """Return current local time (Eastern) as timezone-aware datetime."""
+    return datetime.now(LOCAL_TZ)
 
 
 def normalize_hotel_name(name: str) -> str:

@@ -23,7 +23,6 @@ Usage:
 import asyncio
 import logging
 import sys
-from datetime import datetime, timezone
 from typing import Optional, List, Dict, Any
 
 from celery import group
@@ -33,6 +32,7 @@ from app.tasks.celery_app import celery_app, BaseTask
 from app.database import async_session
 from app.models import PotentialLead, Source, ScrapeLog
 from app.services.intelligent_pipeline import LeadExtractionPipeline
+from app.services.utils import local_now
 
 logger = logging.getLogger(__name__)
 
@@ -155,9 +155,7 @@ async def _save_lead_impl(
 async def create_scrape_log(source_id: int) -> int:
     """Create a new scrape log entry"""
     async with async_session() as session:
-        log = ScrapeLog(
-            source_id=source_id, started_at=datetime.now(timezone.utc), status="running"
-        )
+        log = ScrapeLog(source_id=source_id, started_at=local_now(), status="running")
         session.add(log)
         await session.commit()
         await session.refresh(log)
@@ -178,7 +176,7 @@ async def update_scrape_log(
             update(ScrapeLog)
             .where(ScrapeLog.id == log_id)
             .values(
-                completed_at=datetime.now(timezone.utc),
+                completed_at=local_now(),
                 status=status,
                 urls_scraped=urls_scraped,
                 leads_found=leads_found,
@@ -196,7 +194,7 @@ async def update_source_stats(source_id: int, leads_found: int):
             update(Source)
             .where(Source.id == source_id)
             .values(
-                last_scraped_at=datetime.now(timezone.utc),
+                last_scraped_at=local_now(),
                 leads_found=Source.leads_found + leads_found,
             )
         )
@@ -493,7 +491,7 @@ def run_full_scrape(self) -> Dict[str, Any]:
     sources = run_async(_get_sources())
 
     results = {
-        "started_at": datetime.now(timezone.utc).isoformat(),
+        "started_at": local_now().isoformat(),
         "sources_total": len(sources),
         "sources_scraped": 0,
         "total_leads_found": 0,
@@ -503,7 +501,7 @@ def run_full_scrape(self) -> Dict[str, Any]:
 
     if not sources:
         results["success"] = True
-        results["completed_at"] = datetime.now(timezone.utc).isoformat()
+        results["completed_at"] = local_now().isoformat()
         return results
 
     # H-08: Fan out all source scrapes in parallel using Celery group()
@@ -538,7 +536,7 @@ def run_full_scrape(self) -> Dict[str, Any]:
             if source_result.get("errors"):
                 results["errors"].extend(source_result["errors"])
 
-    results["completed_at"] = datetime.now(timezone.utc).isoformat()
+    results["completed_at"] = local_now().isoformat()
     results["success"] = True
 
     logger.info("=" * 60)
@@ -675,7 +673,7 @@ def sync_approved_to_insightly() -> Dict[str, Any]:
                             .where(PotentialLead.id == lead.id)
                             .values(
                                 insightly_id=result.get("RECORD_ID"),
-                                synced_at=datetime.now(timezone.utc),
+                                synced_at=local_now(),
                             )
                         )
                         await session.commit()
@@ -735,7 +733,7 @@ def health_check() -> Dict[str, Any]:
     """Simple health check task"""
     return {
         "status": "healthy",
-        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "timestamp": local_now().isoformat(),
         "worker": "celery",
     }
 

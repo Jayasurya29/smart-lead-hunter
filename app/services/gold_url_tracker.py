@@ -24,12 +24,13 @@ Gold URL format in DB (JSONB):
 """
 
 import logging
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timedelta
 from typing import Dict, List, Optional
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.source import Source
+from app.services.utils import local_now
 
 logger = logging.getLogger(__name__)
 
@@ -57,7 +58,7 @@ class GoldURLTracker:
             return {"mode": "full", "urls": [], "reason": "Source not found"}
 
         gold_urls = source.gold_urls or {}
-        now = datetime.now(timezone.utc)
+        now = local_now()
 
         # Filter out dead gold URLs (too many misses)
         active_gold = {
@@ -116,7 +117,7 @@ class GoldURLTracker:
             return
 
         gold_urls = dict(source.gold_urls or {})
-        now_str = datetime.now(timezone.utc).isoformat()
+        now_str = local_now().isoformat()
 
         for url, lead_count in url_lead_counts.items():
             if lead_count > 0:
@@ -163,7 +164,7 @@ class GoldURLTracker:
         source.avg_lead_yield = ((old_avg * (scrapes - 1)) + total_leads) / scrapes
 
         if is_discovery:
-            source.last_discovery_at = datetime.now(timezone.utc)
+            source.last_discovery_at = local_now()
 
         await self.session.commit()
 
@@ -205,9 +206,7 @@ class GoldURLTracker:
             "last_discovery_at": source.last_discovery_at.isoformat()
             if source.last_discovery_at
             else None,
-            "needs_discovery": self._needs_discovery(
-                source, datetime.now(timezone.utc)
-            ),
+            "needs_discovery": self._needs_discovery(source, local_now()),
             "gold_urls": {
                 url: {
                     "leads_found": meta.get("leads_found", 0),
@@ -244,7 +243,7 @@ async def get_smart_scrape_queue(session: AsyncSession) -> List[Dict]:
     )
     sources = result.scalars().all()
 
-    now = datetime.now(timezone.utc)
+    now = local_now()
     day_of_week = now.weekday()  # 0=Mon, 6=Sun
 
     due_sources = []
