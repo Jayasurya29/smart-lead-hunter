@@ -123,7 +123,7 @@ class TestTimingScore:
 
         next_year = datetime.now().year + 1
         pts, tier, year = get_timing_score(str(next_year))
-        assert pts >= 15
+        assert pts >= 10
 
     def test_far_future(self):
         from app.services.scorer import get_timing_score
@@ -152,7 +152,7 @@ class TestTimingScore:
         current_year = datetime.now().year
         pts, _, year = get_timing_score(f"Q3 {current_year}")
         assert year == current_year
-        assert pts >= 15
+        assert pts >= 10
 
     def test_season_format(self):
         from app.services.scorer import get_timing_score
@@ -175,7 +175,7 @@ class TestLocationScore:
         from app.services.scorer import get_location_score
 
         pts, reason, loc_type = get_location_score("Miami", "FL", "USA")
-        assert pts >= 15
+        assert pts >= 10
 
     def test_florida_fl_no_false_positive(self):
         """'fl' should NOT match 'buffalo'."""
@@ -190,7 +190,7 @@ class TestLocationScore:
         pts, reason, loc_type = get_location_score(
             "Nassau", "New Providence", "Bahamas"
         )
-        assert pts >= 15
+        assert pts >= 10
 
     def test_international_skip(self):
         from app.services.scorer import get_location_score

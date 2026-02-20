@@ -1420,12 +1420,15 @@ def should_skip_location(
 
 def get_timing_score(opening_date: str = None) -> Tuple[int, str, int]:
     """
-    Score based on opening year.
+    Score based on opening timing relative to TODAY.
 
-    P-01 FIX: Now uses current_year dynamically instead of hardcoded 2026/2027/2028.
-    This means the scoring stays correct as years roll over without code changes.
-
-    Logic: current year or earlier = URGENT, +1 = Hot, +2 = Warm, +3 or later = Track
+    Rules (as of Feb 2026):
+    - Past / already opened    → 0 pts, EXPIRED (should not save)
+    - 1-2 months out           → 5 pts, LONG SHOT (probably committed)
+    - 3-6 months out           → 25 pts, HOT (actively sourcing uniforms)
+    - 7-12 months out          → 18 pts, WARM (in planning phase)
+    - 13-24 months out         → 12 pts, PIPELINE (worth tracking)
+    - 25+ months out           → 6 pts, EARLY (too far out)
 
     Returns: (points, timing_tier, year)
     """
@@ -1433,35 +1436,95 @@ def get_timing_score(opening_date: str = None) -> Tuple[int, str, int]:
         return (4, "Unknown", None)
 
     date_str = str(opening_date).lower()
-    current_year = datetime.now().year
+    now = datetime.now()
+    current_year = now.year
+    current_month = now.month
 
-    # Try to extract year(s) from date string
-    # Audit Fix M-03: Use max() to get latest year, not first match.
-    # E.g. "Opening 2025, delayed to 2027" should score 2027.
+    # Extract year — use max to handle "delayed to 2027" cases
     year_matches = re.findall(r"20\d{2}", date_str)
     if year_matches:
         year = max(int(y) for y in year_matches)
+    elif "this year" in date_str:
+        year = current_year
+    elif "next year" in date_str:
+        year = current_year + 1
     else:
-        # Check for relative year references
-        if "this year" in date_str:
-            year = current_year
-        elif "next year" in date_str:
-            year = current_year + 1
-        else:
-            return (4, "Unknown", None)
+        return (4, "Unknown", None)
 
-    # P-01: Score based on distance from current year (not hardcoded years)
-    years_out = year - current_year
+    # REJECT: past years are already open
+    if year < current_year:
+        return (0, f"{year} - EXPIRED", year)
 
-    if years_out <= 0:
-        # This year or already past — URGENT (may already be open/opening soon)
-        return (25, f"{year} - URGENT!", year)
-    elif years_out == 1:
-        return (18, f"{year} - Hot", year)
-    elif years_out == 2:
-        return (12, f"{year} - Warm", year)
+    # Parse month from date string
+    opening_month = 6  # default to mid-year if unknown
+    month_names = {
+        "january": 1,
+        "february": 2,
+        "march": 3,
+        "april": 4,
+        "may": 5,
+        "june": 6,
+        "july": 7,
+        "august": 8,
+        "september": 9,
+        "october": 10,
+        "november": 11,
+        "december": 12,
+        "jan": 1,
+        "feb": 2,
+        "mar": 3,
+        "apr": 4,
+        "jun": 6,
+        "jul": 7,
+        "aug": 8,
+        "sep": 9,
+        "sept": 9,
+        "oct": 10,
+        "nov": 11,
+        "dec": 12,
+    }
+    for name, num in month_names.items():
+        if name in date_str:
+            opening_month = num
+            break
     else:
-        return (6, f"{year}+ - Track", year)
+        # No month name found — try quarter/season references
+        if "q1" in date_str or "first quarter" in date_str:
+            opening_month = 2
+        elif "q2" in date_str or "second quarter" in date_str or "spring" in date_str:
+            opening_month = 5
+        elif "q3" in date_str or "third quarter" in date_str or "summer" in date_str:
+            opening_month = 8
+        elif (
+            "q4" in date_str
+            or "fourth quarter" in date_str
+            or "fall" in date_str
+            or "winter" in date_str
+        ):
+            opening_month = 11
+        elif "early" in date_str:
+            opening_month = 3
+        elif "mid" in date_str:
+            opening_month = 6
+        elif "late" in date_str or "end" in date_str:
+            opening_month = 10
+
+    # Calculate months until opening
+    months_out = (year - current_year) * 12 + (opening_month - current_month)
+
+    # Score by months out
+    if months_out <= 0:
+        return (0, f"{year} - EXPIRED", year)
+    elif months_out <= 2:
+        return (5, f"{year} - Long Shot", year)
+    elif months_out <= 6:
+        return (25, f"{year} - HOT (sourcing now)", year)
+    elif months_out <= 12:
+        return (18, f"{year} - Warm (planning)", year)
+    elif months_out <= 24:
+        return (12, f"{year} - Pipeline", year)
+    else:
+        return (6, f"{year}+ - Early", year)
 
 
 # =============================================================================
@@ -1754,14 +1817,12 @@ def calculate_lead_score(
     timing_points, timing_tier, opening_year = get_timing_score(opening_date)
     result["opening_year"] = opening_year
     result["breakdown"]["timing"] = {"points": timing_points, "tier": timing_tier}
-
-    # Reject leads with opening dates too far in the past
-    # Audit Fix M-02: Allow last-year openings (may still need uniforms)
-    if opening_year and opening_year < datetime.now().year - 1:
+    # Reject expired leads (past openings, already opened)
+    if timing_points == 0 and opening_year:
         result["should_save"] = False
-        result["skip_reason"] = f"Past opening ({opening_year}): {hotel_name}"
+        result["skip_reason"] = f"Expired opening ({opening_year}): {hotel_name}"
+        result["breakdown"]["timing"]["skip"] = True
         return result
-
     result["total_score"] += timing_points
 
     # 4. ROOM COUNT (15 pts max)

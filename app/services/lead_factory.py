@@ -11,6 +11,7 @@ Used by:
 """
 
 import logging
+import re
 from typing import Dict, Optional, Tuple
 
 from sqlalchemy import select
@@ -33,6 +34,19 @@ def extract_year(date_str: Optional[str]) -> Optional[int]:
     return int(match.group()) if match else None
 
 
+# Patterns that indicate article titles / market summaries, not real hotels
+_JUNK_PATTERNS = [
+    re.compile(r"^\d+ new hotels? (in|for|forecasted|opening)", re.IGNORECASE),
+    re.compile(r"hotels? forecasted for", re.IGNORECASE),
+    re.compile(r"hotels? opening in 20\d{2}", re.IGNORECASE),
+    re.compile(r"hotels? in \d{4}", re.IGNORECASE),
+    re.compile(r"hotel construction", re.IGNORECASE),
+    re.compile(r"hotel pipeline", re.IGNORECASE),
+    re.compile(r"hotel forecast", re.IGNORECASE),
+    re.compile(r"new openings for 20\d{2}", re.IGNORECASE),
+]
+
+
 def prepare_lead(
     lead_dict: Dict,
 ) -> Tuple[Optional[PotentialLead], Optional[str], Dict]:
@@ -48,6 +62,11 @@ def prepare_lead(
     hotel_name = (lead_dict.get("hotel_name") or "").strip()
     if not hotel_name:
         return None, "No hotel name", {}
+
+    # Reject article titles / market summaries
+    for pattern in _JUNK_PATTERNS:
+        if pattern.search(hotel_name):
+            return None, f"Article title, not a hotel: {hotel_name}", {}
 
     # 1. NORMALIZE
     normalized = normalize_hotel_name(hotel_name)
