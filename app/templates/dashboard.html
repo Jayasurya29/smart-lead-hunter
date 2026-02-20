@@ -55,14 +55,28 @@
                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
                             </svg>
                         </div>
+                        <div id="search-spinner" class="htmx-indicator absolute right-10 top-1/2 -translate-y-1/2">
+                            <svg class="animate-spin h-4 w-4 text-brand-500" fill="none" viewBox="0 0 24 24">
+                                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+                            </svg>
+                        </div>
                         <input type="text" name="search" id="search-input"
-                               value=""
+                               value="{{ request.query_params.get('search', '') }}"
+                               hx-get="/dashboard"
+                               hx-trigger="input changed delay:500ms, search"
+                               hx-target="#leads-content"
+                               hx-select="#leads-content"
+                               hx-include="#filter-form"
+                               hx-push-url="true"
+                               hx-indicator="#search-spinner"
                                oninput="liveFilter(this.value); toggleClear();"
-                               onkeydown="if(event.key==='Escape'){this.value='';liveFilter('');toggleClear();}"
+                               onkeydown="if(event.key==='Escape'){this.value='';liveFilter('');toggleClear();htmx.trigger(this,'search');}"
                                placeholder="Search hotels, brands, cities..."
                                class="w-full pl-10 pr-9 py-2.5 text-sm border border-gray-200 rounded-lg focus:ring-2 focus:ring-brand-500 focus:border-transparent bg-gray-50 focus:bg-white transition-all placeholder-gray-400">
+
                         <button type="button" id="search-clear" style="display:none"
-                                onclick="document.getElementById('search-input').value='';liveFilter('');toggleClear();"
+                                onclick="var inp=document.getElementById('search-input');inp.value='';liveFilter('');toggleClear();htmx.trigger(inp,'search');"
                                 class="absolute right-3 top-1/2 -translate-y-1/2 p-0.5 rounded-full hover:bg-gray-200 text-gray-400 hover:text-gray-600 transition-colors">
                             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
@@ -122,7 +136,7 @@
             </div>
 
             <!-- Leads Table -->
-            <div class="bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden">
+            <div id="leads-content" class="bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden">
                 <div class="px-4 py-3 border-b border-gray-100 flex items-center justify-between">
                     <div>
                         <span class="text-sm font-bold text-gray-800">
@@ -249,6 +263,7 @@ document.addEventListener('htmx:afterSwap', function(e) {
         document.querySelectorAll('tr[data-lead-row]').forEach(r => r.classList.remove('active'));
         const trigger = e.detail.requestConfig?.elt;
         if (trigger) trigger.classList.add('active');
+        Alpine.initTree(e.detail.target);
     }
 });
 </script>

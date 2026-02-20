@@ -63,6 +63,7 @@ class PotentialLead(Base):
     contact_title = Column(String(100))
     contact_email = Column(String(255))
     contact_phone = Column(String(50))
+    contact_linkedin = Column(String(500))
 
     # Hotel Details
     opening_date = Column(String(50))  # Flexible: "Q2 2026", "June 2026", "2026"
@@ -159,6 +160,7 @@ class PotentialLead(Base):
             "contact_title": self.contact_title,
             "contact_email": self.contact_email,
             "contact_phone": self.contact_phone,
+            "contact_linkedin": self.contact_linkedin,
             # Scoring
             "lead_score": self.lead_score,
             "score_breakdown": self.score_breakdown,

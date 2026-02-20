@@ -144,6 +144,7 @@
         document.body.addEventListener('htmx:afterSwap', function(evt) {
             const toast = evt.detail.xhr.getResponseHeader('HX-Trigger');
             if (toast) { try { const data = JSON.parse(toast); if (data.showToast) showToast(data.showToast.message, data.showToast.type); } catch (e) {} }
+            if (evt.detail.target) { Alpine.initTree(evt.detail.target); }
         });
     </script>
     <script>
