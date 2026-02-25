@@ -33,7 +33,7 @@ class Settings(BaseSettings):
     # Google Gemini (PRIMARY - $300 free credits, best quality)
     # Get your key at: https://aistudio.google.com/apikey
     gemini_api_key: Optional[str] = None
-    gemini_model: str = "gemini-2.0-flash"
+    gemini_model: str = "gemini-2.5-flash"
 
     # Ollama (BACKUP - runs locally, unlimited)
     ollama_url: str = "http://localhost:11434"

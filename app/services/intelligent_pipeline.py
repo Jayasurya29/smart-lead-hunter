@@ -3,9 +3,6 @@ SMART LEAD HUNTER - UNIFIED INTELLIGENT PIPELINE
 =================================================
 Single pipeline for all AI-powered lead extraction.
 
-REPLACES:
-- intelligent_pipeline.py (old)
-- lead_extraction_pipeline.py (old)
 
 STAGES:
 1. Quick Reject (FREE) - Filter junk URLs
@@ -15,8 +12,9 @@ STAGES:
 5. Priority & Contact Analysis - Timing and contact relevance
 
 AI PROVIDER: Google Gemini
-- Classifier: gemini-2.5-flash-lite (fast, cheap)
-- Extractor: gemini-2.5-flash (more capable)
+-Classifier: gemini-2.5-flash-lite (4,000 RPM / Unlimited RPD)
+-Extractor: gemini-3-flash (1,000 RPM / 10,000 RPD)
+
 
 Usage:
     from app.services.intelligent_pipeline import IntelligentPipeline
@@ -163,33 +161,32 @@ class PipelineConfig:
     # API Key (from env if not provided)
     gemini_api_key: str = ""
 
-    # Models — BEST ACCURACY configuration ($300 budget / 3 months)
-    # Classifier: 2.5 Flash — fast but smart, catches edge cases
-    # Extractor: 2.5 Pro — most capable model for structured extraction
-    classifier_model: str = "gemini-2.5-flash"  # Best classifier (thinking enabled)
-    extractor_model: str = "gemini-2.5-pro"  # Most accurate extraction
+    # Models — Gemini 3/2.5 configuration (no RPM bottlenecks)
+    # Classifier: Flash Lite — 4,000 RPM / Unlimited RPD (binary yes/no)
+    # Extractor: 3 Flash — 1,000 RPM / 10,000 RPD (structured extraction)
+    classifier_model: str = "gemini-2.5-flash-lite"
+    extractor_model: str = "gemini-3-flash"
 
     # Thresholds
-    classification_confidence: float = 0.5  # Lower threshold — let Pro decide (was 0.6)
+    classification_confidence: float = 0.5
     qualification_threshold: int = 30  # Min score to keep lead
 
-    # Rate limiting — Pro has lower RPM limits
-    min_delay_seconds: float = 0.5  # Between API calls (paid tier = higher limits)
+    # Rate limiting — Flash models have generous limits
+    min_delay_seconds: float = 0.3
 
-    # Concurrency — paid tier supports higher throughput
-    max_concurrent_requests: int = 10  # Parallel API calls
+    # Concurrency
+    max_concurrent_requests: int = 15
 
-    # Content limits — Pro handles larger context, send more content
-    classifier_content_limit: int = 5000  # Chars for classification (was 3000)
-    extractor_content_limit: int = 30000  # Chars for extraction (was 8000)
+    # Content limits
+    classifier_content_limit: int = 5000  # Chars for classification
+    extractor_content_limit: int = 15000  # Chars for extraction
 
     # Redis extraction cache (skip re-extraction for same content)
     redis_cache_enabled: bool = True
-    redis_cache_ttl_hours: int = 72  # Cache extracted leads for 3 days
+    redis_cache_ttl_hours: int = 72
     redis_url: str = ""
 
     # TODO: Gemini Batch API (50% cost reduction when GA)
-    # Set to True once google releases batch endpoint for Gemini
     use_batch_api: bool = False
 
     def __post_init__(self):

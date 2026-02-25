@@ -84,6 +84,7 @@ class APIKeyMiddleware(BaseHTTPMiddleware):
         self.exclude_paths = exclude_paths or [
             "/health",
             "/dashboard",
+            "/api/dashboard",
             "/docs",
             "/redoc",
             "/openapi.json",

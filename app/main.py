@@ -553,7 +553,7 @@ async def health_check(db: AsyncSession = Depends(get_db)):
         if not gemini_key:
             components["gemini"] = "not configured"
         else:
-            gemini_model = getattr(settings, "gemini_model", "gemini-2.0-flash")
+            gemini_model = getattr(settings, "gemini_model", "gemini-2.5-flash")
             url = f"https://generativelanguage.googleapis.com/v1beta/models/{gemini_model}?key={gemini_key}"
             async with httpx.AsyncClient(timeout=5.0) as client:
                 resp = await client.get(url)
@@ -2690,3 +2690,69 @@ async def discovery_stream(request: Request):
             "X-Accel-Buffering": "no",
         },
     )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# ENDPOINT: Contact Enrichment (Enrich button on lead detail panel)
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+@app.post("/api/dashboard/leads/{lead_id}/enrich", tags=["Dashboard"])
+async def enrich_lead(lead_id: int):
+    """Enrich a lead with contact information via web search + Apollo."""
+    from app.database import async_session
+    from app.models.potential_lead import PotentialLead
+    from app.services.contact_enrichment import (
+        enrich_lead_contacts,
+        save_enrichment_to_lead,
+    )
+    from sqlalchemy import select
+
+    # Load lead data
+    async with async_session() as session:
+        result = await session.execute(
+            select(PotentialLead).where(PotentialLead.id == lead_id)
+        )
+        lead = result.scalar_one_or_none()
+
+    if not lead:
+        return {"status": "error", "message": "Lead not found"}
+
+    if not lead.hotel_name:
+        return {"status": "error", "message": "Lead has no hotel name"}
+
+    logger.info(f"Enrichment requested for lead {lead_id}: {lead.hotel_name}")
+
+    try:
+        # Run enrichment
+        enrichment_result = await enrich_lead_contacts(
+            lead_id=lead.id,
+            hotel_name=lead.hotel_name,
+            brand=lead.brand,
+            city=lead.city,
+            state=lead.state,
+            country=lead.country,
+            management_company=lead.management_company,
+            opening_date=lead.opening_date,
+        )
+
+        # Save to database
+        save_result = await save_enrichment_to_lead(lead.id, enrichment_result)
+
+        return {
+            "status": save_result["status"],
+            "lead_id": lead_id,
+            "hotel_name": lead.hotel_name,
+            "contacts_found": len(enrichment_result.contacts),
+            "best_contact": enrichment_result.best_contact,
+            "management_company": enrichment_result.management_company,
+            "developer": enrichment_result.developer,
+            "layers_tried": enrichment_result.layers_tried,
+            "sources_used": enrichment_result.sources_used,
+            "updated_fields": save_result.get("updated_fields", []),
+            "errors": enrichment_result.errors,
+        }
+
+    except Exception as e:
+        logger.error(f"Enrichment failed for lead {lead_id}: {e}", exc_info=True)
+        return {"status": "error", "message": f"Enrichment failed: {str(e)}"}

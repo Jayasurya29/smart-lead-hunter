@@ -64,9 +64,25 @@
     <!-- ═══════════ CONTENT - Scrollable ═══════════ -->
     <div class="overflow-y-auto" style="max-height: calc(100vh - 220px);">
         
-        <!-- Edit Toggle -->
-        <div class="px-5 pt-3 flex justify-end">
-            <button @click="editing = !editing; $el.closest('.overflow-y-auto').querySelector('.read-mode').style.display = editing ? 'none' : ''; $el.closest('.overflow-y-auto').querySelector('.edit-mode').style.display = editing ? '' : 'none';" 
+        <!-- Enrich + Edit Toggle -->
+        <div class="px-5 pt-3 flex justify-end gap-2 items-center">
+
+            <!-- ENRICH BUTTON -->
+            <button @click="if(enriching) return; enriching = true; enrichMsg = ''; fetch(`/api/dashboard/leads/{{ lead.id }}/enrich`, {method:'POST', credentials:'same-origin', headers:{'X-Requested-With':'XMLHttpRequest'}}).then(r => r.json()).then(data => { enriching = false; console.log('Enrich result:', data); if(data.contacts_found > 0) { enrichMsg = '✅ Found ' + data.contacts_found + ' contact(s)'; setTimeout(() => window.location.reload(), 1500); } else if(data.updated_fields && data.updated_fields.length > 0) { enrichMsg = '✅ Updated ' + data.updated_fields.length + ' field(s)'; setTimeout(() => window.location.reload(), 1500); } else { enrichMsg = '⚠️ No contacts found'; } }).catch(e => { enriching = false; enrichMsg = '❌ Error: ' + e; console.error('Enrich error:', e); })"
+                    class="text-xs px-3 py-1.5 rounded-full transition-all duration-200 font-medium bg-purple-100 text-purple-600 hover:bg-purple-200"
+                    :class="enriching && 'opacity-50 cursor-wait'"
+                    :disabled="enriching">
+                <span x-show="!enriching">🔍 Enrich</span>
+                <span x-show="enriching" class="flex items-center gap-1">
+                    <svg class="animate-spin w-3 h-3" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
+                    Searching...
+                </span>
+            </button>
+            <span x-show="enrichMsg" x-text="enrichMsg" class="text-xs"
+                  :class="enrichMsg?.includes('✅') ? 'text-emerald-600' : enrichMsg?.includes('❌') ? 'text-red-500' : 'text-amber-600'"></span>
+
+            <!-- EDIT BUTTON -->
+            <button @click="editing = !editing; $el.closest('.overflow-y-auto').querySelector('.read-mode').style.display = editing ? 'none' : ''; $el.closest('.overflow-y-auto').querySelector('.edit-mode').style.display = editing ? '' : 'none';"
                     class="text-xs px-3 py-1.5 rounded-full transition-all duration-200 font-medium"
                     :class="editing ? 'bg-blue-500 text-white shadow-sm' : 'bg-gray-100 text-gray-500 hover:bg-gray-200'">
                 <span x-show="!editing">✏️ Edit</span>
@@ -199,13 +215,16 @@
                     </div>
                     <div class="px-3.5 py-2.5 bg-white relative"
                          :class="expanded ? '' : 'max-h-28 overflow-hidden'"
-                         x-data x-init="
+                        x-data x-init="
                             const raw = $el.querySelector('.raw-text')?.textContent || '';
                             const ul = $el.querySelector('.insight-list');
                             if (raw && ul) {
+                                ul.innerHTML = '';
+                                const seen = new Set();
                                 raw.replace(/([.!?])\s+/g, '$1\n').split(/[\n;]+/)
                                    .map(s => s.replace(/^[\s\u2022\-\u25CF\u25B8\u25B9\u2192*]+/, '').trim())
                                    .filter(s => s.length > 10)
+                                   .filter(s => { const key = s.toLowerCase().slice(0, 50); if (seen.has(key)) return false; seen.add(key); return true; })
                                    .forEach(p => { const li = document.createElement('li'); li.textContent = p; ul.appendChild(li); });
                             }
                          ">
@@ -505,7 +524,7 @@
 <script>
 function leadEditor(leadId) {
     return {
-        editing: false, saving: false, saveMsg: '', saveError: false,
+        editing: false, saving: false, saveMsg: '', saveError: false, enriching: false, enrichMsg: '',
         async saveLead() {
             this.saving = true; this.saveMsg = '';
             const form = document.getElementById('lead-edit-form');

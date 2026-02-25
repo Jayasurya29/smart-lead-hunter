@@ -77,12 +77,10 @@ class AIRateLimiter:
     """
 
     # Configuration
-    MIN_DELAY_GEMINI = (
-        4.0  # Minimum seconds between Gemini requests (free tier ~15 RPM)
-    )
+    MIN_DELAY_GEMINI = 0.2
     MIN_DELAY_OLLAMA = 0.5  # Minimum seconds between Ollama requests (local, fast)
-    INITIAL_COOLDOWN = 60.0  # Initial cooldown after rate limit (seconds)
-    MAX_COOLDOWN = 300.0  # Maximum cooldown (5 minutes)
+    INITIAL_COOLDOWN = 15.0  # Initial cooldown after rate limit (seconds)
+    MAX_COOLDOWN = 120.0  # Maximum cooldown (5 minutes)
     COOLDOWN_MULTIPLIER = 1.5  # Multiply cooldown on repeated rate limits
     RECOVERY_THRESHOLD = 3  # Successes needed to reset cooldown
 
@@ -237,7 +235,7 @@ class AIRateLimiter:
 
         # If Gemini has too many consecutive errors, disable for longer
         if provider == AIProvider.GEMINI and state.consecutive_errors >= 3:
-            extended_cooldown = 120.0  # 2 minutes
+            extended_cooldown = 45.0
             self._gemini_disabled_until = time.time() + extended_cooldown
             logger.warning(
                 f"🚫 Gemini disabled for {extended_cooldown:.0f}s due to repeated rate limits. "
