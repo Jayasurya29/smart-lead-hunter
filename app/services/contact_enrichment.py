@@ -29,8 +29,6 @@ from typing import Optional
 import httpx
 from dotenv import load_dotenv
 
-load_dotenv()
-
 from app.config.enrichment_config import (
     BRAND_TO_PARENT,
     CONTACT_SEARCH_PRIORITIES,
@@ -39,6 +37,8 @@ from app.config.enrichment_config import (
 )
 from app.config.sap_title_classifier import title_classifier, BuyerTier
 from app.services.contact_validator import contact_validator, query_builder
+
+load_dotenv()
 
 logger = logging.getLogger(__name__)
 
