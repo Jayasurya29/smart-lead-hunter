@@ -144,7 +144,7 @@
         document.body.addEventListener('htmx:afterSwap', function(evt) {
             const toast = evt.detail.xhr.getResponseHeader('HX-Trigger');
             if (toast) { try { const data = JSON.parse(toast); if (data.showToast) showToast(data.showToast.message, data.showToast.type); } catch (e) {} }
-            if (evt.detail.target) { Alpine.initTree(evt.detail.target); }
+            if (evt.detail.target && evt.detail.target.id !== 'detail-panel') { Alpine.initTree(evt.detail.target); }
         });
     </script>
     <script>
@@ -158,6 +158,96 @@
             setTimeout(function() { htmx.trigger(e.detail.target, 'load'); }, 2000);
         }
     });
+    </script>
+    <script>
+    function leadDetail(leadId) {
+        return {
+            tab: 'overview',
+            saving: false, saveMsg: '', saveError: false,
+            enriching: false, enrichMsg: '',
+            contacts: [], contactsLoading: false, contactsLoaded: false,
+
+            init() { this.loadContacts(); },
+
+            async loadContacts() {
+                if (this.contactsLoaded) return;
+                this.contactsLoading = true;
+                try {
+                    const resp = await fetch(`/api/dashboard/leads/${leadId}/contacts`, { credentials: 'same-origin' });
+                    if (resp.ok) { this.contacts = await resp.json(); }
+                } catch (e) { console.error('Contact load failed:', e); }
+                this.contactsLoading = false;
+                this.contactsLoaded = true;
+            },
+
+            async enrichLead() {
+                if (this.enriching) return;
+                this.enriching = true; this.enrichMsg = '';
+                try {
+                    const resp = await fetch(`/api/dashboard/leads/${leadId}/enrich`, {
+                        method: 'POST', credentials: 'same-origin',
+                        headers: { 'X-Requested-With': 'XMLHttpRequest' }
+                    });
+                    const data = await resp.json();
+                    this.enriching = false;
+                    if (data.contacts_found > 0) {
+                        this.enrichMsg = 'Found ' + data.contacts_found + ' contact(s)!';
+                        this.tab = 'contact';
+                        this.contactsLoaded = false;
+                        await this.loadContacts();
+                    } else if (data.updated_fields && data.updated_fields.length > 0) {
+                        this.enrichMsg = 'Updated ' + data.updated_fields.length + ' field(s)';
+                        this.contactsLoaded = false;
+                        await this.loadContacts();
+                    } else { this.enrichMsg = 'No contacts found'; }
+                } catch (e) { this.enriching = false; this.enrichMsg = 'Error: ' + e.message; }
+            },
+
+            async saveContact(contactId) {
+                try {
+                    const resp = await fetch(`/api/dashboard/leads/${leadId}/contacts/${contactId}/save`, { method: 'POST', credentials: 'same-origin' });
+                    if (resp.ok) { const c = this.contacts.find(x => x.id === contactId); if (c) c.is_saved = true; }
+                } catch (e) { console.error(e); }
+            },
+
+            async unsaveContact(contactId) {
+                try {
+                    const resp = await fetch(`/api/dashboard/leads/${leadId}/contacts/${contactId}/unsave`, { method: 'POST', credentials: 'same-origin' });
+                    if (resp.ok) { const c = this.contacts.find(x => x.id === contactId); if (c) c.is_saved = false; }
+                } catch (e) { console.error(e); }
+            },
+
+            async setPrimary(contactId) {
+                try {
+                    const resp = await fetch(`/api/dashboard/leads/${leadId}/contacts/${contactId}/set-primary`, { method: 'POST', credentials: 'same-origin' });
+                    if (resp.ok) { this.contacts.forEach(c => { c.is_primary = (c.id === contactId); if (c.id === contactId) c.is_saved = true; }); }
+                } catch (e) { console.error(e); }
+            },
+
+            async deleteContact(contactId, name) {
+                if (!confirm(`Remove ${name}?`)) return;
+                try {
+                    const resp = await fetch(`/api/dashboard/leads/${leadId}/contacts/${contactId}`, { method: 'DELETE', credentials: 'same-origin' });
+                    if (resp.ok) { this.contacts = this.contacts.filter(c => c.id !== contactId); }
+                } catch (e) { console.error(e); }
+            },
+
+            async saveLead() {
+                this.saving = true; this.saveMsg = '';
+                const form = document.getElementById('lead-edit-form');
+                const formData = new FormData(form);
+                const data = {};
+                for (const [k, v] of formData.entries()) { data[k] = k === 'room_count' ? (v ? parseInt(v) : null) : (v || null); }
+                try {
+                    const resp = await fetch(`/api/dashboard/leads/${leadId}/edit`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) });
+                    if (resp.ok) { this.saveMsg = 'Saved!'; this.saveError = false; this.tab = 'overview'; htmx.ajax('GET', `/api/dashboard/leads/${leadId}/row`, { target: `#lead-row-${leadId}`, swap: 'outerHTML' }); }
+                    else { const err = await resp.json(); this.saveMsg = err.detail || 'Save failed'; this.saveError = true; }
+                } catch (e) { this.saveMsg = 'Network error'; this.saveError = true; }
+                this.saving = false;
+                setTimeout(() => { this.saveMsg = ''; }, 3000);
+            }
+        }
+    }
     </script>
 </body>
 </html>

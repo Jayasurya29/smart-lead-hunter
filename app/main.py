@@ -22,7 +22,7 @@ from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, ConfigDict
 from pathlib import Path
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func, text, or_, case
+from sqlalchemy import select, func, text, or_, case, update
 
 import asyncio
 import json
@@ -35,6 +35,7 @@ from app.database import get_db, init_db, async_session
 from app.models import PotentialLead, Source, ScrapeLog
 from app.services.utils import normalize_hotel_name, local_now
 from app.middleware.auth import APIKeyMiddleware
+from app.models.lead_contact import LeadContact
 
 # Global dict to track active scrape jobs and their progress
 # Protected by _scrape_lock for async-safe mutation within a single worker.
@@ -2700,13 +2701,16 @@ async def discovery_stream(request: Request):
 @app.post("/api/dashboard/leads/{lead_id}/enrich", tags=["Dashboard"])
 async def enrich_lead(lead_id: int):
     """Enrich a lead with contact information via web search + Apollo."""
+    from datetime import datetime
+
+    from sqlalchemy import and_, delete, select
+
     from app.database import async_session
     from app.models.potential_lead import PotentialLead
     from app.services.contact_enrichment import (
         enrich_lead_contacts,
         save_enrichment_to_lead,
     )
-    from sqlalchemy import select
 
     # Load lead data
     async with async_session() as session:
@@ -2736,8 +2740,72 @@ async def enrich_lead(lead_id: int):
             opening_date=lead.opening_date,
         )
 
-        # Save to database
+        # Save to notes + lead fields
         save_result = await save_enrichment_to_lead(lead.id, enrichment_result)
+
+        # Save to LeadContact table for the Contact tab
+        if enrichment_result.contacts:
+            async with async_session() as session:
+                # Remove unsaved contacts from previous enrichment (keep saved/primary)
+                await session.execute(
+                    delete(LeadContact).where(
+                        and_(
+                            LeadContact.lead_id == lead_id,
+                            LeadContact.is_saved == False,  # noqa: E712
+                            LeadContact.is_primary == False,  # noqa: E712
+                        )
+                    )
+                )
+
+                # Check existing contacts to avoid duplicates
+                existing = await session.execute(
+                    select(LeadContact.name).where(LeadContact.lead_id == lead_id)
+                )
+                existing_names = {row[0].lower() for row in existing}
+
+                for i, c in enumerate(enrichment_result.contacts):
+                    if c["name"].lower() in existing_names:
+                        # Update evidence_url on existing contacts if missing
+                        if c.get("source"):
+                            existing_contact = await session.execute(
+                                select(LeadContact).where(
+                                    and_(
+                                        LeadContact.lead_id == lead_id,
+                                        LeadContact.name.ilike(c["name"]),
+                                    )
+                                )
+                            )
+                            ec = existing_contact.scalar_one_or_none()
+                            if ec and not ec.evidence_url:
+                                ec.evidence_url = c["source"]
+                        continue
+                    contact = LeadContact(
+                        lead_id=lead_id,
+                        name=c["name"],
+                        title=c.get("title"),
+                        email=c.get("email"),
+                        phone=c.get("phone"),
+                        linkedin=c.get("linkedin"),
+                        organization=c.get("organization"),
+                        scope=c.get("scope", "unknown"),
+                        confidence=c.get(
+                            "_validation_confidence", c.get("confidence", "medium")
+                        ),
+                        tier=c.get("_buyer_tier"),
+                        score=c.get("_validation_score", 0),
+                        is_primary=(i == 0),
+                        found_via=", ".join(enrichment_result.layers_tried)
+                        if enrichment_result.layers_tried
+                        else "web_search",
+                        source_detail=c.get(
+                            "confidence_note", c.get("_validation_reason", "")
+                        ),
+                        evidence_url=c.get("source"),
+                        last_enriched_at=datetime.utcnow(),
+                    )
+                    session.add(contact)
+
+                await session.commit()
 
         return {
             "status": save_result["status"],
@@ -2756,3 +2824,108 @@ async def enrich_lead(lead_id: int):
     except Exception as e:
         logger.error(f"Enrichment failed for lead {lead_id}: {e}", exc_info=True)
         return {"status": "error", "message": f"Enrichment failed: {str(e)}"}
+
+
+# ═══════════════════════════════════════════════════════════════
+# CONTACT MANAGEMENT
+# ═══════════════════════════════════════════════════════════════
+
+
+@app.get("/api/dashboard/leads/{lead_id}/contacts")
+async def list_contacts(lead_id: int):
+    async with async_session() as session:
+        result = await session.execute(
+            select(LeadContact)
+            .where(LeadContact.lead_id == lead_id)
+            .order_by(
+                LeadContact.is_saved.desc(),
+                LeadContact.is_primary.desc(),
+                LeadContact.score.desc(),
+            )
+        )
+        return [c.to_dict() for c in result.scalars().all()]
+
+
+@app.post("/api/dashboard/leads/{lead_id}/contacts/{contact_id}/save")
+async def save_contact(lead_id: int, contact_id: int):
+    async with async_session() as session:
+        result = await session.execute(
+            select(LeadContact).where(
+                LeadContact.id == contact_id, LeadContact.lead_id == lead_id
+            )
+        )
+        contact = result.scalar_one_or_none()
+        if not contact:
+            raise HTTPException(status_code=404, detail="Contact not found")
+        contact.is_saved = True
+        contact.updated_at = datetime.utcnow()
+        await session.commit()
+        return {"status": "saved", "contact_id": contact_id}
+
+
+@app.post("/api/dashboard/leads/{lead_id}/contacts/{contact_id}/unsave")
+async def unsave_contact(lead_id: int, contact_id: int):
+    async with async_session() as session:
+        result = await session.execute(
+            select(LeadContact).where(
+                LeadContact.id == contact_id, LeadContact.lead_id == lead_id
+            )
+        )
+        contact = result.scalar_one_or_none()
+        if not contact:
+            raise HTTPException(status_code=404, detail="Contact not found")
+        contact.is_saved = False
+        contact.updated_at = datetime.utcnow()
+        await session.commit()
+        return {"status": "unsaved", "contact_id": contact_id}
+
+
+@app.delete("/api/dashboard/leads/{lead_id}/contacts/{contact_id}")
+async def delete_contact(lead_id: int, contact_id: int):
+    async with async_session() as session:
+        result = await session.execute(
+            select(LeadContact).where(
+                LeadContact.id == contact_id, LeadContact.lead_id == lead_id
+            )
+        )
+        contact = result.scalar_one_or_none()
+        if not contact:
+            raise HTTPException(status_code=404, detail="Contact not found")
+        await session.delete(contact)
+        await session.commit()
+        return {"status": "deleted", "contact_id": contact_id}
+
+
+@app.post("/api/dashboard/leads/{lead_id}/contacts/{contact_id}/set-primary")
+async def set_primary_contact(lead_id: int, contact_id: int):
+    async with async_session() as session:
+        await session.execute(
+            update(LeadContact)
+            .where(LeadContact.lead_id == lead_id)
+            .values(is_primary=False)
+        )
+        result = await session.execute(
+            select(LeadContact).where(
+                LeadContact.id == contact_id, LeadContact.lead_id == lead_id
+            )
+        )
+        contact = result.scalar_one_or_none()
+        if not contact:
+            raise HTTPException(status_code=404, detail="Contact not found")
+        contact.is_primary = True
+        contact.is_saved = True
+        contact.updated_at = datetime.utcnow()
+        lead_result = await session.execute(
+            select(PotentialLead).where(PotentialLead.id == lead_id)
+        )
+        lead = lead_result.scalar_one_or_none()
+        if lead:
+            lead.contact_name = contact.name
+            lead.contact_title = contact.title
+            lead.contact_email = contact.email
+            lead.contact_phone = contact.phone
+            if hasattr(lead, "contact_linkedin"):
+                lead.contact_linkedin = contact.linkedin
+            lead.updated_at = datetime.utcnow()
+        await session.commit()
+        return {"status": "primary_set", "contact_id": contact_id}

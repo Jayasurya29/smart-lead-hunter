@@ -119,7 +119,6 @@ class ContactValidator:
         name = contact.get("name", "").strip()
         title = contact.get("title", "").strip()
         org = contact.get("organization", "").strip()
-        linkedin = contact.get("linkedin", "") or ""
 
         # ── 1. TITLE CLASSIFICATION ──
         classification = self.classifier.classify(title)
@@ -145,18 +144,24 @@ class ContactValidator:
         score.scope_tag = scope_tag
         score.total_score += org_bonus
 
-        # ── 4. SCOPE SCORING ──
+        # ── 4. CROSS-REFERENCE TITLE + SCOPE ──
+        # Management company contacts: are they property-level or corporate?
+        if scope_tag == "management_company":
+            scope_tag = self._resolve_mgmt_company_scope(title, classification.tier)
+            score.scope_tag = scope_tag
+
+        # Safety net: Even if org matched hotel_specific, corporate titles should be downgraded
+        if scope_tag == "hotel_specific" and self._is_corporate_title(title):
+            scope_tag = "chain_corporate"
+            score.scope_tag = scope_tag
+            score.flags.append("corporate_at_property_org")
+
+        # ── 5. SCOPE SCORING ──
         scope_penalty = self._scope_penalty(scope_tag, classification.tier)
         score.scope_score = scope_penalty
         score.total_score += scope_penalty
 
-        # ── 5. LINKEDIN VALIDATION ──
-        linkedin_bonus = self._check_linkedin(linkedin, hotel_name, brand)
-        score.total_score += linkedin_bonus
-        if linkedin_bonus > 0:
-            score.flags.append("linkedin_verified")
-
-        # ── 6. CONFIDENCE LEVEL ──
+        # ── 6. LINKEDIN VALIDATION ──
         if score.total_score >= 25:
             score.confidence = "high"
         elif score.total_score >= 10:
@@ -249,6 +254,7 @@ class ContactValidator:
     ) -> tuple[int, str]:
         """
         Check if contact's organization matches the hotel, brand, or management company.
+        Cross-references with title to distinguish property staff from corporate execs.
 
         Returns: (bonus_score, scope_tag)
         """
@@ -281,14 +287,14 @@ class ContactValidator:
             if parent and parent.lower() in org_lower:
                 return (5, "chain_level")
 
-        # Management company match
+        # Management company match — distinguish property staff from corporate execs
         if management_company:
             mgmt_lower = management_company.lower().strip()
             if mgmt_lower in org_lower or org_lower in mgmt_lower:
                 return (
                     8,
-                    "hotel_specific",
-                )  # Mgmt company contacts are property-relevant
+                    "management_company",
+                )  # New scope tag — resolved later with title
 
         # No match at all — suspicious
         return (-5, "unrelated")
@@ -299,19 +305,20 @@ class ContactValidator:
         Corporate contacts are less useful for property-level uniform sales.
         """
         if scope_tag == "hotel_specific":
-            # Only bonus if title is relevant (Tier 1-5), not for UNKNOWN/irrelevant
             if tier.value <= 5:  # BuyerTier.TIER5_HR
-                return 5  # Bonus for property-level with relevant title
-            return (
-                0  # Hotel-specific but irrelevant title � no bonus with relevant title
-            )
+                return 5
+            return 0
+        elif scope_tag == "management_company":
+            # Unresolved — shouldn't reach here, but treat as chain_area
+            return -3
         elif scope_tag == "chain_level":
-            # Chain contacts OK for Tier 1-2 (centralized purchasing), bad for Tier 3
             if tier in (BuyerTier.TIER1_UNIFORM_DIRECT, BuyerTier.TIER2_PURCHASING):
-                return 0  # Centralized purchasing is fine
-            return -3  # Chain-level GM not useful for property
+                return 0
+            return -3
+        elif scope_tag == "chain_corporate":
+            return -15  # Heavy penalty — C-suite / corporate execs don't buy uniforms
         elif scope_tag == "unrelated":
-            return -10  # Strong penalty — org doesn't match at all
+            return -10
         return 0
 
     def _check_linkedin(
@@ -334,6 +341,118 @@ class ContactValidator:
             return 3
 
         return 0
+
+    def _is_corporate_title(self, title: str) -> bool:
+        """Detect corporate/executive titles that are NOT property-level buyers."""
+        if not title:
+            return False
+        title_lower = f" {title.lower().strip()} "
+
+        # Property-level titles are NEVER corporate, even if they contain
+        # words like "director" or "managing" that look corporate
+        property_keywords = [
+            "general manager",
+            "hotel manager",
+            "resort manager",
+            "property manager",
+            "operations manager",
+            "director of operations",
+            "director of housekeeping",
+            "director of rooms",
+            "director of purchasing",
+            "director of procurement",
+            "director of front office",
+            "director of food",
+            "director of f&b",
+            "director of banquets",
+            "director of catering",
+            "executive housekeeper",
+            "purchasing manager",
+            "housekeeping manager",
+            "front office manager",
+            "uniform manager",
+            "wardrobe manager",
+            "laundry manager",
+            "supply chain manager",
+            "rooms division manager",
+            "assistant general manager",
+            "assistant director",
+            "spa director",
+            "director of spa",
+        ]
+        if any(kw in title_lower for kw in property_keywords):
+            return False
+
+        corporate_signals = [
+            "ceo",
+            "coo",
+            "cfo",
+            "cto",
+            "cmo",
+            "chief executive",
+            "chief operating",
+            "chief financial",
+            "chairman",
+            "chairwoman",
+            "chairperson",
+            "president",
+            "vice president",
+            "vp ",
+            " svp ",
+            "senior vice president",
+            " evp ",
+            "executive vice president",
+            "investor",
+            "board member",
+            "board of directors",
+            "founder",
+            "co-founder",
+            "cofounder",
+            "owner",
+            "partner",
+            "managing partner",
+            "regional director",
+            "regional manager",
+            "regional vp",
+            "area director",
+            "area manager",
+            "area vp",
+            "divisional",
+            "division president",
+            "head of development",
+            "head of acquisitions",
+            "development officer",
+            "investment",
+        ]
+        return any(kw in title_lower for kw in corporate_signals)
+
+    def _resolve_mgmt_company_scope(self, title: str, tier: BuyerTier) -> str:
+        """
+        Determine if a management company contact is property-level or corporate.
+
+        Property-level roles at mgmt companies (hotel_specific):
+          - General Manager, Director of Housekeeping, Purchasing Manager, etc.
+          - These people work ON-SITE at the specific hotel
+
+        Corporate roles at mgmt companies (chain_corporate):
+          - CEO, SVP, VP of Development, Regional Director, etc.
+          - These people work at HQ and oversee multiple properties
+        """
+        if self._is_corporate_title(title):
+            return "chain_corporate"
+
+        # Property-level operational roles — these people are at the hotel
+        if tier in (
+            BuyerTier.TIER1_UNIFORM_DIRECT,
+            BuyerTier.TIER2_PURCHASING,
+            BuyerTier.TIER3_GM_OPS,
+            BuyerTier.TIER4_FB,
+            BuyerTier.TIER5_HR,
+        ):
+            return "hotel_specific"
+
+        # Unknown title at management company — could be either
+        return "chain_area"
 
     def _build_reason(self, score: ContactScore, classification) -> str:
         """Build human-readable reason string."""
@@ -483,6 +602,23 @@ class SmartQueryBuilder:
             # Query 4: Hotel name + location + GM
             if location:
                 queries.append(f"{hotel_name} {location} General Manager OR Director")
+
+            # Query 5-N: Targeted title-specific queries (SAP-proven buyer titles)
+            location_str = self._build_location(city, state, country)
+            targeted_titles = [
+                "Director of Food and Beverage",
+                "Assistant Director of Food and Beverage",
+                "Restaurants General Manager",
+                "Director of Housekeeping",
+                "Executive Housekeeper",
+                "Director of Rooms",
+                "Purchasing Manager",
+                "Director of Operations",
+                "Resort Manager",
+                "Front Office Manager",
+            ]
+            for tt in targeted_titles:
+                queries.append(f"{hotel_name} {location_str} {tt}")
 
         elif retry_attempt == 1:
             # ── RETRY: Use parent company / management company ──

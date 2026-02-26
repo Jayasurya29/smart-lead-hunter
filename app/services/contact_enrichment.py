@@ -552,9 +552,8 @@ async def _search_web(query: str, max_results: int = 5) -> list[dict]:
 
 
 async def _scrape_url(url: str) -> Optional[str]:
-    """Scrape article text from URL using httpx only."""
+    """Scrape article text - tries httpx first, falls back to Crawl4AI for blocked sites."""
     timeout = ENRICHMENT_SETTINGS["crawl_timeout_seconds"]
-
     skip_domains = [
         "linkedin.com",
         "indeed.com",
@@ -569,20 +568,67 @@ async def _scrape_url(url: str) -> Optional[str]:
             logger.info(f"Skipping: {url} (non-article site)")
             return None
 
+    text = ""
+    httpx_failed = False
+
+    # Try httpx first (fast)
     try:
         async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
-            resp = await client.get(url, headers={"User-Agent": "SmartLeadHunter/1.0"})
-            if resp.status_code != 200:
+            resp = await client.get(
+                url,
+                headers={
+                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+                },
+            )
+            if resp.status_code == 200:
+                text = re.sub(
+                    r"<script[^>]*>.*?</script>", "", resp.text, flags=re.DOTALL
+                )
+                text = re.sub(r"<style[^>]*>.*?</style>", "", text, flags=re.DOTALL)
+                text = re.sub(r"<[^>]+>", " ", text)
+                text = re.sub(r"\s+", " ", text).strip()
+                if len(text) > 200:
+                    return text[: ENRICHMENT_SETTINGS["max_article_chars"]]
+            # 403 or empty = fall through to Crawl4AI
+            if resp.status_code == 403:
+                logger.info(f"httpx blocked (403), trying Crawl4AI: {url}")
+                httpx_failed = True
+            elif resp.status_code != 200:
                 logger.warning(f"HTTP {resp.status_code} for {url}")
                 return None
-
-            text = re.sub(r"<script[^>]*>.*?</script>", "", resp.text, flags=re.DOTALL)
-            text = re.sub(r"<style[^>]*>.*?</style>", "", text, flags=re.DOTALL)
-            text = re.sub(r"<[^>]+>", " ", text)
-            text = re.sub(r"\s+", " ", text).strip()
-            return text[: ENRICHMENT_SETTINGS["max_article_chars"]]
     except Exception as e:
-        logger.warning(f"Scrape failed for {url}: {e}")
+        logger.info(f"httpx failed ({e}), trying Crawl4AI: {url}")
+        httpx_failed = True
+
+    if not httpx_failed:
+        return None
+
+    # Fallback: Crawl4AI with browser rendering
+    try:
+        import os
+
+        os.environ["PYTHONIOENCODING"] = "utf-8"
+        from crawl4ai import AsyncWebCrawler
+
+        async with AsyncWebCrawler(verbose=False) as crawler:
+            result = await crawler.arun(url=url)
+            if result and result.markdown:
+                crawled = result.markdown.strip()
+                if len(crawled) > 200:
+                    # Strip markdown formatting for cleaner Gemini extraction
+                    crawled = re.sub(r"!\[.*?\]\(.*?\)", "", crawled)
+                    crawled = re.sub(r"\[([^\]]+)\]\([^\)]+\)", r"\1", crawled)
+                    crawled = re.sub(r"#{1,6}\s*", "", crawled)
+                    crawled = re.sub(r"\*{1,3}([^*]+)\*{1,3}", r"\1", crawled)
+                    crawled = re.sub(r"\n{3,}", "\n\n", crawled)
+                    crawled = crawled.strip()
+                    crawled = crawled.strip()
+                    logger.info(f"Crawl4AI succeeded: {url} ({len(crawled)} chars)")
+                    return crawled[: ENRICHMENT_SETTINGS["max_article_chars"]]
+            logger.warning(f"Crawl4AI returned no content for {url}")
+            return None
+    except Exception as e:
+        logger.warning(f"Crawl4AI failed for {url}: {e}")
         return None
 
 
@@ -769,10 +815,33 @@ async def _layer_linkedin_snippets(
     result.layers_tried.append("linkedin_snippets")
 
     # ── SMART QUERIES for LinkedIn ──
+    location_str = ", ".join(
+        filter(
+            None,
+            [
+                city,
+                state,
+                country if country and country.upper() not in ("US", "USA") else None,
+            ],
+        )
+    )
     queries = [
         f"{hotel_name} General Manager OR Director site:linkedin.com",
         f"{hotel_name} Purchasing OR Housekeeping OR Operations site:linkedin.com",
     ]
+    # Targeted title-specific queries (finds Dale Dcruz, Jessica Farley, etc.)
+    targeted_titles = [
+        "Director of Food and Beverage",
+        "Assistant Director of Food and Beverage",
+        "Restaurants General Manager",
+        "Director of Housekeeping",
+        "Executive Housekeeper",
+        "Director of Rooms",
+        "Purchasing Manager",
+        "Front Office Manager",
+    ]
+    for tt in targeted_titles:
+        queries.append(f"{hotel_name} {location_str} {tt}")
     # Add parent company query to catch contacts like Kara DePool
     parent = management_company or brand
     if parent:
@@ -880,6 +949,15 @@ async def _layer_linkedin_snippets(
                             "buyer",
                             "vp",
                             "head of",
+                            "ceo",
+                            "coo",
+                            "cfo",
+                            "president",
+                            "chairman",
+                            "investor",
+                            "founder",
+                            "partner",
+                            "board member",
                         ]
                         has_role_word = any(rw in title_lower for rw in role_words)
 
@@ -891,6 +969,23 @@ async def _layer_linkedin_snippets(
                             # Try to find actual title from snippet
                             snippet_lower = snippet.lower()
                             for rw in [
+                                "chief executive officer",
+                                "chief operating officer",
+                                "chief financial officer",
+                                "investor",
+                                "board member",
+                                "chairman",
+                                "president",
+                                "senior vice president",
+                                "executive vice president",
+                                "vice president",
+                                "regional director",
+                                "area director",
+                                "svp",
+                                "evp",
+                                "ceo",
+                                "coo",
+                                "cfo",
                                 "director of operations",
                                 "director of food and beverage",
                                 "director of food & beverage",
@@ -938,23 +1033,96 @@ async def _layer_linkedin_snippets(
 
                 # Title from snippet: look for role keywords
                 snippet_lower = snippet.lower()
-                role_patterns = [
-                    r"role of\s+([\w\s]+?)(?:\s+(?:for|at|of)\s+)",
-                    r"(?:appointed|named|hired|joined)\s+(?:as\s+)?(?:the\s+)?([\w\s]+?)(?:\s+(?:for|at|of)\s+)",
-                    r"(?:i am|i\'m|i\'ve)\s+(?:the\s+)?(?:new\s+)?([\w\s]+?)(?:\s+(?:for|at|of)\s+)",
-                    r"stepped into the role of\s+([\w\s]+?)(?:\s+(?:for|at|of)\s+)",
-                ]
-                for pattern in role_patterns:
-                    role_match = re.search(pattern, snippet_lower)
-                    if role_match:
-                        extracted_title = role_match.group(1).strip().title()
-                        break
+                if is_post:
+                    # For POSTS: titles in text refer to OTHER people, not the poster
+                    # e.g. "recently-named General Manager Brett Orlando" -> Brett = GM
+                    mention_patterns = [
+                        r"(?:recently[- ]?named|appointed|named|hired|announcing)\s+(?:our\s+)?(?:new\s+)?((?:general manager|director of \w+|executive housekeeper|resort manager|hotel manager|purchasing manager|operations manager|front office manager))\s+([A-Z][a-z]+\s+[A-Z][a-zA-Z]+)",
+                        r"(?:our\s+)?(?:new\s+)?(general manager|director of \w+|executive housekeeper|resort manager|hotel manager|purchasing manager|operations manager)\s+([A-Z][a-z]+\s+[A-Z][a-zA-Z]+)",
+                    ]
+                    for mp in mention_patterns:
+                        mm = re.search(mp, sr.get("snippet", ""), re.IGNORECASE)
+                        if mm:
+                            mentioned_title = mm.group(1).strip().title()
+                            mentioned_name = mm.group(2).strip()
+                            # Validate: real name must be 2+ capitalized words (not "for the", "at our", etc.)
+                            name_words = mentioned_name.split()
+                            is_real_name = (
+                                len(mentioned_name) > 4
+                                and len(name_words) >= 2
+                                and all(w[0].isupper() for w in name_words)
+                                and not any(
+                                    w.lower()
+                                    in (
+                                        "the",
+                                        "our",
+                                        "for",
+                                        "at",
+                                        "as",
+                                        "and",
+                                        "or",
+                                        "in",
+                                        "of",
+                                        "a",
+                                        "an",
+                                    )
+                                    for w in name_words
+                                )
+                            )
+                            if is_real_name:
+                                existing = [
+                                    c.get("name", "").lower() for c in result.contacts
+                                ]
+                                if mentioned_name.lower() not in existing:
+                                    mentioned_contact = {
+                                        "name": mentioned_name,
+                                        "title": mentioned_title,
+                                        "email": None,
+                                        "phone": None,
+                                        "linkedin": None,
+                                        "organization": hotel_name,
+                                        "scope": "hotel_specific",
+                                        "confidence": "medium",
+                                        "confidence_note": f"Mentioned in LinkedIn post by {name}",
+                                        "source": url,
+                                        "source_type": "linkedin_post_mention",
+                                        "_raw_snippet": sr.get("snippet", ""),
+                                        "_raw_title": title,
+                                    }
+                                    result.contacts.append(mentioned_contact)
+                                    logger.info(
+                                        f"Post mention extracted: {mentioned_name} - {mentioned_title}"
+                                    )
+                    # Poster gets NO title from post body
+                    extracted_title = None
+                else:
+                    role_patterns = [
+                        r"role of\s+([\w\s]+?)(?:\s+(?:for|at|of)\s+)",
+                        r"(?:appointed|named|hired|joined)\s+(?:as\s+)?(?:the\s+)?([\w\s]+?)(?:\s+(?:for|at|of)\s+)",
+                        r"(?:i am|i\'m|i\'ve)\s+(?:the\s+)?(?:new\s+)?([\w\s]+?)(?:\s+(?:for|at|of)\s+)",
+                        r"stepped into the role of\s+([\w\s]+?)(?:\s+(?:for|at|of)\s+)",
+                    ]
+                    for pattern in role_patterns:
+                        role_match = re.search(pattern, snippet_lower)
+                        if role_match:
+                            extracted_title = role_match.group(1).strip().title()
+                            break
 
                 # If no role found in snippet, try to extract from post URL slug
                 # e.g. linkedin.com/posts/kara-depool-a69a85151_...
                 if not extracted_title:
                     # Check snippet for common title keywords
                     for kw in [
+                        "chief executive officer",
+                        "investor",
+                        "board member",
+                        "chairman",
+                        "president",
+                        "senior vice president",
+                        "vice president",
+                        "ceo",
+                        "coo",
+                        "svp",
                         "general manager",
                         "director of",
                         "executive housekeeper",
@@ -1051,6 +1219,20 @@ async def _layer_linkedin_snippets(
 
             existing_names = [c.get("name", "").lower() for c in result.contacts]
             if name.lower() in existing_names:
+                # If existing contact has no title but this one does, UPDATE it
+                if extracted_title:
+                    for existing_c in result.contacts:
+                        if existing_c.get("name", "").lower() == name.lower():
+                            if not existing_c.get("title"):
+                                existing_c["title"] = extracted_title
+                                existing_c["_raw_snippet"] = sr.get("snippet", "")
+                                existing_c["_raw_title"] = title
+                                if scope == "hotel_specific":
+                                    existing_c["scope"] = scope
+                                logger.info(
+                                    f"Title updated for {name}: {extracted_title}"
+                                )
+                            break
                 continue
 
             contact = {
@@ -1065,6 +1247,8 @@ async def _layer_linkedin_snippets(
                 "confidence_note": confidence_note,
                 "source": url,
                 "source_type": "linkedin_snippet",
+                "_raw_snippet": sr.get("snippet", ""),
+                "_raw_title": title,
             }
 
             result.contacts.append(contact)
@@ -1231,6 +1415,296 @@ async def _layer_apollo(
 
 
 # ═══════════════════════════════════════════════════════════════
+# GEMINI CONTACT VERIFICATION — AI reads context to fix false positives
+# ═══════════════════════════════════════════════════════════════
+
+
+CONTACT_VERIFICATION_PROMPT = """You are a hotel staffing verification expert for JA Uniforms, a hotel uniform supplier.
+
+TARGET HOTEL: {hotel_name}
+LOCATION: {location}
+BRAND: {brand}
+MANAGEMENT COMPANY: {management_company}
+
+Below are contacts discovered during lead research. For EACH contact, determine:
+1) Their ACTUAL job title (not someone else mentioned in a post)
+2) Their ACTUAL employer/organization
+3) Whether they are OPERATIONAL HOTEL STAFF at the target hotel
+
+OPERATIONAL HOTEL STAFF includes: General Manager, Director of Housekeeping, Executive Housekeeper,
+Purchasing Manager, Director of Operations, Director of Rooms, Front Office Manager, F&B Director,
+Assistant GM, Resort Manager, Property Manager, Hotel Manager, Operations Manager, Housekeeping Manager,
+Uniform Manager, Wardrobe Manager, Laundry Manager, Supply Chain Manager, Procurement Manager, Executive Chef.
+
+NOT operational hotel staff (REJECT these):
+- C-suite executives: CEO, COO, CFO, Chairman, Board Member, Investor, Founder, President
+- Regional/corporate roles: Regional Director, VP of Development, SVP, Area Manager
+- Construction contractors, architects, project managers for building projects
+- Sales, marketing, revenue management, catering sales roles
+- People at other hotels, not the target hotel
+- People mentioned in a LinkedIn post who are NOT the post author
+
+CRITICAL RULE FOR LINKEDIN POSTS: If source_url contains /posts/, the contact name is the POST AUTHOR.
+Titles mentioned in the snippet may refer to SOMEONE ELSE discussed in the post, NOT the author.
+Read the snippet carefully to determine the post author actual role vs who they are writing about.
+
+IMPORTANT RULES FOR KEEPING vs REJECTING:
+ALWAYS REJECT these even if they appear connected to the hotel:
+- C-suite/corporate: CEO, COO, CFO, Chairman, Investor, Founder, President, Board Member
+- Regional/area roles: Regional Director, VP of Development, SVP, Area Manager
+- Construction: contractors, architects, project managers for building projects
+- Sales/marketing: Director of Sales, National Accounts, Revenue Management, Catering Sales
+- People confirmed to work at a DIFFERENT hotel than the target
+- People with NO title whose snippet context mentions construction, building site, onsite progress, or groundbreaking
+  (these are typically contractors visiting the construction site, NOT hotel operational staff)
+- People whose ORGANIZATION name contains: Construction, Capital, Development, Holdings, Investment, Architecture,
+  Contracting, Consulting, Engineering (these are vendors/developers, NOT hotel operational staff)
+  Exception: only keep them if they hold a clear operational hotel title like General Manager or Director of Housekeeping
+
+CRITICAL: A contact MUST be confirmed at the EXACT target hotel to be kept as hotel_specific.
+Same city is NOT enough. "Director of Housekeeping in Miami" does NOT mean they work at the target hotel.
+Check raw_snippet and organization carefully - the target hotel name must appear in their profile/snippet.
+If you cannot confirm the SPECIFIC hotel, set corrected_scope to "chain_area" not "hotel_specific".
+
+ALWAYS KEEP these:
+- Contacts whose ACTUAL ROLE (not a role mentioned in someone else's post) is operational hotel staff
+- Resort Manager, Director of Operations, Director of Rooms, Director of F&B, Executive Housekeeper,
+  Purchasing Manager, Housekeeping Manager, Front Office Manager, Hotel Manager, Property Manager
+- Contacts with no extractable title but whose LinkedIn profile URL or org matches the target hotel
+
+WHEN IN DOUBT: If you cannot determine their role but they appear connected to the target hotel, KEEP them.
+But if you CAN determine they are CEO, Investor, Sales, or Construction - ALWAYS REJECT.
+
+REMINDER: For LinkedIn POSTS (source_url contains /posts/), the poster OWN title is NOT in the post text.
+The post text describes OTHER people. The poster is typically a corporate executive sharing company news.
+
+EXAMPLE OF A FALSE POSITIVE YOU MUST CATCH:
+- name: "Alinio Azevedo"
+- source_url: linkedin.com/posts/alinioazevedo_exciting-day-onsite...
+- raw_snippet: "Exciting day onsite at our Westin Cocoa Beach Resort. Construction is progressing well and our recently-named General Manager Brett Orlando..."
+- extracted_title: "General Manager"
+WRONG: Keeping Alinio as General Manager. "General Manager" refers to Brett Orlando, not Alinio.
+RIGHT: Alinio is the poster (CEO/Investor). He should be REJECTED as corporate. Brett should be a separate contact.
+
+Apply this same logic to ALL posts: the poster is sharing news about someone else getting a role.
+If raw_search_title says "Person Name Post - LinkedIn", that person is the POSTER not the role holder.
+Cross-reference the snippet text carefully - who is ACTUALLY being named/appointed/hired?
+
+IMPORTANT: If a contact has NO title in the snippet but their LinkedIn profile URL or context confirms they work at the
+target hotel, do NOT reject them. Set corrected_scope to "hotel_specific" and leave verified_title empty.
+Only reject contacts you can CONFIRM are non-operational (sales, construction, corporate, etc).
+When in doubt, KEEP the contact — our scoring system will handle ranking.
+
+IMPORTANT: If a contact has NO title in the snippet but their LinkedIn profile URL or context confirms they work at the
+target hotel, do NOT reject them. Set corrected_scope to "hotel_specific" and leave verified_title empty.
+Only reject contacts you can CONFIRM are non-operational (sales, construction, corporate, etc).
+When in doubt, KEEP the contact — our scoring system will handle ranking.
+
+CONTACTS TO VERIFY:
+{contacts_json}
+
+Respond with ONLY a JSON array. For each contact:
+{{"name": "original name", "verified_title": "actual title or empty", "verified_org": "actual employer", "is_hotel_ops": true/false, "is_at_target_hotel": true/false, "rejection_reason": "why rejected or null", "corrected_scope": "hotel_specific|chain_area|chain_corporate|rejected"}}
+"""
+
+
+async def _verify_contacts_with_gemini(
+    contacts: list[dict],
+    hotel_name: str,
+    brand: Optional[str] = None,
+    management_company: Optional[str] = None,
+    city: Optional[str] = None,
+    state: Optional[str] = None,
+    country: Optional[str] = None,
+) -> list[dict]:
+    """
+    AI verification layer: Gemini reads raw snippets to determine each contact
+    real title, org, and relevance. Fixes false positives from regex parsing.
+    """
+    api_key = os.getenv("GEMINI_API_KEY")
+    if not api_key:
+        logger.warning("GEMINI_API_KEY not set, skipping contact verification")
+        return contacts
+
+    # Build verification payload with raw snippet context
+    contacts_for_verification = []
+    for i, c in enumerate(contacts):
+        entry = {
+            "index": i,
+            "name": c.get("name", ""),
+            "extracted_title": c.get("title", ""),
+            "organization": c.get("organization", ""),
+            "source_url": c.get("source", ""),
+            "source_type": c.get("source_type", ""),
+            "current_scope": c.get("scope", ""),
+            "raw_snippet": c.get("_raw_snippet", ""),
+            "raw_search_title": c.get("_raw_title", ""),
+        }
+        contacts_for_verification.append(entry)
+
+    if not contacts_for_verification:
+        return contacts
+
+    location = _build_location_string(city, state, country)
+
+    prompt = CONTACT_VERIFICATION_PROMPT.format(
+        hotel_name=hotel_name,
+        location=location,
+        brand=brand or "Unknown",
+        management_company=management_company or "Unknown",
+        contacts_json=json.dumps(contacts_for_verification, indent=2),
+    )
+
+    model = ENRICHMENT_SETTINGS["gemini_model"]
+    api_url = (
+        f"https://generativelanguage.googleapis.com/v1beta/models/{model}"
+        f":generateContent?key={api_key}"
+    )
+
+    try:
+        async with httpx.AsyncClient(timeout=120) as client:
+            resp = await client.post(
+                api_url,
+                json={
+                    "contents": [{"parts": [{"text": prompt}]}],
+                    "generationConfig": {"temperature": 0.1},
+                },
+            )
+
+            if resp.status_code != 200:
+                logger.error(f"Gemini verification API error: {resp.status_code}")
+                return contacts
+
+            data = resp.json()
+            text = data["candidates"][0]["content"]["parts"][0]["text"]
+            text = re.sub(r"```json\s*", "", text)
+            text = re.sub(r"```\s*", "", text)
+            verifications = json.loads(text.strip())
+
+    except Exception as e:
+        import traceback
+
+        logger.error(f"Gemini contact verification failed: {type(e).__name__}: {e}")
+        logger.error(traceback.format_exc())
+        return contacts
+
+    # Apply verification results
+    verified_contacts = []
+    for v in verifications:
+        vname = v.get("name", "").lower().strip()
+        # Find matching original contact
+        match = None
+        for c in contacts:
+            if c.get("name", "").lower().strip() == vname:
+                match = c
+                break
+        if not match:
+            continue
+
+        corrected_scope = v.get("corrected_scope", "")
+        rejection_reason = v.get("rejection_reason")
+
+        if corrected_scope == "rejected":
+            logger.info(f"Gemini REJECTED: {v.get('name')} -- {rejection_reason}")
+            match["_gemini_rejected"] = True
+            match["_gemini_rejection_reason"] = rejection_reason
+            continue
+
+        # Update with verified info
+        verified_title = v.get("verified_title", "")
+        verified_org = v.get("verified_org", "")
+
+        if verified_title:
+            old_title = match.get("title", "")
+            if old_title.lower() != verified_title.lower():
+                logger.info(
+                    f"Gemini title fix: {v.get('name')}: "
+                    f"'{old_title}' -> '{verified_title}'"
+                )
+            match["title"] = verified_title
+
+        if verified_org:
+            match["organization"] = verified_org
+
+        if corrected_scope in ("hotel_specific", "chain_area", "chain_corporate"):
+            old_scope = match.get("scope", "")
+            if old_scope != corrected_scope:
+                logger.info(
+                    f"Gemini scope fix: {v.get('name')}: "
+                    f"'{old_scope}' -> '{corrected_scope}'"
+                )
+            match["scope"] = corrected_scope
+
+        match["_gemini_verified"] = True
+        match["_gemini_is_hotel_ops"] = v.get("is_hotel_ops", False)
+        match["_gemini_is_at_target"] = v.get("is_at_target_hotel", False)
+        verified_contacts.append(match)
+
+    # Keep contacts Gemini did not mention (do not drop silently)
+    verified_names = {v.get("name", "").lower().strip() for v in verifications}
+    for c in contacts:
+        if c.get("name", "").lower().strip() not in verified_names:
+            logger.warning(f"Gemini skipped contact: {c.get('name')} -- keeping as-is")
+            verified_contacts.append(c)
+
+    # Deterministic backstop: reject contacts from non-hotel orgs with no operational title
+    NON_HOTEL_ORG_KEYWORDS = [
+        "construction",
+        "capital",
+        "development",
+        "holdings",
+        "investment",
+        "architecture",
+        "contracting",
+        "consulting",
+        "engineering",
+        "ventures",
+        "equity",
+        "realty",
+        "real estate",
+        "contractors",
+        "builders",
+    ]
+    OPERATIONAL_TITLES = [
+        "general manager",
+        "director of",
+        "executive housekeeper",
+        "purchasing manager",
+        "housekeeping manager",
+        "front office manager",
+        "hotel manager",
+        "resort manager",
+        "property manager",
+        "operations manager",
+        "assistant general manager",
+        "rooms division",
+        "uniform manager",
+        "wardrobe manager",
+        "laundry manager",
+    ]
+    final_contacts = []
+    for c in verified_contacts:
+        org = (c.get("organization") or "").lower()
+        title = (c.get("title") or "").lower()
+        has_non_hotel_org = any(kw in org for kw in NON_HOTEL_ORG_KEYWORDS)
+        has_operational_title = any(kw in title for kw in OPERATIONAL_TITLES)
+        if has_non_hotel_org and not has_operational_title:
+            logger.info(
+                f"Org-filter REJECTED: {c.get('name')} -- org='{c.get('organization')}' "
+                f"title='{c.get('title', '')}' (non-hotel org, no operational title)"
+            )
+            continue
+        final_contacts.append(c)
+
+    rejected_count = len(contacts) - len(final_contacts)
+    logger.info(
+        f"Gemini verification: {len(contacts)} in -> "
+        f"{len(final_contacts)} out ({rejected_count} rejected)"
+    )
+    return final_contacts
+
+
+# ═══════════════════════════════════════════════════════════════
 # MAIN ENRICHMENT ORCHESTRATOR — v4 with validation + auto-retry
 # ═══════════════════════════════════════════════════════════════
 
@@ -1293,6 +1767,29 @@ async def enrich_lead_contacts(
     except Exception as e:
         result.errors.append(f"LinkedIn snippets failed: {str(e)}")
         logger.error(f"Layer 2 error: {e}")
+
+    # ═══════════════════════════════════════════════════════════
+    # GEMINI AI VERIFICATION — fix false positives before scoring
+    # ═══════════════════════════════════════════════════════════
+
+    if result.contacts:
+        try:
+            result.contacts = await _verify_contacts_with_gemini(
+                contacts=result.contacts,
+                hotel_name=hotel_name,
+                brand=brand,
+                management_company=management_company or result.management_company,
+                city=city,
+                state=state,
+                country=country,
+            )
+            # Remove rejected contacts
+            result.contacts = [
+                c for c in result.contacts if not c.get("_gemini_rejected", False)
+            ]
+        except Exception as e:
+            result.errors.append(f"Gemini verification failed: {str(e)}")
+            logger.error(f"Gemini verification error: {e}")
 
     # ══════════════════════════════════════════════════════════
     # CONTACT VALIDATION — SAP-trained scoring + false positive filter
@@ -1369,9 +1866,8 @@ async def enrich_lead_contacts(
             f"(from {len(scored_contacts)} raw)"
         )
 
-    # ── Layer 3: Apollo (only if no hotel-specific contacts after validation) ──
-    hotel_specific = [c for c in result.contacts if c.get("scope") == "hotel_specific"]
-    if not hotel_specific:
+    # ── Layer 3: Apollo (always run as supplement to fill gaps) ──
+    if True:  # Always run Apollo to supplement web/LinkedIn contacts
         try:
             pre_apollo_count = len(result.contacts)
             await _layer_apollo(

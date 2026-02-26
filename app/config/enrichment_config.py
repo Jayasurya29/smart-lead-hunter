@@ -423,6 +423,6 @@ ENRICHMENT_SETTINGS = {
     "crawl_timeout_seconds": 15,
     "max_articles_to_scrape": 3,
     "max_apollo_reveals_per_lead": 2,
-    "gemini_model": "gemini-3-flash",
+    "gemini_model": "gemini-2.5-flash",
     "max_article_chars": 8000,
 }
