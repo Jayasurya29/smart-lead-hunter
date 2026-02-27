@@ -839,6 +839,9 @@ async def _layer_linkedin_snippets(
         "Director of Rooms",
         "Purchasing Manager",
         "Front Office Manager",
+        "Resort Manager",
+        "Hotel Manager",
+        "Operations Manager",
     ]
     for tt in targeted_titles:
         queries.append(f"{hotel_name} {location_str} {tt}")
@@ -1255,6 +1258,62 @@ async def _layer_linkedin_snippets(
             result.sources_used.append(f"LinkedIn: {name}")
             found = True
             logger.info(f"LinkedIn: {name} - {extracted_title} [{scope}]")
+
+    # ── TITLE RECOVERY PASS: search by name for contacts missing titles ──
+    untitled = [c for c in result.contacts if not c.get("title") and c.get("name")]
+    for contact in untitled[:3]:
+        recovery_name = contact["name"]
+        recovery_query = f'"{recovery_name}" "{hotel_name}"'
+        logger.info(f"Title recovery search: {recovery_query}")
+        recovery_results = await _search_web(recovery_query, max_results=5)
+        has_serper = bool(os.getenv("SERPER_API_KEY"))
+        delay = (
+            ENRICHMENT_SETTINGS["serper_delay_seconds"]
+            if has_serper
+            else ENRICHMENT_SETTINGS["ddg_delay_seconds"]
+        )
+        await asyncio.sleep(delay)
+
+        title_keywords = [
+            "resort manager",
+            "hotel manager",
+            "general manager",
+            "assistant general manager",
+            "director of operations",
+            "director of food and beverage",
+            "director of food & beverage",
+            "director of housekeeping",
+            "executive housekeeper",
+            "director of rooms",
+            "rooms division manager",
+            "purchasing manager",
+            "operations manager",
+            "front office manager",
+            "director of procurement",
+            "director of purchasing",
+            "director of banquets",
+            "director of catering",
+            "director of f&b",
+            "director of sales",
+            "director of engineering",
+            "spa director",
+            "director of spa",
+            "restaurant general manager",
+            "restaurants general manager",
+        ]
+
+        for sr in recovery_results:
+            snippet_lower = sr.get("snippet", "").lower()
+            title_text = sr.get("title", "").lower()
+            combined = f"{snippet_lower} {title_text}"
+
+            for kw in title_keywords:
+                if kw in combined:
+                    contact["title"] = kw.title()
+                    logger.info(f"Title recovered for {recovery_name}: {kw.title()}")
+                    break
+            if contact.get("title"):
+                break
 
     return found
 
