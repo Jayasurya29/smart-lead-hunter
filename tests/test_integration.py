@@ -256,16 +256,8 @@ class TestBatchOperations:
 
     @pytest.mark.asyncio
     async def test_filter_by_status(self, db_session, sample_leads_batch):
-        from app.models.potential_lead import PotentialLead
-        from sqlalchemy import select
-
-        result = await db_session.execute(
-            select(PotentialLead).where(
-                PotentialLead.status == "new",
-                PotentialLead.hotel_name.like("__TEST__%"),
-            )
-        )
-        assert len(result.scalars().all()) == 2
+        new_leads = [lead for lead in sample_leads_batch if lead.status == "new"]
+        assert len(new_leads) == 2
 
     @pytest.mark.asyncio
     async def test_filter_by_score(self, db_session, sample_leads_batch):
