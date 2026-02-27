@@ -134,12 +134,19 @@ class ContactValidator:
             score.flags.append("name_collision")
 
         # ── 3. ORGANIZATION MATCH ──
-        org_bonus, scope_tag = self._check_org_match(
-            org=org,
-            hotel_name=hotel_name,
-            brand=brand,
-            management_company=management_company,
-        )
+        # Respect pre-existing scope from Gemini verification if hotel_specific
+        pre_scope = contact.get("scope", "")
+        gemini_confirmed = pre_scope == "hotel_specific"
+        if gemini_confirmed:
+            org_bonus = 15
+            scope_tag = "hotel_specific"
+        else:
+            org_bonus, scope_tag = self._check_org_match(
+                org=org,
+                hotel_name=hotel_name,
+                brand=brand,
+                management_company=management_company,
+            )
         score.org_match_bonus = org_bonus
         score.scope_tag = scope_tag
         score.total_score += org_bonus
@@ -151,7 +158,12 @@ class ContactValidator:
             score.scope_tag = scope_tag
 
         # Safety net: Even if org matched hotel_specific, corporate titles should be downgraded
-        if scope_tag == "hotel_specific" and self._is_corporate_title(title):
+        # BUT skip if Gemini already confirmed hotel_specific (Gemini has full context)
+        if (
+            scope_tag == "hotel_specific"
+            and self._is_corporate_title(title)
+            and not gemini_confirmed
+        ):
             scope_tag = "chain_corporate"
             score.scope_tag = scope_tag
             score.flags.append("corporate_at_property_org")
@@ -319,6 +331,8 @@ class ContactValidator:
             return -15  # Heavy penalty — C-suite / corporate execs don't buy uniforms
         elif scope_tag == "unrelated":
             return -10
+        elif scope_tag == "unknown":
+            return -5
         return 0
 
     def _check_linkedin(
