@@ -1848,12 +1848,52 @@ async def _verify_contacts_with_gemini(
 
         if verified_title:
             old_title = match.get("title", "")
-            if old_title.lower() != verified_title.lower():
+            old_lower = old_title.lower().strip()
+
+            # Only accept Gemini's title if original was missing or incomplete
+            # e.g. "Director Of" → "Director of Food & Beverage" (good)
+            # but NOT "Director of Operations" → "Managing Director" (bad)
+            title_is_missing = not old_lower
+            title_is_incomplete = (
+                old_lower.endswith(" of")
+                or old_lower.endswith(" for")
+                or old_lower.endswith(" and")
+                or old_lower.endswith(" -")
+                or len(old_lower.split()) <= 1
+            )
+            # Gemini expands the original (contains old words)
+            old_words = set(old_lower.split()) - {
+                "of",
+                "the",
+                "and",
+                "for",
+                "at",
+                "in",
+                "&",
+            }
+            new_words = set(verified_title.lower().split()) - {
+                "of",
+                "the",
+                "and",
+                "for",
+                "at",
+                "in",
+                "&",
+            }
+            title_is_expansion = old_words and old_words.issubset(new_words)
+
+            if title_is_missing or title_is_incomplete or title_is_expansion:
+                if old_lower != verified_title.lower().strip():
+                    logger.info(
+                        f"Gemini title fix: {v.get('name')}: "
+                        f"'{old_title}' -> '{verified_title}'"
+                    )
+                match["title"] = verified_title
+            elif old_lower != verified_title.lower().strip():
                 logger.info(
-                    f"Gemini title fix: {v.get('name')}: "
-                    f"'{old_title}' -> '{verified_title}'"
+                    f"Gemini title change BLOCKED: {v.get('name')}: "
+                    f"kept '{old_title}' (Gemini wanted '{verified_title}')"
                 )
-            match["title"] = verified_title
 
         if verified_org:
             match["organization"] = verified_org
