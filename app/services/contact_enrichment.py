@@ -845,6 +845,27 @@ async def _layer_linkedin_snippets(
     ]
     for tt in targeted_titles:
         queries.append(f"{hotel_name} {location_str} {tt}")
+
+    # Create hotel name variations for wider search coverage
+    short_hotel_name = re.sub(
+        r"\s+(?:Resort|Hotel|Spa|Suites?|Residences?|Inn|Lodge|&)+(?:\s+(?:Resort|Hotel|Spa|Suites?|Residences?|Inn|Lodge|&))*\s*$",
+        "",
+        hotel_name,
+        flags=re.IGNORECASE,
+    ).strip()
+    hotel_variants = [f"{hotel_name} {location_str}"]
+    if short_hotel_name and short_hotel_name.lower() != hotel_name.lower():
+        hotel_variants.append(f"{short_hotel_name} {location_str}")
+    if brand:
+        brand_location = f"{brand} {location_str}"
+        if brand_location.lower() not in [v.lower() for v in hotel_variants]:
+            hotel_variants.append(brand_location)
+
+    for tt in targeted_titles:
+        # Alternate between hotel name variants to maximize coverage
+        variant = hotel_variants[targeted_titles.index(tt) % len(hotel_variants)]
+        queries.append(f"{variant} {tt}")
+
     # Add parent company query to catch contacts like Kara DePool
     parent = management_company or brand
     if parent:
@@ -870,7 +891,159 @@ async def _layer_linkedin_snippets(
             is_profile = "linkedin.com/in/" in url
             is_post = "linkedin.com/posts/" in url
 
-            if not is_profile and not is_post:
+            # ── CONTACT DIRECTORY SITES: RocketReach, SignalHire, ZoomInfo, Lusha ──
+            is_contact_directory = any(
+                domain in url
+                for domain in [
+                    "rocketreach.co",
+                    "signalhire.com",
+                    "zoominfo.com",
+                    "lusha.com",
+                    "apollo.io",
+                    "contactout.com",
+                ]
+            )
+
+            if not is_profile and not is_post and not is_contact_directory:
+                continue
+
+            if is_contact_directory:
+                cd_name = None
+                cd_title = None
+                cd_org = None
+
+                # Multiple snippet patterns these sites use:
+                snippet_patterns = [
+                    # "Name, based in Location, is currently a Title at Org. Name brings..."
+                    r"^([A-Z][a-zA-Z]+(?:\s+[a-zA-Z][a-zA-Z]+){1,3}),?\s+(?:based in .+?,\s+)?is (?:currently |a |the )?(.*?)\s+at\s+(.+?)(?:\.\s|\s+\w+ brings)",
+                    # "Name is a Title at Org."
+                    r"^([A-Z][a-zA-Z]+(?:\s+[a-zA-Z][a-zA-Z]+){1,3})\s*(?:is|,)\s+(?:currently\s+)?(?:a\s+|the\s+)?(.*?)\s+at\s+(.+?)(?:\.|$)",
+                    # "Name, Title at Org, has been..."
+                    r"^([A-Z][a-zA-Z]+(?:\s+[a-zA-Z][a-zA-Z]+){1,3}),\s+(.*?)\s+at\s+(.+?)(?:,\s+has|\.\s|$)",
+                    # "Name · Title · Org" (ZoomInfo style)
+                    r"^([A-Z][a-zA-Z]+(?:\s+[a-zA-Z][a-zA-Z]+){1,3})\s+·\s+(.*?)\s+·\s+(.+?)(?:\s+·|\.|$)",
+                    # "Name - Title - Org" (some directory styles)
+                    r"^([A-Z][a-zA-Z]+(?:\s+[a-zA-Z][a-zA-Z]+){1,3})\s+-\s+(.*?)\s+-\s+(.+?)(?:\.|$)",
+                ]
+
+                for pattern in snippet_patterns:
+                    cd_match = re.search(pattern, snippet)
+                    if cd_match:
+                        cd_name = cd_match.group(1).strip()
+                        cd_title = cd_match.group(2).strip()
+                        cd_org = cd_match.group(3).strip().rstrip(".")
+                        break
+
+                # Fallback: extract org from search result title
+                # "Carlos Noboa | The Ritz-Carlton, Grand Cayman - RocketReach"
+                if not cd_name and title:
+                    title_match = re.match(
+                        r"^([A-Z][a-zA-Z]+(?:\s+[a-zA-Z][a-zA-Z]+){1,3})\s*(?:\||[-–—])\s*(.+?)(?:\s*[-–—|]\s*(?:RocketReach|SignalHire|ZoomInfo|Lusha|Apollo|ContactOut))",
+                        title,
+                    )
+                    if title_match:
+                        cd_name = title_match.group(1).strip()
+                        rest = title_match.group(2).strip()
+                        # "Email & Phone Number | Org" or just "Org"
+                        rest_clean = re.sub(
+                            r"(?:Email|Phone|Contact).*?(?:\||[-–—])\s*",
+                            "",
+                            rest,
+                        ).strip()
+                        if rest_clean:
+                            cd_org = rest_clean
+
+                if cd_name:
+                    # Clean title — strip articles and "currently"
+                    if cd_title:
+                        # Strip "based in Location, is currently a" prefix
+                        # Anchor on known title keywords to avoid eating good content
+                        cd_title = re.sub(
+                            r"^.*?(?:is\s+)?(?:currently\s+)?(?:a\s+|an\s+|the\s+)?(?=(?:Director|Manager|Head|Chief|Executive|Assistant|General|Resort|Hotel|Front|Purchasing|Operations|Housekeeping|Coordinator|Supervisor)\b)",
+                            "",
+                            cd_title,
+                            flags=re.IGNORECASE,
+                        ).strip()
+                        # Strip trailing org after dash: "Director Of Housekeeping - Kimpton Seafire"
+                        cd_title = re.sub(
+                            r"\s*[-–—]\s+.*$",
+                            "",
+                            cd_title,
+                        ).strip()
+                        # Final cleanup of remaining articles
+                        cd_title = re.sub(
+                            r"^(?:a|an|the)\s+",
+                            "",
+                            cd_title,
+                            flags=re.IGNORECASE,
+                        ).strip()
+
+                    source_site = url.split("/")[2].replace("www.", "")
+
+                    # Check if this person already exists — update title if missing
+                    existing_names = [
+                        c.get("name", "").lower() for c in result.contacts
+                    ]
+                    if cd_name.lower() in existing_names:
+                        if cd_title:
+                            for existing_c in result.contacts:
+                                if (
+                                    existing_c.get("name", "").lower()
+                                    == cd_name.lower()
+                                ):
+                                    if not existing_c.get("title"):
+                                        existing_c["title"] = cd_title
+                                        if cd_org and not existing_c.get(
+                                            "organization"
+                                        ):
+                                            existing_c["organization"] = cd_org
+                                        logger.info(
+                                            f"{source_site} title update: {cd_name} -> {cd_title}"
+                                        )
+                                    break
+                        continue
+
+                    # New contact
+                    hotel_lower = hotel_name.lower()
+                    cd_org_lower = (cd_org or "").lower()
+                    hotel_words = [w for w in hotel_lower.split() if len(w) > 3]
+                    org_matches = sum(1 for w in hotel_words if w in cd_org_lower)
+                    match_ratio = org_matches / len(hotel_words) if hotel_words else 0
+
+                    if match_ratio >= 0.5:
+                        scope = "hotel_specific"
+                        confidence = "medium"
+                        confidence_note = (
+                            f"{source_site} confirms {cd_title} at {cd_org}"
+                        )
+                    else:
+                        scope = "chain_area"
+                        confidence = "low"
+                        confidence_note = (
+                            f"{source_site}: {cd_org} (hotel match unclear)"
+                        )
+
+                    contact = {
+                        "name": cd_name,
+                        "title": cd_title or "",
+                        "email": None,
+                        "phone": None,
+                        "linkedin": None,
+                        "organization": cd_org or "",
+                        "scope": scope,
+                        "confidence": confidence,
+                        "confidence_note": confidence_note,
+                        "source": url,
+                        "source_type": f"{source_site}_snippet",
+                        "_raw_snippet": snippet,
+                        "_raw_title": title,
+                    }
+                    result.contacts.append(contact)
+                    result.sources_used.append(f"{source_site}: {cd_name}")
+                    found = True
+                    logger.info(
+                        f"{source_site}: {cd_name} - {cd_title} at {cd_org} [{scope}]"
+                    )
                 continue
 
             name = None

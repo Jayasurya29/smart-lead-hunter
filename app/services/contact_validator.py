@@ -126,6 +126,11 @@ class ContactValidator:
         score.title_tier = classification.tier
         score.total_score += classification.score
 
+        # Penalty for missing title — can't do sales outreach without knowing the role
+        if not title:
+            score.total_score -= 10
+            score.flags.append("no_title")
+
         # ── 2. NAME COLLISION DETECTION ──
         collision_penalty = self._check_name_collision(name, hotel_name_words)
         score.name_collision_penalty = collision_penalty
