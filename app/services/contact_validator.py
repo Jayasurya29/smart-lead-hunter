@@ -625,16 +625,19 @@ class SmartQueryBuilder:
             # Query 5-N: Targeted title-specific queries (SAP-proven buyer titles)
             location_str = self._build_location(city, state, country)
             targeted_titles = [
-                "Director of Food and Beverage",
-                "Assistant Director of Food and Beverage",
-                "Restaurants General Manager",
+                "General Manager",
                 "Director of Housekeeping",
                 "Executive Housekeeper",
-                "Director of Rooms",
+                "Housekeeping Manager",
                 "Purchasing Manager",
+                "Director of Purchasing",
+                "Procurement Manager",
                 "Director of Operations",
-                "Resort Manager",
-                "Front Office Manager",
+                "Director of Rooms",
+                "Hotel Manager",
+                "Director of Food and Beverage",
+                "Executive Chef",
+                "Laundry Manager",
             ]
             for tt in targeted_titles:
                 queries.append(f"{hotel_name} {location_str} {tt}")

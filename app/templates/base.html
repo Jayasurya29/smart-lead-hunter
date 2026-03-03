@@ -180,15 +180,37 @@
                 this.contactsLoaded = true;
             },
 
+            enrichProgress: 0, enrichStage: '',
             async enrichLead() {
                 if (this.enriching) return;
-                this.enriching = true; this.enrichMsg = '';
+                this.enriching = true; this.enrichMsg = ''; this.enrichProgress = 0; this.enrichStage = '';
+                const stages = [
+                    { pct: 5, msg: 'Starting enrichment...' },
+                    { pct: 15, msg: 'Searching web articles...' },
+                    { pct: 30, msg: 'Scanning press releases...' },
+                    { pct: 45, msg: 'Extracting LinkedIn profiles...' },
+                    { pct: 60, msg: 'Running targeted title searches...' },
+                    { pct: 75, msg: 'Verifying contacts with AI...' },
+                    { pct: 85, msg: 'Checking Apollo database...' },
+                    { pct: 92, msg: 'Finding LinkedIn URLs...' },
+                    { pct: 96, msg: 'Finalizing results...' },
+                ];
+                let stageIdx = 0;
+                const progressTimer = setInterval(() => {
+                    if (stageIdx < stages.length) {
+                        this.enrichProgress = stages[stageIdx].pct;
+                        this.enrichStage = stages[stageIdx].msg;
+                        stageIdx++;
+                    }
+                }, 4000);
                 try {
                     const resp = await fetch(`/api/dashboard/leads/${leadId}/enrich`, {
                         method: 'POST', credentials: 'same-origin',
                         headers: { 'X-Requested-With': 'XMLHttpRequest' }
                     });
+                    clearInterval(progressTimer);
                     const data = await resp.json();
+                    this.enrichProgress = 100; this.enrichStage = '';
                     this.enriching = false;
                     if (data.contacts_found > 0) {
                         this.enrichMsg = 'Found ' + data.contacts_found + ' contact(s)!';
@@ -200,7 +222,7 @@
                         this.contactsLoaded = false;
                         await this.loadContacts();
                     } else { this.enrichMsg = 'No contacts found'; }
-                } catch (e) { this.enriching = false; this.enrichMsg = 'Error: ' + e.message; }
+                } catch (e) { clearInterval(progressTimer); this.enriching = false; this.enrichProgress = 0; this.enrichMsg = 'Error: ' + e.message; }
             },
 
             async saveContact(contactId) {

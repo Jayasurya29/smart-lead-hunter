@@ -122,11 +122,11 @@
                     <div class="bg-gradient-to-r from-blue-50 to-indigo-50 rounded-lg p-3.5 ring-1 ring-blue-100/60 hover:ring-blue-200 transition-all group">
                         <div class="flex items-center gap-3">
                             <div class="w-9 h-9 rounded-full bg-gradient-to-br from-blue-400 to-indigo-500 flex items-center justify-center flex-shrink-0">
-                                <span class="text-white font-bold text-sm" x-text="(contacts[0]?.name || '?')[0].toUpperCase()"></span>
+                                <span class="text-white font-bold text-sm" x-text="((contacts.find(c => c.is_primary) || contacts[0])?.name || '?')[0].toUpperCase()"></span>
                             </div>
                             <div class="min-w-0 flex-1">
-                                <p class="text-sm font-semibold text-gray-900" x-text="contacts[0]?.name"></p>
-                                <p class="text-xs text-gray-500 truncate" x-text="contacts[0]?.title || 'No title'"></p>
+                                <p class="text-sm font-semibold text-gray-900" x-text="(contacts.find(c => c.is_primary) || contacts[0])?.name"></p>
+                                <p class="text-xs text-gray-500 truncate" x-text="(contacts.find(c => c.is_primary) || contacts[0])?.title || 'No title'"></p>
                             </div>
                             <div class="flex items-center gap-1.5">
                                 <span x-show="contacts.length > 1" class="text-[10px] text-blue-500 font-medium" x-text="'+' + (contacts.length - 1) + ' more'"></span>
@@ -209,8 +209,20 @@
                 </button>
             </div>
 
+            <!-- Progress bar during enrichment -->
+            <div x-show="enriching" x-transition class="space-y-1.5">
+                <div class="flex items-center justify-between">
+                    <span class="text-[11px] text-purple-600 font-medium" x-text="enrichStage || 'Starting...'"></span>
+                    <span class="text-[11px] text-purple-400 font-mono" x-text="enrichProgress + '%'"></span>
+                </div>
+                <div class="w-full bg-purple-100 rounded-full h-1.5 overflow-hidden">
+                    <div class="bg-gradient-to-r from-purple-500 to-indigo-500 h-full rounded-full transition-all duration-1000 ease-out"
+                         :style="'width: ' + enrichProgress + '%'"></div>
+                </div>
+            </div>
+
             <!-- Status message -->
-            <div x-show="enrichMsg" x-transition class="text-xs px-3 py-2 rounded-lg"
+            <div x-show="enrichMsg && !enriching" x-transition class="text-xs px-3 py-2 rounded-lg"
                  :class="enrichMsg?.includes('Found') || enrichMsg?.includes('Updated') ? 'bg-emerald-50 text-emerald-700' : enrichMsg?.includes('Error') ? 'bg-red-50 text-red-600' : 'bg-amber-50 text-amber-700'">
                 <span x-text="enrichMsg"></span>
             </div>

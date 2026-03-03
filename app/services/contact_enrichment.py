@@ -1727,7 +1727,13 @@ Below are contacts discovered during lead research. For EACH contact, determine:
 OPERATIONAL HOTEL STAFF includes: General Manager, Director of Housekeeping, Executive Housekeeper,
 Purchasing Manager, Director of Operations, Director of Rooms, Front Office Manager, F&B Director,
 Assistant GM, Resort Manager, Property Manager, Hotel Manager, Operations Manager, Housekeeping Manager,
-Uniform Manager, Wardrobe Manager, Laundry Manager, Supply Chain Manager, Procurement Manager, Executive Chef.
+Uniform Manager, Wardrobe Manager, Laundry Manager, Supply Chain Manager, Procurement Manager, Executive Chef,
+Director of Purchasing, Director of Finance, Controller, Procurement Manager, Housekeeping Director.
+
+GATEWAY CONTACTS (DO NOT REJECT — classify normally for scope):
+- Director of People & Culture, Director of Talent & Culture, HR Director, HR Manager
+- These may be kept or dropped later based on how many operational contacts we find.
+- Classify their scope normally (hotel_specific vs chain_area) based on evidence.
 
 NOT operational hotel staff (REJECT these):
 - C-suite executives: CEO, COO, CFO, Chairman, Board Member, Investor, Founder, President
@@ -1789,12 +1795,24 @@ If you cannot confirm the SPECIFIC hotel, set corrected_scope to "chain_area" no
 
 ALWAYS KEEP these:
 - Contacts whose ACTUAL ROLE (not a role mentioned in someone else's post) is operational hotel staff
+  AND whose snippet/org confirms they work at the TARGET hotel specifically
 - Resort Manager, Director of Operations, Director of Rooms, Director of F&B, Executive Housekeeper,
   Purchasing Manager, Housekeeping Manager, Front Office Manager, Hotel Manager, Property Manager
-- Contacts with no extractable title but whose LinkedIn profile URL or org matches the target hotel
 
-WHEN IN DOUBT: If you cannot determine their role but they appear connected to the target hotel, KEEP them.
-But if you CAN determine they are CEO, Investor, Sales, or Construction - ALWAYS REJECT.
+DIFFERENT HOTEL = ALWAYS REJECT:
+If the snippet or organization mentions a SPECIFIC hotel name that is NOT the target hotel, REJECT immediately.
+Examples:
+- Target: "Fairmont New Orleans" → snippet mentions "Archer Hotel" or "The Roosevelt" = REJECT
+- Target: "Westin Cocoa Beach" → snippet mentions "Hilton Garden Inn" = REJECT
+- This applies even if the contact has an operational title and is in the same city.
+A different hotel name is definitive proof they do NOT work at the target.
+
+WHEN IN DOUBT about hotel connection:
+- If snippet/org mentions a DIFFERENT specific hotel → REJECT (not chain_area, REJECT)
+- If snippet/org mentions only the parent brand → chain_area
+- If snippet/org has NO hotel mentioned at all → chain_area (NOT hotel_specific)
+- Only assign hotel_specific when the TARGET hotel name or its unique location appears in the snippet
+- ALWAYS REJECT CEO, Investor, Sales, Construction regardless
 
 REMINDER: For LinkedIn POSTS (source_url contains /posts/), the poster OWN title is NOT in the post text.
 The post text describes OTHER people. The poster is typically a corporate executive sharing company news.
@@ -1811,15 +1829,12 @@ Apply this same logic to ALL posts: the poster is sharing news about someone els
 If raw_search_title says "Person Name Post - LinkedIn", that person is the POSTER not the role holder.
 Cross-reference the snippet text carefully - who is ACTUALLY being named/appointed/hired?
 
-IMPORTANT: If a contact has NO title in the snippet but their LinkedIn profile URL or context confirms they work at the
-target hotel, do NOT reject them. Set corrected_scope to "hotel_specific" and leave verified_title empty.
-Only reject contacts you can CONFIRM are non-operational (sales, construction, corporate, etc).
-When in doubt, KEEP the contact — our scoring system will handle ranking.
+IMPORTANT: If a contact has NO title but their LinkedIn URL or org explicitly contains the TARGET hotel name,
+keep them as hotel_specific. But if their profile shows a DIFFERENT hotel or no hotel at all, REJECT or set chain_area.
+Do NOT default to keeping contacts just because you are uncertain — uncertainty without evidence means chain_area at best.
 
-IMPORTANT: If a contact has NO title in the snippet but their LinkedIn profile URL or context confirms they work at the
-target hotel, do NOT reject them. Set corrected_scope to "hotel_specific" and leave verified_title empty.
-Only reject contacts you can CONFIRM are non-operational (sales, construction, corporate, etc).
-When in doubt, KEEP the contact — our scoring system will handle ranking.
+LOW-SCORE CONTACTS: If a contact has no title AND no organization matching the target hotel, they should be REJECTED.
+A contact with zero evidence of working at the target hotel should never be classified as hotel_specific.
 
 CONTACTS TO VERIFY:
 {contacts_json}
@@ -2226,6 +2241,40 @@ async def enrich_lead_contacts(
             min_score=5,
             max_contacts=MAX_CONTACTS_TO_SAVE,
         )
+
+        # Conditional Tier 5 HR filter — only keep gateway contacts when needed
+        strong_contacts = [
+            s
+            for s in good_contacts
+            if s.scope_tag == "hotel_specific"
+            and s.title_tier
+            and s.title_tier.value <= 4
+            and s.total_score > 0
+        ]
+        if len(strong_contacts) >= 2:
+            before_count = len(good_contacts)
+            good_contacts = [
+                s
+                for s in good_contacts
+                if not (s.title_tier and s.title_tier == BuyerTier.TIER5_HR)
+            ]
+            dropped = before_count - len(good_contacts)
+            if dropped:
+                logger.info(
+                    f"Dropped {dropped} Tier 5 HR gateway contacts — "
+                    f"{len(strong_contacts)} strong Tier 1-4 contacts found"
+                )
+        else:
+            hr_count = sum(
+                1
+                for s in good_contacts
+                if s.title_tier and s.title_tier == BuyerTier.TIER5_HR
+            )
+            if hr_count:
+                logger.info(
+                    f"Keeping {hr_count} Tier 5 HR as gateway — only "
+                    f"{len(strong_contacts)} strong Tier 1-4 contacts"
+                )
 
         # Replace raw contacts with validated ones, preserving extra metadata
         validated_contacts = []
