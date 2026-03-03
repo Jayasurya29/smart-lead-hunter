@@ -589,9 +589,46 @@ async def _scrape_url(url: str) -> Optional[str]:
                 text = re.sub(r"\s+", " ", text).strip()
                 if len(text) > 200:
                     return text[: ENRICHMENT_SETTINGS["max_article_chars"]]
-            # 403 or empty = fall through to Crawl4AI
+            # 403 = retry with full browser headers before Crawl4AI
             if resp.status_code == 403:
-                logger.info(f"httpx blocked (403), trying Crawl4AI: {url}")
+                logger.info(f"httpx blocked (403), retrying with full headers: {url}")
+                try:
+                    resp2 = await client.get(
+                        url,
+                        headers={
+                            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+                            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+                            "Accept-Language": "en-US,en;q=0.9",
+                            "Accept-Encoding": "gzip, deflate, br",
+                            "Referer": "https://www.google.com/",
+                            "DNT": "1",
+                            "Connection": "keep-alive",
+                            "Upgrade-Insecure-Requests": "1",
+                            "Sec-Fetch-Dest": "document",
+                            "Sec-Fetch-Mode": "navigate",
+                            "Sec-Fetch-Site": "cross-site",
+                            "Cache-Control": "max-age=0",
+                        },
+                    )
+                    if resp2.status_code == 200:
+                        text = re.sub(
+                            r"<script[^>]*>.*?</script>",
+                            "",
+                            resp2.text,
+                            flags=re.DOTALL,
+                        )
+                        text = re.sub(
+                            r"<style[^>]*>.*?</style>", "", text, flags=re.DOTALL
+                        )
+                        text = re.sub(r"<[^>]+>", " ", text)
+                        text = re.sub(r"\s+", " ", text).strip()
+                        if len(text) > 200:
+                            logger.info(
+                                f"httpx retry succeeded: {url} ({len(text)} chars)"
+                            )
+                            return text[: ENRICHMENT_SETTINGS["max_article_chars"]]
+                except Exception:
+                    pass
                 httpx_failed = True
             elif resp.status_code != 200:
                 logger.warning(f"HTTP {resp.status_code} for {url}")
@@ -604,29 +641,52 @@ async def _scrape_url(url: str) -> Optional[str]:
         return None
 
     # Fallback: Crawl4AI with browser rendering
+    # Run in separate thread to avoid Windows event loop subprocess issues under uvicorn
     try:
         import os
 
         os.environ["PYTHONIOENCODING"] = "utf-8"
-        from crawl4ai import AsyncWebCrawler
 
-        async with AsyncWebCrawler(verbose=False) as crawler:
-            result = await crawler.arun(url=url)
-            if result and result.markdown:
-                crawled = result.markdown.strip()
-                if len(crawled) > 200:
-                    # Strip markdown formatting for cleaner Gemini extraction
-                    crawled = re.sub(r"!\[.*?\]\(.*?\)", "", crawled)
-                    crawled = re.sub(r"\[([^\]]+)\]\([^\)]+\)", r"\1", crawled)
-                    crawled = re.sub(r"#{1,6}\s*", "", crawled)
-                    crawled = re.sub(r"\*{1,3}([^*]+)\*{1,3}", r"\1", crawled)
-                    crawled = re.sub(r"\n{3,}", "\n\n", crawled)
-                    crawled = crawled.strip()
-                    crawled = crawled.strip()
-                    logger.info(f"Crawl4AI succeeded: {url} ({len(crawled)} chars)")
-                    return crawled[: ENRICHMENT_SETTINGS["max_article_chars"]]
-            logger.warning(f"Crawl4AI returned no content for {url}")
-            return None
+        def _crawl_sync(target_url: str) -> Optional[str]:
+            """Run Crawl4AI in a fresh event loop on a separate thread."""
+            import asyncio as _asyncio
+            import sys
+
+            # Fix Windows encoding for Crawl4AI unicode output
+            if sys.platform == "win32" and hasattr(sys.stdout, "reconfigure"):
+                try:
+                    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+                    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+                except Exception:
+                    pass
+
+            from crawl4ai import AsyncWebCrawler
+
+            async def _do_crawl():
+                async with AsyncWebCrawler(verbose=False) as crawler:
+                    return await crawler.arun(url=target_url)
+
+            loop = _asyncio.new_event_loop()
+            try:
+                return loop.run_until_complete(_do_crawl())
+            finally:
+                loop.close()
+
+        result = await asyncio.to_thread(_crawl_sync, url)
+        if result and result.markdown:
+            crawled = result.markdown.strip()
+            if len(crawled) > 200:
+                # Strip markdown formatting for cleaner Gemini extraction
+                crawled = re.sub(r"!\[.*?\]\(.*?\)", "", crawled)
+                crawled = re.sub(r"\[([^\]]+)\]\([^\)]+\)", r"\1", crawled)
+                crawled = re.sub(r"#{1,6}\s*", "", crawled)
+                crawled = re.sub(r"\*{1,3}([^*]+)\*{1,3}", r"\1", crawled)
+                crawled = re.sub(r"\n{3,}", "\n\n", crawled)
+                crawled = crawled.strip()
+                logger.info(f"Crawl4AI succeeded: {url} ({len(crawled)} chars)")
+                return crawled[: ENRICHMENT_SETTINGS["max_article_chars"]]
+        logger.warning(f"Crawl4AI returned no content for {url}")
+        return None
     except Exception as e:
         logger.warning(f"Crawl4AI failed for {url}: {e}")
         return None
@@ -831,12 +891,13 @@ async def _layer_linkedin_snippets(
     ]
     # Targeted title-specific queries (finds Dale Dcruz, Jessica Farley, etc.)
     targeted_titles = [
+        "General Manager",
         "Director of Food and Beverage",
         "Assistant Director of Food and Beverage",
-        "Restaurants General Manager",
         "Director of Housekeeping",
         "Executive Housekeeper",
         "Director of Rooms",
+        "Director of Operations",
         "Purchasing Manager",
         "Front Office Manager",
         "Resort Manager",
@@ -1694,8 +1755,36 @@ ALWAYS REJECT these even if they appear connected to the hotel:
   Exception: only keep them if they hold a clear operational hotel title like General Manager or Director of Housekeeping
 
 CRITICAL: A contact MUST be confirmed at the EXACT target hotel to be kept as hotel_specific.
-Same city is NOT enough. "Director of Housekeeping in Miami" does NOT mean they work at the target hotel.
-Check raw_snippet and organization carefully - the target hotel name must appear in their profile/snippet.
+Same city is NOT enough. Same brand/chain is NOT enough.
+"Director of Housekeeping in Miami" does NOT mean they work at the target hotel.
+"Director of Operations at Auberge Resorts Collection" does NOT mean they work at the target Auberge property.
+
+SAME-BRAND DIFFERENT-PROPERTY: If a contact works for the same brand/collection but at a DIFFERENT
+property, they should be REJECTED. For example:
+- Target: Shell Bay Club, Auberge → GM at Goldener Hirsch, Auberge = REJECT (different property)
+- Target: Grand Hyatt Grand Cayman → Resort Manager at Hyatt Regency Chicago = REJECT (different property)
+- Target: Westin Cocoa Beach → Housekeeping Manager at Westin Savannah = REJECT (different property)
+
+If the snippet/organization ONLY mentions the parent brand (e.g. "Auberge Resorts Collection", "Hyatt",
+"Marriott", "The Ritz-Carlton", "Marriott International") without naming the SPECIFIC target property,
+set corrected_scope to "chain_area" not "hotel_specific".
+The target property name "{hotel_name}" or its distinguishing location (e.g. "San Juan", "Cancun")
+MUST appear in the snippet, organization, or profile URL for a contact to qualify as "hotel_specific".
+
+SAME-CITY DIFFERENT-HOTEL: A contact working in the same city but at a DIFFERENT hotel is NOT at the target.
+For example if the target is "The Ritz-Carlton, San Juan":
+- "Director of Housekeeping at Marriott International" with no mention of San Juan = chain_area
+- "Executive Housekeeper at Marriott Hotels" in Puerto Rico but no mention of Ritz-Carlton San Juan = REJECT
+- "Director of Housekeeping at The Ritz-Carlton" with a Washington DC area code or DC location = chain_area (different property)
+- A contact whose LinkedIn says "The Ritz-Carlton Spa, San Juan" but actually works at a different Marriott property = REJECT
+
+BRAND-ONLY ORG RULE: If a contact's organization is ONLY a brand name or parent company
+(e.g. "The Ritz-Carlton", "Marriott International", "Hilton", "Hyatt") without the specific
+property name or city, they MUST be set to "chain_area" — NEVER "hotel_specific".
+This applies even if they hold an operational title like Director of Housekeeping.
+
+Check raw_snippet and organization carefully - the target hotel name or its specific city/location
+must appear in their actual profile/snippet (not just in the search query that found them).
 If you cannot confirm the SPECIFIC hotel, set corrected_scope to "chain_area" not "hotel_specific".
 
 ALWAYS KEEP these:
@@ -1882,10 +1971,27 @@ async def _verify_contacts_with_gemini(
             }
             title_is_expansion = old_words and old_words.issubset(new_words)
 
+            # Allow Gemini correction if original came from non-LinkedIn sources
+            # (Facebook, Instagram, press releases often use different titles than LinkedIn)
+            source_type = match.get("source_type", "")
+            source_url = match.get("source", "")
+            is_linkedin_profile = (
+                source_type == "linkedin_snippet"
+                and "linkedin.com/in/" in (source_url or "")
+            )
+
             if title_is_missing or title_is_incomplete or title_is_expansion:
                 if old_lower != verified_title.lower().strip():
                     logger.info(
                         f"Gemini title fix: {v.get('name')}: "
+                        f"'{old_title}' -> '{verified_title}'"
+                    )
+                match["title"] = verified_title
+            elif not is_linkedin_profile:
+                # Non-LinkedIn source — trust Gemini's correction (likely from LinkedIn data)
+                if old_lower != verified_title.lower().strip():
+                    logger.info(
+                        f"Gemini title correction (non-LinkedIn source): {v.get('name')}: "
                         f"'{old_title}' -> '{verified_title}'"
                     )
                 match["title"] = verified_title
@@ -2208,6 +2314,24 @@ async def enrich_lead_contacts(
             seen.add(key)
             unique.append(c)
     result.contacts = unique
+
+    # ── Fill missing LinkedIn URLs via quick search ──
+    for c in result.contacts:
+        if not c.get("linkedin") and c.get("name"):
+            try:
+                name = c["name"]
+                # Keep query short for better results
+                short_brand = brand or hotel_name.split(",")[0].split(" - ")[0][:30]
+                li_query = f"{name} {short_brand} linkedin"
+                li_results = await _search_web(li_query, max_results=3)
+                for r in li_results:
+                    r_url = r.get("url", "")
+                    if "linkedin.com/in/" in r_url:
+                        c["linkedin"] = r_url
+                        logger.info(f"LinkedIn URL found for {name}: {r_url}")
+                        break
+            except Exception as e:
+                logger.debug(f"LinkedIn URL lookup failed for {c.get('name')}: {e}")
 
     # ── Sort: hotel_specific > chain_area > unknown, then by validation score ──
     scope_rank = {
