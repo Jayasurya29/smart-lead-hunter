@@ -2765,19 +2765,40 @@ async def enrich_lead(lead_id: int):
 
                 for i, c in enumerate(enrichment_result.contacts):
                     if c["name"].lower() in existing_names:
-                        # Update evidence_url on existing contacts if missing
-                        if c.get("source"):
-                            existing_contact = await session.execute(
-                                select(LeadContact).where(
-                                    and_(
-                                        LeadContact.lead_id == lead_id,
-                                        LeadContact.name.ilike(c["name"]),
-                                    )
+                        # Fill blanks on existing contact — never overwrite
+                        existing_contact = await session.execute(
+                            select(LeadContact).where(
+                                and_(
+                                    LeadContact.lead_id == lead_id,
+                                    LeadContact.name.ilike(c["name"]),
                                 )
                             )
-                            ec = existing_contact.scalar_one_or_none()
-                            if ec and not ec.evidence_url:
+                        )
+                        ec = existing_contact.scalar_one_or_none()
+                        if ec:
+                            filled = []
+                            if not ec.email and c.get("email"):
+                                ec.email = c["email"]
+                                filled.append("email")
+                            if not ec.phone and c.get("phone"):
+                                ec.phone = c["phone"]
+                                filled.append("phone")
+                            if not ec.linkedin and c.get("linkedin"):
+                                ec.linkedin = c["linkedin"]
+                                filled.append("linkedin")
+                            if not ec.title and c.get("title"):
+                                ec.title = c["title"]
+                                filled.append("title")
+                            if not ec.organization and c.get("organization"):
+                                ec.organization = c["organization"]
+                                filled.append("organization")
+                            if not ec.evidence_url and c.get("source"):
                                 ec.evidence_url = c["source"]
+                                filled.append("evidence_url")
+                            if filled:
+                                logger.info(
+                                    f"Updated {ec.name}: filled {', '.join(filled)}"
+                                )
                         continue
                     contact = LeadContact(
                         lead_id=lead_id,
