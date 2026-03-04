@@ -47,19 +47,6 @@ from app.services.scorer import (
 
 
 def _safe_int(value, default: int = 0) -> int:
-    """Safely parse int from various formats: 200, '200', 'approximately 200', None"""
-    if value is None:
-        return default
-    if isinstance(value, int):
-        return value
-    try:
-        return int(value)
-    except (ValueError, TypeError):
-        match = re.search(r"\d+", str(value))
-        return int(match.group()) if match else default
-
-
-def _safe_int(value, default: int = 0) -> int:
     """Safely parse an integer from various formats (Audit Fix #5).
 
     Handles: 200, "200", "approximately 200", "200-300", "200+", None

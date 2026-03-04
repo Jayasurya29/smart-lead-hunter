@@ -20,9 +20,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 
 COPY requirements.txt .
-# Install CPU-only PyTorch first (saves ~4GB vs full CUDA version)
-RUN pip install --no-cache-dir --prefix=/install \
-    torch --index-url https://download.pytorch.org/whl/cpu
 RUN pip install --no-cache-dir --prefix=/install -r requirements.txt
 
 # --------------- Stage 2: Runtime ---------------
@@ -59,9 +56,6 @@ WORKDIR /app
 
 # Install Playwright browsers as root (needs write access to /usr/local)
 RUN playwright install chromium && playwright install-deps chromium
-
-# Install spacy model
-RUN python -m spacy download en_core_web_sm
 
 # Copy application code
 COPY . .

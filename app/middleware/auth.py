@@ -106,7 +106,19 @@ class APIKeyMiddleware(BaseHTTPMiddleware):
         try:
             valid_key = _get_valid_api_key()
         except RuntimeError:
-            # If API_AUTH_KEY not set, allow through (dev mode)
+            # If API_AUTH_KEY not set, behaviour depends on environment
+            env = os.getenv("ENVIRONMENT", "development")
+            if env == "production":
+                return JSONResponse(
+                    status_code=500,
+                    content={"detail": "Server misconfigured: API_AUTH_KEY not set"},
+                )
+            # Dev mode — allow through but log warning
+            import logging as _logging
+
+            _logging.getLogger(__name__).warning(
+                "API_AUTH_KEY not set — auth disabled (dev mode only)"
+            )
             return await call_next(request)
 
         if not api_key or not secrets.compare_digest(api_key, valid_key):

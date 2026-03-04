@@ -48,6 +48,7 @@ data/learnings/*.json
 # --- Logs ---
 *.log
 logs/
+enrichment_log.txt
 
 # --- OS Files ---
 .DS_Store

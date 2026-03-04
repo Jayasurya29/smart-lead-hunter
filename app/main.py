@@ -48,6 +48,31 @@ _scrape_lock = asyncio.Lock()
 _pending_configs: dict = {}  # scrape_id -> {mode, source_ids, ...}
 _pending_extract_urls: dict = {}  # extract_id -> url
 _pending_discovery_configs: dict = {}  # discovery_id -> {mode, extract_leads, dry_run}
+_PENDING_TTL = 300  # 5 minutes — evict stale entries
+
+
+def _store_pending(store: dict, key: str, value):
+    """Store a pending config with timestamp, evicting expired entries."""
+    now = time.monotonic()
+    store[key] = {"_v": value, "_t": now}
+    # Evict expired entries on each write (cheap — typically <10 entries)
+    cutoff = now - _PENDING_TTL
+    expired = [
+        k for k, v in store.items() if isinstance(v, dict) and v.get("_t", 0) < cutoff
+    ]
+    for k in expired:
+        del store[k]
+
+
+def _pop_pending(store: dict, key: str, default=None):
+    """Pop a pending config by key, returning the original value."""
+    entry = store.pop(key, None)
+    if entry is None:
+        return default
+    if isinstance(entry, dict) and "_v" in entry:
+        return entry["_v"]
+    return entry  # Backward compat if raw value stored
+
 
 # Logging configured by setup_logging() in lifespan
 logger = logging.getLogger(__name__)
@@ -1162,18 +1187,21 @@ async def dashboard_page(
             )
         )
     if score == "hot":
-        query = query.where(PotentialLead.lead_score >= 70)
+        query = query.where(PotentialLead.lead_score >= settings.hot_lead_threshold)
     elif score == "warm":
-        query = query.where(PotentialLead.lead_score.between(50, 69))
+        query = query.where(
+            PotentialLead.lead_score.between(
+                settings.warm_lead_threshold, settings.hot_lead_threshold - 1
+            )
+        )
     elif score == "cold":
-        query = query.where(PotentialLead.lead_score < 50)
+        query = query.where(PotentialLead.lead_score < settings.warm_lead_threshold)
     if location:
         query = query.where(PotentialLead.location_type == location)
     if tier:
         query = query.where(PotentialLead.brand_tier == tier)
 
     # Order — support sort parameter
-    sort = request.query_params.get("sort", "score_desc")
     if sort == "newest":
         query = query.order_by(PotentialLead.created_at.desc().nullslast())
     elif sort == "oldest":
@@ -1423,7 +1451,10 @@ async def dashboard_edit_lead(
     tags=["Dashboard"],
 )
 async def dashboard_approve_lead(
-    request: Request, lead_id: int, db: AsyncSession = Depends(get_db)
+    request: Request,
+    lead_id: int,
+    db: AsyncSession = Depends(get_db),
+    _csrf=Depends(_require_ajax),
 ):
     """HTMX: Approve lead and return updated row"""
     result = await db.execute(select(PotentialLead).where(PotentialLead.id == lead_id))
@@ -1453,6 +1484,7 @@ async def dashboard_reject_lead(
     lead_id: int,
     reason: Optional[str] = Query(None),
     db: AsyncSession = Depends(get_db),
+    _csrf=Depends(_require_ajax),
 ):
     """HTMX: Reject lead and return updated row"""
     result = await db.execute(select(PotentialLead).where(PotentialLead.id == lead_id))
@@ -1482,9 +1514,11 @@ async def dashboard_reject_lead(
     tags=["Dashboard"],
 )
 async def dashboard_restore_lead(
-    request: Request, lead_id: int, db: AsyncSession = Depends(get_db)
+    request: Request,
+    lead_id: int,
+    db: AsyncSession = Depends(get_db),
+    _csrf=Depends(_require_ajax),
 ):
-    """Restore a lead back to 'new' (pipeline) status"""
     result = await db.execute(select(PotentialLead).where(PotentialLead.id == lead_id))
     lead = result.scalar_one_or_none()
 
@@ -1511,7 +1545,10 @@ async def dashboard_restore_lead(
     tags=["Dashboard"],
 )
 async def dashboard_delete_lead(
-    request: Request, lead_id: int, db: AsyncSession = Depends(get_db)
+    request: Request,
+    lead_id: int,
+    db: AsyncSession = Depends(get_db),
+    _csrf=Depends(_require_ajax),
 ):
     """Soft-delete a lead (can be restored from Deleted tab)"""
     result = await db.execute(select(PotentialLead).where(PotentialLead.id == lead_id))
@@ -1646,7 +1683,7 @@ async def dashboard_sources_list(db: AsyncSession = Depends(get_db)):
 
 
 @app.post("/api/dashboard/scrape", tags=["Dashboard"])
-async def dashboard_trigger_scrape(request: Request):
+async def dashboard_trigger_scrape(request: Request, _csrf=Depends(_require_ajax)):
     try:
         # Parse request body (may be empty for backwards compat)
         body = {}
@@ -1659,10 +1696,14 @@ async def dashboard_trigger_scrape(request: Request):
         source_ids = body.get("source_ids", [])
 
         scrape_id = str(uuid.uuid4())
-        _pending_configs[scrape_id] = {
-            "mode": mode,
-            "source_ids": source_ids,
-        }
+        _store_pending(
+            _pending_configs,
+            scrape_id,
+            {
+                "mode": mode,
+                "source_ids": source_ids,
+            },
+        )
 
         logger.info(
             f"Dashboard: Scrape triggered (mode={mode}, sources={len(source_ids) if source_ids else 'all'})"
@@ -1709,7 +1750,7 @@ async def scrape_with_progress(request: Request):
 
         return StreamingResponse(no_config(), media_type="text/event-stream")
 
-    scrape_config = _pending_configs.pop(scrape_id)
+    scrape_config = _pop_pending(_pending_configs, scrape_id, {})
     config_source_ids = scrape_config.get("source_ids", [])
 
     async with _scrape_lock:
@@ -2219,7 +2260,7 @@ async def dashboard_extract_url(request: Request, _csrf=Depends(_require_ajax)):
 
         # Store keyed by unique ID (Audit Fix #3 — race-safe)
         extract_id = str(uuid.uuid4())
-        _pending_extract_urls[extract_id] = url
+        _store_pending(_pending_extract_urls, extract_id, url)
 
         logger.info(f"Dashboard: URL extract triggered for {url}")
 
@@ -2242,7 +2283,9 @@ async def extract_url_stream(request: Request):
     """SSE endpoint for real-time URL extraction progress"""
 
     extract_id = request.query_params.get("extract_id", "")
-    target_url = _pending_extract_urls.pop(extract_id, "") if extract_id else ""
+    target_url = (
+        _pop_pending(_pending_extract_urls, extract_id, "") if extract_id else ""
+    )
 
     if not target_url:
 
@@ -2330,7 +2373,7 @@ async def extract_url_stream(request: Request):
                             return
                 except Exception as e2:
                     _err = f"All fetch methods failed: {_safe_error(e2)}"
-                    yield "data: {json.dumps({'type': 'error', 'message': _err})}\n\n"
+                    yield f"data: {json.dumps({'type': 'error', 'message': _err})}\n\n"
                     return
 
             if not page_content:
@@ -2495,11 +2538,15 @@ async def discovery_start(request: Request, _csrf=Depends(_require_ajax)):
 
         # Store keyed by unique ID (Audit Fix #3 — race-safe)
         discovery_id = str(uuid.uuid4())
-        _pending_discovery_configs[discovery_id] = {
-            "mode": mode,
-            "extract_leads": extract_leads,
-            "dry_run": dry_run,
-        }
+        _store_pending(
+            _pending_discovery_configs,
+            discovery_id,
+            {
+                "mode": mode,
+                "extract_leads": extract_leads,
+                "dry_run": dry_run,
+            },
+        )
 
         logger.info(
             f"Dashboard: Discovery triggered (mode={mode}, leads={extract_leads}, dry_run={dry_run})"
@@ -2527,7 +2574,11 @@ async def discovery_stream(request: Request):
 
     # Get config by discovery_id query param (Audit Fix #3 — race-safe)
     discovery_id = request.query_params.get("discovery_id", "")
-    config = _pending_discovery_configs.pop(discovery_id, {}) if discovery_id else {}
+    config = (
+        _pop_pending(_pending_discovery_configs, discovery_id, {})
+        if discovery_id
+        else {}
+    )
 
     mode = config.get("mode", "full")
     extract_leads = config.get("extract_leads", True)
@@ -2698,10 +2749,27 @@ async def discovery_stream(request: Request):
 # ─────────────────────────────────────────────────────────────────────────────
 
 
+# Prevent duplicate enrichment runs for the same lead (Audit Fix M-09)
+_enrichment_locks: dict[int, asyncio.Lock] = {}
+
+
 @app.post("/api/dashboard/leads/{lead_id}/enrich", tags=["Dashboard"])
-async def enrich_lead(lead_id: int):
-    """Enrich a lead with contact information via web search + Apollo."""
-    from datetime import datetime
+async def enrich_lead(lead_id: int, _csrf=Depends(_require_ajax)):
+    # Check if enrichment already running for this lead
+    if lead_id not in _enrichment_locks:
+        _enrichment_locks[lead_id] = asyncio.Lock()
+    if _enrichment_locks[lead_id].locked():
+        return {
+            "status": "already_running",
+            "message": "Enrichment already in progress for this lead",
+        }
+
+    async with _enrichment_locks[lead_id]:
+        return await _do_enrich_lead(lead_id)
+
+
+async def _do_enrich_lead(lead_id: int):
+    """Actual enrichment logic (extracted for lock wrapper)."""
 
     from sqlalchemy import and_, delete, select
 
@@ -2822,7 +2890,7 @@ async def enrich_lead(lead_id: int):
                             "confidence_note", c.get("_validation_reason", "")
                         ),
                         evidence_url=c.get("source"),
-                        last_enriched_at=datetime.utcnow(),
+                        last_enriched_at=local_now(),
                     )
                     session.add(contact)
 
@@ -2868,7 +2936,7 @@ async def list_contacts(lead_id: int):
 
 
 @app.post("/api/dashboard/leads/{lead_id}/contacts/{contact_id}/save")
-async def save_contact(lead_id: int, contact_id: int):
+async def save_contact(lead_id: int, contact_id: int, _csrf=Depends(_require_ajax)):
     async with async_session() as session:
         result = await session.execute(
             select(LeadContact).where(
@@ -2879,13 +2947,13 @@ async def save_contact(lead_id: int, contact_id: int):
         if not contact:
             raise HTTPException(status_code=404, detail="Contact not found")
         contact.is_saved = True
-        contact.updated_at = datetime.utcnow()
+        contact.updated_at = local_now()
         await session.commit()
         return {"status": "saved", "contact_id": contact_id}
 
 
 @app.post("/api/dashboard/leads/{lead_id}/contacts/{contact_id}/unsave")
-async def unsave_contact(lead_id: int, contact_id: int):
+async def unsave_contact(lead_id: int, contact_id: int, _csrf=Depends(_require_ajax)):
     async with async_session() as session:
         result = await session.execute(
             select(LeadContact).where(
@@ -2896,13 +2964,13 @@ async def unsave_contact(lead_id: int, contact_id: int):
         if not contact:
             raise HTTPException(status_code=404, detail="Contact not found")
         contact.is_saved = False
-        contact.updated_at = datetime.utcnow()
+        contact.updated_at = local_now()
         await session.commit()
         return {"status": "unsaved", "contact_id": contact_id}
 
 
 @app.delete("/api/dashboard/leads/{lead_id}/contacts/{contact_id}")
-async def delete_contact(lead_id: int, contact_id: int):
+async def delete_contact(lead_id: int, contact_id: int, _csrf=Depends(_require_ajax)):
     async with async_session() as session:
         result = await session.execute(
             select(LeadContact).where(
@@ -2918,7 +2986,9 @@ async def delete_contact(lead_id: int, contact_id: int):
 
 
 @app.post("/api/dashboard/leads/{lead_id}/contacts/{contact_id}/set-primary")
-async def set_primary_contact(lead_id: int, contact_id: int):
+async def set_primary_contact(
+    lead_id: int, contact_id: int, _csrf=Depends(_require_ajax)
+):
     async with async_session() as session:
         await session.execute(
             update(LeadContact)
@@ -2935,7 +3005,7 @@ async def set_primary_contact(lead_id: int, contact_id: int):
             raise HTTPException(status_code=404, detail="Contact not found")
         contact.is_primary = True
         contact.is_saved = True
-        contact.updated_at = datetime.utcnow()
+        contact.updated_at = local_now()
         lead_result = await session.execute(
             select(PotentialLead).where(PotentialLead.id == lead_id)
         )
@@ -2947,6 +3017,6 @@ async def set_primary_contact(lead_id: int, contact_id: int):
             lead.contact_phone = contact.phone
             if hasattr(lead, "contact_linkedin"):
                 lead.contact_linkedin = contact.linkedin
-            lead.updated_at = datetime.utcnow()
+            lead.updated_at = local_now()
         await session.commit()
         return {"status": "primary_set", "contact_id": contact_id}

@@ -85,7 +85,18 @@ def setup_logging(
     root.addHandler(error_handler)
 
     # Quiet noisy third-party loggers
-    for name in ["httpx", "httpcore", "urllib3", "asyncio", "playwright"]:
+    for name in [
+        "httpx",
+        "httpcore",
+        "urllib3",
+        "asyncio",
+        "playwright",
+        "rustls",
+        "h2",
+        "hyper_util",
+        "hpack",
+        "ddgs",
+    ]:
         logging.getLogger(name).setLevel(logging.WARNING)
 
     logging.info(f"Logging initialized: level={log_level}, file={log_file}")

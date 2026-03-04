@@ -7,8 +7,6 @@ Stores contacts linked to leads. Supports:
 - Track enrichment history (which cycle found/updated each contact)
 """
 
-from datetime import datetime
-
 from sqlalchemy import (
     Boolean,
     Column,
@@ -21,6 +19,7 @@ from sqlalchemy import (
 from sqlalchemy.orm import relationship
 
 from app.database import Base
+from app.services.utils import local_now
 
 
 class LeadContact(Base):
@@ -66,9 +65,15 @@ class LeadContact(Base):
     evidence_url = Column(Text)  # URL where this contact was found (proof of relevance)
 
     # Timestamps
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
-    last_enriched_at = Column(DateTime)  # When enrichment last touched this contact
+    created_at = Column(DateTime(timezone=True), default=lambda: local_now())
+    updated_at = Column(
+        DateTime(timezone=True),
+        default=lambda: local_now(),
+        onupdate=lambda: local_now(),
+    )
+    last_enriched_at = Column(
+        DateTime(timezone=True)
+    )  # When enrichment last touched this contact
 
     # Relationship
     lead = relationship("PotentialLead", backref="contacts")
