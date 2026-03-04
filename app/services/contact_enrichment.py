@@ -885,49 +885,28 @@ async def _layer_linkedin_snippets(
             ],
         )
     )
+    # ── Broad LinkedIn queries only — Layer 1 already searched all 13 titles ──
     queries = [
         f"{hotel_name} General Manager OR Director site:linkedin.com",
         f"{hotel_name} Purchasing OR Housekeeping OR Operations site:linkedin.com",
+        f"{hotel_name} Chef OR Laundry OR Rooms site:linkedin.com",
     ]
-    # Targeted title-specific queries (finds Dale Dcruz, Jessica Farley, etc.)
-    targeted_titles = [
-        "General Manager",
-        "Director of Food and Beverage",
-        "Assistant Director of Food and Beverage",
-        "Director of Housekeeping",
-        "Executive Housekeeper",
-        "Director of Rooms",
-        "Director of Operations",
-        "Purchasing Manager",
-        "Front Office Manager",
-        "Resort Manager",
-        "Hotel Manager",
-        "Operations Manager",
-    ]
-    for tt in targeted_titles:
-        queries.append(f"{hotel_name} {location_str} {tt}")
-
-    # Create hotel name variations for wider search coverage
+    # Hotel name variants to catch what Layer 1 missed
     short_hotel_name = re.sub(
         r"\s+(?:Resort|Hotel|Spa|Suites?|Residences?|Inn|Lodge|&)+(?:\s+(?:Resort|Hotel|Spa|Suites?|Residences?|Inn|Lodge|&))*\s*$",
         "",
         hotel_name,
         flags=re.IGNORECASE,
     ).strip()
-    hotel_variants = [f"{hotel_name} {location_str}"]
     if short_hotel_name and short_hotel_name.lower() != hotel_name.lower():
-        hotel_variants.append(f"{short_hotel_name} {location_str}")
-    if brand:
-        brand_location = f"{brand} {location_str}"
-        if brand_location.lower() not in [v.lower() for v in hotel_variants]:
-            hotel_variants.append(brand_location)
-
-    for tt in targeted_titles:
-        # Alternate between hotel name variants to maximize coverage
-        variant = hotel_variants[targeted_titles.index(tt) % len(hotel_variants)]
-        queries.append(f"{variant} {tt}")
-
-    # Add parent company query to catch contacts like Kara DePool
+        queries.append(
+            f"{short_hotel_name} {location_str} hotel staff OR manager site:linkedin.com"
+        )
+    if brand and brand.lower() not in hotel_name.lower():
+        queries.append(
+            f"{brand} {location_str} hotel manager OR director site:linkedin.com"
+        )
+    # Parent/management company query
     parent = management_company or brand
     if parent:
         queries.append(f"{parent} {hotel_name} site:linkedin.com")
