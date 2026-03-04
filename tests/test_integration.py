@@ -304,8 +304,9 @@ class TestDataIntegrity:
 
 class TestSecurity:
     @pytest.mark.asyncio
-    async def test_scrape_endpoint_responds(self, client):
-        assert (await client.post("/api/dashboard/scrape")).status_code == 200
+    async def test_scrape_endpoint_requires_csrf(self, client):
+        """Bare POST without HTMX/AJAX header should be rejected (CSRF protection)."""
+        assert (await client.post("/api/dashboard/scrape")).status_code == 403
 
     @pytest.mark.asyncio
     async def test_htmx_header_accepted(self, client):
