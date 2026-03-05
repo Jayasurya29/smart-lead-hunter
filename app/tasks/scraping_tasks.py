@@ -130,7 +130,7 @@ async def save_lead_to_db(
         logger.error(f"Failed to save lead: {e}")
         if owns_session:
             await session.rollback()
-        return {"success": False, "error": "Unexpected error"}
+        return None  # C-02 FIX: callers expect int | None
 
 
 async def _save_lead_impl(
@@ -147,9 +147,10 @@ async def _save_lead_impl(
         return result["id"]
     elif result["status"] in ("duplicate", "enriched"):
         logger.info(f"Duplicate found: {hotel.get('hotel_name')}")
-        return {"success": False, "error": "Operation failed"}
+        return None  # C-02 FIX: was returning dict, but declared Optional[int]
     else:
-        return {"success": False, "error": result.get("reason", "Skipped")}
+        logger.info(f"Skipped: {hotel.get('hotel_name')} — {result.get('reason')}")
+        return None  # C-02 FIX: was returning dict, but declared Optional[int]
 
 
 async def create_scrape_log(source_id: int) -> int:
@@ -227,7 +228,7 @@ async def _get_shared_browser():
                 logger.info("Shared Playwright browser launched")
             except ImportError:
                 logger.warning("Playwright not available")
-                return {"success": False, "error": "Unexpected error"}
+                return None  # C-02 FIX: callers expect browser | None
     return _playwright_browser
 
 
@@ -305,11 +306,11 @@ async def scrape_url_async(url: str, use_playwright: bool = False) -> Optional[s
                 return soup.get_text(" ", strip=True)
             else:
                 logger.warning(f"HTTP {response.status_code} for {url}")
-                return {"success": False, "error": "Operation failed"}
+                return None  # C-02 FIX: was returning dict, callers expect str | None
 
     except Exception as e:
         logger.error(f"Scrape failed for {url}: {e}")
-        return {"success": False, "error": "Content fetch failed"}
+        return None  # C-02 FIX: was returning dict, callers expect str | None
 
 
 async def process_scraped_content(
@@ -440,12 +441,17 @@ def scrape_source(self, source_id: int) -> Dict[str, Any]:
         urls = source.get("entry_urls") or [source.get("base_url") or source.get("url")]
         urls = [u for u in urls if u]
 
+        # P-03 FIX: Create pipeline once per source, not per URL
+        pipeline = LeadExtractionPipeline()
+
         for url in urls:
             try:
                 text = await scrape_url_async(url, source.get("use_playwright", False))
                 if text:
                     total_stats["urls_scraped"] += 1
-                    stats = await process_scraped_content(text, url, source["name"])
+                    stats = await process_scraped_content(
+                        text, url, source["name"], pipeline=pipeline
+                    )
                     total_stats["leads_found"] += stats["leads_found"]
                     total_stats["leads_saved"] += stats["leads_saved"]
                     total_stats["errors"].extend(stats.get("errors", []))

@@ -3,6 +3,7 @@ Alembic env.py — Async SQLAlchemy support for Smart Lead Hunter
 """
 
 from dotenv import load_dotenv
+
 load_dotenv()
 
 import asyncio
@@ -12,7 +13,6 @@ from logging.config import fileConfig
 
 from alembic import context
 from sqlalchemy import pool
-from sqlalchemy.ext.asyncio import async_engine_from_config
 
 # Import your models' Base metadata
 from app.database import Base
@@ -52,7 +52,14 @@ def do_run_migrations(connection) -> None:
 async def run_async_migrations() -> None:
     """Run migrations in 'online' mode with async engine."""
     from sqlalchemy.ext.asyncio import create_async_engine
-    url = os.getenv("DATABASE_URL").replace("postgresql://", "postgresql+asyncpg://")
+
+    # L-05 FIX: Handle missing DATABASE_URL gracefully
+    raw_url = os.getenv("DATABASE_URL")
+    if not raw_url:
+        import sys
+
+        sys.exit("ERROR: DATABASE_URL not set. Cannot run migrations.")
+    url = raw_url.replace("postgresql://", "postgresql+asyncpg://")
     connectable = create_async_engine(url, poolclass=pool.NullPool)
     async with connectable.connect() as connection:
         await connection.run_sync(do_run_migrations)

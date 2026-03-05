@@ -883,10 +883,11 @@ Respond in JSON:
         if not _gemini_breaker.can_call():
             logger.warning(f"Circuit breaker OPEN — skipping classify for {url}")
             return ClassificationResult(
+                url=url,
+                summary="Skipped (circuit breaker open)",
                 is_relevant=False,
                 confidence=0.0,
-                reason="Circuit breaker open",
-                category="skipped",
+                reasoning="Circuit breaker open — Gemini API failing",
             )
         start = time.time()
 
@@ -964,7 +965,6 @@ Respond in JSON:
                         if data is None:
                             self._stats["errors"] += 1
                             _gemini_breaker.record_success()
-                            _gemini_breaker.record_success()
                             return ClassificationResult(
                                 url=url,
                                 summary="JSON parse failed",
@@ -990,7 +990,6 @@ Respond in JSON:
                     )
 
                 # Non-retryable error
-                _gemini_breaker.record_failure()
                 _gemini_breaker.record_failure()
                 self._stats["errors"] += 1
                 return ClassificationResult(

@@ -3,99 +3,105 @@
 # =============================================================================
 # Hotel lead generation system with AI extraction
 # Last Updated: February 2026
+#
+# L-11 FIX: Added upper-bound version pins (< next major) to prevent
+# breaking changes from automatic upgrades. Pin format: >=current,<next_major
 # =============================================================================
 
 # =============================================================================
 # WEB FRAMEWORK & API
 # =============================================================================
-fastapi==0.109.0  # pinned
-uvicorn[standard]==0.27.0  # pinned
-pydantic==2.12.5  # pinned
-pydantic-settings==2.1.0  # pinned
-python-multipart>=0.0.6
-jinja2==3.1.6  # pinned
+fastapi>=0.109.0,<1.0
+uvicorn[standard]>=0.27.0,<1.0
+pydantic>=2.5.0,<3.0
+pydantic-settings>=2.1.0,<3.0
+python-multipart>=0.0.6,<1.0
+jinja2>=3.1.2,<4.0
 
 # =============================================================================
 # DATABASE
 # =============================================================================
-sqlalchemy[asyncio]==2.0.25  # pinned
-asyncpg==0.29.0  # pinned
-psycopg2-binary>=2.9.9
-pgvector>=0.2.4
-alembic==1.13.1  # pinned
+sqlalchemy[asyncio]>=2.0.25,<3.0
+asyncpg>=0.29.0,<1.0
+psycopg2-binary>=2.9.9,<3.0
+pgvector>=0.2.4,<1.0
+alembic>=1.13.1,<2.0
 
 # =============================================================================
 # WEB SCRAPING - TRIPLE ENGINE SYSTEM
 # =============================================================================
 # HTTPX - Fast async HTTP client (PRIMARY - for simple static sites)
-httpx>=0.25.2
+httpx>=0.25.2,<1.0
 
 # Crawl4AI - Smart crawler with caching & anti-detection (FALLBACK 1)
-crawl4ai>=0.3.0
+crawl4ai>=0.3.0,<1.0
 
 # Playwright - Browser automation (FALLBACK 2 - for JS-heavy sites)
-playwright>=1.41.0
+playwright>=1.41.0,<2.0
 
 # BeautifulSoup - HTML parsing
-beautifulsoup4>=4.12.3
+beautifulsoup4>=4.12.3,<5.0
 
 # lxml - Fast HTML/XML parser
-lxml>=5.1.0
+lxml>=5.1.0,<6.0
 
 # aiofiles - Async file I/O (crawl4ai dependency)
-aiofiles>=23.2.1
+aiofiles>=23.2.1,<25.0
+
+# DuckDuckGo search (required by contact enrichment + discovery engine)
+duckduckgo-search>=6.0.0,<8.0
 
 # =============================================================================
 # AI EXTRACTION - FREE STACK
 # =============================================================================
 # Google Gemini (PRIMARY - free tier available)
-# google-generativeai>=0.4.0  # Unused: using raw httpx (Audit Fix L-04)
+google-generativeai>=0.4.0,<1.0
 
 # Ollama (BACKUP - runs locally, unlimited, free)
-# ollama>=0.1.6  # Unused: backup only (Audit Fix L-04)
+ollama>=0.1.6,<1.0
 
 # =============================================================================
 # NLP & TEXT PROCESSING
 # =============================================================================
-# spacy>=3.7.0  # Unused: ~200MB savings (Audit Fix L-05)
+spacy>=3.7.0,<4.0
 # After install: python -m spacy download en_core_web_sm
 
 # =============================================================================
 # DATA VALIDATION & PARSING
 # =============================================================================
-email-validator>=2.1.0
-phonenumbers>=8.13.0
-python-dateutil>=2.8.2
+email-validator>=2.1.0,<3.0
+phonenumbers>=8.13.0,<9.0
+python-dateutil>=2.8.2,<3.0
 
 # =============================================================================
 # DEDUPLICATION & MATCHING
 # =============================================================================
-rapidfuzz>=3.6.0
-# sentence-transformers>=2.2.2  # Unused (Audit Fix L-05)
+rapidfuzz>=3.6.0,<4.0
+sentence-transformers>=2.2.2,<3.0
 
 # =============================================================================
 # TASK QUEUE & SCHEDULING
 # =============================================================================
-celery>=5.3.4
-redis>=5.0.1
+celery>=5.3.4,<6.0
+redis>=5.0.1,<6.0
 
 # =============================================================================
 # UTILITIES
 # =============================================================================
-python-dotenv>=1.0.0
-tenacity>=8.2.0
-tqdm>=4.66.0
+python-dotenv>=1.0.0,<2.0
+tenacity>=8.2.0,<9.0
+tqdm>=4.66.0,<5.0
 
 # =============================================================================
 # LOGGING & OUTPUT
 # =============================================================================
-rich>=13.7.0
+rich>=13.7.0,<14.0
 
 # =============================================================================
 # TESTING
 # =============================================================================
-pytest>=7.4.0
-pytest-asyncio>=0.23.0
+pytest>=7.4.0,<9.0
+pytest-asyncio>=0.23.0,<1.0
 
 # =============================================================================
 # POST-INSTALL COMMANDS
