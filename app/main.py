@@ -508,6 +508,87 @@ templates = Jinja2Templates(directory=str(templates_path))
 # -----------------------------------------------------------------------------
 
 
+async def _paginate_leads(
+    db: AsyncSession,
+    base_query,
+    count_query,
+    page: int,
+    per_page: int,
+    order_by=None,
+):
+    """Shared pagination logic for lead list endpoints (M-01).
+
+    Returns: (leads, total, pages)
+    """
+    result = await db.execute(count_query)
+    total = result.scalar() or 0
+
+    offset = (page - 1) * per_page
+    if order_by is not None:
+        base_query = base_query.order_by(order_by)
+    else:
+        base_query = base_query.order_by(
+            PotentialLead.lead_score.desc().nullslast(), PotentialLead.created_at.desc()
+        )
+    base_query = base_query.offset(offset).limit(per_page)
+
+    result = await db.execute(base_query)
+    leads = result.scalars().all()
+
+    pages = (total + per_page - 1) // per_page if total > 0 else 1
+    return leads, total, pages
+
+
+def _apply_lead_filters(
+    query,
+    count_query,
+    status: Optional[str] = None,
+    min_score: Optional[int] = None,
+    state: Optional[str] = None,
+    location_type: Optional[str] = None,
+    brand_tier: Optional[str] = None,
+    search: Optional[str] = None,
+):
+    """Apply common lead filters to both query and count_query (M-01)."""
+    if status:
+        query = query.where(PotentialLead.status == status)
+        count_query = count_query.where(PotentialLead.status == status)
+    if min_score:
+        query = query.where(PotentialLead.lead_score >= min_score)
+        count_query = count_query.where(PotentialLead.lead_score >= min_score)
+    if state:
+        safe_state = escape_like(state)
+        query = query.where(PotentialLead.state.ilike(f"%{safe_state}%"))
+        count_query = count_query.where(PotentialLead.state.ilike(f"%{safe_state}%"))
+    if location_type:
+        query = query.where(PotentialLead.location_type == location_type)
+        count_query = count_query.where(PotentialLead.location_type == location_type)
+    if brand_tier:
+        query = query.where(PotentialLead.brand_tier == brand_tier)
+        count_query = count_query.where(PotentialLead.brand_tier == brand_tier)
+    if search:
+        safe_search = escape_like(search)
+        search_filter = (
+            PotentialLead.hotel_name.ilike(f"%{safe_search}%")
+            | PotentialLead.city.ilike(f"%{safe_search}%")
+            | PotentialLead.brand.ilike(f"%{safe_search}%")
+        )
+        query = query.where(search_filter)
+        count_query = count_query.where(search_filter)
+    return query, count_query
+
+
+def _lead_list_response(leads, total, page, per_page, pages) -> LeadListResponse:
+    """Build standard LeadListResponse (M-01)."""
+    return LeadListResponse(
+        leads=[LeadResponse.model_validate(lead) for lead in leads],
+        total=total,
+        page=page,
+        per_page=per_page,
+        pages=pages,
+    )
+
+
 async def _get_dashboard_stats(db: AsyncSession) -> dict:
     """Fetch all dashboard stats in 2 queries instead of 12.
 
@@ -710,59 +791,19 @@ async def list_leads(
     query = select(PotentialLead)
     count_query = select(func.count(PotentialLead.id))
 
-    # Apply filters
-    if status:
-        query = query.where(PotentialLead.status == status)
-        count_query = count_query.where(PotentialLead.status == status)
-    if min_score:
-        query = query.where(PotentialLead.lead_score >= min_score)
-        count_query = count_query.where(PotentialLead.lead_score >= min_score)
-    if state:
-        safe_state = escape_like(state)
-        query = query.where(PotentialLead.state.ilike(f"%{safe_state}%"))
-        count_query = count_query.where(PotentialLead.state.ilike(f"%{safe_state}%"))
-    if location_type:
-        query = query.where(PotentialLead.location_type == location_type)
-        count_query = count_query.where(PotentialLead.location_type == location_type)
-    if brand_tier:
-        query = query.where(PotentialLead.brand_tier == brand_tier)
-        count_query = count_query.where(PotentialLead.brand_tier == brand_tier)
-    if search:
-        safe_search = escape_like(search)
-        search_filter = (
-            PotentialLead.hotel_name.ilike(f"%{safe_search}%")
-            | PotentialLead.city.ilike(f"%{safe_search}%")
-            | PotentialLead.brand.ilike(f"%{safe_search}%")
-        )
-        query = query.where(search_filter)
-        count_query = count_query.where(search_filter)
-
-    # Get total count
-    result = await db.execute(count_query)
-    total = result.scalar() or 0
-
-    # Apply pagination and ordering - HIGH SCORES FIRST
-    offset = (page - 1) * per_page
-    query = (
-        query.order_by(
-            PotentialLead.lead_score.desc().nullslast(), PotentialLead.created_at.desc()
-        )
-        .offset(offset)
-        .limit(per_page)
+    query, count_query = _apply_lead_filters(
+        query,
+        count_query,
+        status=status,
+        min_score=min_score,
+        state=state,
+        location_type=location_type,
+        brand_tier=brand_tier,
+        search=search,
     )
 
-    result = await db.execute(query)
-    leads = result.scalars().all()
-
-    pages = (total + per_page - 1) // per_page if total > 0 else 1
-
-    return LeadListResponse(
-        leads=[LeadResponse.model_validate(lead) for lead in leads],
-        total=total,
-        page=page,
-        per_page=per_page,
-        pages=pages,
-    )
+    leads, total, pages = await _paginate_leads(db, query, count_query, page, per_page)
+    return _lead_list_response(leads, total, page, per_page, pages)
 
 
 @app.get("/leads/hot", response_model=LeadListResponse, tags=["Leads"])
@@ -772,35 +813,22 @@ async def get_hot_leads(
     db: AsyncSession = Depends(get_db),
 ):
     """Get hot leads (score >= config threshold) - ready for outreach"""
-    query = select(PotentialLead).where(
+    where = [
         PotentialLead.lead_score >= settings.hot_lead_threshold,
         PotentialLead.status == "new",
+    ]
+    query = select(PotentialLead).where(*where)
+    count_query = select(func.count(PotentialLead.id)).where(*where)
+
+    leads, total, pages = await _paginate_leads(
+        db,
+        query,
+        count_query,
+        page,
+        per_page,
+        order_by=PotentialLead.lead_score.desc(),
     )
-    count_query = select(func.count(PotentialLead.id)).where(
-        PotentialLead.lead_score >= settings.hot_lead_threshold,
-        PotentialLead.status == "new",
-    )
-
-    result = await db.execute(count_query)
-    total = result.scalar() or 0
-
-    offset = (page - 1) * per_page
-    query = (
-        query.order_by(PotentialLead.lead_score.desc()).offset(offset).limit(per_page)
-    )
-
-    result = await db.execute(query)
-    leads = result.scalars().all()
-
-    pages = (total + per_page - 1) // per_page if total > 0 else 1
-
-    return LeadListResponse(
-        leads=[LeadResponse.model_validate(lead) for lead in leads],
-        total=total,
-        page=page,
-        per_page=per_page,
-        pages=pages,
-    )
+    return _lead_list_response(leads, total, page, per_page, pages)
 
 
 @app.get("/leads/florida", response_model=LeadListResponse, tags=["Leads"])
@@ -815,28 +843,15 @@ async def get_florida_leads(
         PotentialLead.location_type == "florida"
     )
 
-    result = await db.execute(count_query)
-    total = result.scalar() or 0
-
-    offset = (page - 1) * per_page
-    query = (
-        query.order_by(PotentialLead.lead_score.desc().nullslast())
-        .offset(offset)
-        .limit(per_page)
+    leads, total, pages = await _paginate_leads(
+        db,
+        query,
+        count_query,
+        page,
+        per_page,
+        order_by=PotentialLead.lead_score.desc().nullslast(),
     )
-
-    result = await db.execute(query)
-    leads = result.scalars().all()
-
-    pages = (total + per_page - 1) // per_page if total > 0 else 1
-
-    return LeadListResponse(
-        leads=[LeadResponse.model_validate(lead) for lead in leads],
-        total=total,
-        page=page,
-        per_page=per_page,
-        pages=pages,
-    )
+    return _lead_list_response(leads, total, page, per_page, pages)
 
 
 @app.get("/leads/caribbean", response_model=LeadListResponse, tags=["Leads"])
@@ -851,28 +866,15 @@ async def get_caribbean_leads(
         PotentialLead.location_type == "caribbean"
     )
 
-    result = await db.execute(count_query)
-    total = result.scalar() or 0
-
-    offset = (page - 1) * per_page
-    query = (
-        query.order_by(PotentialLead.lead_score.desc().nullslast())
-        .offset(offset)
-        .limit(per_page)
+    leads, total, pages = await _paginate_leads(
+        db,
+        query,
+        count_query,
+        page,
+        per_page,
+        order_by=PotentialLead.lead_score.desc().nullslast(),
     )
-
-    result = await db.execute(query)
-    leads = result.scalars().all()
-
-    pages = (total + per_page - 1) // per_page if total > 0 else 1
-
-    return LeadListResponse(
-        leads=[LeadResponse.model_validate(lead) for lead in leads],
-        total=total,
-        page=page,
-        per_page=per_page,
-        pages=pages,
-    )
+    return _lead_list_response(leads, total, page, per_page, pages)
 
 
 @app.get("/leads/{lead_id}", response_model=LeadResponse, tags=["Leads"])
@@ -1347,44 +1349,17 @@ async def dashboard_leads_partial(
     query = select(PotentialLead)
     count_query = select(func.count(PotentialLead.id))
 
-    if status:
-        query = query.where(PotentialLead.status == status)
-        count_query = count_query.where(PotentialLead.status == status)
-    if min_score:
-        query = query.where(PotentialLead.lead_score >= min_score)
-        count_query = count_query.where(PotentialLead.lead_score >= min_score)
-    if location_type:
-        query = query.where(PotentialLead.location_type == location_type)
-        count_query = count_query.where(PotentialLead.location_type == location_type)
-    if brand_tier:
-        query = query.where(PotentialLead.brand_tier == brand_tier)
-        count_query = count_query.where(PotentialLead.brand_tier == brand_tier)
-    if search:
-        safe_search = escape_like(search)
-        search_filter = (
-            PotentialLead.hotel_name.ilike(f"%{safe_search}%")
-            | PotentialLead.city.ilike(f"%{safe_search}%")
-            | PotentialLead.brand.ilike(f"%{safe_search}%")
-        )
-        query = query.where(search_filter)
-        count_query = count_query.where(search_filter)
-
-    result = await db.execute(count_query)
-    total = result.scalar() or 0
-
-    offset = (page - 1) * per_page
-    query = (
-        query.order_by(
-            PotentialLead.lead_score.desc().nullslast(), PotentialLead.created_at.desc()
-        )
-        .offset(offset)
-        .limit(per_page)
+    query, count_query = _apply_lead_filters(
+        query,
+        count_query,
+        status=status,
+        min_score=min_score,
+        location_type=location_type,
+        brand_tier=brand_tier,
+        search=search,
     )
 
-    result = await db.execute(query)
-    leads = result.scalars().all()
-
-    pages = (total + per_page - 1) // per_page if total > 0 else 1
+    leads, total, pages = await _paginate_leads(db, query, count_query, page, per_page)
 
     return templates.TemplateResponse(
         request,
@@ -1949,11 +1924,51 @@ async def scrape_with_progress(request: Request):
 
                                     soup = BeautifulSoup(result.html or "", "lxml")
                                     links = set()
+                                    # M-10: Filter out junk URLs before following
+                                    _skip_patterns = [
+                                        "/login",
+                                        "/signup",
+                                        "/register",
+                                        "/account",
+                                        "/privacy",
+                                        "/terms",
+                                        "/cookie",
+                                        "/legal",
+                                        "/advertise",
+                                        "/subscribe",
+                                        "/cart",
+                                        "/checkout",
+                                        "/contact-us",
+                                        "/about-us",
+                                        "/careers",
+                                        "/jobs",
+                                        "/tag/",
+                                        "/category/",
+                                        "/author/",
+                                        "/page/",
+                                        "#",
+                                        "mailto:",
+                                        "javascript:",
+                                        "tel:",
+                                        ".pdf",
+                                        ".jpg",
+                                        ".png",
+                                        ".gif",
+                                        ".svg",
+                                        ".mp4",
+                                        ".mp3",
+                                        ".zip",
+                                        ".doc",
+                                    ]
                                     for a in soup.find_all("a", href=True):
                                         full_url = urljoin(gold_url, a["href"])
                                         if (
                                             full_url not in visited
                                             and source.base_url in full_url
+                                            and not any(
+                                                skip in full_url.lower()
+                                                for skip in _skip_patterns
+                                            )
                                         ):
                                             links.add(full_url)
 

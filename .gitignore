@@ -50,6 +50,9 @@ data/learnings/*.json
 logs/
 enrichment_log.txt
 
+# --- Backups ---
+backups/
+
 # --- OS Files ---
 .DS_Store
 Thumbs.db

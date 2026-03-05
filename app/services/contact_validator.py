@@ -362,88 +362,10 @@ class ContactValidator:
         return 0
 
     def _is_corporate_title(self, title: str) -> bool:
-        """Detect corporate/executive titles that are NOT property-level buyers."""
-        if not title:
-            return False
-        title_lower = f" {title.lower().strip()} "
-
-        # Property-level titles are NEVER corporate, even if they contain
-        # words like "director" or "managing" that look corporate
-        property_keywords = [
-            "general manager",
-            "hotel manager",
-            "resort manager",
-            "property manager",
-            "operations manager",
-            "director of operations",
-            "director of housekeeping",
-            "director of rooms",
-            "director of purchasing",
-            "director of procurement",
-            "director of front office",
-            "director of food",
-            "director of f&b",
-            "director of banquets",
-            "director of catering",
-            "executive housekeeper",
-            "purchasing manager",
-            "housekeeping manager",
-            "front office manager",
-            "uniform manager",
-            "wardrobe manager",
-            "laundry manager",
-            "supply chain manager",
-            "rooms division manager",
-            "assistant general manager",
-            "assistant director",
-            "spa director",
-            "director of spa",
-        ]
-        if any(kw in title_lower for kw in property_keywords):
-            return False
-
-        corporate_signals = [
-            "ceo",
-            "coo",
-            "cfo",
-            "cto",
-            "cmo",
-            "chief executive",
-            "chief operating",
-            "chief financial",
-            "chairman",
-            "chairwoman",
-            "chairperson",
-            "president",
-            "vice president",
-            "vp ",
-            " svp ",
-            "senior vice president",
-            " evp ",
-            "executive vice president",
-            "investor",
-            "board member",
-            "board of directors",
-            "founder",
-            "co-founder",
-            "cofounder",
-            "owner",
-            "partner",
-            "managing partner",
-            "regional director",
-            "regional manager",
-            "regional vp",
-            "area director",
-            "area manager",
-            "area vp",
-            "divisional",
-            "division president",
-            "head of development",
-            "head of acquisitions",
-            "development officer",
-            "investment",
-        ]
-        return any(kw in title_lower for kw in corporate_signals)
+        """Detect corporate/executive titles that are NOT property-level buyers.
+        L-04: Delegates to module-level is_corporate_title() for single source of truth.
+        """
+        return is_corporate_title(title)
 
     def _resolve_mgmt_company_scope(self, title: str, tier: BuyerTier) -> str:
         """
@@ -674,6 +596,148 @@ class SmartQueryBuilder:
         if country and country.upper() not in ("USA", "US", "UNITED STATES"):
             parts.append(country)
         return ", ".join(parts)
+
+
+# ═══════════════════════════════════════════════════════════════
+# SHARED DETECTION FUNCTIONS (L-04)
+# Single source of truth — used by both validator and enrichment
+# ═══════════════════════════════════════════════════════════════
+
+# Property-level titles that should NEVER be flagged as corporate
+_PROPERTY_TITLES = [
+    "general manager",
+    "hotel manager",
+    "resort manager",
+    "property manager",
+    "operations manager",
+    "director of operations",
+    "director of housekeeping",
+    "director of rooms",
+    "director of purchasing",
+    "director of procurement",
+    "director of front office",
+    "director of food",
+    "director of f&b",
+    "director of banquets",
+    "director of catering",
+    "executive housekeeper",
+    "purchasing manager",
+    "housekeeping manager",
+    "front office manager",
+    "uniform manager",
+    "wardrobe manager",
+    "laundry manager",
+    "supply chain manager",
+    "rooms division manager",
+    "assistant general manager",
+    "assistant director",
+    "spa director",
+    "director of spa",
+]
+
+# Corporate/executive signals
+_CORPORATE_SIGNALS = [
+    "ceo",
+    "coo",
+    "cfo",
+    "cto",
+    "cmo",
+    "chief executive",
+    "chief operating",
+    "chief financial",
+    "chairman",
+    "chairwoman",
+    "chairperson",
+    "president",
+    "vice president",
+    "vp ",
+    " svp ",
+    " evp ",
+    "senior vice president",
+    "executive vice president",
+    "area vice president",
+    "global head",
+    "head of region",
+    "investor",
+    "board member",
+    "board of directors",
+    "founder",
+    "co-founder",
+    "cofounder",
+    "owner",
+    "co-owner",
+    "partner",
+    "managing partner",
+    "principal",
+    "developer",
+    "real estate",
+    "regional director",
+    "regional manager",
+    "regional vp",
+    "area director",
+    "area manager",
+    "area vp",
+    "divisional",
+    "division president",
+    "head of development",
+    "head of acquisitions",
+    "development officer",
+    "investment",
+]
+
+# Non-hotel organization keywords
+_IRRELEVANT_ORG_KEYWORDS = [
+    "cbre",
+    "jll",
+    "cushman",
+    "colliers",
+    "real estate",
+    "law firm",
+    "attorney",
+    "legal",
+    "government",
+    "chamber of commerce",
+    "office of the prime",
+    "architecture",
+    "architect",
+    "construction",
+    "investment",
+    "capital",
+    "equity",
+    "fund",
+    "consulting",
+    "advisory",
+    "advisor",
+    "news",
+    "media",
+    "journal",
+    "magazine",
+]
+
+
+def is_corporate_title(title: str) -> bool:
+    """Check if a title is corporate/executive (not property-level).
+
+    L-04: Single source of truth used by both contact_validator.py
+    and contact_enrichment.py.
+    """
+    if not title:
+        return False
+    title_lower = f" {title.lower().strip()} "
+
+    # Property-level titles are NEVER corporate
+    if any(kw in title_lower for kw in _PROPERTY_TITLES):
+        return False
+
+    return any(kw in title_lower for kw in _CORPORATE_SIGNALS)
+
+
+def is_irrelevant_org(org: str) -> bool:
+    """Check if an organization is not a hotel (L-04)."""
+    if not org:
+        return False
+    org_lower = org.lower()
+    return any(term in org_lower for term in _IRRELEVANT_ORG_KEYWORDS)
 
 
 # Module-level instances

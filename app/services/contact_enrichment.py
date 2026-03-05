@@ -37,7 +37,12 @@ from app.config.enrichment_config import (
     get_enrichment_gemini_model,
 )
 from app.config.sap_title_classifier import title_classifier, BuyerTier
-from app.services.contact_validator import contact_validator, query_builder
+from app.services.contact_validator import (
+    contact_validator,
+    query_builder,
+    is_corporate_title,
+    is_irrelevant_org,
+)
 from app.services.utils import local_now
 
 load_dotenv()
@@ -406,94 +411,17 @@ def _is_hotel_relevant_title(title: str) -> bool:
 
 
 def _is_irrelevant_org(org: str) -> bool:
-    """Filter out contacts from non-hotel organizations."""
-    if not org:
-        return False
-
-    org_lower = org.lower()
-    irrelevant = [
-        "cbre",
-        "jll",
-        "cushman",
-        "colliers",
-        "real estate",
-        "law firm",
-        "attorney",
-        "legal",
-        "government",
-        "chamber of commerce",
-        "office of the prime",
-        "architecture",
-        "architect",
-        "construction",
-        "investment",
-        "capital",
-        "equity",
-        "fund",
-        "consulting",
-        "advisory",
-        "advisor",
-        "news",
-        "media",
-        "journal",
-        "magazine",
-    ]
-
-    for term in irrelevant:
-        if term in org_lower:
-            return True
-
-    return False
+    """Filter out contacts from non-hotel organizations.
+    L-04: Delegates to shared is_irrelevant_org() in contact_validator.
+    """
+    return is_irrelevant_org(org)
 
 
 def _is_corporate_title(title: str) -> bool:
-    """Filter out corporate/executive/investor titles — not property-level contacts."""
-    if not title:
-        return False
-
-    classification = title_classifier.classify(title)
-    # The SAP classifier already handles corporate detection
-    # Check if it got tagged as corporate (score=5, priority=7)
-    if classification.search_priority >= 7:
-        return True
-
-    title_lower = title.lower()
-    corporate_keywords = [
-        "president",
-        "ceo",
-        "cfo",
-        "coo",
-        "cto",
-        "chief executive",
-        "chief operating",
-        "chief financial",
-        "vice president",
-        "svp",
-        "evp",
-        "senior vice",
-        "executive vice",
-        "area vice president",
-        "global head",
-        "head of region",
-    ]
-    # Investor/developer/owner — they don't buy uniforms
-    investor_keywords = [
-        "co-founder",
-        "cofounder",
-        "founder",
-        "partner",
-        "managing partner",
-        "owner",
-        "co-owner",
-        "investor",
-        "principal",
-        "developer",
-        "real estate",
-    ]
-    for kw in corporate_keywords + investor_keywords:
-        if kw in title_lower:
-            return True
-    return False
+    """Filter out corporate/executive/investor titles — not property-level contacts.
+    L-04: Delegates to shared is_corporate_title() in contact_validator.
+    """
+    return is_corporate_title(title)
 
 
 # ═══════════════════════════════════════════════════════════════
