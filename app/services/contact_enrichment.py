@@ -34,6 +34,7 @@ from app.config.enrichment_config import (
     CONTACT_SEARCH_PRIORITIES,
     ENRICHMENT_SETTINGS,
     HOSPITALITY_NEWS_DOMAINS,
+    get_enrichment_gemini_model,
 )
 from app.config.sap_title_classifier import title_classifier, BuyerTier
 from app.services.contact_validator import contact_validator, query_builder
@@ -63,6 +64,93 @@ def _get_client() -> httpx.AsyncClient:
             follow_redirects=True,
         )
     return _shared_client
+
+
+# ═══════════════════════════════════════════════════════════════
+# GEMINI API CALLER WITH RETRY (H-08)
+# Retries on 429/503/500 with exponential backoff
+# ═══════════════════════════════════════════════════════════════
+
+_GEMINI_RETRY_ATTEMPTS = 3
+_GEMINI_RETRY_BASE_DELAY = 2  # seconds
+
+
+async def _call_gemini(
+    prompt: str, model: Optional[str] = None, timeout: int = 30
+) -> Optional[dict]:
+    """Call Gemini API with retry and exponential backoff.
+
+    Returns parsed JSON response or None on failure.
+    Retries on 429 (rate limit), 500, 503 (server errors).
+    """
+    api_key = os.getenv("GEMINI_API_KEY")
+    if not api_key:
+        logger.error("GEMINI_API_KEY not set")
+        return None
+
+    if not model:
+        model = get_enrichment_gemini_model()
+
+    url = (
+        f"https://generativelanguage.googleapis.com/v1beta/models/{model}"
+        f":generateContent?key={api_key}"
+    )
+    payload = {
+        "contents": [{"parts": [{"text": prompt}]}],
+        "generationConfig": {"temperature": 0.1},
+    }
+
+    client = _get_client()
+    last_error = None
+
+    for attempt in range(_GEMINI_RETRY_ATTEMPTS):
+        try:
+            resp = await client.post(url, json=payload, timeout=timeout)
+
+            if resp.status_code == 200:
+                data = resp.json()
+                candidates = data.get("candidates", [])
+                if not candidates:
+                    feedback = data.get("promptFeedback", {})
+                    logger.warning(
+                        f"Gemini returned no candidates. Feedback: {feedback}"
+                    )
+                    return None
+                try:
+                    text = candidates[0]["content"]["parts"][0]["text"]
+                except (KeyError, IndexError) as e:
+                    logger.error(f"Unexpected Gemini response structure: {e}")
+                    return None
+                text = re.sub(r"```json\s*", "", text)
+                text = re.sub(r"```\s*", "", text)
+                return json.loads(text.strip())
+
+            elif resp.status_code in (429, 500, 503):
+                delay = _GEMINI_RETRY_BASE_DELAY * (2**attempt)
+                logger.warning(
+                    f"Gemini {resp.status_code} (attempt {attempt + 1}/{_GEMINI_RETRY_ATTEMPTS}), "
+                    f"retrying in {delay}s..."
+                )
+                await asyncio.sleep(delay)
+                last_error = f"HTTP {resp.status_code}"
+            else:
+                logger.error(f"Gemini API error: {resp.status_code}")
+                return None
+
+        except (json.JSONDecodeError, ValueError) as e:
+            logger.error(f"Gemini response parse error: {e}")
+            return None
+        except Exception as e:
+            delay = _GEMINI_RETRY_BASE_DELAY * (2**attempt)
+            logger.warning(
+                f"Gemini call failed (attempt {attempt + 1}/{_GEMINI_RETRY_ATTEMPTS}): {e}, "
+                f"retrying in {delay}s..."
+            )
+            await asyncio.sleep(delay)
+            last_error = str(e)
+
+    logger.error(f"Gemini failed after {_GEMINI_RETRY_ATTEMPTS} attempts: {last_error}")
+    return None
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -732,48 +820,15 @@ async def _extract_contacts_with_gemini(
     article_text: str, hotel_name: str, location: str
 ) -> Optional[dict]:
     """Use Gemini to extract contacts with scope tagging."""
-    api_key = os.getenv("GEMINI_API_KEY")
-    if not api_key:
-        logger.error("GEMINI_API_KEY not set")
-        return None
-
-    model = ENRICHMENT_SETTINGS["gemini_model"]
+    model = get_enrichment_gemini_model()
     prompt = CONTACT_EXTRACTION_PROMPT_V3.format(
         hotel_name=hotel_name,
         location=location,
         article_text=article_text[: ENRICHMENT_SETTINGS["max_article_chars"]],
     )
 
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
-
     try:
-        client = _get_client()
-        resp = await client.post(
-            url,
-            json={
-                "contents": [{"parts": [{"text": prompt}]}],
-                "generationConfig": {"temperature": 0.1},
-            },
-        )
-
-        if resp.status_code != 200:
-            logger.error(f"Gemini API error: {resp.status_code}")
-            return None
-
-        data = resp.json()
-        candidates = data.get("candidates", [])
-        if not candidates:
-            feedback = data.get("promptFeedback", {})
-            logger.warning(f"Gemini returned no candidates. Feedback: {feedback}")
-            return None
-        try:
-            text = candidates[0]["content"]["parts"][0]["text"]
-        except (KeyError, IndexError) as e:
-            logger.error(f"Unexpected Gemini response structure: {e}")
-            return None
-        text = re.sub(r"```json\s*", "", text)
-        text = re.sub(r"```\s*", "", text)
-        return json.loads(text.strip())
+        return await _call_gemini(prompt, model=model)
     except Exception as e:
         logger.error(f"Gemini extraction failed: {e}")
         return None
@@ -1881,11 +1936,6 @@ async def _verify_contacts_with_gemini(
     AI verification layer: Gemini reads raw snippets to determine each contact
     real title, org, and relevance. Fixes false positives from regex parsing.
     """
-    api_key = os.getenv("GEMINI_API_KEY")
-    if not api_key:
-        logger.warning("GEMINI_API_KEY not set, skipping contact verification")
-        return contacts
-
     # Build verification payload with raw snippet context
     contacts_for_verification = []
     for i, c in enumerate(contacts):
@@ -1915,43 +1965,21 @@ async def _verify_contacts_with_gemini(
         contacts_json=json.dumps(contacts_for_verification, indent=2),
     )
 
-    model = ENRICHMENT_SETTINGS["gemini_model"]
-    api_url = (
-        f"https://generativelanguage.googleapis.com/v1beta/models/{model}"
-        f":generateContent?key={api_key}"
-    )
+    model = get_enrichment_gemini_model()
 
     try:
-        client = _get_client()
-        resp = await client.post(
-            api_url,
-            json={
-                "contents": [{"parts": [{"text": prompt}]}],
-                "generationConfig": {"temperature": 0.1},
-            },
-            timeout=120,
-        )
-
-        if resp.status_code != 200:
-            logger.error(f"Gemini verification API error: {resp.status_code}")
-            return contacts
-
-        data = resp.json()
-        candidates = data.get("candidates", [])
-        if not candidates:
-            feedback = data.get("promptFeedback", {})
+        verifications = await _call_gemini(prompt, model=model, timeout=120)
+        if verifications is None:
             logger.warning(
-                f"Gemini verification returned no candidates. Feedback: {feedback}"
+                "Gemini verification returned no data, keeping contacts as-is"
             )
             return contacts
-        try:
-            text = candidates[0]["content"]["parts"][0]["text"]
-        except (KeyError, IndexError) as e:
-            logger.error(f"Unexpected Gemini verification response: {e}")
+        # _call_gemini returns parsed JSON — for verification, it's a list
+        if not isinstance(verifications, list):
+            logger.error(
+                f"Gemini verification returned non-list: {type(verifications)}"
+            )
             return contacts
-        text = re.sub(r"```json\s*", "", text)
-        text = re.sub(r"```\s*", "", text)
-        verifications = json.loads(text.strip())
 
     except Exception as e:
         import traceback

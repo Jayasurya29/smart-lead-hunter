@@ -75,7 +75,27 @@
         }
     </style>
 </head>
-<body class="h-full">
+<body class="h-full" hx-headers='{"X-API-Key": "{{ api_auth_key|default("", true) }}"}'>
+    <!-- C-04: API key available for JS fetch() calls -->
+    <meta name="api-key" content="{{ api_auth_key|default('', true) }}">
+    <script>
+        // C-04: Auto-inject X-API-Key header into all fetch() calls
+        (function() {
+            const apiKey = document.querySelector('meta[name="api-key"]')?.content;
+            if (apiKey) {
+                const _origFetch = window.fetch;
+                window.fetch = function(url, opts = {}) {
+                    opts.headers = opts.headers || {};
+                    if (opts.headers instanceof Headers) {
+                        if (!opts.headers.has('X-API-Key')) opts.headers.set('X-API-Key', apiKey);
+                    } else {
+                        opts.headers['X-API-Key'] = opts.headers['X-API-Key'] || apiKey;
+                    }
+                    return _origFetch.call(this, url, opts);
+                };
+            }
+        })();
+    </script>
     <div class="min-h-full">
         <!-- ═══ NAVBAR — White, 80px, logo fills height ═══ -->
         <nav class="bg-white border-b border-gray-200 shadow-sm h-[80px] flex-shrink-0">

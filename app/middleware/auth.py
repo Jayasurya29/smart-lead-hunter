@@ -84,10 +84,17 @@ class APIKeyMiddleware(BaseHTTPMiddleware):
         self.exclude_paths = exclude_paths or [
             "/health",
             "/dashboard",
-            "/api/dashboard",
             "/docs",
             "/redoc",
             "/openapi.json",
+            # SSE streams: EventSource can't send custom headers;
+            # these are gated by one-time scrape_id/discovery_id tokens instead
+            "/api/dashboard/scrape/stream",
+            "/api/dashboard/extract-url/stream",
+            "/api/dashboard/discovery/stream",
+            # Read-only endpoints polled by dashboard
+            "/api/dashboard/stats",
+            "/api/dashboard/sources/list",
         ]
 
     async def dispatch(self, request: Request, call_next):

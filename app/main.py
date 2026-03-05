@@ -26,6 +26,7 @@ from sqlalchemy import select, func, text, or_, case, update
 
 import asyncio
 import json
+import os
 import re
 import uuid
 
@@ -36,6 +37,7 @@ from app.models import PotentialLead, Source, ScrapeLog
 from app.services.utils import normalize_hotel_name, local_now
 from app.middleware.auth import APIKeyMiddleware
 from app.models.lead_contact import LeadContact
+from app.services.lead_factory import save_lead_to_db
 
 # Global dict to track active scrape jobs and their progress
 # Protected by _scrape_lock for async-safe mutation within a single worker.
@@ -43,6 +45,22 @@ from app.models.lead_contact import LeadContact
 active_scrapes: dict = {}
 scrape_cancellations: set = set()
 _scrape_lock = asyncio.Lock()
+_SCRAPE_TTL = 1800  # 30 minutes — auto-evict stale scrape entries
+
+
+async def _cleanup_stale_scrapes():
+    """Remove scrape entries older than _SCRAPE_TTL (M-05 fix)."""
+    async with _scrape_lock:
+        now = time.monotonic()
+        stale = [
+            k
+            for k, v in active_scrapes.items()
+            if isinstance(v, dict) and now - v.get("_started", now) > _SCRAPE_TTL
+        ]
+        for k in stale:
+            del active_scrapes[k]
+            scrape_cancellations.discard(k)
+
 
 # Keyed by unique ID to prevent race conditions between concurrent users (Audit Fix #3)
 _pending_configs: dict = {}  # scrape_id -> {mode, source_ids, ...}
@@ -77,6 +95,9 @@ def _pop_pending(store: dict, key: str, default=None):
 # Logging configured by setup_logging() in lifespan
 logger = logging.getLogger(__name__)
 
+# M-04: Cached Redis connection for health checks
+_health_redis = None
+
 
 # -----------------------------------------------------------------------------
 # Helpers
@@ -100,6 +121,38 @@ def escape_like(value: str) -> str:
         .replace("%", "\\%")
         .replace("_", "\\_")
     )
+
+
+def _merged_lead_to_dict(ml, fallback_url: str = "", fallback_source: str = "") -> dict:
+    """Convert a MergedLead object to a dict for save_leads_to_database.
+
+    Used by both scrape_with_progress and extract_url_stream SSE endpoints
+    to avoid duplicating the 20-field conversion logic.
+    """
+    d = {
+        "hotel_name": ml.hotel_name,
+        "brand": ml.brand,
+        "property_type": ml.property_type,
+        "city": ml.city,
+        "state": ml.state,
+        "country": ml.country,
+        "opening_date": ml.opening_date,
+        "room_count": ml.room_count,
+        "contact_name": ml.contact_name,
+        "contact_title": ml.contact_title,
+        "contact_email": ml.contact_email,
+        "contact_phone": ml.contact_phone,
+        "source_url": ml.source_urls[0] if ml.source_urls else fallback_url,
+        "source_name": ml.source_names[0] if ml.source_names else fallback_source,
+        "key_insights": getattr(ml, "key_insights", ""),
+        "confidence_score": ml.confidence_score,
+        "qualification_score": getattr(ml, "qualification_score", 0),
+    }
+    if ml.merged_from_count > 1:
+        d["key_insights"] = (
+            d.get("key_insights") or ""
+        ) + f"\n\n Merged from {ml.merged_from_count} sources"
+    return d
 
 
 # -----------------------------------------------------------------------------
@@ -365,9 +418,7 @@ async def _checked_json(request: Request, max_size: int = MAX_BODY_SIZE) -> dict
     body = await request.body()
     if len(body) > max_size:
         raise HTTPException(status_code=413, detail="Request body too large")
-    import json as _json
-
-    return _json.loads(body)
+    return json.loads(body)
 
 
 def _cleanup_rate_limit_store(now: float) -> None:
@@ -434,8 +485,6 @@ async def rate_limit_middleware(request: Request, call_next):
     bucket["count"] += 1
 
     if bucket["count"] > _RATE_LIMIT_MAX:
-        from fastapi.responses import JSONResponse
-
         return JSONResponse(
             status_code=429,
             content={"detail": "Too many requests. Please slow down."},
@@ -598,10 +647,22 @@ async def health_check(db: AsyncSession = Depends(get_db)):
         else:
             import redis.asyncio as aioredis
 
-            r = aioredis.from_url(redis_url, socket_connect_timeout=3)
-            await r.ping()
-            await r.aclose()
-            components["redis"] = "healthy"
+            # Reuse module-level connection (M-04: avoid creating per-check)
+            global _health_redis
+            if "_health_redis" not in globals() or _health_redis is None:
+                _health_redis = aioredis.from_url(redis_url, socket_connect_timeout=3)
+            try:
+                await _health_redis.ping()
+                components["redis"] = "healthy"
+            except Exception:
+                # Connection stale — recreate
+                try:
+                    await _health_redis.aclose()
+                except Exception:
+                    pass
+                _health_redis = aioredis.from_url(redis_url, socket_connect_timeout=3)
+                await _health_redis.ping()
+                components["redis"] = "healthy"
     except Exception as e:
         components["redis"] = f"unhealthy: {_safe_error(e)}"
 
@@ -829,8 +890,6 @@ async def get_lead(lead_id: int, db: AsyncSession = Depends(get_db)):
 @app.post("/leads", response_model=LeadResponse, tags=["Leads"])
 async def create_lead(lead_data: LeadCreate, db: AsyncSession = Depends(get_db)):
     """Create a new lead manually — routed through shared lead factory."""
-    from app.services.lead_factory import save_lead_to_db
-
     lead_dict = lead_data.model_dump()
     lead_dict["source_site"] = lead_dict.get("source_site") or "manual"
 
@@ -1259,6 +1318,7 @@ async def dashboard_page(
             "rejected_count": _tc.rejected or 0,
             "deleted_count": _tc.deleted or 0,
             "total_count": total_count,
+            "api_auth_key": os.getenv("API_AUTH_KEY", ""),
         },
     )
 
@@ -1754,7 +1814,9 @@ async def scrape_with_progress(request: Request):
     config_source_ids = scrape_config.get("source_ids", [])
 
     async with _scrape_lock:
-        active_scrapes[scrape_id] = {"status": "starting"}
+        active_scrapes[scrape_id] = {"status": "starting", "_started": time.monotonic()}
+    # Periodic cleanup of stale entries (M-05)
+    await _cleanup_stale_scrapes()
 
     async def event_generator():
         orchestrator = None
@@ -2005,32 +2067,7 @@ async def scrape_with_progress(request: Request):
                 yield f"data: {json.dumps({'type': 'info', 'message': f'Dedup: {dupes_found} duplicates merged, {unique_count} unique leads'})}\n\n"
 
                 # Convert MergedLead objects to dicts for save_leads_to_database
-                lead_dicts = []
-                for ml in merged_leads:
-                    d = {
-                        "hotel_name": ml.hotel_name,
-                        "brand": ml.brand,
-                        "property_type": ml.property_type,
-                        "city": ml.city,
-                        "state": ml.state,
-                        "country": ml.country,
-                        "opening_date": ml.opening_date,
-                        "room_count": ml.room_count,
-                        "contact_name": ml.contact_name,
-                        "contact_title": ml.contact_title,
-                        "contact_email": ml.contact_email,
-                        "contact_phone": ml.contact_phone,
-                        "source_url": ml.source_urls[0] if ml.source_urls else "",
-                        "source_name": ml.source_names[0] if ml.source_names else "",
-                        "key_insights": getattr(ml, "key_insights", ""),
-                        "confidence_score": ml.confidence_score,
-                        "qualification_score": getattr(ml, "qualification_score", 0),
-                    }
-                    if ml.merged_from_count > 1:
-                        d["key_insights"] = (
-                            d.get("key_insights") or ""
-                        ) + f"\n\n Merged from {ml.merged_from_count} sources"
-                    lead_dicts.append(d)
+                lead_dicts = [_merged_lead_to_dict(ml) for ml in merged_leads]
             else:
                 # No deduplicator or no leads
                 lead_dicts = [
@@ -2435,30 +2472,12 @@ async def extract_url_stream(request: Request):
                 yield f"data: {json.dumps({'type': 'info', 'message': f'Dedup: {dupes_found} duplicates merged, {unique_count} unique leads'})}\n\n"
 
                 # Convert to dicts
-                lead_dicts = []
-                for ml in merged_leads:
-                    d = {
-                        "hotel_name": ml.hotel_name,
-                        "brand": ml.brand,
-                        "property_type": ml.property_type,
-                        "city": ml.city,
-                        "state": ml.state,
-                        "country": ml.country,
-                        "opening_date": ml.opening_date,
-                        "room_count": ml.room_count,
-                        "contact_name": ml.contact_name,
-                        "contact_title": ml.contact_title,
-                        "contact_email": ml.contact_email,
-                        "contact_phone": ml.contact_phone,
-                        "source_url": ml.source_urls[0]
-                        if ml.source_urls
-                        else target_url,
-                        "source_name": source_label,
-                        "key_insights": getattr(ml, "key_insights", ""),
-                        "confidence_score": ml.confidence_score,
-                        "qualification_score": getattr(ml, "qualification_score", 0),
-                    }
-                    lead_dicts.append(d)
+                lead_dicts = [
+                    _merged_lead_to_dict(
+                        ml, fallback_url=target_url, fallback_source=source_label
+                    )
+                    for ml in merged_leads
+                ]
             else:
                 lead_dicts = [
                     lead.to_dict() for lead in (pipeline_result.final_leads or [])

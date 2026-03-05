@@ -12,6 +12,7 @@ from sqlalchemy import (
     Column,
     DateTime,
     ForeignKey,
+    Index,
     Integer,
     String,
     Text,
@@ -24,6 +25,9 @@ from app.services.utils import local_now
 
 class LeadContact(Base):
     __tablename__ = "lead_contacts"
+
+    # M-08: Composite index for duplicate checks during enrichment
+    __table_args__ = (Index("ix_lead_contacts_lead_name", "lead_id", "name"),)
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     lead_id = Column(

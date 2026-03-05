@@ -423,6 +423,21 @@ ENRICHMENT_SETTINGS = {
     "crawl_timeout_seconds": 15,
     "max_articles_to_scrape": 3,
     "max_apollo_reveals_per_lead": 2,
-    "gemini_model": "gemini-2.5-flash",
+    # M-03: Model name loaded from app settings at runtime (see get_gemini_model())
+    "gemini_model": None,  # Resolved lazily below
     "max_article_chars": 8000,
 }
+
+
+def get_enrichment_gemini_model() -> str:
+    """Get Gemini model for enrichment, centralized from app settings (M-03)."""
+    if ENRICHMENT_SETTINGS["gemini_model"]:
+        return ENRICHMENT_SETTINGS["gemini_model"]
+    try:
+        from app.config import settings
+
+        model = getattr(settings, "gemini_model", "gemini-2.5-flash")
+        ENRICHMENT_SETTINGS["gemini_model"] = model
+        return model
+    except Exception:
+        return "gemini-2.5-flash"
