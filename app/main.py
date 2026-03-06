@@ -1472,12 +1472,67 @@ async def dashboard_edit_lead(
         lead.hotel_name_normalized = normalize_hotel_name(data["hotel_name"])
 
     # Audit Fix 5b: Wrap room_count safely
-    lead.updated_at = local_now()
+    # Rescore lead after edits
+    tier_points_map = {
+        "tier1_ultra_luxury": 25,
+        "tier2_luxury": 20,
+        "tier3_upper_upscale": 15,
+        "tier4_upscale": 10,
+        "tier5_skip": 0,
+        "unknown": 0,
+    }
+    scoring_fields = {
+        "hotel_name",
+        "brand",
+        "city",
+        "state",
+        "country",
+        "opening_date",
+        "room_count",
+        "description",
+    }
+    scoring_changed = any(f in data for f in scoring_fields)
 
+    if scoring_changed:
+        # Full rescore from scratch
+        from app.services.scorer import calculate_lead_score
+
+        result_score = calculate_lead_score(
+            hotel_name=lead.hotel_name or "",
+            city=lead.city or "",
+            state=lead.state or "",
+            country=lead.country or "USA",
+            opening_date=lead.opening_date or "",
+            room_count=lead.room_count or 0,
+            description=lead.description or "",
+            brand=lead.brand or "",
+        )
+        lead.lead_score = result_score["total_score"]
+        # If user also changed tier in same edit, override
+        if "brand_tier" in data and data["brand_tier"]:
+            auto_points = result_score["breakdown"].get("brand", {}).get("points", 0)
+            manual_points = tier_points_map.get(data["brand_tier"], 0)
+            lead.lead_score = lead.lead_score - auto_points + manual_points
+            lead.brand_tier = data["brand_tier"]
+        else:
+            lead.brand_tier = result_score["brand_tier"]
+    elif "brand_tier" in data and data["brand_tier"]:
+        # Tier-only change — just swap the points on existing score
+        old_points = tier_points_map.get(lead.brand_tier or "unknown", 0)
+        new_points = tier_points_map.get(data["brand_tier"], 0)
+        lead.lead_score = (lead.lead_score or 0) - old_points + new_points
+        lead.brand_tier = data["brand_tier"]
+    lead.updated_at = local_now()
     await db.commit()
     await db.refresh(lead)
-
-    return JSONResponse(content={"status": "ok", "id": lead.id})
+    return JSONResponse(
+        content={
+            "status": "ok",
+            "id": lead.id,
+            "new_score": lead.lead_score,
+            "new_tier": lead.brand_tier,
+        }
+    )
 
 
 @app.post(

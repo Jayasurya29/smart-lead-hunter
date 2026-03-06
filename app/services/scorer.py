@@ -198,6 +198,10 @@ TIER1_ULTRA_LUXURY = [
     "montage los cabos",
     "montage big sky",
     "montage healdsburg",
+    # ── V2.1 additions ──
+    "bvlgari",  # Alternate spelling of bulgari
+    "single thread",  # Michelin 3-star ultra luxury
+    "singlethread",
 ]
 
 # =============================================================================
@@ -305,6 +309,18 @@ TIER2_LUXURY = [
     # ── Accor Luxury ──
     "fairmont",  # Accor luxury
     "sofitel legend",  # Accor top tier
+    # ── V2.1 additions ──
+    "appellation",  # Luxury boutique collection
+    "canyon ranch",  # Luxury wellness
+    "faraway",  # Luxury boutique
+    "meritage collection",  # Luxury boutique
+    "mosaic hotel collection",  # Luxury boutique
+    "the dean group",  # Luxury boutique
+    "trailborn",  # Luxury experiential
+    "beemok hospitality collection",  # Luxury boutique (The Cooper)
+    "beemok",
+    "mirbeau",  # Luxury spa resort
+    "mirbeau inn",
 ]
 
 # =============================================================================
@@ -347,6 +363,7 @@ TIER3_UPPER_UPSCALE = [
     "jdv by hyatt",  # Joie de Vivre
     "bunkhouse",  # Hyatt boutique
     "unscripted by hyatt",  # Hyatt upscale boutique
+    "unscripted",  # Hyatt lifestyle (bare name)
     # ── Hyatt All-Inclusive (Upper) ──
     "hyatt zilara",
     "hyatt ziva",
@@ -416,6 +433,10 @@ TIER3_UPPER_UPSCALE = [
     "the goodtime hotel",  # Miami Beach
     "proper",
     "grand wailea",
+    # ── V2.1 additions ──
+    "opal collection",  # Upper upscale boutique
+    "recess",  # Upper upscale lifestyle
+    "hilton hotels and resorts",  # Upper upscale (full name variant)
 ]
 
 # =============================================================================
@@ -430,6 +451,7 @@ TIER4_UPSCALE = [
     "doubletree",
     "embassy suites",
     "hilton hotel",
+    "hilton",  # Bare brand name fallback
     "hilton hotels",
     "hilton resort",
     "hilton miami",
@@ -507,6 +529,10 @@ TIER4_UPSCALE = [
     "mercure",
     "movenpick",
     "25hours",
+    # ── V2.1 additions ──
+    "under canvas",  # Glamping/outdoor hospitality
+    "outbound hotels",  # Outdoor hospitality
+    "outbound",
 ]
 
 # =============================================================================
@@ -621,6 +647,10 @@ TIER5_SKIP = [
     "adagio",
     "greet",
     "jo&joe",
+    # ── V2.1 additions ──
+    "dazzler select",  # Wyndham budget
+    "dazzler",
+    "universal studios",  # Theme park, not hotel target
 ]
 
 
@@ -1773,6 +1803,9 @@ def calculate_lead_score(
 
     # 1. BRAND TIER (25 pts max)
     brand_tier_num, brand_tier_name, brand_points = get_brand_tier(hotel_name)
+    # Also check the brand field if hotel name didn't match
+    if brand_tier_num == 0 and brand:
+        brand_tier_num, brand_tier_name, brand_points = get_brand_tier(brand)
     result["brand_tier"] = get_brand_tier_name(brand_tier_num)
 
     if brand_tier_num == 5:

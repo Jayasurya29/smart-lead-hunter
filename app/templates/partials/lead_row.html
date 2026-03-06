@@ -60,8 +60,9 @@
     <!-- Sources (pipeline only) — this is the LAST real column -->
     {% if active_tab == 'pipeline' %}
     <td class="px-3 py-2.5 w-16 text-center" style="position: relative;">
-        {% if lead.source_count is defined and lead.source_count and lead.source_count > 1 %}
-            <span class="inline-flex items-center justify-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-100 text-amber-700 border border-amber-300">{{ lead.source_count }}x</span>
+        {% set src_count = (lead.source_urls | length) if lead.source_urls else 1 %}
+        {% if src_count > 1 %}
+            <span class="inline-flex items-center justify-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-100 text-amber-700 border border-amber-300">{{ src_count }}x</span>
         {% else %}
             <span class="text-xs text-gray-400">1</span>
         {% endif %}

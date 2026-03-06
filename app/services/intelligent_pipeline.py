@@ -13,7 +13,7 @@ STAGES:
 
 AI PROVIDER: Google Gemini
 -Classifier: gemini-2.5-flash-lite (4,000 RPM / Unlimited RPD)
--Extractor: gemini-3-flash (1,000 RPM / 10,000 RPD)
+-Extractor: gemini-2.5-flash (1,000 RPM / 10,000 RPD)
 
 
 Usage:
@@ -150,27 +150,27 @@ class PipelineConfig:
 
     # Models — Gemini 3/2.5 configuration (no RPM bottlenecks)
     # Classifier: Flash Lite — 4,000 RPM / Unlimited RPD (binary yes/no)
-    # Extractor: 3 Flash — 1,000 RPM / 10,000 RPD (structured extraction)
+    # Extractor: 2.5 Flash — 1,000 RPM / 10,000 RPD (structured extraction)
     classifier_model: str = "gemini-2.5-flash-lite"
-    extractor_model: str = "gemini-3-flash"
+    extractor_model: str = "gemini-2.5-flash"
 
     # Thresholds
-    classification_confidence: float = 0.5
+    classification_confidence: float = 0.45
     qualification_threshold: int = 30  # Min score to keep lead
 
     # Rate limiting — Flash models have generous limits
-    min_delay_seconds: float = 0.3
+    min_delay_seconds: float = 0.15
 
     # Concurrency
-    max_concurrent_requests: int = 15
+    max_concurrent_requests: int = 20
 
     # Content limits
     classifier_content_limit: int = 5000  # Chars for classification
-    extractor_content_limit: int = 15000  # Chars for extraction
+    extractor_content_limit: int = 20000  # Chars for extraction
 
     # Redis extraction cache (skip re-extraction for same content)
     redis_cache_enabled: bool = True
-    redis_cache_ttl_hours: int = 72
+    redis_cache_ttl_hours: int = 168
     redis_url: str = ""
 
     # TODO: Gemini Batch API (50% cost reduction when GA)
@@ -1476,7 +1476,7 @@ Return [] if no new hotels found."""
                 wait = (2**attempt) * 2
                 # Fall back to faster model on 2nd retry
                 if attempt >= 1:
-                    model = "gemini-2.5-flash"
+                    model = self.config.extractor_model
                     logger.warning(
                         f"Timeout on {url}, falling back to {model}, retry {attempt + 1}/{max_retries} in {wait}s"
                     )

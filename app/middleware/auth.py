@@ -95,6 +95,7 @@ class APIKeyMiddleware(BaseHTTPMiddleware):
             # Read-only endpoints polled by dashboard
             "/api/dashboard/stats",
             "/api/dashboard/sources/list",
+            "/api/dashboard/leads",
         ]
 
     async def dispatch(self, request: Request, call_next):

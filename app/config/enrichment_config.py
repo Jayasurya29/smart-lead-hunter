@@ -417,15 +417,15 @@ MANAGEMENT_COMPANIES = [
 # ═══════════════════════════════════════════════════════════════
 
 ENRICHMENT_SETTINGS = {
-    "ddg_delay_seconds": 2.0,
+    "ddg_delay_seconds": 1.5,
     "serper_delay_seconds": 0.5,  # Serper is fast, minimal delay needed
     "apollo_delay_seconds": 0.5,
-    "crawl_timeout_seconds": 15,
-    "max_articles_to_scrape": 3,
-    "max_apollo_reveals_per_lead": 2,
+    "crawl_timeout_seconds": 20,
+    "max_articles_to_scrape": 5,
+    "max_apollo_reveals_per_lead": 3,
     # M-03: Model name loaded from app settings at runtime (see get_gemini_model())
     "gemini_model": None,  # Resolved lazily below
-    "max_article_chars": 8000,
+    "max_article_chars": 12000,
 }
 
 

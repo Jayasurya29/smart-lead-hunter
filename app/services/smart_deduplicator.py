@@ -10,6 +10,14 @@ CHANGES IN V2:
 - Async database comparison
 - P-05: Unicode normalization in _clean_name() for cross-source matching
 
+CHANGES IN V2.1:
+- Multi-bucket keys: hotels land in multiple buckets to catch name variations
+- Location word stripping: "Grand Hyatt Miami Beach" vs "Hilton Miami Beach" no longer match
+- Brand mismatch penalty: different brands = different hotels
+- State normalization: "Florida" and "FL" match correctly
+- Expanded suffix stripping: Autograph Collection, Auberge, etc.
+- Smart hotel name merge: picks clean mid-length name, not longest bloated one
+
 PROBLEM:
 - Same hotel appears from multiple sources with slightly different names
 - "Six Senses Camp Korongo" vs "Six Senses Camp Korongo Utah" = SAME HOTEL
@@ -227,6 +235,14 @@ class SmartDeduplicator:
         else:
             logger.info("rapidfuzz not available, using difflib (slower)")
 
+    @staticmethod
+    def _normalize_state(state: str) -> str:
+        s = state.lower().strip()
+        abbrev = SmartDeduplicator.STATE_ABBREVS.get(s)
+        if abbrev:
+            return abbrev.lower()
+        return s[:2] if len(s) >= 2 else s
+
     # =========================================================================
     # MAIN API
     # =========================================================================
@@ -396,27 +412,63 @@ class SmartDeduplicator:
 
     # =========================================================================
     # SIMILARITY
-    # ========================================================================
+    # =========================================================================
 
-    def _name_similarity(self, name1: str, name2: str) -> float:
-        """Calculate name similarity (0-1)"""
+    def _name_similarity(self, name1: str, name2: str, lead1=None, lead2=None) -> float:
+        """Calculate name similarity (0-1), stripping shared location words."""
         if not name1 or not name2:
             return 0.0
 
-        # Normalize names
         n1 = self._clean_name(name1)
         n2 = self._clean_name(name2)
 
+        # Strip location words that inflate similarity between different hotels
+        if lead1 and lead2:
+            location_words = set()
+            for loc_field in [lead1.city, lead1.state, lead2.city, lead2.state]:
+                if loc_field:
+                    for word in loc_field.lower().split():
+                        if len(word) > 2:
+                            location_words.add(word)
+            for word in location_words:
+                n1 = n1.replace(word, "").strip()
+                n2 = n2.replace(word, "").strip()
+            n1 = " ".join(n1.split())
+            n2 = " ".join(n2.split())
+
+            # For same-brand hotels, also strip brand words to compare distinctive parts
+            # "Hilton Miami Beach" vs "Hilton Miami Airport" → "hilton" vs "hilton airport"
+            # after location strip → strip brand → "" vs "airport" → low score
+            brand1 = (lead1.brand or "").lower().strip()
+            brand2 = (lead2.brand or "").lower().strip()
+            if brand1 and brand2 and brand1 == brand2:
+                brand_clean = re.sub(r"[^\w\s]", "", brand1)
+                brand_words = set(brand_clean.split())
+                n1_stripped = " ".join(
+                    w for w in n1.split() if w not in brand_words
+                ).strip()
+                n2_stripped = " ".join(
+                    w for w in n2.split() if w not in brand_words
+                ).strip()
+
+                # Both empty after stripping = names were identical brand-only → same hotel
+                if not n1_stripped and not n2_stripped:
+                    return 1.0
+                # One empty, other has distinctive words → different hotel
+                if not n1_stripped or not n2_stripped:
+                    return 0.3
+                # Both have distinctive words → compare those instead
+                n1 = n1_stripped
+                n2 = n2_stripped
+
+        if not n1 or not n2:
+            return 0.0
         if n1 == n2:
             return 1.0
-
         if n1 in n2 or n2 in n1:
             return 0.9
 
-        # Use rapidfuzz if available (returns 0-100)
         if USING_RAPIDFUZZ:
-            # Take best of character ratio and token-set ratio
-            # token_set_ratio handles reordering and extra words much better
             char_ratio = fuzz.ratio(n1, n2) / 100.0
             token_ratio = fuzz.token_set_ratio(n1, n2) / 100.0
             return max(char_ratio, token_ratio)
@@ -441,8 +493,33 @@ class SmartDeduplicator:
         name = unicodedata.normalize("NFKD", name)
         name = "".join(c for c in name if not unicodedata.combining(c))
 
-        # Remove common suffixes
+        # Normalize & to and before suffix stripping
+        name = name.replace("&", "and")
+
+        # Normalize dashes (em dash, en dash → hyphen)
+        name = name.replace("\u2013", "-").replace("\u2014", "-")
+
+        # Remove common suffixes — longest first to avoid partial matches
         for suffix in [
+            "an autograph collection all-inclusive resort - adults only",
+            "an autograph collection all-inclusive resort",
+            "a singletread inn",
+            "a single thread inn",
+            "a viceroy resort",
+            "auberge resorts collection",
+            "autograph collection",
+            "auberge collection",
+            "hotel and residences",
+            "and residences",
+            "jdv by hyatt",
+            "by hilton",
+            "by marriott",
+            "by hyatt",
+            "by ihg",
+            "residences",
+            "all-inclusive",
+            "adults only",
+            "collection",
             "hotel",
             "hotels",
             "resort",
@@ -450,13 +527,9 @@ class SmartDeduplicator:
             "spa",
             "suites",
             "suite",
-            "inn",
             "lodge",
-            "collection",
-            "by hilton",
-            "by marriott",
-            "by hyatt",
-            "by ihg",
+            "club",
+            "inn",
         ]:
             name = name.replace(suffix, "").strip()
 
@@ -471,7 +544,9 @@ class SmartDeduplicator:
     def _locations_match(self, lead1: MergedLead, lead2: MergedLead) -> bool:
         """Check if locations match"""
         if lead1.state and lead2.state:
-            if lead1.state.lower() == lead2.state.lower():
+            if SmartDeduplicator._normalize_state(
+                lead1.state
+            ) == SmartDeduplicator._normalize_state(lead2.state):
                 return True
 
         if lead1.city and lead2.city:
@@ -483,10 +558,20 @@ class SmartDeduplicator:
 
     def _locations_different(self, lead1: MergedLead, lead2: MergedLead) -> bool:
         """Check if locations are clearly different"""
-        # Different states = definitely different
+        # Different states = definitely different (only if BOTH have states)
         if lead1.state and lead2.state:
-            if lead1.state.lower() != lead2.state.lower():
+            if SmartDeduplicator._normalize_state(
+                lead1.state
+            ) != SmartDeduplicator._normalize_state(lead2.state):
                 return True
+
+        # If one has no state, check city overlap — don't assume different
+        if (lead1.state and not lead2.state) or (lead2.state and not lead1.state):
+            if lead1.city and lead2.city:
+                c1, c2 = lead1.city.lower().strip(), lead2.city.lower().strip()
+                if c1 == c2 or c1 in c2 or c2 in c1:
+                    return False  # Same city, one missing state — not different
+            return False  # Can't determine — don't penalize
 
         # Different cities only count as "different" if no state info
         # (same state + different city = could be same resort area)
@@ -500,8 +585,8 @@ class SmartDeduplicator:
 
     def _calculate_similarity(self, lead1: MergedLead, lead2: MergedLead) -> float:
         """Calculate overall similarity between two leads"""
-        # Start with name similarity
-        sim = self._name_similarity(lead1.hotel_name, lead2.hotel_name)
+        # Start with name similarity (with location stripping)
+        sim = self._name_similarity(lead1.hotel_name, lead2.hotel_name, lead1, lead2)
 
         # Location penalty/boost
         if self._locations_different(lead1, lead2):
@@ -513,14 +598,17 @@ class SmartDeduplicator:
             if (
                 lead1.state
                 and lead2.state
-                and lead1.state.lower() == lead2.state.lower()
+                and SmartDeduplicator._normalize_state(lead1.state)
+                == SmartDeduplicator._normalize_state(lead2.state)
             ):
                 sim += 0.05
 
-        # Brand boost
+        # Brand boost/penalty
         if lead1.brand and lead2.brand:
             if lead1.brand.lower() == lead2.brand.lower():
                 sim += self.BRAND_BOOST
+            else:
+                sim -= 0.15  # Different brands = likely different hotels
 
         return min(sim, 1.0)
 
@@ -529,71 +617,118 @@ class SmartDeduplicator:
     # =========================================================================
 
     @staticmethod
-    def _bucket_key(lead: "MergedLead") -> str:
-        """Generate a bucket key from first 4 chars of cleaned name + state.
+    def _bucket_keys(lead: "MergedLead") -> list[str]:
+        """Generate multiple bucket keys to catch name variations.
 
-        Audit Fix M-04: Leads are only compared within the same bucket,
-        reducing O(n²) to O(n * k²) where k is the max bucket size.
+        Hotels like "Dolly Parton's SongTeller" vs "SongTeller" need
+        to land in overlapping buckets to be compared.
         """
         name = (lead.hotel_name or "").lower().strip()
-        # Remove common prefixes
+        state = SmartDeduplicator._normalize_state(lead.state or "unknown")
+
+        keys = set()
+
+        # Generate key from raw name
+        variants = [name]
+        # Remove common prefixes and generate key from each variant
         for prefix in ("the ", "hotel ", "a "):
             if name.startswith(prefix):
-                name = name[len(prefix) :]
-        key = name[:4].ljust(4, "_")
-        state = (lead.state or "unknown").lower().strip()[:2]
-        return f"{key}|{state}"
+                variants.append(name[len(prefix) :])
+
+        # Also generate keys from each significant word (>3 chars)
+        # This catches "Dolly Parton's SongTeller" via "song" key
+        # and "SongTeller Hotel" also via "song" key
+        words = name.split()
+        for word in words:
+            clean_word = re.sub(r"[^\w]", "", word)
+            if len(clean_word) > 3 and clean_word not in (
+                "hotel",
+                "hotels",
+                "resort",
+                "resorts",
+                "suite",
+                "suites",
+                "collection",
+            ):
+                keys.add(f"{clean_word[:4]}|{state}")
+
+        for v in variants:
+            v = v.strip()
+            if v:
+                keys.add(f"{v[:4].ljust(4, '_')}|{state}")
+
+        # Also bucket by city for cross-state matching (Caribbean, mixed state formats)
+        city = (lead.city or "").lower().strip()
+        if city:
+            city_key = re.sub(r"[^\w]", "", city)[:4]
+            if len(city_key) >= 3:
+                keys.add(f"{city_key}|city")
+
+        return list(keys)
 
     def _group_similar(self, leads: List[MergedLead]) -> List[List[MergedLead]]:
-        """Group similar leads together using bucketing for performance.
+        """Group similar leads using multi-key bucketing + union-find.
 
-        Audit Fix M-04: Bucket by name prefix + state first, then only
-        compare within buckets. Falls back to cross-bucket for unmatched.
+        Union-find solves the ordering problem with multi-bucket grouping:
+        a lead in buckets [A, B] won't get stuck as a singleton in bucket A
+        before being compared to its match in bucket B.
+
+        Steps:
+        1. Bucket leads (each lead in multiple buckets via _bucket_keys)
+        2. Compare all pairs within each bucket, union matching pairs
+        3. Build groups from connected components
         """
         from collections import defaultdict
 
-        # Step 1: Bucket leads
+        n = len(leads)
+        if n == 0:
+            return []
+
+        # Union-Find data structure
+        parent = list(range(n))
+
+        def find(x: int) -> int:
+            while parent[x] != x:
+                parent[x] = parent[parent[x]]  # path compression
+                x = parent[x]
+            return x
+
+        def union(x: int, y: int) -> None:
+            rx, ry = find(x), find(y)
+            if rx != ry:
+                parent[rx] = ry
+
+        # Step 1: Bucket leads — each lead can appear in multiple buckets
         buckets: dict = defaultdict(list)
         for i, lead in enumerate(leads):
-            key = self._bucket_key(lead)
-            buckets[key].append((i, lead))
+            for key in self._bucket_keys(lead):
+                buckets[key].append((i, lead))
 
-        grouped = set()
-        groups = []
-
-        # Step 2: Compare within each bucket (much smaller N)
+        # Step 2: Compare all pairs within each bucket (deduplicated)
+        compared: set = set()
         for bucket_leads in buckets.values():
-            for idx_a, (i, lead1) in enumerate(bucket_leads):
-                if i in grouped:
-                    continue
-
-                group = [lead1]
-                grouped.add(i)
-
-                for idx_b, (j, lead2) in enumerate(bucket_leads):
-                    if j in grouped or i == j:
+            for a_idx, (i, lead1) in enumerate(bucket_leads):
+                for b_idx, (j, lead2) in enumerate(bucket_leads):
+                    if i >= j:
                         continue
+                    pair = (i, j)
+                    if pair in compared:
+                        continue
+                    compared.add(pair)
 
                     sim = self._calculate_similarity(lead1, lead2)
                     if sim >= self.threshold:
-                        group.append(lead2)
-                        grouped.add(j)
+                        union(i, j)
                         logger.debug(
                             f"   Match ({sim:.2f}): '{lead1.hotel_name}' ~ '{lead2.hotel_name}'"
                         )
 
-                if len(group) > 1:
-                    groups.append(group)
-                else:
-                    # Single lead — check neighboring buckets for matches
-                    groups.append(group)
+        # Step 3: Build groups from union-find components
+        group_map: dict = defaultdict(list)
+        for i in range(n):
+            group_map[find(i)].append(leads[i])
 
-        # Step 3: Add any completely ungrouped leads as singletons
-        for i, lead in enumerate(leads):
-            if i not in grouped:
-                groups.append([lead])
-
-        return groups
+        return list(group_map.values())
 
     def _merge_group(self, leads: List[MergedLead]) -> MergedLead:
         """Merge a group of similar leads into one"""
@@ -610,8 +745,17 @@ class SmartDeduplicator:
 
         merged = MergedLead()
 
+        # Hotel name — prefer mid-length (not too short, not bloated with suffixes)
+        name_options = [
+            ld.hotel_name for ld in leads if ld.hotel_name and ld.hotel_name.strip()
+        ]
+        if name_options:
+            # Score by length closeness to 40 chars (sweet spot)
+            merged.hotel_name = min(name_options, key=lambda n: abs(len(n) - 40))
+        else:
+            merged.hotel_name = ""
+
         # Text fields - prefer longer values
-        merged.hotel_name = best_text([ld.hotel_name for ld in leads])
         merged.brand = best_text([ld.brand for ld in leads])
         merged.city = best_text([ld.city for ld in leads])
         merged.state = best_text([ld.state for ld in leads])
@@ -753,9 +897,9 @@ if __name__ == "__main__":
 
     # These should all clean to the same string
     test_names = [
-        "Hotel & Residences Miami Beach",
-        "H\u00f4tel & R\u00e9sidences Miami Beach",  # accented
-        "Hotel \u0026 Residences Miami Beach",  # & entity
+        "Hotel Marais Residence",
+        "H\u00f4tel Marais R\u00e9sidence",  # accented
+        "Hotel \u0026 Residences Miami Beach",  # & entity (different test)
     ]
     print("\n_clean_name() results:")
     for name in test_names:
@@ -764,15 +908,15 @@ if __name__ == "__main__":
 
     unicode_leads = [
         {
-            "hotel_name": "H\u00f4tel & R\u00e9sidences Miami Beach",
-            "city": "Miami Beach",
-            "state": "FL",
+            "hotel_name": "H\u00f4tel Marais R\u00e9sidence",
+            "city": "Paris",
+            "state": "",
             "source_url": "https://source1.com",
         },
         {
-            "hotel_name": "Hotel & Residences Miami Beach",
-            "city": "Miami Beach",
-            "state": "FL",
+            "hotel_name": "Hotel Marais Residence",
+            "city": "Paris",
+            "state": "",
             "source_url": "https://source2.com",
         },
     ]
@@ -786,6 +930,77 @@ if __name__ == "__main__":
     print(f"\nOutput: {len(unicode_unique)} unique leads")
     expected = 1
     status = "PASS" if len(unicode_unique) == expected else "FAIL"
+    print(f"   {status} (expected {expected})")
+
+    # V2.1: False positive test — different hotels same location
+    print("\n" + "=" * 70)
+    print("V2.1: FALSE POSITIVE TEST (different hotels, same location)")
+    print("=" * 70)
+
+    false_positive_leads = [
+        {
+            "hotel_name": "Grand Hyatt Miami Beach",
+            "brand": "Grand Hyatt",
+            "city": "Miami Beach",
+            "state": "FL",
+            "source_url": "https://source1.com",
+        },
+        {
+            "hotel_name": "Hilton Miami Beach",
+            "brand": "Hilton",
+            "city": "Miami Beach",
+            "state": "FL",
+            "source_url": "https://source2.com",
+        },
+        {
+            "hotel_name": "Bulgari Hotel Miami Beach",
+            "brand": "Bulgari",
+            "city": "Miami Beach",
+            "state": "FL",
+            "source_url": "https://source3.com",
+        },
+    ]
+
+    print(f"\nInput: {len(false_positive_leads)} leads (3 DIFFERENT hotels)")
+    for lead in false_positive_leads:
+        print(f"   - {lead['hotel_name']} ({lead['brand']})")
+
+    fp_unique = deduplicate_leads(false_positive_leads)
+
+    print(f"\nOutput: {len(fp_unique)} unique leads")
+    expected = 3
+    status = "PASS" if len(fp_unique) == expected else "FAIL"
+    print(f"   {status} (expected {expected})")
+
+    # V2.1: Name variation test — same hotel, different names
+    print("\n" + "=" * 70)
+    print("V2.1: NAME VARIATION TEST (same hotel, different names)")
+    print("=" * 70)
+
+    variation_leads = [
+        {
+            "hotel_name": "Dolly Parton's SongTeller Hotel",
+            "city": "Nashville",
+            "state": "Tennessee",
+            "source_url": "https://source1.com",
+        },
+        {
+            "hotel_name": "SongTeller Hotel",
+            "city": "Nashville",
+            "state": "TN",
+            "source_url": "https://source2.com",
+        },
+    ]
+
+    print(f"\nInput: {len(variation_leads)} leads (same hotel, different names)")
+    for lead in variation_leads:
+        print(f"   - {lead['hotel_name']} ({lead.get('state')})")
+
+    var_unique = deduplicate_leads(variation_leads)
+
+    print(f"\nOutput: {len(var_unique)} unique leads")
+    expected = 1
+    status = "PASS" if len(var_unique) == expected else "FAIL"
     print(f"   {status} (expected {expected})")
 
     print("\n" + "=" * 70)

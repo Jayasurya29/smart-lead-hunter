@@ -269,7 +269,7 @@
             async deleteContact(contactId, name) {
                 if (!confirm(`Remove ${name}?`)) return;
                 try {
-                    const resp = await fetch(`/api/dashboard/leads/${leadId}/contacts/${contactId}`, { method: 'DELETE', credentials: 'same-origin' });
+                    const resp = await fetch(`/api/dashboard/leads/${leadId}/contacts/${contactId}`, { method: 'DELETE', credentials: 'same-origin', headers: { 'X-Requested-With': 'XMLHttpRequest' } });
                     if (resp.ok) { this.contacts = this.contacts.filter(c => c.id !== contactId); }
                 } catch (e) { console.error(e); }
             },
