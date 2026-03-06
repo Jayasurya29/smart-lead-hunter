@@ -953,6 +953,36 @@ async def approve_lead(lead_id: int, db: AsyncSession = Depends(get_db)):
     lead.status = "approved"
     lead.updated_at = local_now()
 
+    # Push to Insightly CRM
+    from app.services.insightly import get_insightly_client
+
+    crm = get_insightly_client()
+    if crm.enabled and not lead.insightly_id:
+        lead_data = {
+            "hotel_name": lead.hotel_name,
+            "brand": lead.brand,
+            "brand_tier": lead.brand_tier,
+            "city": lead.city,
+            "state": lead.state,
+            "country": lead.country or "USA",
+            "opening_date": lead.opening_date,
+            "room_count": lead.room_count or 0,
+            "lead_score": lead.lead_score or 0,
+            "description": lead.description,
+            "source_url": lead.source_url,
+            "management_company": lead.management_company,
+            "developer": lead.developer,
+            "owner": lead.owner,
+            "status": "approved",
+            "id": lead.id,
+        }
+        result = await crm.push_lead(lead_data)
+        if result:
+            lead.insightly_id = result.get("RECORD_ID")
+            logger.info(f"Insightly: synced {lead.hotel_name} → ID {lead.insightly_id}")
+        else:
+            logger.warning(f"Insightly: failed to sync {lead.hotel_name}")
+
     await db.commit()
     await db.refresh(lead)
 
@@ -1555,6 +1585,36 @@ async def dashboard_approve_lead(
 
     lead.status = "approved"
     lead.updated_at = local_now()
+
+    # Push to Insightly CRM
+    from app.services.insightly import get_insightly_client
+
+    crm = get_insightly_client()
+    if crm.enabled and not lead.insightly_id:
+        lead_data = {
+            "hotel_name": lead.hotel_name,
+            "brand": lead.brand,
+            "brand_tier": lead.brand_tier,
+            "city": lead.city,
+            "state": lead.state,
+            "country": lead.country or "USA",
+            "opening_date": lead.opening_date,
+            "room_count": lead.room_count or 0,
+            "lead_score": lead.lead_score or 0,
+            "description": lead.description,
+            "source_url": lead.source_url,
+            "management_company": lead.management_company,
+            "developer": lead.developer,
+            "owner": lead.owner,
+            "status": "approved",
+            "id": lead.id,
+        }
+        result = await crm.push_lead(lead_data)
+        if result:
+            lead.insightly_id = result.get("RECORD_ID")
+            logger.info(f"Insightly: synced {lead.hotel_name} → ID {lead.insightly_id}")
+        else:
+            logger.warning(f"Insightly: failed to sync {lead.hotel_name}")
 
     await db.commit()
     await db.refresh(lead)
