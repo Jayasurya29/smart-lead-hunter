@@ -2234,40 +2234,7 @@ async def enrich_lead_contacts(
             max_contacts=MAX_CONTACTS_TO_SAVE,
         )
 
-        # Conditional Tier 5 HR filter — only keep gateway contacts when needed
-        strong_contacts = [
-            s
-            for s in good_contacts
-            if s.scope_tag == "hotel_specific"
-            and s.title_tier
-            and s.title_tier.value <= 4
-            and s.total_score > 0
-        ]
-        if len(strong_contacts) >= 2:
-            before_count = len(good_contacts)
-            good_contacts = [
-                s
-                for s in good_contacts
-                if not (s.title_tier and s.title_tier == BuyerTier.TIER5_HR)
-            ]
-            dropped = before_count - len(good_contacts)
-            if dropped:
-                logger.info(
-                    f"Dropped {dropped} Tier 5 HR gateway contacts — "
-                    f"{len(strong_contacts)} strong Tier 1-4 contacts found"
-                )
-        else:
-            hr_count = sum(
-                1
-                for s in good_contacts
-                if s.title_tier and s.title_tier == BuyerTier.TIER5_HR
-            )
-            if hr_count:
-                logger.info(
-                    f"Keeping {hr_count} Tier 5 HR as gateway — only "
-                    f"{len(strong_contacts)} strong Tier 1-4 contacts"
-                )
-
+        # HR contacts are kept — Director of HR handles uniform onboarding
         # Replace raw contacts with validated ones, preserving extra metadata
         validated_contacts = []
         for sc in good_contacts:

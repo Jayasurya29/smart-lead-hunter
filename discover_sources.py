@@ -1,9 +1,9 @@
 """
-ðŸŒ WEB DISCOVERY ENGINE v5.1
+🌐 WEB DISCOVERY ENGINE v5.1
 ============================
 Discovers new hotel news sources AND extracts leads from discovered articles.
 
-Uses the SAME IntelligentPipeline as the scraper for AI classification â€”
+Uses the SAME IntelligentPipeline as the scraper for AI classification —
 no separate Gemini validator, no duplicate AI calls, proven accuracy.
 
 Flow:
@@ -38,7 +38,7 @@ from typing import Optional
 from urllib.parse import urlparse, quote_plus, urljoin
 
 import httpx
-from sqlalchemy import select, or_
+from sqlalchemy import select
 
 from app.database import async_session
 from app.models import Source
@@ -52,17 +52,17 @@ from dotenv import load_dotenv
 load_dotenv()
 
 
-# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+# ═══════════════════════════════════════════════════════════════════════════════
 # SEARCH QUERIES
-# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+# ═══════════════════════════════════════════════════════════════════════════════
 
 SEARCH_QUERIES = [
-    # â”€â”€ Core (wide net) â”€â”€
+    # ── Core (wide net) ──
     "new hotel opening 2026 United States",
     "new luxury hotel opening 2026 USA",
     "new hotel opening 2027 United States",
     "new resort opening 2026 2027",
-    # â”€â”€ Brand-Specific (luxury + upper-upscale) â”€â”€
+    # ── Brand-Specific (luxury + upper-upscale) ──
     "Hilton new hotel opening 2026 2027",
     "Marriott new hotel resort opening 2026",
     "Hyatt new hotel opening 2026 2027",
@@ -71,7 +71,7 @@ SEARCH_QUERIES = [
     "Ritz-Carlton Waldorf Astoria new hotel 2026",
     "Rosewood Montage Peninsula hotel opening 2026",
     "Accor Fairmont Sofitel new hotel Americas 2026",
-    # â”€â”€ Major US Markets (by region) â”€â”€
+    # ── Major US Markets (by region) ──
     # Southeast
     "new hotel Miami Fort Lauderdale 2026",
     "new hotel Orlando resort opening 2026",
@@ -89,25 +89,25 @@ SEARCH_QUERIES = [
     "new hotel Dallas Houston Austin Texas 2026",
     "new hotel Chicago Denver 2026",
     "new hotel New Orleans Charleston Savannah 2026",
-    # â”€â”€ Caribbean & Latin America â”€â”€
+    # ── Caribbean & Latin America ──
     "new resort Dominican Republic Punta Cana 2026",
     "new hotel Bahamas opening 2026 2027",
     "new hotel Aruba Cayman Islands 2026",
     "new resort Jamaica Turks Caicos 2026",
     "new hotel Puerto Rico Costa Rica 2026",
-    # â”€â”€ Renovations & Conversions (new uniforms!) â”€â”€
+    # ── Renovations & Conversions (new uniforms!) ──
     "hotel renovation rebranding conversion 2026",
     "hotel flag change conversion USA 2026",
-    # â”€â”€ Industry Pipeline â”€â”€
+    # ── Industry Pipeline ──
     "hotel groundbreaking construction announcement 2026",
     "all inclusive resort opening 2026 2027",
     "upper upscale hotel opening announcement 2026",
 ]
 
 
-# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+# ═══════════════════════════════════════════════════════════════════════════════
 # BLACKLIST
-# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+# ═══════════════════════════════════════════════════════════════════════════════
 
 BLACKLISTED_DOMAINS = {
     # Search engines
@@ -241,9 +241,9 @@ HIGH_VALUE_KEYWORDS = [
 ]
 
 
-# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+# ═══════════════════════════════════════════════════════════════════════════════
 # SOURCE TYPE CLASSIFICATION RULES
-# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+# ═══════════════════════════════════════════════════════════════════════════════
 
 SOURCE_TYPE_RULES = {
     "chain_newsroom": {
@@ -309,9 +309,9 @@ SOURCE_TYPE_RULES = {
 }
 
 
-# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+# ═══════════════════════════════════════════════════════════════════════════════
 # HTML CLEANING UTILITY
-# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+# ═══════════════════════════════════════════════════════════════════════════════
 
 
 def clean_html_to_text(html: str) -> str:
@@ -338,9 +338,9 @@ def clean_html_to_text(html: str) -> str:
     return text
 
 
-# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+# ═══════════════════════════════════════════════════════════════════════════════
 # SEARCH BACKENDS
-# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+# ═══════════════════════════════════════════════════════════════════════════════
 
 
 class SearchBackend:
@@ -394,7 +394,7 @@ class DuckDuckGoSearch(SearchBackend):
 
 
 class GoogleNewsRSS(SearchBackend):
-    """Google News RSS â€” parse XML feed."""
+    """Google News RSS — parse XML feed."""
 
     @staticmethod
     def _decode_gnews_url(gnews_url: str) -> str:
@@ -462,9 +462,9 @@ class GoogleNewsRSS(SearchBackend):
         return results
 
 
-# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
-# DOMAIN TESTER â€” signal detection, recurring detection, classification
-# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+# ═══════════════════════════════════════════════════════════════════════════════
+# DOMAIN TESTER — signal detection, recurring detection, classification
+# ═══════════════════════════════════════════════════════════════════════════════
 
 
 class DomainTester:
@@ -488,7 +488,7 @@ class DomainTester:
             self._crawler = AsyncWebCrawler(verbose=False)
             await self._crawler.awarmup()
             self._crawl4ai_available = True
-            logger.info("  ðŸŒ Crawl4AI ready for JS-heavy sites")
+            logger.info("  🌐 Crawl4AI ready for JS-heavy sites")
         except Exception as e:
             logger.debug(f"Crawl4AI not available: {e}")
             self._crawl4ai_available = False
@@ -560,7 +560,7 @@ class DomainTester:
         result["signal_count"] = len(result["signals"])
         result["has_hotel_content"] = result["signal_count"] >= 2
 
-        # Step 4: Extract article links â€” prioritize opening-specific articles
+        # Step 4: Extract article links — prioritize opening-specific articles
         from bs4 import BeautifulSoup
 
         soup2 = BeautifulSoup(page_content, "lxml")
@@ -679,7 +679,7 @@ class DomainTester:
             "year_2026_plus": r"\b(?:2026|2027|2028)\b",
             "brand_major": r"\b(?:hilton|marriott|hyatt|ihg|four\s*seasons|ritz|waldorf|st\.?\s*regis)\b",
             "brand_luxury": r"\b(?:rosewood|aman|oetker|peninsula|mandarin\s*oriental|park\s*hyatt|conrad)\b",
-            "room_count": r"\b\d{2,4}\s*[-â€“]?\s*(?:room|key|suite|guest\s*room)\b",
+            "room_count": r"\b\d{2,4}\s*[-–]?\s*(?:room|key|suite|guest\s*room)\b",
             "location_florida": r"\b(?:florida|miami|orlando|tampa|fort\s*lauderdale|palm\s*beach|naples)\b",
             "location_caribbean": r"\b(?:caribbean|bahamas|aruba|jamaica|cayman|bermuda|turks|barbados)\b",
             "location_usa": r"\b(?:new\s*york|los\s*angeles|chicago|texas|california|las\s*vegas|atlanta)\b",
@@ -765,16 +765,16 @@ class DomainTester:
                 pass
 
 
-# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
-# PIPELINE WRAPPER â€” uses IntelligentPipeline for classification + extraction
-# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+# ═══════════════════════════════════════════════════════════════════════════════
+# PIPELINE WRAPPER — uses IntelligentPipeline for classification + extraction
+# ═══════════════════════════════════════════════════════════════════════════════
 
 
 class DiscoveryLeadExtractor:
     """Uses the existing IntelligentPipeline for BOTH classification and extraction.
 
     CRITICAL: Sends CLEANED TEXT to pipeline, not raw HTML.
-    The pipeline classifier truncates to 5000 chars â€” if that's raw HTML,
+    The pipeline classifier truncates to 5000 chars — if that's raw HTML,
     Gemini only sees <head> boilerplate and rejects everything.
     """
 
@@ -786,9 +786,9 @@ class DiscoveryLeadExtractor:
             from app.services.intelligent_pipeline import IntelligentPipeline
 
             self.pipeline = IntelligentPipeline()
-            logger.info("âœ… Pipeline ready (classification + extraction)")
+            logger.info("✅ Pipeline ready (classification + extraction)")
         except Exception as e:
-            logger.warning(f"Pipeline init failed: {e} â€” AI validation disabled")
+            logger.warning(f"Pipeline init failed: {e} — AI validation disabled")
 
     async def close(self):
         if self.pipeline:
@@ -883,9 +883,9 @@ class DiscoveryLeadExtractor:
         return result
 
 
-# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+# ═══════════════════════════════════════════════════════════════════════════════
 # MAIN DISCOVERY ENGINE
-# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+# ═══════════════════════════════════════════════════════════════════════════════
 
 
 class WebDiscoveryEngine:
@@ -927,10 +927,10 @@ class WebDiscoveryEngine:
         await self.pipeline.initialize()
 
         skippable = sum(1 for fd in self.failed_domains.values() if fd.should_skip())
-        print(f"  ðŸ“‚ Loaded {len(self.known_domains)} known domains from database")
+        print(f"  📂 Loaded {len(self.known_domains)} known domains from database")
         if self.failed_domains:
             print(
-                f"  ðŸš« Loaded {len(self.failed_domains)} failed domains ({skippable} will skip)"
+                f"  🚫 Loaded {len(self.failed_domains)} failed domains ({skippable} will skip)"
             )
 
     def _is_blacklisted(self, domain: str) -> bool:
@@ -951,9 +951,9 @@ class WebDiscoveryEngine:
         if max_queries:
             queries = queries[:max_queries]
 
-        print("â•" * 70)
-        print("  ðŸŒ  W E B   D I S C O V E R Y   E N G I N E   v5.1")
-        print("â•" * 70)
+        print("═" * 70)
+        print("  🌐  W E B   D I S C O V E R Y   E N G I N E   v5.1")
+        print("═" * 70)
         print(f"  Search queries : {len(queries)}")
         print(f"  Known sources  : {len(self.known_domains)}")
         print(f"  Search engines : {', '.join(name for name, _ in self.engines)}")
@@ -962,12 +962,12 @@ class WebDiscoveryEngine:
             f"  Pipeline       : {'ON' if self.pipeline.pipeline else 'OFF'} (classify + extract)"
         )
         print(f"  Sources only   : {'YES' if self.sources_only else 'NO'}")
-        print(f"  Mode           : {'ðŸ” DRY RUN' if self.dry_run else 'ðŸš€ LIVE'}")
-        print("â•" * 70)
+        print(f"  Mode           : {'🔍 DRY RUN' if self.dry_run else '🚀 LIVE'}")
+        print("═" * 70)
 
-        # â”€â”€ Phase 1: Search â”€â”€
+        # ── Phase 1: Search ──
         print(
-            f"\nðŸ“¡ Phase 1: Searching ({len(queries)} queries Ã— {len(self.engines)} engines)..."
+            f"\n📡 Phase 1: Searching ({len(queries)} queries × {len(self.engines)} engines)..."
         )
         all_results = {}
         for i, query in enumerate(queries, 1):
@@ -995,10 +995,10 @@ class WebDiscoveryEngine:
                     logger.debug(f"{engine_name} error on query '{query}': {e}")
 
         self.stats["search_results"] = len(all_results)
-        print(f"  â†’ {len(all_results)} unique domains found across all engines")
+        print(f"  → {len(all_results)} unique domains found across all engines")
 
-        # â”€â”€ Phase 2: Filter â”€â”€
-        print("\nðŸ” Phase 2: Filtering known & blacklisted domains...")
+        # ── Phase 2: Filter ──
+        print("\n🔍 Phase 2: Filtering known & blacklisted domains...")
         candidates = {}
         known_count = 0
         blacklisted_count = 0
@@ -1021,14 +1021,14 @@ class WebDiscoveryEngine:
         self.stats["blacklisted"] = blacklisted_count
         self.stats["failed_skipped"] = failed_skip_count
 
-        print(f"  â†’ {len(candidates)} candidates to test")
-        print(f"  â†’ {known_count} already known")
-        print(f"  â†’ {blacklisted_count} blacklisted")
+        print(f"  → {len(candidates)} candidates to test")
+        print(f"  → {known_count} already known")
+        print(f"  → {blacklisted_count} blacklisted")
         if failed_skip_count:
-            print(f"  â†’ {failed_skip_count} skipped (failed before)")
+            print(f"  → {failed_skip_count} skipped (failed before)")
 
-        # â”€â”€ Phase 3: Signal test â”€â”€
-        print(f"\nðŸ§ª Phase 3: Signal-testing {len(candidates)} domains...")
+        # ── Phase 3: Signal test ──
+        print(f"\n🧪 Phase 3: Signal-testing {len(candidates)} domains...")
         signal_passed = []
 
         for i, (domain, data) in enumerate(candidates.items(), 1):
@@ -1038,7 +1038,7 @@ class WebDiscoveryEngine:
             test_result = await self.tester.test(url, domain)
 
             if not test_result["reachable"]:
-                print("âŒ Unreachable")
+                print("❌ Unreachable")
                 self.stats["unreachable"] += 1
                 await self._record_domain_failure(domain, "unreachable")
                 continue
@@ -1046,27 +1046,27 @@ class WebDiscoveryEngine:
             await self._clear_domain_failure(domain)
 
             if test_result["signal_count"] == 0:
-                print("âšª No signals")
+                print("⚪ No signals")
                 self.stats["low_signals"] += 1
                 continue
 
             score = test_result["quality_score"]
             signals = test_result["signal_count"]
             articles = len(test_result.get("sample_articles", []))
-            rec = " ðŸ”„" if test_result["is_recurring"] else ""
+            rec = " 🔄" if test_result["is_recurring"] else ""
             print(
-                f"ðŸ“‹ Score:{score} Signals:{signals} Articles:{articles}{rec} â†’ queued"
+                f"📋 Score:{score} Signals:{signals} Articles:{articles}{rec} → queued"
             )
             signal_passed.append({**data, **test_result})
 
             await asyncio.sleep(0.5)
 
-        print(f"  â†’ {len(signal_passed)} pages passed signal test")
+        print(f"  → {len(signal_passed)} pages passed signal test")
 
-        # â”€â”€ Phase 3b: Fetch actual article pages for pipeline â”€â”€
+        # ── Phase 3b: Fetch actual article pages for pipeline ──
         if signal_passed:
             print(
-                f"\nðŸ“„ Phase 3b: Fetching article pages from {len(signal_passed)} domains..."
+                f"\n📄 Phase 3b: Fetching article pages from {len(signal_passed)} domains..."
             )
             article_pages = []
             fetch_client = httpx.AsyncClient(
@@ -1082,10 +1082,10 @@ class WebDiscoveryEngine:
                 articles = src.get("sample_articles", [])[:3]
 
                 if not articles:
-                    # No article links â€” send homepage with cleaned text
+                    # No article links — send homepage with cleaned text
                     if src.get("page_text") or src.get("page_html"):
                         article_pages.append(src)
-                        print(f"  ðŸ“„ {domain}: no article links, using homepage")
+                        print(f"  📄 {domain}: no article links, using homepage")
                     continue
 
                 fetched = 0
@@ -1110,24 +1110,24 @@ class WebDiscoveryEngine:
                     await asyncio.sleep(0.3)
 
                 if fetched > 0:
-                    print(f"  âœ… {domain}: fetched {fetched}/{len(articles)} articles")
+                    print(f"  ✅ {domain}: fetched {fetched}/{len(articles)} articles")
                 else:
                     if src.get("page_text") or src.get("page_html"):
                         article_pages.append(src)
-                        print(f"  âš ï¸  {domain}: articles failed, using homepage")
+                        print(f"  ⚠️  {domain}: articles failed, using homepage")
 
             await fetch_client.aclose()
-            print(f"  â†’ {len(article_pages)} pages ready for pipeline")
+            print(f"  → {len(article_pages)} pages ready for pipeline")
         else:
             article_pages = []
 
-        # â”€â”€ Phase 4: Pipeline classification + extraction â”€â”€
+        # ── Phase 4: Pipeline classification + extraction ──
         qualified_sources = []
         qualified_articles = []
 
         if article_pages and self.pipeline.pipeline:
             print(
-                f"\nðŸ¤– Phase 4: Pipeline classification + extraction ({len(article_pages)} pages)..."
+                f"\n🤖 Phase 4: Pipeline classification + extraction ({len(article_pages)} pages)..."
             )
 
             pipeline_result = await self.pipeline.classify_and_extract(article_pages)
@@ -1137,10 +1137,10 @@ class WebDiscoveryEngine:
             leads_per_domain = pipeline_result.get("leads_per_domain", {})
 
             print(
-                f"  â†’ Pipeline: {len(relevant_urls)} relevant, {len(rejected_urls)} rejected"
+                f"  → Pipeline: {len(relevant_urls)} relevant, {len(rejected_urls)} rejected"
             )
             if leads:
-                print(f"  â†’ Extracted {len(leads)} leads!")
+                print(f"  → Extracted {len(leads)} leads!")
                 self.extracted_leads = leads
 
             # Build per-domain best result for scoring
@@ -1165,37 +1165,35 @@ class WebDiscoveryEngine:
                     src["pipeline_relevant"] = True
                     src["pipeline_leads"] = lead_count
                     tag = (
-                        f"Pipeline: âœ… ({lead_count} leads)"
+                        f"Pipeline: ✅ ({lead_count} leads)"
                         if lead_count
-                        else "Pipeline: âœ…"
+                        else "Pipeline: ✅"
                     )
                 else:
                     src["quality_score"] -= 40
                     src["pipeline_relevant"] = False
                     src["pipeline_leads"] = 0
-                    tag = "Pipeline: âŒ"
+                    tag = "Pipeline: ❌"
 
                 score = src["quality_score"]
                 if score >= self.min_quality:
                     rec_tag = ""
                     if src.get("is_recurring"):
                         qualified_sources.append(src)
-                        rec_tag = " | ðŸ”„ Recurring"
+                        rec_tag = " | 🔄 Recurring"
                         self.stats["recurring"] += 1
                     else:
                         qualified_articles.append(src)
-                        rec_tag = " | ðŸ“„ One-off"
+                        rec_tag = " | 📄 One-off"
                         self.stats["one_off"] += 1
                     self.discovered.append(src)
-                    print(f"  âœ… {domain}: Score:{score} {tag}{rec_tag}")
+                    print(f"  ✅ {domain}: Score:{score} {tag}{rec_tag}")
                 else:
-                    print(
-                        f"  âš ï¸  {domain}: Score:{score} < {self.min_quality} {tag}"
-                    )
+                    print(f"  ⚠️  {domain}: Score:{score} < {self.min_quality} {tag}")
                     self.stats["low_quality"] += 1
 
         elif article_pages:
-            print("\nâš ï¸  Pipeline unavailable â€” using signal scores only")
+            print("\n⚠️  Pipeline unavailable — using signal scores only")
             for src in article_pages:
                 if src["quality_score"] >= self.min_quality:
                     if src.get("is_recurring"):
@@ -1208,31 +1206,31 @@ class WebDiscoveryEngine:
 
         self.stats["qualified"] = len(qualified_sources) + len(qualified_articles)
 
-        # â”€â”€ Phase 5: Save â”€â”€
+        # ── Phase 5: Save ──
         if not self.dry_run:
             if self.extracted_leads and not self.sources_only:
                 saved = await self._save_leads(self.extracted_leads)
                 print(
-                    f"  â†’ Leads saved: {saved.get('saved', 0)} new, {saved.get('duplicates', 0)} duplicates"
+                    f"  → Leads saved: {saved.get('saved', 0)} new, {saved.get('duplicates', 0)} duplicates"
                 )
 
             if qualified_sources:
                 print(
-                    f"\nðŸ’¾ Phase 5: Saving {len(qualified_sources)} recurring sources to database..."
+                    f"\n💾 Phase 5: Saving {len(qualified_sources)} recurring sources to database..."
                 )
                 added = await self._save_sources(qualified_sources)
-                print(f"  â†’ {added} sources added")
+                print(f"  → {added} sources added")
         else:
             print(
-                f"\nðŸ“‹ Phase 5: DRY RUN â€” would add {len(qualified_sources)} recurring sources"
+                f"\n📋 Phase 5: DRY RUN — would add {len(qualified_sources)} recurring sources"
             )
             if qualified_articles:
-                print(f"  â†’ {len(qualified_articles)} one-off articles (leads only)")
+                print(f"  → {len(qualified_articles)} one-off articles (leads only)")
 
         self._print_report(qualified_sources, qualified_articles)
         self._save_log(qualified_sources, qualified_articles)
 
-    # â”€â”€â”€ Domain failure tracking â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ─── Domain failure tracking ─────────────────────────────────────────────
 
     async def _record_domain_failure(self, domain: str, reason: str = "unreachable"):
         if self.dry_run:
@@ -1279,22 +1277,14 @@ class WebDiscoveryEngine:
         except Exception as e:
             logger.debug(f"Failed to clear domain failure for {domain}: {e}")
 
-    # â”€â”€â”€ Save sources â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ─── Save sources ────────────────────────────────────────────────────────
 
     async def _save_sources(self, qualified: list[dict]) -> int:
         added = 0
         async with async_session() as session:
             for src in qualified:
                 existing = await session.execute(
-                    # Audit Fix P-02: Exact domain match instead of ILIKE scan
-                    select(Source).where(
-                        or_(
-                            Source.base_url == src["domain"],
-                            Source.base_url == f"https://{src['domain']}",
-                            Source.base_url == f"http://{src['domain']}",
-                            Source.base_url.like(f"%://{src['domain']}/%"),
-                        )
-                    )
+                    select(Source).where(Source.base_url.ilike(f"%{src['domain']}%"))
                 )
                 if existing.scalar_one_or_none():
                     continue
@@ -1334,14 +1324,14 @@ class WebDiscoveryEngine:
                 session.add(source)
                 added += 1
                 print(
-                    f"    âœ… {name} (priority={src.get('suggested_priority')}, type={src.get('suggested_type')})"
+                    f"    ✅ {name} (priority={src.get('suggested_priority')}, type={src.get('suggested_type')})"
                 )
 
             if added:
                 await session.commit()
         return added
 
-    # â”€â”€â”€ Save leads â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ─── Save leads ──────────────────────────────────────────────────────────
 
     async def _save_leads(self, leads: list) -> dict:
         result = {"saved": 0, "duplicates": 0}
@@ -1371,12 +1361,12 @@ class WebDiscoveryEngine:
             logger.error(f"Failed to save discovery leads: {e}")
         return result
 
-    # â”€â”€â”€ Report â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ─── Report ──────────────────────────────────────────────────────────────
 
     def _print_report(self, recurring: list, one_off: list):
-        print("\n" + "â•" * 70)
-        print("  ðŸ“Š  D I S C O V E R Y   R E S U L T S")
-        print("â•" * 70)
+        print("\n" + "═" * 70)
+        print("  📊  D I S C O V E R Y   R E S U L T S")
+        print("═" * 70)
         print(f"  Queries run      : {self.stats.get('queries', len(SEARCH_QUERIES))}")
         print(f"  Search results   : {self.stats['search_results']}")
         print(f"  Already known    : {self.stats['already_known']}")
@@ -1393,21 +1383,19 @@ class WebDiscoveryEngine:
         print(f"  Unreachable      : {self.stats['unreachable']}")
         print(f"  Low signals      : {self.stats['low_signals']}")
         print(f"  Low quality      : {self.stats['low_quality']}")
-        print(
-            "  â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€"
-        )
-        print(f"  âœ… QUALIFIED       : {self.stats['qualified']}")
-        print(f"     ðŸ”„ Recurring   : {len(recurring)} (add to sources DB)")
-        print(f"     ðŸ“„ One-off     : {len(one_off)} (leads only)")
+        print("  ───────────────────────────────────")
+        print(f"  ✅ QUALIFIED       : {self.stats['qualified']}")
+        print(f"     🔄 Recurring   : {len(recurring)} (add to sources DB)")
+        print(f"     📄 One-off     : {len(one_off)} (leads only)")
 
         if recurring:
-            print("\n  ðŸ”„ RECURRING SOURCES:")
+            print("\n  🔄 RECURRING SOURCES:")
             for src in sorted(
                 recurring, key=lambda x: x["quality_score"], reverse=True
             ):
                 leads = src.get("pipeline_leads", 0)
                 tag = f" | {leads} leads" if leads else ""
-                print(f"    ðŸŒ {src['domain']}")
+                print(f"    🌐 {src['domain']}")
                 print(
                     f"       Score: {src['quality_score']} | Type: {src.get('suggested_type', '?')}{tag}"
                 )
@@ -1415,16 +1403,16 @@ class WebDiscoveryEngine:
                     print(f"       Why: {src['recurring_reason']}")
 
         if one_off:
-            print("\n  ðŸ“„ ONE-OFF ARTICLES:")
+            print("\n  📄 ONE-OFF ARTICLES:")
             for src in sorted(one_off, key=lambda x: x["quality_score"], reverse=True)[
                 :5
             ]:
                 print(
-                    f"    [{src['quality_score']:3d}] {src['domain']} â€” {src.get('recurring_reason', '')}"
+                    f"    [{src['quality_score']:3d}] {src['domain']} — {src.get('recurring_reason', '')}"
                 )
 
         if self.extracted_leads:
-            print(f"\n  ðŸ¨ EXTRACTED LEADS ({len(self.extracted_leads)}):")
+            print(f"\n  🏨 EXTRACTED LEADS ({len(self.extracted_leads)}):")
             for lead in self.extracted_leads[:15]:
                 if hasattr(lead, "hotel_name"):
                     name = lead.hotel_name
@@ -1436,10 +1424,10 @@ class WebDiscoveryEngine:
                     state = lead.get("state", "")
                 else:
                     continue
-                loc = f" â€” {city}, {state}" if city else ""
-                print(f"    ðŸ¨ {name}{loc}")
+                loc = f" — {city}, {state}" if city else ""
+                print(f"    🏨 {name}{loc}")
 
-    # â”€â”€â”€ Discovery log â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ─── Discovery log ───────────────────────────────────────────────────────
 
     def _save_log(self, recurring: list, one_off: list):
         log_path = Path("data/learnings/discovery_log.json")
@@ -1473,7 +1461,7 @@ class WebDiscoveryEngine:
         history = history[-50:]
         log_path.write_text(json.dumps(history, indent=2))
 
-    # â”€â”€â”€ Helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ─── Helpers ─────────────────────────────────────────────────────────────
 
     @staticmethod
     def _domain_to_name(domain: str) -> str:
@@ -1490,13 +1478,13 @@ class WebDiscoveryEngine:
             await self.pipeline.close()
 
 
-# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+# ═══════════════════════════════════════════════════════════════════════════════
 # CLI
-# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+# ═══════════════════════════════════════════════════════════════════════════════
 
 
 async def main():
-    parser = argparse.ArgumentParser(description="ðŸŒ Web Discovery Engine v5.1")
+    parser = argparse.ArgumentParser(description="🌐 Web Discovery Engine v5.1")
     parser.add_argument(
         "--dry-run", action="store_true", help="Preview only, don't add to DB"
     )
@@ -1533,17 +1521,20 @@ async def main():
         await engine.run(max_queries=args.queries, skip_queries=args.skip_queries)
 
         if engine.discovered:
-            print(f"\nâœ¨ Found {len(engine.discovered)} qualified source(s).")
+            print(f"\n✨ Found {len(engine.discovered)} qualified source(s).")
             if engine.extracted_leads:
-                print(f"ðŸ¨ Extracted {len(engine.extracted_leads)} leads!")
+                print(f"🏨 Extracted {len(engine.extracted_leads)} leads!")
             if args.dry_run:
                 print("   Run without --dry-run to save to database.")
         else:
-            print("\nðŸ“­ No new sources or leads this run.")
+            print("\n📭 No new sources or leads this run.")
     except KeyboardInterrupt:
-        print("\n\nâš ï¸  Cancelled")
+        print("\n\n⚠️  Cancelled")
     finally:
         await engine.close()
+        from app.database import engine as db_engine
+
+        await db_engine.dispose()
 
 
 if __name__ == "__main__":

@@ -99,6 +99,17 @@ CONTACT_SEARCH_PRIORITIES = {
             ],
             "reason": "Decides restaurant, bar, banquet staff uniforms separately from rooms division",
         },
+        {
+            "priority": 7,
+            "titles": [
+                "Director of Human Resources",
+                "HR Director",
+                "Director of People and Culture",
+                "VP of Human Resources",
+                "Human Resources Manager",
+            ],
+            "reason": "Handles uniform onboarding for all new hires — critical for pre-opening staffing",
+        },
     ],
     # ── OPENING SOON MODE (under 6 months) ──
     # Operational staff now hired, they're the actual buyers
@@ -176,9 +187,19 @@ CONTACT_SEARCH_PRIORITIES = {
             ],
             "reason": "Kitchen whites, chef coats — separate uniform category",
         },
+        {
+            "priority": 7,
+            "titles": [
+                "Director of Human Resources",
+                "HR Director",
+                "Director of People and Culture",
+                "VP of Human Resources",
+                "Human Resources Manager",
+            ],
+            "reason": "Handles uniform onboarding and distribution to all new hires",
+        },
     ],
 }
-
 
 # ═══════════════════════════════════════════════════════════════
 # FLATTENED TITLE LIST (used for Apollo bulk queries)

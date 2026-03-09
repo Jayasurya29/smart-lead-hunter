@@ -174,11 +174,22 @@ def enrich_existing_lead(existing: PotentialLead, lead_dict: Dict) -> bool:
         if not old_val:
             setattr(existing, field, new_val)
             enriched = True
+        elif field == "description" and len(str(new_val)) > len(str(old_val)):
+            setattr(existing, field, new_val)
+            enriched = True
+        elif field == "opening_date" and len(str(new_val)) > len(str(old_val)):
+            # "March 2026" is more specific than "2026"
+            setattr(existing, field, new_val)
+            enriched = True
+        elif field == "room_count" and not old_val and new_val:
+            setattr(existing, field, new_val)
+            enriched = True
         elif (
-            field == "description"
+            field == "room_count"
             and old_val
             and new_val
-            and len(str(new_val)) > len(str(old_val))
+            and int(new_val) > 0
+            and int(old_val) == 0
         ):
             setattr(existing, field, new_val)
             enriched = True

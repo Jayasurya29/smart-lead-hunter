@@ -11,9 +11,9 @@ from sqlalchemy import (
     CheckConstraint,
     Numeric,
     ForeignKey,
-    Index,
 )
 from sqlalchemy.dialects.postgresql import JSONB
+from datetime import datetime, timezone
 
 # L2 FIX: Guard pgvector import — makes it optional for dev/test environments
 try:
@@ -22,22 +22,12 @@ except ImportError:
     Vector = None
 
 from app.database import Base
-from app.services.utils import local_now
 
 
 class PotentialLead(Base):
     """Scraped leads waiting for review"""
 
     __tablename__ = "potential_leads"
-
-    __table_args__ = (
-        Index("ix_leads_status_score", "status", "lead_score"),
-        Index("ix_leads_status_created", "status", "created_at"),
-        Index("ix_leads_location_type", "location_type"),
-        Index("ix_leads_brand_tier", "brand_tier"),
-        Index("ix_leads_normalized_name", "hotel_name_normalized"),
-        Index("ix_leads_source_id", "source_id"),
-    )
 
     # Primary key
     id = Column(Integer, primary_key=True, autoincrement=True)
@@ -63,7 +53,6 @@ class PotentialLead(Base):
     contact_title = Column(String(100))
     contact_email = Column(String(255))
     contact_phone = Column(String(50))
-    contact_linkedin = Column(String(500))
 
     # Hotel Details
     opening_date = Column(String(50))  # Flexible: "Q2 2026", "June 2026", "2026"
@@ -90,7 +79,9 @@ class PotentialLead(Base):
     source_id = Column(Integer, ForeignKey("sources.id"))
     source_url = Column(Text)
     source_site = Column(String(100))
-    scraped_at = Column(DateTime(timezone=True), default=lambda: local_now())
+    source_urls = Column(JSONB, default=[])
+    source_extractions = Column(JSONB, default={})
+    scraped_at = Column(DateTime(timezone=True))
 
     # Workflow Status
     status = Column(
@@ -115,15 +106,15 @@ class PotentialLead(Base):
 
     # Raw data
     raw_data = Column(JSONB)
-    source_urls = Column(JSONB, default=list)
-    source_extractions = Column(JSONB, default=dict)
 
     # Timestamps
-    created_at = Column(DateTime(timezone=True), default=lambda: local_now())
+    created_at = Column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+    )
     updated_at = Column(
         DateTime(timezone=True),
-        default=lambda: local_now(),
-        onupdate=lambda: local_now(),
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
     )
 
     def __repr__(self):
@@ -160,7 +151,6 @@ class PotentialLead(Base):
             "contact_title": self.contact_title,
             "contact_email": self.contact_email,
             "contact_phone": self.contact_phone,
-            "contact_linkedin": self.contact_linkedin,
             # Scoring
             "lead_score": self.lead_score,
             "score_breakdown": self.score_breakdown,

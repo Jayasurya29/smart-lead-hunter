@@ -455,32 +455,43 @@
     <div class="flex-shrink-0 px-5 py-3 bg-gray-50 border-t border-gray-200">
         {% if lead.status == 'new' %}
         <div class="flex gap-2">
-            <button hx-post="/api/dashboard/leads/{{ lead.id }}/approve" hx-swap="none" hx-on::after-request="window.location.reload()" class="flex-1 inline-flex justify-center items-center px-3 py-2.5 text-sm font-semibold rounded-lg text-white bg-emerald-600 hover:bg-emerald-700 transition-colors shadow-sm">Approve</button>
-            <button hx-post="/api/dashboard/leads/{{ lead.id }}/reject" hx-swap="none" hx-on::after-request="window.location.reload()" class="flex-1 inline-flex justify-center items-center px-3 py-2.5 border border-gray-300 text-sm font-semibold rounded-lg text-gray-600 bg-white hover:bg-gray-50 transition-colors">Reject</button>
-            <button hx-post="/api/dashboard/leads/{{ lead.id }}/delete" hx-swap="none" hx-confirm="Delete this lead?" hx-on::after-request="window.location.reload()" class="inline-flex justify-center items-center px-3 py-2.5 border border-gray-300 text-sm rounded-lg text-gray-400 bg-white hover:text-red-500 hover:border-red-300 hover:bg-red-50 transition-colors"><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg></button>
+            <button @click.stop="$dispatch('show-confirm', { type:'approve', title:'Approve & Push to Insightly?', detail:'Contacts will be pushed as Leads to Insightly CRM. Your sales team will see them immediately.', url:'/api/dashboard/leads/{{ lead.id }}/approve', redirect:'/dashboard?tab=approved' })" class="flex-1 inline-flex justify-center items-center gap-1.5 px-3 py-2.5 text-sm font-semibold rounded-lg text-white bg-emerald-600 hover:bg-emerald-700 transition-colors shadow-sm">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
+                Approve
+            </button>
+            <button @click.stop="$dispatch('show-confirm', { type:'reject', title:'Reject this lead?', detail:'Lead will be moved to rejected. Can be restored later.', url:'/api/dashboard/leads/{{ lead.id }}/reject', redirect:'/dashboard?tab=rejected' })" class="flex-1 inline-flex justify-center items-center px-3 py-2.5 border border-gray-300 text-sm font-semibold rounded-lg text-gray-600 bg-white hover:bg-gray-50 transition-colors">Reject</button>
+            <button @click.stop="$dispatch('show-confirm', { type:'delete', title:'Delete this lead?', detail:'Lead will be soft-deleted. Can be restored from Deleted tab.', url:'/api/dashboard/leads/{{ lead.id }}/delete', redirect:'/dashboard?tab=pipeline' })" class="inline-flex justify-center items-center px-3 py-2.5 border border-gray-300 text-sm rounded-lg text-gray-400 bg-white hover:text-red-500 hover:border-red-300 hover:bg-red-50 transition-colors">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
+            </button>
         </div>
         {% elif lead.status == 'approved' %}
         <div class="flex items-center justify-between">
-            <span class="text-emerald-600 text-sm font-medium">Approved</span>
+            <span class="inline-flex items-center gap-1.5 text-emerald-600 text-sm font-medium">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+                Synced to Insightly
+            </span>
             <div class="flex items-center gap-3">
-                <button hx-post="/api/dashboard/leads/{{ lead.id }}/restore" hx-swap="none" hx-on::after-request="window.location.reload()" class="text-xs text-gray-400 hover:text-gray-600 underline">Move to pipeline</button>
-                <button hx-post="/api/dashboard/leads/{{ lead.id }}/delete" hx-swap="none" hx-confirm="Delete?" hx-on::after-request="window.location.reload()" class="text-xs text-gray-400 hover:text-red-500"><svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg></button>
+                <button @click.stop="$dispatch('show-confirm', { type:'restore', title:'Move back to pipeline?', detail:'⚠️ Contacts will be REMOVED from Insightly CRM.', url:'/api/dashboard/leads/{{ lead.id }}/restore', redirect:'/dashboard?tab=pipeline' })" class="text-xs text-amber-500 hover:text-amber-700 font-medium underline">Move to pipeline</button>
+                <button @click.stop="$dispatch('show-confirm', { type:'delete', title:'Delete this lead?', detail:'⚠️ Contacts will be REMOVED from Insightly CRM.', url:'/api/dashboard/leads/{{ lead.id }}/delete', redirect:'/dashboard?tab=pipeline' })" class="text-xs text-gray-400 hover:text-red-500">
+                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
+                </button>
             </div>
         </div>
         {% elif lead.status == 'rejected' %}
         <div class="flex items-center justify-between">
             <span class="text-red-500 text-sm font-medium">Rejected{% if lead.rejection_reason %} <span class="text-gray-400 text-xs">({{ lead.rejection_reason }})</span>{% endif %}</span>
             <div class="flex items-center gap-3">
-                <button hx-post="/api/dashboard/leads/{{ lead.id }}/restore" hx-swap="none" hx-on::after-request="window.location.reload()" class="text-xs text-blue-500 hover:text-blue-700 underline">Restore</button>
-                <button hx-post="/api/dashboard/leads/{{ lead.id }}/delete" hx-swap="none" hx-confirm="Delete?" hx-on::after-request="window.location.reload()" class="text-xs text-gray-400 hover:text-red-500"><svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg></button>
+                <button @click.stop="$dispatch('show-confirm', { type:'restore', title:'Restore to pipeline?', detail:'Lead will be moved back for review.', url:'/api/dashboard/leads/{{ lead.id }}/restore', redirect:'/dashboard?tab=pipeline' })" class="text-xs text-blue-500 hover:text-blue-700 underline">Restore</button>
+                <button @click.stop="$dispatch('show-confirm', { type:'delete', title:'Delete this lead?', detail:'Lead will be soft-deleted.', url:'/api/dashboard/leads/{{ lead.id }}/delete', redirect:'/dashboard?tab=rejected' })" class="text-xs text-gray-400 hover:text-red-500">
+                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
+                </button>
             </div>
         </div>
         {% elif lead.status == 'deleted' %}
         <div class="flex items-center justify-between">
             <span class="text-gray-500 text-sm">Deleted</span>
-            <button hx-post="/api/dashboard/leads/{{ lead.id }}/restore" hx-swap="none" hx-on::after-request="window.location.reload()" class="text-xs text-blue-500 hover:text-blue-700 underline font-medium">Restore</button>
+            <button @click.stop="$dispatch('show-confirm', { type:'restore', title:'Restore this lead?', detail:'Lead will be moved back to pipeline.', url:'/api/dashboard/leads/{{ lead.id }}/restore', redirect:'/dashboard?tab=pipeline' })" class="text-xs text-blue-500 hover:text-blue-700 underline font-medium">Restore</button>
         </div>
         {% endif %}
     </div>
 </div>
-

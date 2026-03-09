@@ -11,7 +11,7 @@
     <div class="px-8 lg:px-12 mt-3">
         <div class="flex items-center justify-between">
             <nav class="flex space-x-1 bg-white rounded-lg shadow-sm p-1 border border-gray-200">
-                <a href="/dashboard?tab=pipeline{% if request.query_params.get('score') %}&score={{ request.query_params.get('score') }}{% endif %}"
+                <a href="/dashboard?tab=pipeline"
                    class="px-4 py-2 text-sm font-medium rounded-md transition-all duration-200
                           {% if active_tab == 'pipeline' %}bg-brand-800 text-white shadow{% else %}text-gray-600 hover:text-gray-900 hover:bg-gray-50{% endif %}">
                     📥 Pipeline
@@ -87,16 +87,25 @@
                     <!-- Filter Row -->
                     <div class="flex flex-wrap items-center gap-2.5">
                         <select name="score" onchange="this.form.submit()" class="px-3 py-1.5 text-sm border border-gray-200 rounded-lg focus:ring-2 focus:ring-brand-500 bg-gray-50 cursor-pointer">
-                            <option value="">All Scores</option>
-                            <option value="hot" {% if request.query_params.get('score') == 'hot' %}selected{% endif %}>🔥 Hot (70+)</option>
-                            <option value="warm" {% if request.query_params.get('score') == 'warm' %}selected{% endif %}>⚡ Warm (50-69)</option>
-                            <option value="cold" {% if request.query_params.get('score') == 'cold' %}selected{% endif %}>❄️ Cold (&lt;50)</option>
+                            <option value="">All Timeline</option>
+                            <option value="hot" {% if request.query_params.get('score') == 'hot' %}selected{% endif %}>🔥 Hot (6-12mo)</option>
+                            <option value="urgent" {% if request.query_params.get('score') == 'urgent' %}selected{% endif %}>⚡ Urgent (3-6mo)</option>
+                            <option value="warm" {% if request.query_params.get('score') == 'warm' %}selected{% endif %}>🌡️ Warm (12-18mo)</option>
+                            <option value="cool" {% if request.query_params.get('score') == 'cool' %}selected{% endif %}>❄️ Cool (18mo+)</option>
+                            <option value="late" {% if request.query_params.get('score') == 'late' %}selected{% endif %}>⏰ Late (0-3mo)</option>
+                            <option value="expired" {% if request.query_params.get('score') == 'expired' %}selected{% endif %}>⛔ Expired</option>
+                            <option value="tbd" {% if request.query_params.get('score') == 'tbd' %}selected{% endif %}>❓ TBD</option>
                         </select>
                         <select name="location" onchange="this.form.submit()" class="px-3 py-1.5 text-sm border border-gray-200 rounded-lg focus:ring-2 focus:ring-brand-500 bg-gray-50 cursor-pointer">
                             <option value="">All Locations</option>
-                            <option value="florida" {% if request.query_params.get('location') == 'florida' %}selected{% endif %}>🌴 Florida</option>
+                            <option value="south_florida" {% if request.query_params.get('location') == 'south_florida' %}selected{% endif %}>☀️ South Florida</option>
+                            <option value="rest_florida" {% if request.query_params.get('location') == 'rest_florida' %}selected{% endif %}>🌴 Rest of Florida</option>
                             <option value="caribbean" {% if request.query_params.get('location') == 'caribbean' %}selected{% endif %}>🏝️ Caribbean</option>
-                            <option value="usa" {% if request.query_params.get('location') == 'usa' %}selected{% endif %}>🇺🇸 USA</option>
+                            <option value="california" {% if request.query_params.get('location') == 'california' %}selected{% endif %}>🌅 California</option>
+                            <option value="new_york" {% if request.query_params.get('location') == 'new_york' %}selected{% endif %}>🗽 New York</option>
+                            <option value="texas" {% if request.query_params.get('location') == 'texas' %}selected{% endif %}>🤠 Texas</option>
+                            <option value="southeast" {% if request.query_params.get('location') == 'southeast' %}selected{% endif %}>🍑 Southeast</option>
+                            <option value="mountain" {% if request.query_params.get('location') == 'mountain' %}selected{% endif %}>⛰️ Mountain West</option>
                         </select>
                         <select name="tier" onchange="this.form.submit()" class="px-3 py-1.5 text-sm border border-gray-200 rounded-lg focus:ring-2 focus:ring-brand-500 bg-gray-50 cursor-pointer">
                             <option value="">All Tiers</option>
@@ -114,6 +123,13 @@
                         </select>
 
                         <div class="border-l border-gray-200 h-5 mx-0.5"></div>
+
+                        <select name="added" onchange="this.form.submit()" class="px-3 py-1.5 text-sm border border-gray-200 rounded-lg focus:ring-2 focus:ring-brand-500 bg-gray-50 cursor-pointer">
+                            <option value="">All Time</option>
+                            <option value="this_week" {% if request.query_params.get('added') == 'this_week' %}selected{% endif %}>📅 This Week</option>
+                            <option value="last_7" {% if request.query_params.get('added') == 'last_7' %}selected{% endif %}>📅 Last 7 Days</option>
+                            <option value="last_30" {% if request.query_params.get('added') == 'last_30' %}selected{% endif %}>📅 Last 30 Days</option>
+                        </select>
 
                         <select name="sort" onchange="this.form.submit()" class="px-3 py-1.5 text-sm border border-gray-200 rounded-lg focus:ring-2 focus:ring-brand-500 bg-gray-50 cursor-pointer">
                             <option value="score_desc" {% if request.query_params.get('sort', 'score_desc') == 'score_desc' %}selected{% endif %}>Score ↓</option>

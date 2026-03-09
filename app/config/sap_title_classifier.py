@@ -32,7 +32,7 @@ class BuyerTier(IntEnum):
     TIER2_PURCHASING = 2  # +15 pts — Purchasing/Procurement
     TIER3_GM_OPS = 3  # +10 pts — GM/Operations/Rooms
     TIER4_FB = 4  # +8 pts  — F&B (separate uniform category)
-    TIER5_HR = 5  # +5 pts  — HR/People (sometimes involved)
+    TIER5_HR = 5  # +10 pts  — HR/People (uniform onboarding, critical)
     TIER6_FINANCE = 6  # +0 pts  — Finance/AP (invoice only)
     TIER7_IRRELEVANT = 7  # -5 pts  — PR/Marketing/Sales/IT/etc.
     UNKNOWN = 99  # +3 pts  — Unknown, assume some relevance
@@ -240,7 +240,7 @@ class TitleClassifier:
         BuyerTier.TIER2_PURCHASING: 15,
         BuyerTier.TIER3_GM_OPS: 10,
         BuyerTier.TIER4_FB: 8,
-        BuyerTier.TIER5_HR: 5,
+        BuyerTier.TIER5_HR: 10,
         BuyerTier.TIER6_FINANCE: 0,
         BuyerTier.TIER7_IRRELEVANT: -5,
         BuyerTier.UNKNOWN: 3,
@@ -252,7 +252,7 @@ class TitleClassifier:
         BuyerTier.TIER2_PURCHASING: 2,
         BuyerTier.TIER3_GM_OPS: 3,
         BuyerTier.TIER4_FB: 4,
-        BuyerTier.TIER5_HR: 5,
+        BuyerTier.TIER5_HR: 3,
         BuyerTier.TIER6_FINANCE: 99,  # Don't search for these
         BuyerTier.TIER7_IRRELEVANT: 99,
         BuyerTier.UNKNOWN: 6,
@@ -263,7 +263,7 @@ class TitleClassifier:
         BuyerTier.TIER2_PURCHASING: "Purchasing/Procurement — controls vendor selection",
         BuyerTier.TIER3_GM_OPS: "GM/Operations — approves purchases, decision maker",
         BuyerTier.TIER4_FB: "F&B — separate uniform category (chef coats, restaurant staff)",
-        BuyerTier.TIER5_HR: "HR — sometimes involved in uniform programs",
+        BuyerTier.TIER5_HR: "HR/People — handles uniform onboarding for all new hires",
         BuyerTier.TIER6_FINANCE: "Finance/AP — invoice contact only, not a buyer",
         BuyerTier.TIER7_IRRELEVANT: "Not involved in uniform purchasing",
         BuyerTier.UNKNOWN: "Unknown role — may have some relevance",

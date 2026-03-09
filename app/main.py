@@ -22,7 +22,7 @@ from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, ConfigDict
 from pathlib import Path
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func, text, or_, case, update
+from sqlalchemy import select, func, text, or_, case, update, literal
 
 import asyncio
 import json
@@ -299,7 +299,9 @@ class StatsResponse(BaseModel):
     pending_leads: int
     rejected_leads: int
     hot_leads: int
+    urgent_leads: int
     warm_leads: int
+    cool_leads: int
     total_sources: int
     active_sources: int
     healthy_sources: int
@@ -613,22 +615,9 @@ async def _get_dashboard_stats(db: AsyncSession) -> dict:
             func.sum(
                 case((PotentialLead.status.in_(["rejected", "bad"]), 1), else_=0)
             ).label("rejected"),
-            func.sum(
-                case(
-                    (PotentialLead.lead_score >= settings.hot_lead_threshold, 1),
-                    else_=0,
-                )
-            ).label("hot"),
-            func.sum(
-                case(
-                    (
-                        (PotentialLead.lead_score >= settings.warm_lead_threshold)
-                        & (PotentialLead.lead_score < settings.hot_lead_threshold),
-                        1,
-                    ),
-                    else_=0,
-                )
-            ).label("warm"),
+            # Hot/Warm now calculated in Python (timeline-based, not score-based)
+            literal(0).label("hot"),
+            literal(0).label("warm"),
             func.sum(case((PotentialLead.created_at >= today_start, 1), else_=0)).label(
                 "today"
             ),
@@ -654,14 +643,30 @@ async def _get_dashboard_stats(db: AsyncSession) -> dict:
     )
     sr = source_result.one()
 
+    # Calculate Hot/Warm/Urgent from opening timeline
+    from app.services.utils import get_timeline_label
+
+    timeline_result = await db.execute(
+        select(PotentialLead.opening_date).where(
+            PotentialLead.status.in_(["new", "approved"])
+        )
+    )
+    timeline_counts = {"HOT": 0, "URGENT": 0, "WARM": 0, "COOL": 0}
+    for row in timeline_result.scalars().all():
+        label = get_timeline_label(row or "")
+        if label in timeline_counts:
+            timeline_counts[label] += 1
+
     return {
         "total_leads": lr.total or 0,
         "new_leads": lr.new or 0,
         "approved_leads": lr.approved or 0,
         "pending_leads": lr.pending or 0,
         "rejected_leads": lr.rejected or 0,
-        "hot_leads": lr.hot or 0,
-        "warm_leads": lr.warm or 0,
+        "hot_leads": timeline_counts["HOT"],
+        "urgent_leads": timeline_counts["URGENT"],
+        "warm_leads": timeline_counts["WARM"],
+        "cool_leads": timeline_counts["COOL"],
         "leads_today": lr.today or 0,
         "leads_this_week": lr.this_week or 0,
         "deleted_leads": lr.deleted or 0,
@@ -672,8 +677,7 @@ async def _get_dashboard_stats(db: AsyncSession) -> dict:
 
 
 # -----------------------------------------------------------------------------
-# Health & Status Endpoints
-# -----------------------------------------------------------------------------
+# Health & Status Endpoints--------------------------------------------------------------------------
 
 
 @app.get("/", tags=["Health"])
@@ -1250,6 +1254,7 @@ async def dashboard_page(
     location: str = "",
     tier: str = "",
     sort: str = "score_desc",
+    added: str = "",
     db: AsyncSession = Depends(get_db),
 ):
     """Dashboard page with Pipeline/Approved/Rejected tabs"""
@@ -1264,6 +1269,8 @@ async def dashboard_page(
 
     # Base query
     query = select(PotentialLead).where(PotentialLead.status == status)
+    now = local_now()
+    today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
 
     # Filters (Audit Fix #6: escape LIKE wildcards in search input)
     if search:
@@ -1277,18 +1284,154 @@ async def dashboard_page(
                 PotentialLead.state.ilike(search_term),
             )
         )
-    if score == "hot":
-        query = query.where(PotentialLead.lead_score >= settings.hot_lead_threshold)
-    elif score == "warm":
-        query = query.where(
-            PotentialLead.lead_score.between(
-                settings.warm_lead_threshold, settings.hot_lead_threshold - 1
+    if score in ("hot", "urgent", "warm", "cool", "late", "expired", "tbd"):
+        from app.services.utils import get_timeline_label
+
+        timeline_q = await db.execute(
+            select(PotentialLead.id, PotentialLead.opening_date).where(
+                PotentialLead.status.in_(["new", "approved"])
             )
         )
-    elif score == "cold":
-        query = query.where(PotentialLead.lead_score < settings.warm_lead_threshold)
+        label_map = {
+            "hot": "HOT",
+            "urgent": "URGENT",
+            "warm": "WARM",
+            "cool": "COOL",
+            "late": "LATE",
+            "expired": "EXPIRED",
+            "tbd": "TBD",
+        }
+        matching_ids = [
+            row[0]
+            for row in timeline_q.all()
+            if get_timeline_label(row[1] or "") == label_map[score]
+        ]
+        if matching_ids:
+            query = query.where(PotentialLead.id.in_(matching_ids))
+        else:
+            query = query.where(PotentialLead.id == -1)
+
     if location:
-        query = query.where(PotentialLead.location_type == location)
+        south_fl_cities = [
+            "miami",
+            "miami beach",
+            "fort lauderdale",
+            "hallandale beach",
+            "west palm beach",
+            "palm beach",
+            "boca raton",
+            "hollywood",
+            "deerfield beach",
+            "delray beach",
+            "aventura",
+            "coral gables",
+            "key west",
+            "key biscayne",
+            "sweetwater",
+            "doral",
+            "hialeah",
+            "homestead",
+            "sunny isles beach",
+            "surfside",
+            "bal harbour",
+            "north miami",
+            "north miami beach",
+            "miami gardens",
+            "miami lakes",
+            "coconut grove",
+            "pompano beach",
+            "lauderdale by the sea",
+            "plantation",
+            "weston",
+            "davie",
+            "sunrise",
+            "pembroke pines",
+            "miramar",
+            "cooper city",
+            "boynton beach",
+            "jupiter",
+            "riviera beach",
+            "lake worth",
+            "naples",
+            "bonita springs",
+            "marco island",
+            "fort myers",
+            "cape coral",
+            "sarasota",
+            "clearwater",
+            "st. petersburg",
+            "st petersburg",
+        ]
+        caribbean_countries = [
+            "dominican republic",
+            "bahamas",
+            "jamaica",
+            "cayman islands",
+            "barbados",
+            "aruba",
+            "turks & caicos islands",
+            "turks and caicos",
+            "saint lucia",
+            "st. lucia",
+            "curacao",
+            "u.s. virgin islands",
+            "antigua and barbuda",
+            "trinidad and tobago",
+            "puerto rico",
+        ]
+        southeast_states = [
+            "georgia",
+            "tennessee",
+            "south carolina",
+            "north carolina",
+            "alabama",
+            "mississippi",
+            "arkansas",
+            "virginia",
+        ]
+        mountain_states = [
+            "utah",
+            "wyoming",
+            "idaho",
+            "colorado",
+            "montana",
+            "arizona",
+            "new mexico",
+        ]
+
+        if location == "south_florida":
+            query = query.where(func.lower(PotentialLead.city).in_(south_fl_cities))
+        elif location == "rest_florida":
+            query = query.where(
+                func.lower(PotentialLead.state) == "florida",
+                ~func.lower(PotentialLead.city).in_(south_fl_cities),
+            )
+        elif location == "caribbean":
+            query = query.where(
+                func.lower(PotentialLead.country).in_(caribbean_countries)
+            )
+        elif location == "california":
+            query = query.where(func.lower(PotentialLead.state) == "california")
+        elif location == "new_york":
+            query = query.where(func.lower(PotentialLead.state) == "new york")
+        elif location == "texas":
+            query = query.where(func.lower(PotentialLead.state) == "texas")
+        elif location == "southeast":
+            query = query.where(func.lower(PotentialLead.state).in_(southeast_states))
+        elif location == "mountain":
+            query = query.where(func.lower(PotentialLead.state).in_(mountain_states))
+    if added:
+        if added == "this_week":
+            week_start = today_start - timedelta(days=now.weekday())
+            query = query.where(PotentialLead.created_at >= week_start)
+        elif added == "last_7":
+            query = query.where(
+                PotentialLead.created_at >= today_start - timedelta(days=7)
+            )
+        elif added == "last_30":
+            query = query.where(
+                PotentialLead.created_at >= today_start - timedelta(days=30)
+            )
     if tier:
         query = query.where(PotentialLead.brand_tier == tier)
 
@@ -1583,38 +1726,56 @@ async def dashboard_approve_lead(
     if not lead:
         return HTMLResponse(content="Lead not found", status_code=404)
 
+    # Block approve if no contacts — must enrich first
+    from app.models.lead_contact import LeadContact
+
+    contacts_result = await db.execute(
+        select(LeadContact)
+        .where(LeadContact.lead_id == lead_id)
+        .order_by(LeadContact.score.desc())
+    )
+    contacts = [c.to_dict() for c in contacts_result.scalars().all()]
+    if not contacts:
+        return HTMLResponse(
+            content='<div class="text-red-600 text-sm font-medium p-2">Enrich first — no contacts to push to CRM</div>',
+            status_code=200,
+        )
+
     lead.status = "approved"
     lead.updated_at = local_now()
 
-    # Push to Insightly CRM
+    # Push contacts as Insightly Leads
     from app.services.insightly import get_insightly_client
 
     crm = get_insightly_client()
     if crm.enabled and not lead.insightly_id:
-        lead_data = {
-            "hotel_name": lead.hotel_name,
-            "brand": lead.brand,
-            "brand_tier": lead.brand_tier,
-            "city": lead.city,
-            "state": lead.state,
-            "country": lead.country or "USA",
-            "opening_date": lead.opening_date,
-            "room_count": lead.room_count or 0,
-            "lead_score": lead.lead_score or 0,
-            "description": lead.description,
-            "source_url": lead.source_url,
-            "management_company": lead.management_company,
-            "developer": lead.developer,
-            "owner": lead.owner,
-            "status": "approved",
-            "id": lead.id,
-        }
-        result = await crm.push_lead(lead_data)
-        if result:
-            lead.insightly_id = result.get("RECORD_ID")
-            logger.info(f"Insightly: synced {lead.hotel_name} → ID {lead.insightly_id}")
+        pushed = await crm.push_contacts_as_leads(
+            contacts=contacts,
+            hotel_name=lead.hotel_name,
+            brand=lead.brand or "",
+            brand_tier=lead.brand_tier or "",
+            city=lead.city or "",
+            state=lead.state or "",
+            country=lead.country or "USA",
+            opening_date=lead.opening_date or "",
+            room_count=lead.room_count or 0,
+            lead_score=lead.lead_score or 0,
+            description=lead.description or "",
+            source_url=lead.source_url or "",
+            management_company=lead.management_company or "",
+            developer=lead.developer or "",
+            owner=lead.owner or "",
+            slh_lead_id=lead.id,
+        )
+        successful = [p for p in pushed if p[1]]
+        if successful:
+            lead.insightly_id = successful[0][1]  # Store first Lead ID as reference
+            logger.info(
+                f"Insightly: pushed {len(successful)} contacts for "
+                f"{lead.hotel_name} → Lead IDs: {[p[1] for p in successful]}"
+            )
         else:
-            logger.warning(f"Insightly: failed to sync {lead.hotel_name}")
+            logger.warning(f"Insightly: failed to push contacts for {lead.hotel_name}")
 
     await db.commit()
     await db.refresh(lead)
@@ -1648,6 +1809,16 @@ async def dashboard_reject_lead(
     lead.notes = f"{lead.notes or ''}\nRejected: {reason or 'No reason given'}".strip()
     lead.updated_at = local_now()
 
+    # Remove from Insightly if previously pushed
+    if lead.insightly_id:
+        from app.services.insightly import get_insightly_client
+
+        crm = get_insightly_client()
+        if crm.enabled:
+            deleted = await crm.delete_leads_by_slh_id(lead.id)
+            logger.info(f"Insightly: deleted {deleted} leads for {lead.hotel_name}")
+        lead.insightly_id = None
+
     await db.commit()
     await db.refresh(lead)
 
@@ -1671,21 +1842,27 @@ async def dashboard_restore_lead(
 ):
     result = await db.execute(select(PotentialLead).where(PotentialLead.id == lead_id))
     lead = result.scalar_one_or_none()
-
     if not lead:
         return HTMLResponse(
             content="<div class='text-red-500 p-2'>Lead not found</div>",
             status_code=404,
         )
-
     lead.status = "new"
     lead.rejection_reason = None
-
     lead.updated_at = local_now()
+
+    # Remove from Insightly if previously pushed
+    if lead.insightly_id:
+        from app.services.insightly import get_insightly_client
+
+        crm = get_insightly_client()
+        if crm.enabled:
+            deleted = await crm.delete_leads_by_slh_id(lead.id)
+            logger.info(f"Insightly: deleted {deleted} leads for {lead.hotel_name}")
+        lead.insightly_id = None
 
     await db.commit()
     await db.refresh(lead)
-
     return templates.TemplateResponse(request, "partials/lead_row.html", {"lead": lead})
 
 
