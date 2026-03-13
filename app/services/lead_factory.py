@@ -20,6 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.potential_lead import PotentialLead
 from app.services.utils import normalize_hotel_name, local_now
 from app.services.scorer import calculate_lead_score
+from app.config.intelligence_config import SCORE_HOT_THRESHOLD, SCORE_WARM_THRESHOLD
 
 logger = logging.getLogger(__name__)
 
@@ -285,9 +286,9 @@ async def save_lead_to_db(
 
     quality = (
         "🔴 HOT"
-        if lead.lead_score >= 70
+        if lead.lead_score >= SCORE_HOT_THRESHOLD
         else "🟠 WARM"
-        if lead.lead_score >= 50
+        if lead.lead_score >= SCORE_WARM_THRESHOLD
         else "🔵 COOL"
     )
     logger.info(f"   {quality} [{lead.lead_score}] {hotel_name}")

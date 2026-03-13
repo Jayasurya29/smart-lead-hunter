@@ -25,6 +25,12 @@ from typing import Dict, Optional
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config.intelligence_config import (
+    SCORE_HOT_THRESHOLD,
+    SCORE_WARM_THRESHOLD,
+    SCORE_COOL_THRESHOLD,
+)
+
 logger = logging.getLogger(__name__)
 
 # Decision-maker titles for uniform purchasing
@@ -221,11 +227,11 @@ async def rescore_lead(lead_id: int, session: AsyncSession) -> Optional[Dict]:
         lead.location_type = score_result["location_type"]
 
     # Update score tier
-    if new_score >= 70:
+    if new_score >= SCORE_HOT_THRESHOLD:
         lead.lead_score_tier = "HOT"
-    elif new_score >= 50:
+    elif new_score >= SCORE_WARM_THRESHOLD:
         lead.lead_score_tier = "WARM"
-    elif new_score >= 30:
+    elif new_score >= SCORE_COOL_THRESHOLD:
         lead.lead_score_tier = "COOL"
     else:
         lead.lead_score_tier = "COLD"

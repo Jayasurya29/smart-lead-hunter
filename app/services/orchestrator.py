@@ -28,6 +28,7 @@ from typing import Any, Dict, List, Optional
 # Database
 from app.database import async_session
 from app.services.utils import local_now
+from app.config.intelligence_config import SCORE_HOT_THRESHOLD, SCORE_MIN_ATTENTION
 
 logger = logging.getLogger(__name__)
 
@@ -301,9 +302,9 @@ class LeadHunterOrchestrator:
         # Count quality levels
         for ld in unique_lead_dicts:
             score = ld.get("qualification_score", 0)
-            if score >= 70:
+            if score >= SCORE_HOT_THRESHOLD:
                 self.stats.high_quality_leads += 1
-            elif score >= 40:
+            elif score >= SCORE_MIN_ATTENTION:
                 self.stats.medium_quality_leads += 1
             else:
                 self.stats.low_quality_leads += 1

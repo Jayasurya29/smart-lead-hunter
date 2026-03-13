@@ -29,45 +29,12 @@ from urllib.parse import urljoin, urlparse
 from bs4 import BeautifulSoup
 
 from app.services.utils import local_now
+from app.config.intelligence_config import SKIP_URL_PATTERNS
 
 logger = logging.getLogger(__name__)
 
-# URLs to never follow
-SKIP_PATTERNS = [
-    "/login",
-    "/signup",
-    "/register",
-    "/account",
-    "/privacy",
-    "/terms",
-    "/cookie",
-    "/legal",
-    "/advertise",
-    "/subscribe",
-    "/cart",
-    "/checkout",
-    "/contact-us",
-    "/about-us",
-    "/careers",
-    "/jobs",
-    "/tag/",
-    "/category/",
-    "/author/",
-    "/page/",
-    "#",
-    "mailto:",
-    "javascript:",
-    "tel:",
-    ".pdf",
-    ".jpg",
-    ".png",
-    ".gif",
-    ".svg",
-    ".mp4",
-    ".mp3",
-    ".zip",
-    ".doc",
-]
+# URLs to never follow — imported from single config
+SKIP_PATTERNS = SKIP_URL_PATTERNS
 
 
 @dataclass

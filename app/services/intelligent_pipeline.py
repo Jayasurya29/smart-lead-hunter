@@ -55,6 +55,8 @@ from app.config.intelligence_config import (
     MIN_DELAY_SECONDS,
     MAX_CONCURRENT_REQUESTS,
     REDIS_CACHE_TTL_HOURS,
+    SCORE_HOT_THRESHOLD,
+    SKIP_URL_PATTERNS,
 )
 
 
@@ -725,66 +727,7 @@ class QuickRejectFilter:
     Cost: FREE (no AI)
     """
 
-    JUNK_PATTERNS = [
-        # Auth & user pages
-        r"/login",
-        r"/signin",
-        r"/signup",
-        r"/register",
-        r"/logout",
-        r"/account",
-        r"/profile",
-        r"/settings",
-        r"/password",
-        # Site infrastructure
-        r"/contact",
-        r"/about-us",
-        r"/about$",
-        r"/privacy",
-        r"/terms",
-        r"/cookie",
-        r"/sitemap",
-        r"/robots",
-        r"/feed",
-        r"/rss",
-        r"/wp-admin",
-        r"/wp-login",
-        r"/admin",
-        r"/_next/",
-        r"/_nuxt/",
-        # Media
-        r"/video-gallery",
-        r"/photo-gallery",
-        r"/gallery",
-        r"/podcast",
-        r"\.pdf$",
-        r"\.jpg$",
-        r"\.png$",
-        r"\.mp4$",
-        # Social
-        r"facebook\.com",
-        r"twitter\.com",
-        r"instagram\.com",
-        r"linkedin\.com",
-        r"youtube\.com",
-        r"mailto:",
-        r"tel:",
-        r"javascript:",
-        # E-commerce
-        r"/cart",
-        r"/checkout",
-        r"/shop",
-        r"/store",
-        r"/subscribe",
-        # Navigation
-        r"/search\?",
-        r"/search$",
-        r"/tag/",
-        r"/tags/",
-        r"/author/",
-        r"/page/\d+$",
-        r"#",
-    ]
+    JUNK_PATTERNS = SKIP_URL_PATTERNS
 
     def __init__(self):
         self._patterns = [re.compile(p, re.IGNORECASE) for p in self.JUNK_PATTERNS]
@@ -1906,7 +1849,11 @@ class IntelligentPipeline:
 
         # Categorize
         high_quality = len(
-            [lead for lead in final_leads if lead.qualification_score >= 70]
+            [
+                lead
+                for lead in final_leads
+                if lead.qualification_score >= SCORE_HOT_THRESHOLD
+            ]
         )
         medium_quality = len(
             [lead for lead in final_leads if 40 <= lead.qualification_score < 70]

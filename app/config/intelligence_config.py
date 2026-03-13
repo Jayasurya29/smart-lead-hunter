@@ -6,10 +6,14 @@ Every threshold, interval, and tuning constant for the intelligence
 system lives HERE. No other file should hardcode these values.
 
 Imported by:
-  - app/tasks/autonomous_tasks.py     (scheduling intervals)
-  - app/services/source_intelligence.py (pattern classification, page budgets)
-  - app/services/intelligent_pipeline.py (cache TTL, AI config)
-  - app/services/smart_scraper.py       (skip patterns)
+  - app/tasks/autonomous_tasks.py       (scheduling intervals, score thresholds)
+  - app/services/source_intelligence.py  (pattern classification, page budgets)
+  - app/services/intelligent_pipeline.py (cache TTL, AI config, skip patterns)
+  - app/services/smart_scraper.py        (skip patterns)
+  - app/services/lead_factory.py         (score tier thresholds)
+  - app/services/orchestrator.py         (score tier thresholds)
+  - app/services/rescore.py              (score tier thresholds)
+  - app/services/url_filter.py           (skip patterns)
 
 Change a number HERE → changes everywhere.
 """
@@ -41,6 +45,27 @@ ZERO_YIELD_INTERVAL_HOURS = 336  # Biweekly (0% yield after 3+ runs)
 
 
 # ═══════════════════════════════════════════════════════════════
+# LEAD SCORE TIER THRESHOLDS
+# ═══════════════════════════════════════════════════════════════
+# Used by: rescore.py, lead_factory.py, orchestrator.py,
+#          intelligent_pipeline.py, autonomous_tasks.py
+#
+# These define what score = HOT/WARM/COOL/COLD across the
+# entire app. Change here → changes everywhere.
+
+SCORE_HOT_THRESHOLD = 70  # Score >= 70 = HOT lead
+SCORE_WARM_THRESHOLD = 50  # Score >= 50 = WARM lead
+SCORE_COOL_THRESHOLD = 30  # Score >= 30 = COOL lead
+# Score < 30  = COLD lead
+
+# Minimum score to auto-enrich (autonomous_tasks picks leads above this)
+SCORE_MIN_ENRICH = 40
+
+# Minimum score for orchestrator to flag as "worth attention"
+SCORE_MIN_ATTENTION = 40
+
+
+# ═══════════════════════════════════════════════════════════════
 # PATTERN CLASSIFICATION — Gold vs Junk URL patterns
 # ═══════════════════════════════════════════════════════════════
 # Used by: source_intelligence.py
@@ -55,7 +80,6 @@ JUNK_MAX_HIT_RATE = 0.0  # 0% after 5+ tests = junk
 # PAGE BUDGETS — How many pages to scrape per source
 # ═══════════════════════════════════════════════════════════════
 # Used by: source_intelligence.py get_scrape_settings()
-# Yield thresholds here match SOURCE SCHEDULING above
 
 MAX_PAGES_NEW_SOURCE = 20  # New sources (< MIN_RUNS_TO_GRADUATE runs)
 MAX_PAGES_HIGH_YIELD = 20  # yield > PRODUCER_YIELD_THRESHOLD
@@ -115,3 +139,85 @@ MIN_RUNS_FOR_DEACTIVATION = 5  # Don't deactivate until 5+ runs
 
 # History limits
 MAX_RUN_HISTORY = 20  # Keep last 20 scrape runs per source
+
+
+# ═══════════════════════════════════════════════════════════════
+# SKIP URL PATTERNS — URLs to never scrape/follow
+# ═══════════════════════════════════════════════════════════════
+# Used by: intelligent_pipeline.py (QuickRejectFilter),
+#          smart_scraper.py (SKIP_PATTERNS), url_filter.py
+#
+# ONE list. Every scraping component imports this.
+
+SKIP_URL_PATTERNS = [
+    # Auth & user pages
+    "/login",
+    "/signin",
+    "/signup",
+    "/register",
+    "/logout",
+    "/account",
+    "/profile",
+    "/settings",
+    "/password",
+    # Site infrastructure
+    "/contact-us",
+    "/contact",
+    "/about-us",
+    "/about$",
+    "/privacy",
+    "/terms",
+    "/cookie",
+    "/legal",
+    "/sitemap",
+    "/robots",
+    "/feed",
+    "/rss",
+    "/wp-admin",
+    "/wp-login",
+    "/admin",
+    "/_next/",
+    "/_nuxt/",
+    # Media files
+    "/video-gallery",
+    "/photo-gallery",
+    "/gallery",
+    "/podcast",
+    r"\.pdf$",
+    r"\.jpg$",
+    r"\.png$",
+    r"\.gif$",
+    r"\.svg$",
+    r"\.mp4$",
+    r"\.mp3$",
+    r"\.zip$",
+    r"\.doc$",
+    # Social media
+    r"facebook\.com",
+    r"twitter\.com",
+    r"instagram\.com",
+    r"linkedin\.com",
+    r"youtube\.com",
+    "mailto:",
+    "tel:",
+    "javascript:",
+    # E-commerce
+    "/cart",
+    "/checkout",
+    "/shop",
+    "/store",
+    "/subscribe",
+    "/advertise",
+    # Navigation / pagination
+    "/search\\?",
+    "/search$",
+    "/tag/",
+    "/tags/",
+    "/category/",
+    "/author/",
+    r"/page/\d+$",
+    "#",
+    # Career pages
+    "/careers",
+    "/jobs",
+]
