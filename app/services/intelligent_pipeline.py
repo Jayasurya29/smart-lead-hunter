@@ -45,6 +45,18 @@ from app.services.scorer import (
     calculate_lead_score,
 )
 
+from app.config.intelligence_config import (
+    CLASSIFIER_MODEL,
+    EXTRACTOR_MODEL,
+    CLASSIFIER_CONTENT_LIMIT,
+    EXTRACTOR_CONTENT_LIMIT,
+    CLASSIFICATION_CONFIDENCE,
+    QUALIFICATION_THRESHOLD,
+    MIN_DELAY_SECONDS,
+    MAX_CONCURRENT_REQUESTS,
+    REDIS_CACHE_TTL_HOURS,
+)
+
 
 def _safe_int(value, default: int = 0) -> int:
     """Safely parse an integer from various formats (Audit Fix #5).
@@ -150,28 +162,27 @@ class PipelineConfig:
 
     # Models — Gemini 3/2.5 configuration (no RPM bottlenecks)
     # Classifier: Flash Lite — 4,000 RPM / Unlimited RPD (binary yes/no)
-    # Extractor: 2.5 Flash — 1,000 RPM / 10,000 RPD (structured extraction)
-    classifier_model: str = "gemini-2.5-flash-lite"
-    extractor_model: str = "gemini-2.5-flash"
+
+    classifier_model: str = CLASSIFIER_MODEL
+    extractor_model: str = EXTRACTOR_MODEL
 
     # Thresholds
-    classification_confidence: float = 0.45
-    qualification_threshold: int = 30  # Min score to keep lead
+    classification_confidence: float = CLASSIFICATION_CONFIDENCE
+    qualification_threshold: int = QUALIFICATION_THRESHOLD
 
-    # Rate limiting — Flash models have generous limits
-    min_delay_seconds: float = 0.15
+    # Rate limiting
+    min_delay_seconds: float = MIN_DELAY_SECONDS
 
     # Concurrency
-    max_concurrent_requests: int = 20
+    max_concurrent_requests: int = MAX_CONCURRENT_REQUESTS
 
     # Content limits
-    classifier_content_limit: int = 5000  # Chars for classification
-    extractor_content_limit: int = 20000  # Chars for extraction
+    classifier_content_limit: int = CLASSIFIER_CONTENT_LIMIT
+    extractor_content_limit: int = EXTRACTOR_CONTENT_LIMIT
 
-    # Redis extraction cache (skip re-extraction for same content)
+    # Redis extraction cache
     redis_cache_enabled: bool = True
-    redis_cache_ttl_hours: int = 168
-    redis_url: str = ""
+    redis_cache_ttl_hours: int = REDIS_CACHE_TTL_HOURS
 
     # TODO: Gemini Batch API (50% cost reduction when GA)
     use_batch_api: bool = False
@@ -1156,6 +1167,12 @@ RULES:
 2. Leave fields empty if not clearly stated
 3. For opening_date use format "Month YYYY" or "Q1 {current_year}" or "{current_year}"
 4. key_insights is REQUIRED - include staffing numbers, amenities, investment
+5. MULTI-HOTEL ARTICLES: When an article mentions multiple hotels, carefully match EACH hotel to ITS OWN opening date. Dates may appear in different paragraphs or sentences than the hotel name - read the full context around each mention. Common patterns:
+   - "Hotel X... set to open in 2028" (date in same sentence)
+   - "Hotel X in Location." Then later: "...expected to debut in 2028" (date in nearby paragraph)
+   - "Hotel X and Hotel Y, set to open in Turks & Caicos" then "...slated for 2028" (shared date)
+   - If a date like "2027" or "2028" appears near a hotel name within 2-3 sentences, assign it
+6. NEVER leave opening_date empty if ANY year or timeframe is mentioned near the hotel name in the article. Search the ENTIRE article for dates associated with each hotel before giving up
 
 KEY INSIGHTS TO CAPTURE (critical for uniform sales!):
 - Staff hiring numbers (e.g., "hiring 300 employees" = big order!)

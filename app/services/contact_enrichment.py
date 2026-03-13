@@ -1547,7 +1547,13 @@ async def _layer_linkedin_snippets(
             snippet_lower = sr.get("snippet", "").lower()
             title_text = sr.get("title", "").lower()
             combined = f"{snippet_lower} {title_text}"
-
+            # Name MUST appear in same snippet - prevents stealing another person's title
+            name_parts = recovery_name.lower().split()
+            name_in_snippet = any(
+                part in combined for part in name_parts if len(part) > 2
+            )
+            if not name_in_snippet:
+                continue
             for kw in title_keywords:
                 if kw in combined:
                     contact["title"] = kw.title()

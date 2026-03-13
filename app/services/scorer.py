@@ -1545,16 +1545,18 @@ def get_timing_score(opening_date: str = None) -> Tuple[int, str, int]:
     # Score by months out
     if months_out <= 0:
         return (0, f"{year} - EXPIRED", year)
-    elif months_out <= 2:
-        return (5, f"{year} - Long Shot", year)
+    elif months_out <= 3:
+        return (8, f"{year} - LATE (may have ordered)", year)
     elif months_out <= 6:
-        return (25, f"{year} - HOT (sourcing now)", year)
+        return (20, f"{year} - URGENT (ordering now)", year)
     elif months_out <= 12:
-        return (18, f"{year} - Warm (planning)", year)
+        return (25, f"{year} - HOT (sweet spot)", year)
+    elif months_out <= 18:
+        return (15, f"{year} - WARM (planning phase)", year)
     elif months_out <= 24:
-        return (12, f"{year} - Pipeline", year)
+        return (10, f"{year} - COOL (early pipeline)", year)
     else:
-        return (6, f"{year}+ - Early", year)
+        return (6, f"{year}+ - Future", year)
 
 
 # =============================================================================

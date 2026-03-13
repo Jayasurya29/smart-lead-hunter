@@ -829,7 +829,9 @@ class DiscoveryLeadExtractor:
                 {
                     "url": url,
                     "content": content,
-                    "source": f"discovery:{page['domain']}",
+                    "source": self.domain_to_source_name.get(
+                        page["domain"], f"discovery:{page['domain']}"
+                    ),
                 }
             )
             url_to_domain[url] = page["domain"]
@@ -902,6 +904,7 @@ class WebDiscoveryEngine:
         self.pipeline = DiscoveryLeadExtractor()
 
         self.known_domains: set[str] = set()
+        self.domain_to_source_name: dict[str, str] = {}
         self.failed_domains: dict = {}
         self.discovered: list[dict] = []
         self.extracted_leads: list = []
@@ -909,13 +912,19 @@ class WebDiscoveryEngine:
 
     async def initialize(self):
         async with async_session() as session:
-            result = await session.execute(select(Source.base_url))
-            for url in result.scalars().all():
-                domain = urlparse(url).netloc.lower().replace("www.", "")
+            result = await session.execute(
+                select(Source.base_url, Source.name).where(Source.is_active.is_(True))
+            )
+            for row in result.all():
+                domain = urlparse(row.base_url).netloc.lower().replace("www.", "")
                 self.known_domains.add(domain)
+                self.domain_to_source_name[domain] = row.name
                 parts = domain.split(".")
                 if len(parts) > 2:
-                    self.known_domains.add(".".join(parts[-2:]))
+                    short = ".".join(parts[-2:])
+                    self.known_domains.add(short)
+                    if short not in self.domain_to_source_name:
+                        self.domain_to_source_name[short] = row.name
 
             try:
                 fd_result = await session.execute(select(FailedDomain))

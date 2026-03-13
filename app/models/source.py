@@ -56,6 +56,12 @@ class Source(Base):
     # Notes
     notes = Column(Text)
 
+    # Source Intelligence - adaptive learning data
+    source_intelligence = Column(JSONB, default=dict)
+
+    # Source Intelligence — adaptive learning data
+    source_intelligence = Column(JSONB, default=dict)
+
     # Timestamps
     created_at = Column(DateTime(timezone=True), default=lambda: local_now())
     updated_at = Column(

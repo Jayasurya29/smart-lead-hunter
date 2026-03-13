@@ -30,7 +30,7 @@ celery_app = Celery(
     "smart_lead_hunter",
     broker=settings.redis_url,
     backend=settings.redis_url,
-    include=["app.tasks.scraping_tasks"],
+    include=["app.tasks.scraping_tasks", "app.tasks.autonomous_tasks"],
 )
 
 # Celery configuration
@@ -61,35 +61,55 @@ celery_app.conf.update(
     },
     # Beat scheduler (periodic tasks)
     beat_schedule={
-        # Daily full scrape at 6 AM Eastern
-        "daily-full-scrape": {
-            "task": "app.tasks.scraping_tasks.run_full_scrape",
-            "schedule": crontab(hour=6, minute=0),
-            "options": {"queue": "scraping"},
-        },
-        # Check high-priority sources every 6 hours
-        "high-priority-scrape": {
-            "task": "app.tasks.scraping_tasks.scrape_high_priority_sources",
-            "schedule": crontab(hour="*/6", minute=30),
-            "options": {"queue": "scraping"},
-        },
-        # Weekly embedding update (Sundays at 2 AM)
-        "weekly-embedding-update": {
-            "task": "app.tasks.scraping_tasks.update_all_embeddings",
-            "schedule": crontab(hour=2, minute=0, day_of_week=0),
+        # ======================================================
+        # AUTONOMOUS BRAIN — Business Hours Only (9:30a-4:30p ET)
+        # Mon-Fri only. App is shutdown outside these hours.
+        # ======================================================
+        # Startup health check: 9:35 AM Mon-Fri
+        # Cleanup overnight gaps, rescore stale leads
+        "startup-health-check": {
+            "task": "daily_health_check",
+            "schedule": crontab(hour=9, minute=35, day_of_week="1-5"),
             "options": {"queue": "maintenance"},
         },
-        # Daily duplicate cleanup at 3 AM
-        "daily-duplicate-check": {
-            "task": "app.tasks.scraping_tasks.check_duplicates",
-            "schedule": crontab(hour=3, minute=0),
-            "options": {"queue": "maintenance"},
+        # Smart Scrape Round 1: 10:00 AM Mon-Fri
+        # Brain picks which sources are due based on intelligence
+        "smart-scrape-am": {
+            "task": "smart_scrape",
+            "schedule": crontab(hour=10, minute=0, day_of_week="1-5"),
+            "options": {"queue": "scraping"},
         },
-        # Sync approved leads to Insightly every hour
-        "hourly-insightly-sync": {
-            "task": "app.tasks.scraping_tasks.sync_approved_to_insightly",
-            "schedule": crontab(minute=15),  # At :15 past every hour
-            "options": {"queue": "crm"},
+        # Auto-Enrich Round 1: 11:00 AM Mon-Fri
+        # Enrich top 5 unenriched HOT/URGENT leads
+        "auto-enrich-am": {
+            "task": "auto_enrich",
+            "schedule": crontab(hour=11, minute=0, day_of_week="1-5"),
+            "options": {"queue": "scraping"},
+        },
+        # Smart Scrape Round 2: 12:30 PM Mon-Fri
+        "smart-scrape-mid": {
+            "task": "smart_scrape",
+            "schedule": crontab(hour=12, minute=30, day_of_week="1-5"),
+            "options": {"queue": "scraping"},
+        },
+        # Auto-Enrich Round 2: 2:00 PM Mon-Fri
+        "auto-enrich-pm": {
+            "task": "auto_enrich",
+            "schedule": crontab(hour=14, minute=0, day_of_week="1-5"),
+            "options": {"queue": "scraping"},
+        },
+        # Smart Scrape Round 3: 3:30 PM Mon-Fri (last scrape of the day)
+        "smart-scrape-pm": {
+            "task": "smart_scrape",
+            "schedule": crontab(hour=15, minute=30, day_of_week="1-5"),
+            "options": {"queue": "scraping"},
+        },
+        # Weekly Discovery: Thursday 10:30 AM
+        # Finds new sources and leads from the web
+        "weekly-discovery": {
+            "task": "weekly_discovery",
+            "schedule": crontab(hour=10, minute=30, day_of_week=4),
+            "options": {"queue": "scraping"},
         },
     },
     # Task routing

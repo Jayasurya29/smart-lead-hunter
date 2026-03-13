@@ -45,6 +45,7 @@
         </div>
     </div>
 
+    {%- set all_source_urls = lead.source_urls if lead.source_urls and lead.source_urls | length > 0 else ([lead.source_url] if lead.source_url else []) -%}
     <!-- ═══════════ TAB BAR ═══════════ -->
     <div class="flex-shrink-0 flex border-b border-gray-200 bg-white px-2">
         <button @click="tab = 'overview'"
@@ -60,10 +61,10 @@
         <button @click="tab = 'edit'"
                 :class="tab === 'edit' ? 'border-blue-500 text-blue-600 font-semibold' : 'border-transparent text-gray-400 hover:text-gray-600'"
                 class="px-3 py-2 text-xs border-b-2 transition-colors whitespace-nowrap">Edit</button>
-        {% if lead.source_urls and lead.source_urls | length > 0 %}
+        {% if all_source_urls | length > 0 %}
         <button @click="tab = 'sources'"
                 :class="tab === 'sources' ? 'border-blue-500 text-blue-600 font-semibold' : 'border-transparent text-gray-400 hover:text-gray-600'"
-                class="px-3 py-2 text-xs border-b-2 transition-colors whitespace-nowrap">Sources <span class="text-[10px] text-gray-400">({{ lead.source_urls | length }})</span></button>
+                class="px-3 py-2 text-xs border-b-2 transition-colors whitespace-nowrap">Sources <span class="text-[10px] text-gray-400">({{ all_source_urls | length }})</span></button>
         {% endif %}
     </div>
 
@@ -419,10 +420,15 @@
 
 
         <!-- ─── SOURCES TAB ─── -->
-        {% if lead.source_urls and lead.source_urls | length > 0 %}
+        {% if all_source_urls | length > 0 %}
         <div x-show="tab === 'sources'" x-cloak class="p-5 space-y-3">
-            <h3 class="text-xs font-semibold text-gray-400 uppercase tracking-wider">Source Articles ({{ lead.source_urls | length }})</h3>
-            {% for url in lead.source_urls %}
+            {% if lead.source_site and lead.source_site != 'manual' %}
+            <div class="flex items-center gap-2 mb-2">
+                <span class="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-purple-100 text-purple-700">{{ lead.source_site }}</span>
+            </div>
+            {% endif %}
+            <h3 class="text-xs font-semibold text-gray-400 uppercase tracking-wider">Source Articles ({{ all_source_urls | length }})</h3>
+            {% for url in all_source_urls %}
             <div class="rounded-lg ring-1 ring-gray-100 overflow-hidden" x-data="{ open: false }">
                 <div class="flex items-start gap-2 p-3 bg-gray-50 hover:bg-gray-100 transition-colors cursor-pointer" @click="open = !open">
                     <svg class="w-4 h-4 text-purple-400 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1"/></svg>

@@ -38,6 +38,7 @@ from app.services.utils import normalize_hotel_name, local_now
 from app.middleware.auth import APIKeyMiddleware
 from app.models.lead_contact import LeadContact
 from app.services.lead_factory import save_lead_to_db
+from app.services.rescore import rescore_lead
 
 # Global dict to track active scrape jobs and their progress
 # Protected by _scrape_lock for async-safe mutation within a single worker.
@@ -45,7 +46,7 @@ from app.services.lead_factory import save_lead_to_db
 active_scrapes: dict = {}
 scrape_cancellations: set = set()
 _scrape_lock = asyncio.Lock()
-_SCRAPE_TTL = 1800  # 30 minutes — auto-evict stale scrape entries
+_SCRAPE_TTL = 1800  # 30 minutes â€” auto-evict stale scrape entries
 
 
 async def _cleanup_stale_scrapes():
@@ -66,14 +67,14 @@ async def _cleanup_stale_scrapes():
 _pending_configs: dict = {}  # scrape_id -> {mode, source_ids, ...}
 _pending_extract_urls: dict = {}  # extract_id -> url
 _pending_discovery_configs: dict = {}  # discovery_id -> {mode, extract_leads, dry_run}
-_PENDING_TTL = 300  # 5 minutes — evict stale entries
+_PENDING_TTL = 300  # 5 minutes â€” evict stale entries
 
 
 def _store_pending(store: dict, key: str, value):
     """Store a pending config with timestamp, evicting expired entries."""
     now = time.monotonic()
     store[key] = {"_v": value, "_t": now}
-    # Evict expired entries on each write (cheap — typically <10 entries)
+    # Evict expired entries on each write (cheap â€” typically <10 entries)
     cutoff = now - _PENDING_TTL
     expired = [
         k for k, v in store.items() if isinstance(v, dict) and v.get("_t", 0) < cutoff
@@ -693,7 +694,7 @@ async def root():
 
 @app.get("/health", tags=["Health"])
 async def health_check(db: AsyncSession = Depends(get_db)):
-    """Health check endpoint — verifies DB, Gemini API, and Redis."""
+    """Health check endpoint â€” verifies DB, Gemini API, and Redis."""
     components = {}
 
     # 1. Database
@@ -740,7 +741,7 @@ async def health_check(db: AsyncSession = Depends(get_db)):
                 await _health_redis.ping()
                 components["redis"] = "healthy"
             except Exception:
-                # Connection stale — recreate
+                # Connection stale â€” recreate
                 try:
                     await _health_redis.aclose()
                 except Exception:
@@ -895,7 +896,7 @@ async def get_lead(lead_id: int, db: AsyncSession = Depends(get_db)):
 
 @app.post("/leads", response_model=LeadResponse, tags=["Leads"])
 async def create_lead(lead_data: LeadCreate, db: AsyncSession = Depends(get_db)):
-    """Create a new lead manually — routed through shared lead factory."""
+    """Create a new lead manually â€” routed through shared lead factory."""
     lead_dict = lead_data.model_dump()
     lead_dict["source_site"] = lead_dict.get("source_site") or "manual"
 
@@ -983,7 +984,9 @@ async def approve_lead(lead_id: int, db: AsyncSession = Depends(get_db)):
         result = await crm.push_lead(lead_data)
         if result:
             lead.insightly_id = result.get("RECORD_ID")
-            logger.info(f"Insightly: synced {lead.hotel_name} → ID {lead.insightly_id}")
+            logger.info(
+                f"Insightly: synced {lead.hotel_name} â†’ ID {lead.insightly_id}"
+            )
         else:
             logger.warning(f"Insightly: failed to sync {lead.hotel_name}")
 
@@ -1435,7 +1438,7 @@ async def dashboard_page(
     if tier:
         query = query.where(PotentialLead.brand_tier == tier)
 
-    # Order — support sort parameter
+    # Order â€” support sort parameter
     if sort == "newest":
         query = query.order_by(PotentialLead.created_at.desc().nullslast())
     elif sort == "oldest":
@@ -1667,34 +1670,20 @@ async def dashboard_edit_lead(
     scoring_changed = any(f in data for f in scoring_fields)
 
     if scoring_changed:
-        # Full rescore from scratch
-        from app.services.scorer import calculate_lead_score
-
-        result_score = calculate_lead_score(
-            hotel_name=lead.hotel_name or "",
-            city=lead.city or "",
-            state=lead.state or "",
-            country=lead.country or "USA",
-            opening_date=lead.opening_date or "",
-            room_count=lead.room_count or 0,
-            description=lead.description or "",
-            brand=lead.brand or "",
-        )
-        lead.lead_score = result_score["total_score"]
-        # If user also changed tier in same edit, override
+        # Full rescore with enriched contacts
+        await db.flush()
+        await rescore_lead(lead.id, db)
         if "brand_tier" in data and data["brand_tier"]:
-            auto_points = result_score["breakdown"].get("brand", {}).get("points", 0)
+            auto_points = (lead.score_breakdown or {}).get("brand", {}).get("points", 0)
             manual_points = tier_points_map.get(data["brand_tier"], 0)
             lead.lead_score = lead.lead_score - auto_points + manual_points
             lead.brand_tier = data["brand_tier"]
-        else:
-            lead.brand_tier = result_score["brand_tier"]
     elif "brand_tier" in data and data["brand_tier"]:
-        # Tier-only change — just swap the points on existing score
         old_points = tier_points_map.get(lead.brand_tier or "unknown", 0)
         new_points = tier_points_map.get(data["brand_tier"], 0)
         lead.lead_score = (lead.lead_score or 0) - old_points + new_points
         lead.brand_tier = data["brand_tier"]
+
     lead.updated_at = local_now()
     await db.commit()
     await db.refresh(lead)
@@ -1726,7 +1715,7 @@ async def dashboard_approve_lead(
     if not lead:
         return HTMLResponse(content="Lead not found", status_code=404)
 
-    # Block approve if no contacts — must enrich first
+    # Block approve if no contacts â€” must enrich first
     from app.models.lead_contact import LeadContact
 
     contacts_result = await db.execute(
@@ -1737,7 +1726,7 @@ async def dashboard_approve_lead(
     contacts = [c.to_dict() for c in contacts_result.scalars().all()]
     if not contacts:
         return HTMLResponse(
-            content='<div class="text-red-600 text-sm font-medium p-2">Enrich first — no contacts to push to CRM</div>',
+            content='<div class="text-red-600 text-sm font-medium p-2">Enrich first â€” no contacts to push to CRM</div>',
             status_code=200,
         )
 
@@ -1772,7 +1761,7 @@ async def dashboard_approve_lead(
             lead.insightly_id = successful[0][1]  # Store first Lead ID as reference
             logger.info(
                 f"Insightly: pushed {len(successful)} contacts for "
-                f"{lead.hotel_name} → Lead IDs: {[p[1] for p in successful]}"
+                f"{lead.hotel_name} â†’ Lead IDs: {[p[1] for p in successful]}"
             )
         else:
             logger.warning(f"Insightly: failed to push contacts for {lead.hotel_name}")
@@ -1892,9 +1881,9 @@ async def dashboard_delete_lead(
     lead.updated_at = local_now()
 
     await db.commit()
-    await db.refresh(lead)
 
-    return templates.TemplateResponse(request, "partials/lead_row.html", {"lead": lead})
+    # Return empty response so HTMX removes the row from the current tab
+    return HTMLResponse(content="", status_code=200)
 
 
 @app.get("/api/dashboard/sources/list", tags=["Dashboard"])
@@ -1913,20 +1902,20 @@ async def dashboard_sources_list(db: AsyncSession = Depends(get_db)):
     # Build category counts
     cat_counts = {}
     cat_labels = {
-        "chain_newsroom": "🏨 Chain Newsrooms",
-        "luxury_independent": "💎 Luxury & Independent",
-        "aggregator": "📰 Aggregators",
-        "industry": "🏗️ Industry",
-        "florida": "🌴 Florida",
-        "caribbean": "🏝️ Caribbean",
-        "travel_pub": "✈️ Travel Pubs",
-        "pr_wire": "📡 PR Wire",
+        "chain_newsroom": "ðŸ¨ Chain Newsrooms",
+        "luxury_independent": "ðŸ’Ž Luxury & Independent",
+        "aggregator": "ðŸ“° Aggregators",
+        "industry": "ðŸ—ï¸ Industry",
+        "florida": "ðŸŒ´ Florida",
+        "caribbean": "ðŸï¸ Caribbean",
+        "travel_pub": "âœˆï¸ Travel Pubs",
+        "pr_wire": "ðŸ“¡ PR Wire",
     }
 
     all_sources = []
     due_sources = []
 
-    # Frequency → hours threshold
+    # Frequency â†’ hours threshold
     freq_hours = {
         "daily": 20,
         "every_3_days": 68,
@@ -2064,7 +2053,7 @@ async def dashboard_trigger_scrape(request: Request, _csrf=Depends(_require_ajax
 async def scrape_with_progress(request: Request):
     """SSE endpoint for real-time scrape progress using the orchestrator pipeline"""
 
-    # Get scrape config by ID from query param (Audit Fix #3 — race-safe)
+    # Get scrape config by ID from query param (Audit Fix #3 â€” race-safe)
     scrape_id = request.query_params.get("scrape_id", "")
     if not scrape_id or scrape_id not in _pending_configs:
 
@@ -2126,6 +2115,11 @@ async def scrape_with_progress(request: Request):
 
             start_time = local_now()
 
+            # Load Source Intelligence for adaptive scraping
+            from app.services.source_intelligence import SourceIntelligence
+
+            source_intel_map = {}  # source_id -> SourceIntelligence
+
             # --- PHASE 1: SCRAPE all sources via the engine ---
             yield f"data: {json.dumps({'type': 'info', 'message': 'Phase 1: Scraping sources...'})}\n\n"
 
@@ -2152,6 +2146,23 @@ async def scrape_with_progress(request: Request):
 
                 source_name = source.name
 
+                # Load Source Intelligence (adaptive settings)
+                scrape_settings = None
+                try:
+                    intel = SourceIntelligence(source)
+                    source_intel_map[source.id] = intel
+                    scrape_settings = intel.get_scrape_settings()
+                    if scrape_settings.should_skip:
+                        skip_msg = (
+                            f"Skipping {source_name}: {scrape_settings.skip_reason}"
+                        )
+                        yield f"data: {json.dumps({'type': 'info', 'message': skip_msg})}\n\n"
+                        continue
+                except Exception as intel_err:
+                    logger.warning(
+                        f"Intelligence load failed for {source_name}: {intel_err}"
+                    )
+
                 # Check for gold URLs (fast scrape mode)
                 gold_urls_dict = source.gold_urls or {}
                 active_gold = [
@@ -2173,18 +2184,18 @@ async def scrape_with_progress(request: Request):
                         needs_rediscovery = True
                         use_gold = False  # Force deep crawl to find new gold
                 elif use_gold and not source.last_discovery_at:
-                    # Has gold URLs but never formally discovered — do a full crawl
+                    # Has gold URLs but never formally discovered â€” do a full crawl
                     needs_rediscovery = True
                     use_gold = False
 
                 if needs_rediscovery:
                     mode_label = (
-                        f"🔄 Rediscovery (overdue, {len(active_gold)} gold exist)"
+                        f"ðŸ”„ Rediscovery (overdue, {len(active_gold)} gold exist)"
                     )
                 elif use_gold:
-                    mode_label = f"⚡ GOLD ({len(active_gold)} URLs)"
+                    mode_label = f"âš¡ GOLD ({len(active_gold)} URLs)"
                 else:
-                    mode_label = "🔍 First Discovery"
+                    mode_label = "ðŸ” First Discovery"
                 yield f"data: {json.dumps({'type': 'source_start', 'source': source_name, 'current': idx, 'total': total_sources, 'mode': 'gold' if use_gold else 'discover'})}\n\n"
                 yield f"data: {json.dumps({'type': 'info', 'message': f'{source_name}: {mode_label}'})}\n\n"
 
@@ -2195,7 +2206,14 @@ async def scrape_with_progress(request: Request):
                         visited = set()
                         for gold_url in active_gold:
                             try:
-                                # 1. Fetch the listing/hub page
+                                # 1. Fetch the listing/hub page (adaptive delay)
+                                if (
+                                    scrape_settings
+                                    and scrape_settings.delay_seconds > 1.0
+                                ):
+                                    import asyncio as _aio
+
+                                    await _aio.sleep(scrape_settings.delay_seconds)
                                 await orchestrator.scraping_engine.rate_limiter.acquire(
                                     gold_url
                                 )
@@ -2206,6 +2224,21 @@ async def scrape_with_progress(request: Request):
                                 result = await orchestrator.scraping_engine.http_scraper.scrape(
                                     gold_url
                                 )
+                                # Record response to intelligence
+                                if scrape_settings and source.id in source_intel_map:
+                                    src_intel = source_intel_map[source.id]
+                                    if result.status_code in (429, 403):
+                                        src_intel.record_rate_limit(result.status_code)
+                                        logger.warning(
+                                            f"Rate limit {result.status_code} from {source_name}"
+                                        )
+                                    if result.crawl_time_ms:
+                                        src_intel.record_url_result(
+                                            url=gold_url,
+                                            produced_lead=False,
+                                            response_time_ms=result.crawl_time_ms,
+                                        )
+
                                 if result.success:
                                     scrape_results[source_name].append(result)
                                     visited.add(gold_url)
@@ -2252,27 +2285,73 @@ async def scrape_with_progress(request: Request):
                                         ".zip",
                                         ".doc",
                                     ]
+                                    from urllib.parse import urlparse
+
+                                    gold_domain = urlparse(gold_url).netloc
                                     for a in soup.find_all("a", href=True):
                                         full_url = urljoin(gold_url, a["href"])
                                         if (
                                             full_url not in visited
-                                            and source.base_url in full_url
+                                            and urlparse(full_url).netloc == gold_domain
                                             and not any(
                                                 skip in full_url.lower()
                                                 for skip in _skip_patterns
                                             )
                                         ):
-                                            links.add(full_url)
+                                            # Intelligence junk filter
+                                            import re as _re
 
-                                    # Fetch up to 15 linked pages
-                                    for link_url in list(links)[:15]:
+                                            is_junk = False
+                                            if (
+                                                scrape_settings
+                                                and scrape_settings.junk_patterns
+                                            ):
+                                                for jp in scrape_settings.junk_patterns:
+                                                    try:
+                                                        if _re.search(jp, full_url):
+                                                            is_junk = True
+                                                            break
+                                                    except _re.error:
+                                                        pass
+                                            if not is_junk:
+                                                links.add(full_url)
+
+                                    # Fetch linked pages (capped by intelligence)
+                                    max_follow = (
+                                        scrape_settings.max_pages
+                                        if scrape_settings
+                                        else 15
+                                    )
+                                    for link_url in list(links)[:max_follow]:
                                         try:
+                                            # Adaptive delay from intelligence
+                                            if (
+                                                scrape_settings
+                                                and scrape_settings.delay_seconds > 1.0
+                                            ):
+                                                import asyncio as _aio
+
+                                                await _aio.sleep(
+                                                    scrape_settings.delay_seconds
+                                                )
                                             await orchestrator.scraping_engine.rate_limiter.acquire(
                                                 link_url
                                             )
                                             link_result = await orchestrator.scraping_engine.http_scraper.scrape(
                                                 link_url
                                             )
+                                            # Track rate limits on followed links
+                                            if (
+                                                link_result.status_code in (429, 403)
+                                                and source.id in source_intel_map
+                                            ):
+                                                source_intel_map[
+                                                    source.id
+                                                ].record_rate_limit(
+                                                    link_result.status_code
+                                                )
+                                                break  # Stop following links if rate limited
+
                                             if link_result.success:
                                                 scrape_results[source_name].append(
                                                     link_result
@@ -2283,7 +2362,7 @@ async def scrape_with_progress(request: Request):
                             except Exception as e:
                                 logger.warning(f"Gold URL failed {gold_url[:50]}: {e}")
                         logger.info(
-                            f"⚡ Gold mode: {source_name} → {len(scrape_results[source_name])} pages from {len(active_gold)} gold URLs"
+                            f"âš¡ Gold mode: {source_name} â†’ {len(scrape_results[source_name])} pages from {len(active_gold)} gold URLs"
                         )
                     else:
                         # DISCOVERY MODE: Deep crawl to find new gold URLs
@@ -2293,6 +2372,18 @@ async def scrape_with_progress(request: Request):
                             )
                         )
                     source_pages = 0
+                    # Log intelligence summary
+                    if source.id in source_intel_map:
+                        _si = source_intel_map[source.id]
+                        _junk_count = len(_si.patterns.get("junk", []))
+                        _gold_count = len(_si.patterns.get("gold", []))
+                        logger.info(
+                            f"Intelligence: {source_name} | "
+                            f"score={_si.efficiency_score} | "
+                            f"delay={scrape_settings.delay_seconds if scrape_settings else 1.0}s | "
+                            f"{_gold_count} gold, {_junk_count} junk patterns"
+                        )
+
                     for sname, results in scrape_results.items():
                         successful = [r for r in results if r.success]
                         source_pages += len(successful)
@@ -2518,6 +2609,44 @@ async def scrape_with_progress(request: Request):
                         source_obj.gold_urls = gold
                         source_obj.last_discovery_at = local_now()
 
+                        # --- SOURCE INTELLIGENCE: Record & Learn ---
+                        if source_obj.id in source_intel_map:
+                            try:
+                                src_intel = source_intel_map[source_obj.id]
+                                src_pages = [
+                                    p
+                                    for p in all_pages
+                                    if p.get("source_name") == src.name
+                                ]
+                                for pg in src_pages:
+                                    pg_url = pg.get("url", "")
+                                    pg_leads = url_lead_map.get(src.id, {}).get(
+                                        pg_url, 0
+                                    )
+                                    src_intel.record_url_result(
+                                        url=pg_url,
+                                        produced_lead=pg_leads > 0,
+                                        lead_count=pg_leads,
+                                    )
+                                src_intel.record_scrape_run(
+                                    pages_scraped=len(src_pages),
+                                    leads_found=source_leads,
+                                    leads_saved=source_leads,
+                                    duration_seconds=0,
+                                    mode="gold"
+                                    if source_obj.gold_urls
+                                    else "discovery",
+                                )
+                                src_intel.save()
+                                source_obj.source_intelligence = dict(src_intel._data)
+                                logger.info(
+                                    f"Brain updated: {src.name} (score={src_intel.efficiency_score})"
+                                )
+                            except Exception as intel_err:
+                                logger.warning(
+                                    f"Intelligence record failed for {src.name}: {intel_err}"
+                                )
+
                     await stats_session.commit()
 
                 total_gold = sum(len(urls) for urls in url_lead_map.values())
@@ -2602,7 +2731,7 @@ async def dashboard_extract_url(request: Request, _csrf=Depends(_require_ajax)):
         if not url.startswith("http"):
             url = "https://" + url
 
-        # Store keyed by unique ID (Audit Fix #3 — race-safe)
+        # Store keyed by unique ID (Audit Fix #3 â€” race-safe)
         extract_id = str(uuid.uuid4())
         _store_pending(_pending_extract_urls, extract_id, url)
 
@@ -2848,9 +2977,9 @@ async def cancel_scrape(scrape_id: str, _csrf=Depends(_require_ajax)):
     return {"status": "not_found", "message": "Scrape job not found"}
 
 
-# ─────────────────────────────────────────────────────────────────────────────
+# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 # ENDPOINT: Start Discovery (stores config, returns immediately)
-# ─────────────────────────────────────────────────────────────────────────────
+# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 
 @app.post("/api/dashboard/discovery/start", tags=["Dashboard"])
@@ -2862,7 +2991,7 @@ async def discovery_start(request: Request, _csrf=Depends(_require_ajax)):
         extract_leads = body.get("extract_leads", True)
         dry_run = body.get("dry_run", False)
 
-        # Store keyed by unique ID (Audit Fix #3 — race-safe)
+        # Store keyed by unique ID (Audit Fix #3 â€” race-safe)
         discovery_id = str(uuid.uuid4())
         _store_pending(
             _pending_discovery_configs,
@@ -2889,16 +3018,16 @@ async def discovery_start(request: Request, _csrf=Depends(_require_ajax)):
         return {"status": "error", "message": f"Failed: {_safe_error(e)}"}
 
 
-# ─────────────────────────────────────────────────────────────────────────────
+# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 # ENDPOINT: Discovery SSE Stream (asyncio-based, matches v5 engine)
-# ─────────────────────────────────────────────────────────────────────────────
+# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 
 @app.get("/api/dashboard/discovery/stream", tags=["Dashboard"])
 async def discovery_stream(request: Request):
     """SSE endpoint for real-time web discovery progress."""
 
-    # Get config by discovery_id query param (Audit Fix #3 — race-safe)
+    # Get config by discovery_id query param (Audit Fix #3 â€” race-safe)
     discovery_id = request.query_params.get("discovery_id", "")
     config = (
         _pop_pending(_pending_discovery_configs, discovery_id, {})
@@ -2917,7 +3046,7 @@ async def discovery_stream(request: Request):
 
             sys.path.insert(0, os.getcwd())
 
-            yield f"data: {json.dumps({'type': 'phase', 'message': '🌐 Initializing Web Discovery Engine v5...'})}\n\n"
+            yield f"data: {json.dumps({'type': 'phase', 'message': 'ðŸŒ Initializing Web Discovery Engine v5...'})}\n\n"
 
             # v5 constructor: no use_ai param, uses IntelligentPipeline automatically
             max_queries = 5 if mode == "quick" else None
@@ -3011,7 +3140,7 @@ async def discovery_stream(request: Request):
                     progress_queue.put_nowait(
                         {
                             "type": "complete",
-                            "message": f"✅ Discovery complete in {elapsed:.0f}s",
+                            "message": f"âœ… Discovery complete in {elapsed:.0f}s",
                             "stats": {
                                 "queries": eng.stats.get("search_results", 0),
                                 "domains": (
@@ -3030,12 +3159,12 @@ async def discovery_stream(request: Request):
                     progress_queue.put_nowait(
                         {
                             "type": "complete",
-                            "message": f"❌ Discovery failed: {_safe_error(e)}",
+                            "message": f"âŒ Discovery failed: {_safe_error(e)}",
                             "stats": {},
                         }
                     )
 
-            # Run on the MAIN event loop (no threading — avoids AsyncEngine conflicts)
+            # Run on the MAIN event loop (no threading â€” avoids AsyncEngine conflicts)
             task = asyncio.create_task(run_discovery())
 
             # Stream progress messages to frontend
@@ -3055,7 +3184,7 @@ async def discovery_stream(request: Request):
 
         except Exception as e:
             logger.error(f"Discovery stream error: {e}")
-            yield f"data: {json.dumps({'type': 'complete', 'message': f'❌ Stream error: {_safe_error(e)}', 'stats': {}})}\n\n"
+            yield f"data: {json.dumps({'type': 'complete', 'message': f'âŒ Stream error: {_safe_error(e)}', 'stats': {}})}\n\n"
 
     from starlette.responses import StreamingResponse
 
@@ -3070,9 +3199,9 @@ async def discovery_stream(request: Request):
     )
 
 
-# ─────────────────────────────────────────────────────────────────────────────
+# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 # ENDPOINT: Contact Enrichment (Enrich button on lead detail panel)
-# ─────────────────────────────────────────────────────────────────────────────
+# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 
 # Prevent duplicate enrichment runs for the same lead (Audit Fix M-09)
@@ -3159,7 +3288,7 @@ async def _do_enrich_lead(lead_id: int):
 
                 for i, c in enumerate(enrichment_result.contacts):
                     if c["name"].lower() in existing_names:
-                        # Fill blanks on existing contact — never overwrite
+                        # Fill blanks on existing contact â€” never overwrite
                         existing_contact = await session.execute(
                             select(LeadContact).where(
                                 and_(
@@ -3241,9 +3370,9 @@ async def _do_enrich_lead(lead_id: int):
         return {"status": "error", "message": f"Enrichment failed: {str(e)}"}
 
 
-# ═══════════════════════════════════════════════════════════════
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 # CONTACT MANAGEMENT
-# ═══════════════════════════════════════════════════════════════
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 
 @app.get("/api/dashboard/leads/{lead_id}/contacts")
@@ -3308,6 +3437,12 @@ async def delete_contact(lead_id: int, contact_id: int, _csrf=Depends(_require_a
             raise HTTPException(status_code=404, detail="Contact not found")
         await session.delete(contact)
         await session.commit()
+        # Auto-rescore after contact removal
+        try:
+            await rescore_lead(lead_id, session)
+            await session.commit()
+        except Exception:
+            pass
         return {"status": "deleted", "contact_id": contact_id}
 
 
