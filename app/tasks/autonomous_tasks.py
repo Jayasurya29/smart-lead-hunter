@@ -34,6 +34,7 @@ from app.config.intelligence_config import (
     MAX_CONSECUTIVE_FAILURES,
     MIN_EFFICIENCY_SCORE,
     MIN_RUNS_FOR_DEACTIVATION,
+    SCORE_MIN_ENRICH,
 )
 
 
@@ -294,7 +295,7 @@ def auto_enrich(self) -> Dict[str, Any]:
                 .where(
                     and_(
                         PotentialLead.status == "new",
-                        PotentialLead.lead_score >= 40,
+                        PotentialLead.lead_score >= SCORE_MIN_ENRICH,
                         ~PotentialLead.id.in_(leads_with_contacts),
                     )
                 )

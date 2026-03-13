@@ -29,6 +29,11 @@ from datetime import datetime
 from typing import Dict, Tuple
 import re
 
+from app.config.intelligence_config import (
+    SCORE_HOT_THRESHOLD,
+    SCORE_WARM_THRESHOLD,
+    SCORE_COOL_THRESHOLD,
+)
 
 # =============================================================================
 # M-07: WORD-BOUNDARY BRAND MATCHING
@@ -1545,18 +1550,16 @@ def get_timing_score(opening_date: str = None) -> Tuple[int, str, int]:
     # Score by months out
     if months_out <= 0:
         return (0, f"{year} - EXPIRED", year)
-    elif months_out <= 3:
-        return (8, f"{year} - LATE (may have ordered)", year)
+    elif months_out <= 2:
+        return (5, f"{year} - Long Shot", year)
     elif months_out <= 6:
-        return (20, f"{year} - URGENT (ordering now)", year)
+        return (25, f"{year} - HOT (sourcing now)", year)
     elif months_out <= 12:
-        return (25, f"{year} - HOT (sweet spot)", year)
-    elif months_out <= 18:
-        return (15, f"{year} - WARM (planning phase)", year)
+        return (18, f"{year} - Warm (planning)", year)
     elif months_out <= 24:
-        return (10, f"{year} - COOL (early pipeline)", year)
+        return (12, f"{year} - Pipeline", year)
     else:
-        return (6, f"{year}+ - Future", year)
+        return (6, f"{year}+ - Early", year)
 
 
 # =============================================================================
@@ -1890,11 +1893,11 @@ def calculate_lead_score(
     result["total_score"] += client_points
 
     # Determine score tier
-    if result["total_score"] >= 70:
+    if result["total_score"] >= SCORE_HOT_THRESHOLD:
         result["score_tier"] = "HOT"
-    elif result["total_score"] >= 50:
+    elif result["total_score"] >= SCORE_WARM_THRESHOLD:
         result["score_tier"] = "WARM"
-    elif result["total_score"] >= 30:
+    elif result["total_score"] >= SCORE_COOL_THRESHOLD:
         result["score_tier"] = "COOL"
     else:
         result["score_tier"] = "COLD"
