@@ -39,6 +39,7 @@ from app.middleware.auth import APIKeyMiddleware
 from app.models.lead_contact import LeadContact
 from app.services.lead_factory import save_lead_to_db
 from app.services.rescore import rescore_lead
+from app.config.intelligence_config import SKIP_URL_PATTERNS
 
 # Global dict to track active scrape jobs and their progress
 # Protected by _scrape_lock for async-safe mutation within a single worker.
@@ -46,7 +47,7 @@ from app.services.rescore import rescore_lead
 active_scrapes: dict = {}
 scrape_cancellations: set = set()
 _scrape_lock = asyncio.Lock()
-_SCRAPE_TTL = 1800  # 30 minutes â€” auto-evict stale scrape entries
+_SCRAPE_TTL = 1800  # 30 minutes — auto-evict stale scrape entries
 
 
 async def _cleanup_stale_scrapes():
@@ -67,14 +68,14 @@ async def _cleanup_stale_scrapes():
 _pending_configs: dict = {}  # scrape_id -> {mode, source_ids, ...}
 _pending_extract_urls: dict = {}  # extract_id -> url
 _pending_discovery_configs: dict = {}  # discovery_id -> {mode, extract_leads, dry_run}
-_PENDING_TTL = 300  # 5 minutes â€” evict stale entries
+_PENDING_TTL = 300  # 5 minutes — evict stale entries
 
 
 def _store_pending(store: dict, key: str, value):
     """Store a pending config with timestamp, evicting expired entries."""
     now = time.monotonic()
     store[key] = {"_v": value, "_t": now}
-    # Evict expired entries on each write (cheap â€” typically <10 entries)
+    # Evict expired entries on each write (cheap — typically <10 entries)
     cutoff = now - _PENDING_TTL
     expired = [
         k for k, v in store.items() if isinstance(v, dict) and v.get("_t", 0) < cutoff
@@ -694,7 +695,7 @@ async def root():
 
 @app.get("/health", tags=["Health"])
 async def health_check(db: AsyncSession = Depends(get_db)):
-    """Health check endpoint â€” verifies DB, Gemini API, and Redis."""
+    """Health check endpoint — verifies DB, Gemini API, and Redis."""
     components = {}
 
     # 1. Database
@@ -741,7 +742,7 @@ async def health_check(db: AsyncSession = Depends(get_db)):
                 await _health_redis.ping()
                 components["redis"] = "healthy"
             except Exception:
-                # Connection stale â€” recreate
+                # Connection stale — recreate
                 try:
                     await _health_redis.aclose()
                 except Exception:
@@ -896,7 +897,7 @@ async def get_lead(lead_id: int, db: AsyncSession = Depends(get_db)):
 
 @app.post("/leads", response_model=LeadResponse, tags=["Leads"])
 async def create_lead(lead_data: LeadCreate, db: AsyncSession = Depends(get_db)):
-    """Create a new lead manually â€” routed through shared lead factory."""
+    """Create a new lead manually — routed through shared lead factory."""
     lead_dict = lead_data.model_dump()
     lead_dict["source_site"] = lead_dict.get("source_site") or "manual"
 
@@ -984,9 +985,7 @@ async def approve_lead(lead_id: int, db: AsyncSession = Depends(get_db)):
         result = await crm.push_lead(lead_data)
         if result:
             lead.insightly_id = result.get("RECORD_ID")
-            logger.info(
-                f"Insightly: synced {lead.hotel_name} â†’ ID {lead.insightly_id}"
-            )
+            logger.info(f"Insightly: synced {lead.hotel_name} → ID {lead.insightly_id}")
         else:
             logger.warning(f"Insightly: failed to sync {lead.hotel_name}")
 
@@ -1438,7 +1437,7 @@ async def dashboard_page(
     if tier:
         query = query.where(PotentialLead.brand_tier == tier)
 
-    # Order â€” support sort parameter
+    # Order — support sort parameter
     if sort == "newest":
         query = query.order_by(PotentialLead.created_at.desc().nullslast())
     elif sort == "oldest":
@@ -1715,7 +1714,7 @@ async def dashboard_approve_lead(
     if not lead:
         return HTMLResponse(content="Lead not found", status_code=404)
 
-    # Block approve if no contacts â€” must enrich first
+    # Block approve if no contacts — must enrich first
     from app.models.lead_contact import LeadContact
 
     contacts_result = await db.execute(
@@ -1726,7 +1725,7 @@ async def dashboard_approve_lead(
     contacts = [c.to_dict() for c in contacts_result.scalars().all()]
     if not contacts:
         return HTMLResponse(
-            content='<div class="text-red-600 text-sm font-medium p-2">Enrich first â€” no contacts to push to CRM</div>',
+            content='<div class="text-red-600 text-sm font-medium p-2">Enrich first — no contacts to push to CRM</div>',
             status_code=200,
         )
 
@@ -1761,7 +1760,7 @@ async def dashboard_approve_lead(
             lead.insightly_id = successful[0][1]  # Store first Lead ID as reference
             logger.info(
                 f"Insightly: pushed {len(successful)} contacts for "
-                f"{lead.hotel_name} â†’ Lead IDs: {[p[1] for p in successful]}"
+                f"{lead.hotel_name} → Lead IDs: {[p[1] for p in successful]}"
             )
         else:
             logger.warning(f"Insightly: failed to push contacts for {lead.hotel_name}")
@@ -1902,20 +1901,20 @@ async def dashboard_sources_list(db: AsyncSession = Depends(get_db)):
     # Build category counts
     cat_counts = {}
     cat_labels = {
-        "chain_newsroom": "ðŸ¨ Chain Newsrooms",
-        "luxury_independent": "ðŸ’Ž Luxury & Independent",
-        "aggregator": "ðŸ“° Aggregators",
-        "industry": "ðŸ—ï¸ Industry",
-        "florida": "ðŸŒ´ Florida",
-        "caribbean": "ðŸï¸ Caribbean",
-        "travel_pub": "âœˆï¸ Travel Pubs",
-        "pr_wire": "ðŸ“¡ PR Wire",
+        "chain_newsroom": "🏨 Chain Newsrooms",
+        "luxury_independent": "💎 Luxury & Independent",
+        "aggregator": "📰 Aggregators",
+        "industry": "🏗️ Industry",
+        "florida": "🌴 Florida",
+        "caribbean": "🏝️ Caribbean",
+        "travel_pub": "✈️ Travel Pubs",
+        "pr_wire": "📡 PR Wire",
     }
 
     all_sources = []
     due_sources = []
 
-    # Frequency â†’ hours threshold
+    # Frequency → hours threshold
     freq_hours = {
         "daily": 20,
         "every_3_days": 68,
@@ -2053,7 +2052,7 @@ async def dashboard_trigger_scrape(request: Request, _csrf=Depends(_require_ajax
 async def scrape_with_progress(request: Request):
     """SSE endpoint for real-time scrape progress using the orchestrator pipeline"""
 
-    # Get scrape config by ID from query param (Audit Fix #3 â€” race-safe)
+    # Get scrape config by ID from query param (Audit Fix #3 — race-safe)
     scrape_id = request.query_params.get("scrape_id", "")
     if not scrape_id or scrape_id not in _pending_configs:
 
@@ -2184,18 +2183,18 @@ async def scrape_with_progress(request: Request):
                         needs_rediscovery = True
                         use_gold = False  # Force deep crawl to find new gold
                 elif use_gold and not source.last_discovery_at:
-                    # Has gold URLs but never formally discovered â€” do a full crawl
+                    # Has gold URLs but never formally discovered — do a full crawl
                     needs_rediscovery = True
                     use_gold = False
 
                 if needs_rediscovery:
                     mode_label = (
-                        f"ðŸ”„ Rediscovery (overdue, {len(active_gold)} gold exist)"
+                        f"🔄 Rediscovery (overdue, {len(active_gold)} gold exist)"
                     )
                 elif use_gold:
-                    mode_label = f"âš¡ GOLD ({len(active_gold)} URLs)"
+                    mode_label = f"⚡ GOLD ({len(active_gold)} URLs)"
                 else:
-                    mode_label = "ðŸ” First Discovery"
+                    mode_label = "🔍 First Discovery"
                 yield f"data: {json.dumps({'type': 'source_start', 'source': source_name, 'current': idx, 'total': total_sources, 'mode': 'gold' if use_gold else 'discover'})}\n\n"
                 yield f"data: {json.dumps({'type': 'info', 'message': f'{source_name}: {mode_label}'})}\n\n"
 
@@ -2250,41 +2249,7 @@ async def scrape_with_progress(request: Request):
                                     soup = BeautifulSoup(result.html or "", "lxml")
                                     links = set()
                                     # M-10: Filter out junk URLs before following
-                                    _skip_patterns = [
-                                        "/login",
-                                        "/signup",
-                                        "/register",
-                                        "/account",
-                                        "/privacy",
-                                        "/terms",
-                                        "/cookie",
-                                        "/legal",
-                                        "/advertise",
-                                        "/subscribe",
-                                        "/cart",
-                                        "/checkout",
-                                        "/contact-us",
-                                        "/about-us",
-                                        "/careers",
-                                        "/jobs",
-                                        "/tag/",
-                                        "/category/",
-                                        "/author/",
-                                        "/page/",
-                                        "#",
-                                        "mailto:",
-                                        "javascript:",
-                                        "tel:",
-                                        ".pdf",
-                                        ".jpg",
-                                        ".png",
-                                        ".gif",
-                                        ".svg",
-                                        ".mp4",
-                                        ".mp3",
-                                        ".zip",
-                                        ".doc",
-                                    ]
+                                    _skip_patterns = SKIP_URL_PATTERNS
                                     from urllib.parse import urlparse
 
                                     gold_domain = urlparse(gold_url).netloc
@@ -2362,7 +2327,7 @@ async def scrape_with_progress(request: Request):
                             except Exception as e:
                                 logger.warning(f"Gold URL failed {gold_url[:50]}: {e}")
                         logger.info(
-                            f"âš¡ Gold mode: {source_name} â†’ {len(scrape_results[source_name])} pages from {len(active_gold)} gold URLs"
+                            f"⚡ Gold mode: {source_name} → {len(scrape_results[source_name])} pages from {len(active_gold)} gold URLs"
                         )
                     else:
                         # DISCOVERY MODE: Deep crawl to find new gold URLs
@@ -2731,7 +2696,7 @@ async def dashboard_extract_url(request: Request, _csrf=Depends(_require_ajax)):
         if not url.startswith("http"):
             url = "https://" + url
 
-        # Store keyed by unique ID (Audit Fix #3 â€” race-safe)
+        # Store keyed by unique ID (Audit Fix #3 — race-safe)
         extract_id = str(uuid.uuid4())
         _store_pending(_pending_extract_urls, extract_id, url)
 
@@ -2977,9 +2942,9 @@ async def cancel_scrape(scrape_id: str, _csrf=Depends(_require_ajax)):
     return {"status": "not_found", "message": "Scrape job not found"}
 
 
-# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ─────────────────────────────────────────────────────────────────────────────
 # ENDPOINT: Start Discovery (stores config, returns immediately)
-# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ─────────────────────────────────────────────────────────────────────────────
 
 
 @app.post("/api/dashboard/discovery/start", tags=["Dashboard"])
@@ -2991,7 +2956,7 @@ async def discovery_start(request: Request, _csrf=Depends(_require_ajax)):
         extract_leads = body.get("extract_leads", True)
         dry_run = body.get("dry_run", False)
 
-        # Store keyed by unique ID (Audit Fix #3 â€” race-safe)
+        # Store keyed by unique ID (Audit Fix #3 — race-safe)
         discovery_id = str(uuid.uuid4())
         _store_pending(
             _pending_discovery_configs,
@@ -3018,16 +2983,16 @@ async def discovery_start(request: Request, _csrf=Depends(_require_ajax)):
         return {"status": "error", "message": f"Failed: {_safe_error(e)}"}
 
 
-# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ─────────────────────────────────────────────────────────────────────────────
 # ENDPOINT: Discovery SSE Stream (asyncio-based, matches v5 engine)
-# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ─────────────────────────────────────────────────────────────────────────────
 
 
 @app.get("/api/dashboard/discovery/stream", tags=["Dashboard"])
 async def discovery_stream(request: Request):
     """SSE endpoint for real-time web discovery progress."""
 
-    # Get config by discovery_id query param (Audit Fix #3 â€” race-safe)
+    # Get config by discovery_id query param (Audit Fix #3 — race-safe)
     discovery_id = request.query_params.get("discovery_id", "")
     config = (
         _pop_pending(_pending_discovery_configs, discovery_id, {})
@@ -3046,7 +3011,7 @@ async def discovery_stream(request: Request):
 
             sys.path.insert(0, os.getcwd())
 
-            yield f"data: {json.dumps({'type': 'phase', 'message': 'ðŸŒ Initializing Web Discovery Engine v5...'})}\n\n"
+            yield f"data: {json.dumps({'type': 'phase', 'message': '🌐 Initializing Web Discovery Engine v5...'})}\n\n"
 
             # v5 constructor: no use_ai param, uses IntelligentPipeline automatically
             max_queries = 5 if mode == "quick" else None
@@ -3140,7 +3105,7 @@ async def discovery_stream(request: Request):
                     progress_queue.put_nowait(
                         {
                             "type": "complete",
-                            "message": f"âœ… Discovery complete in {elapsed:.0f}s",
+                            "message": f"✅ Discovery complete in {elapsed:.0f}s",
                             "stats": {
                                 "queries": eng.stats.get("search_results", 0),
                                 "domains": (
@@ -3159,12 +3124,12 @@ async def discovery_stream(request: Request):
                     progress_queue.put_nowait(
                         {
                             "type": "complete",
-                            "message": f"âŒ Discovery failed: {_safe_error(e)}",
+                            "message": f"❌ Discovery failed: {_safe_error(e)}",
                             "stats": {},
                         }
                     )
 
-            # Run on the MAIN event loop (no threading â€” avoids AsyncEngine conflicts)
+            # Run on the MAIN event loop (no threading — avoids AsyncEngine conflicts)
             task = asyncio.create_task(run_discovery())
 
             # Stream progress messages to frontend
@@ -3184,7 +3149,7 @@ async def discovery_stream(request: Request):
 
         except Exception as e:
             logger.error(f"Discovery stream error: {e}")
-            yield f"data: {json.dumps({'type': 'complete', 'message': f'âŒ Stream error: {_safe_error(e)}', 'stats': {}})}\n\n"
+            yield f"data: {json.dumps({'type': 'complete', 'message': f'❌ Stream error: {_safe_error(e)}', 'stats': {}})}\n\n"
 
     from starlette.responses import StreamingResponse
 
@@ -3199,9 +3164,9 @@ async def discovery_stream(request: Request):
     )
 
 
-# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ─────────────────────────────────────────────────────────────────────────────
 # ENDPOINT: Contact Enrichment (Enrich button on lead detail panel)
-# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ─────────────────────────────────────────────────────────────────────────────
 
 
 # Prevent duplicate enrichment runs for the same lead (Audit Fix M-09)
@@ -3288,7 +3253,7 @@ async def _do_enrich_lead(lead_id: int):
 
                 for i, c in enumerate(enrichment_result.contacts):
                     if c["name"].lower() in existing_names:
-                        # Fill blanks on existing contact â€” never overwrite
+                        # Fill blanks on existing contact — never overwrite
                         existing_contact = await session.execute(
                             select(LeadContact).where(
                                 and_(
@@ -3370,9 +3335,9 @@ async def _do_enrich_lead(lead_id: int):
         return {"status": "error", "message": f"Enrichment failed: {str(e)}"}
 
 
-# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+# ═══════════════════════════════════════════════════════════════
 # CONTACT MANAGEMENT
-# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+# ═══════════════════════════════════════════════════════════════
 
 
 @app.get("/api/dashboard/leads/{lead_id}/contacts")

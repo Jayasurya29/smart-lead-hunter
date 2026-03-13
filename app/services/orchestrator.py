@@ -32,13 +32,7 @@ from app.config.intelligence_config import SCORE_HOT_THRESHOLD, SCORE_MIN_ATTENT
 
 logger = logging.getLogger(__name__)
 
-# Try imports
-try:
-    from app.services.source_learning import SourceLearningSystem
-
-    LEARNING_AVAILABLE = True
-except ImportError:
-    LEARNING_AVAILABLE = False
+LEARNING_AVAILABLE = False
 
 try:
     from app.services.intelligent_pipeline import IntelligentPipeline, PipelineConfig
@@ -170,7 +164,7 @@ class LeadHunterOrchestrator:
         # Learning system
         if LEARNING_AVAILABLE:
             try:
-                self.learning_system = SourceLearningSystem()
+                self.learning_system = None
                 logger.info("✅ Learning system initialized")
             except Exception as e:
                 logger.warning(f"⚠️ Learning system not available: {e}")
@@ -388,74 +382,9 @@ class LeadHunterOrchestrator:
 
     def _record_learnings(self, scrape_results: Dict, leads: List):
         """Record learnings about which URLs produced leads."""
-        if not LEARNING_AVAILABLE or not self.learning_system:
-            return
-
-        try:
-            # Build map of URL -> leads
-            url_to_leads = {}
-            for lead in leads:
-                source_url = (
-                    lead.source_url
-                    if hasattr(lead, "source_url")
-                    else lead.get("source_url", "")
-                )
-                if source_url:
-                    if source_url not in url_to_leads:
-                        url_to_leads[source_url] = []
-                    url_to_leads[source_url].append(lead)
-
-            # Record each URL's result
-            for source_name, results in scrape_results.items():
-                for result in results:
-                    if not result.success:
-                        continue
-
-                    url = result.url
-                    leads_from_url = url_to_leads.get(url, [])
-                    produced_lead = len(leads_from_url) > 0
-
-                    # Calculate lead quality
-                    lead_quality = None
-                    lead_location = None
-
-                    if leads_from_url:
-                        # Get average confidence
-                        qualities = []
-                        for lead in leads_from_url:
-                            if hasattr(lead, "confidence_score"):
-                                qualities.append(lead.confidence_score)
-                            elif isinstance(lead, dict) and lead.get(
-                                "confidence_score"
-                            ):
-                                qualities.append(lead["confidence_score"])
-                        if qualities:
-                            lead_quality = sum(qualities) / len(qualities)
-
-                        # Get location type
-                        for lead in leads_from_url:
-                            if hasattr(lead, "location_type"):
-                                lead_location = lead.location_type
-                            elif isinstance(lead, dict):
-                                lead_location = lead.get("location_type")
-                            if lead_location:
-                                break
-
-                    # Record to learning system
-                    self.learning_system.record_result(
-                        source_name=source_name,
-                        url=url,
-                        produced_lead=produced_lead,
-                        lead_quality=lead_quality,
-                        lead_location=lead_location,
-                        response_time_ms=getattr(result, "crawl_time_ms", 0),
-                    )
-
-            self.learning_system.save()
-            logger.info("📚 Learnings recorded")
-
-        except Exception as e:
-            logger.warning(f"Could not record learnings: {e}")
+        # Learning is now handled by source_intelligence.py (DB-backed).
+        # Called automatically by main.py Phase 5 and autonomous_tasks.py.
+        return
 
     async def export_leads(
         self, leads: List[Dict], filename: str = "leads.json", format: str = "json"
