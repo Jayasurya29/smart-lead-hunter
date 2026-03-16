@@ -75,3 +75,4 @@ htmlcov/
 # --- Container/OCI artifacts (Ollama, Docker) ---
 blobs/
 manifests/
+celerybeat-schedule.*

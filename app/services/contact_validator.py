@@ -561,7 +561,7 @@ class SmartQueryBuilder:
                 "Executive Chef",
                 "Laundry Manager",
                 "Director of Human Resources",
-                "HR Director",
+                "Director of People and Culture",
             ]
             for tt in targeted_titles:
                 queries.append(f"{hotel_name} {location_str} {tt}")

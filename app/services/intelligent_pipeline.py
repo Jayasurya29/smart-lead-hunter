@@ -185,6 +185,7 @@ class PipelineConfig:
     # Redis extraction cache
     redis_cache_enabled: bool = True
     redis_cache_ttl_hours: int = REDIS_CACHE_TTL_HOURS
+    redis_url: str = ""
 
     # TODO: Gemini Batch API (50% cost reduction when GA)
     use_batch_api: bool = False

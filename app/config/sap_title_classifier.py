@@ -534,6 +534,12 @@ if __name__ == "__main__":
         ("BANQUET MANAGER", BuyerTier.TIER4_FB),
         # Tier 5 — HR
         ("HUMAN RESOURCES MANAGER", BuyerTier.TIER5_HR),
+        ("HR DIRECTOR", BuyerTier.TIER5_HR),
+        ("DIRECTOR OF HUMAN RESOURCES", BuyerTier.TIER5_HR),
+        ("DIRECTOR OF PEOPLE AND CULTURE", BuyerTier.TIER5_HR),
+        ("VP OF HUMAN RESOURCES", BuyerTier.TIER5_HR),
+        ("DIRECTOR OF HR", BuyerTier.TIER5_HR),
+        ("HR MANAGER", BuyerTier.TIER5_HR),
         # Tier 6 — Finance (NOT buyers)
         ("ACCOUNTS PAYABLE", BuyerTier.TIER6_FINANCE),
         ("CONTROLLER", BuyerTier.TIER6_FINANCE),
