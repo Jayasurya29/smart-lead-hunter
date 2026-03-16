@@ -162,7 +162,9 @@ def smart_scrape(self) -> Dict[str, Any]:
                     continue
 
                 results["sources_scraped"] += 1
-
+                # Per-source counters (NOT cumulative)
+                lead_dicts = []
+                saved = 0
                 # Run through extraction pipeline
                 if scrape_result.all_pages_data:
                     pipeline_result = await orchestrator.pipeline.process_pages(
@@ -218,14 +220,14 @@ def smart_scrape(self) -> Dict[str, Any]:
                             }
                         )
 
-                # Update source intelligence
+                # Update source intelligence (per-source, NOT cumulative)
                 if source.id in source_intel_map:
                     try:
                         src_intel = source_intel_map[source.id]
                         src_intel.record_scrape_run(
                             pages_scraped=scrape_result.pages_scraped,
-                            leads_found=results.get("leads_extracted", 0),
-                            leads_saved=results.get("leads_saved", 0),
+                            leads_found=len(lead_dicts),
+                            leads_saved=saved,
                             duration_seconds=0,
                             mode=scrape_result.mode,
                         )
