@@ -69,53 +69,86 @@ async def api_key_auth(api_key: str = Security(_api_key_header)) -> str:
     return api_key
 
 
-# ─── Middleware (all /api/ routes at once) ───
+# ─── Middleware (global route protection) ───
 
 
 class APIKeyMiddleware(BaseHTTPMiddleware):
     """
-    Middleware that protects all /api/ routes with API key auth.
-    Dashboard, health, and docs are excluded by default.
+    Middleware that protects all API and REST routes with API key auth.
+
+    FIX C-01: Removed "/api/dashboard/leads" from exclude list — it was
+    a prefix match that bypassed auth for ALL lead sub-routes including
+    edit, approve, reject, enrich, contacts, etc.
+
+    FIX C-02: Now also protects /leads, /sources, /stats, /scrape routes
+    (previously only /api/* was protected).
 
     Usage:
-        app.add_middleware(
-            APIKeyMiddleware,
-            exclude_paths=["/health", "/dashboard", "/docs", "/openapi.json"]
-        )
+        app.add_middleware(APIKeyMiddleware)
     """
 
     def __init__(self, app, exclude_paths: list[str] | None = None):
         super().__init__(app)
-        self.exclude_paths = exclude_paths or [
+        # Exact path matches — only these specific paths skip auth
+        self.exclude_exact = set(exclude_paths or [
             "/health",
-            "/dashboard",
             "/docs",
             "/redoc",
             "/openapi.json",
+        ])
+        # Prefix matches — ALL sub-routes under these are public
+        self.exclude_prefixes = [
+            "/dashboard",        # HTMX HTML pages (served by Jinja2)
+            "/static",           # Static files
             # SSE streams: EventSource can't send custom headers;
-            # these are gated by one-time scrape_id/discovery_id tokens instead
+            # gated by one-time scrape_id/discovery_id tokens
             "/api/dashboard/scrape/stream",
             "/api/dashboard/extract-url/stream",
             "/api/dashboard/discovery/stream",
-            # Read-only endpoints polled by dashboard
+            # Read-only HTMX partials polled by old dashboard
             "/api/dashboard/stats",
             "/api/dashboard/sources/list",
-            "/api/dashboard/leads",
+            # Auth verification endpoint (must work without auth to verify keys)
+            "/api/auth/verify",
+        ]
+        # NOTE: "/api/dashboard/leads" is intentionally NOT excluded.
+        # The old exclude was a prefix match that bypassed auth for
+        # /api/dashboard/leads/{id}/edit, /approve, /reject, /enrich,
+        # /contacts, etc.  All of those now require auth.
+
+        # FIX C-02: Routes that MUST be protected (not just /api/)
+        self.protected_prefixes = [
+            "/api/",
+            "/leads",
+            "/sources",
+            "/stats",
+            "/scrape",
         ]
 
     async def dispatch(self, request: Request, call_next):
         path = request.url.path
 
-        # Skip auth for excluded paths and static files
-        if any(path.startswith(p) for p in self.exclude_paths):
+        # Exact path exclusions (root, health, docs)
+        if path in self.exclude_exact or path == "/":
             return await call_next(request)
 
-        # Skip auth for non-API routes (HTML pages, SSE)
-        if not path.startswith("/api/"):
+        # Prefix exclusions (for genuinely public route trees)
+        if any(path.startswith(p) for p in self.exclude_prefixes):
             return await call_next(request)
 
-        # Validate API key
+        # FIX C-02: Check if this path actually needs protection.
+        # Only paths matching protected_prefixes require auth.
+        # Everything else (favicon, robots.txt, etc.) passes through.
+        needs_auth = any(path.startswith(p) for p in self.protected_prefixes)
+        if not needs_auth:
+            return await call_next(request)
+
+        # Validate API key from header
         api_key = request.headers.get("X-API-Key", "")
+        # Fallback: check query param (for EventSource which can't set headers)
+        if not api_key:
+            api_key = request.query_params.get("api_key", "")
+
         try:
             valid_key = _get_valid_api_key()
         except RuntimeError:

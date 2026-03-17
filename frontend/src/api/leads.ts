@@ -10,6 +10,7 @@ export interface LeadFilters {
   search?: string
   min_score?: number
   location_type?: string
+  location?: string  // FIX C-03: city-level location filter (south_florida, rest_florida, etc.)
   brand_tier?: string
   timeline?: string
   year?: string
@@ -33,27 +34,30 @@ export async function fetchLead(id: number): Promise<Lead> {
   return data
 }
 
-// Uses REST JSON endpoints that return LeadResponse
+// ─── FIX C-04: Use /api/leads/ JSON endpoints that include full CRM logic ───
+// These call the new JSON-returning API endpoints (not the simpler REST ones
+// that skip contact checks and Insightly sync)
+
 export async function approveLead(id: number): Promise<Lead> {
-  const { data } = await api.post<Lead>(`/leads/${id}/approve`)
+  const { data } = await api.post<Lead>(`/api/leads/${id}/approve`)
   return data
 }
 
 export async function rejectLead(id: number, reason?: string): Promise<Lead> {
   const params = reason ? `?reason=${encodeURIComponent(reason)}` : ''
-  const { data } = await api.post<Lead>(`/leads/${id}/reject${params}`)
+  const { data } = await api.post<Lead>(`/api/leads/${id}/reject${params}`)
   return data
 }
 
-// Restore uses PATCH on the REST endpoint to set status back to "new"
+// FIX: Use dedicated restore endpoint (clears rejection_reason, cleans up Insightly)
 export async function restoreLead(id: number): Promise<Lead> {
-  const { data } = await api.patch<Lead>(`/leads/${id}`, { status: 'new', rejection_reason: null })
+  const { data } = await api.post<Lead>(`/api/leads/${id}/restore`)
   return data
 }
 
-// Soft-delete via PATCH (set status to "deleted")
-export async function deleteLead(id: number): Promise<Lead> {
-  const { data } = await api.patch<Lead>(`/leads/${id}`, { status: 'deleted' })
+// FIX: Use dedicated soft-delete endpoint (sets status to "deleted")
+export async function deleteLead(id: number): Promise<any> {
+  const { data } = await api.post(`/api/leads/${id}/delete`)
   return data
 }
 
@@ -129,10 +133,10 @@ export async function fetchSources(): Promise<SourcesListResponse> {
 }
 
 // ── SSE Stream Helper ──
+// FIX H-02: Don't pass API key in URL — SSE endpoints are already excluded
+// from auth and gated by one-time tokens (scrape_id, extract_id, discovery_id).
+// Passing the key in the URL exposes it in browser history and server logs.
 
 export function createSSEStream(path: string): EventSource {
-  const token = localStorage.getItem('slh_token')
-  const sep = path.includes('?') ? '&' : '?'
-  const url = token ? `${path}${sep}api_key=${token}` : path
-  return new EventSource(url)
+  return new EventSource(path)
 }

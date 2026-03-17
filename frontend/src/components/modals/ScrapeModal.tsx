@@ -28,6 +28,14 @@ const MODE_CONFIG = [
   { key: 'full' as const, label: 'Full Sweep', desc: 'All sources', icon: Radio, color: 'blue' },
 ]
 
+// FIX H-01: Tailwind JIT can't detect dynamic classes like `bg-${color}-50`.
+// Use a static lookup so all class strings appear in source code.
+const MODE_STYLES: Record<string, { bg: string; border: string; text: string }> = {
+  amber:   { bg: 'bg-amber-50',   border: 'border-amber-400',   text: 'text-amber-600' },
+  emerald: { bg: 'bg-emerald-50', border: 'border-emerald-400', text: 'text-emerald-600' },
+  blue:    { bg: 'bg-blue-50',    border: 'border-blue-400',    text: 'text-blue-600' },
+}
+
 export default function ScrapeModal({ onClose }: Props) {
   const [mode, setMode] = useState<ScrapeMode>('smart')
   const [status, setStatus] = useState<Status>('idle')
@@ -155,12 +163,13 @@ export default function ScrapeModal({ onClose }: Props) {
             <div className="grid grid-cols-3 gap-2 px-5 pt-4 pb-3">
               {MODE_CONFIG.map(m => {
                 const active = mode === m.key
+                const styles = MODE_STYLES[m.color]
                 return (
                   <button key={m.key} onClick={() => switchMode(m.key)} className={cn(
                     'p-3 rounded-lg border-2 text-left transition-all duration-150',
-                    active ? `bg-${m.color}-50 border-${m.color}-400` : 'border-stone-200 hover:border-stone-300',
+                    active ? `${styles.bg} ${styles.border}` : 'border-stone-200 hover:border-stone-300',
                   )}>
-                    <m.icon className={cn('w-4 h-4 mb-1.5', active ? `text-${m.color}-600` : 'text-stone-400')} />
+                    <m.icon className={cn('w-4 h-4 mb-1.5', active ? styles.text : 'text-stone-400')} />
                     <div className={cn('text-[12px] font-bold', active ? 'text-stone-900' : 'text-stone-700')}>{m.label}</div>
                     <div className="text-[10px] text-stone-400 mt-0.5">{m.desc}</div>
                   </button>

@@ -22,7 +22,10 @@ export function useLeads(tab: LeadTab, page: number, search: string, filters: { 
       page,
       per_page: 25,
       search: search || undefined,
-      location_type: filters.location || undefined,
+      // FIX C-03: Send as "location" param (not location_type).
+      // The backend now accepts "location" with values like south_florida,
+      // rest_florida, etc. and does city-level filtering internally.
+      ...(filters.location ? { location: filters.location } : {}),
       brand_tier: filters.tier || undefined,
       timeline: filters.timeline || undefined,
       year: filters.year || undefined,

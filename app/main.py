@@ -797,12 +797,22 @@ async def list_leads(
     location_type: Optional[str] = None,
     brand_tier: Optional[str] = None,
     search: Optional[str] = None,
+    # ── FIX C-03: NEW PARAMS (ported from dashboard endpoint for React frontend) ──
+    timeline: Optional[str] = None,  # hot, urgent, warm, cool, late, expired, tbd
+    year: Optional[str] = None,  # 2025, 2026, 2027, 2028
+    added: Optional[str] = None,  # today, this_week, last_7, last_30
+    sort: Optional[str] = "score_desc",  # newest, oldest, score_desc, score_asc, opening, name_asc
+    location: Optional[str] = None,  # south_florida, rest_florida, caribbean, california, etc.
     db: AsyncSession = Depends(get_db),
 ):
-    """List leads with filtering and pagination"""
+    """List leads with full filtering, pagination, and sorting.
+
+    Supports all filters used by both HTMX dashboard and React frontend.
+    """
     query = select(PotentialLead)
     count_query = select(func.count(PotentialLead.id))
 
+    # Basic filters (existing)
     query, count_query = _apply_lead_filters(
         query,
         count_query,
@@ -814,8 +824,139 @@ async def list_leads(
         search=search,
     )
 
-    leads, total, pages = await _paginate_leads(db, query, count_query, page, per_page)
+    now = local_now()
+    today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+
+    # ── Timeline filter ──
+    if timeline and timeline in ("hot", "urgent", "warm", "cool", "late", "expired", "tbd"):
+        from app.services.utils import get_timeline_label
+
+        label_map = {
+            "hot": "HOT",
+            "urgent": "URGENT",
+            "warm": "WARM",
+            "cool": "COOL",
+            "late": "LATE",
+            "expired": "EXPIRED",
+            "tbd": "TBD",
+        }
+        timeline_q = await db.execute(
+            select(PotentialLead.id, PotentialLead.opening_date).where(
+                PotentialLead.status.in_(["new", "approved"])
+            )
+        )
+        matching_ids = [
+            row[0]
+            for row in timeline_q.all()
+            if get_timeline_label(row[1] or "") == label_map[timeline]
+        ]
+        if matching_ids:
+            query = query.where(PotentialLead.id.in_(matching_ids))
+            count_query = count_query.where(PotentialLead.id.in_(matching_ids))
+        else:
+            query = query.where(PotentialLead.id == -1)
+            count_query = count_query.where(PotentialLead.id == -1)
+
+    # ── Year filter ──
+    if year:
+        safe_year = escape_like(year)
+        query = query.where(PotentialLead.opening_date.ilike(f"%{safe_year}%"))
+        count_query = count_query.where(
+            PotentialLead.opening_date.ilike(f"%{safe_year}%")
+        )
+
+    # ── Added date filter ──
+    if added:
+        if added == "today":
+            query = query.where(PotentialLead.created_at >= today_start)
+            count_query = count_query.where(PotentialLead.created_at >= today_start)
+        elif added == "this_week":
+            week_start = today_start - timedelta(days=now.weekday())
+            query = query.where(PotentialLead.created_at >= week_start)
+            count_query = count_query.where(PotentialLead.created_at >= week_start)
+        elif added == "last_7":
+            cutoff = today_start - timedelta(days=7)
+            query = query.where(PotentialLead.created_at >= cutoff)
+            count_query = count_query.where(PotentialLead.created_at >= cutoff)
+        elif added == "last_30":
+            cutoff = today_start - timedelta(days=30)
+            query = query.where(PotentialLead.created_at >= cutoff)
+            count_query = count_query.where(PotentialLead.created_at >= cutoff)
+
+    # ── Location filter (city-level granularity, ported from dashboard) ──
+    if location:
+        south_fl_cities = [
+            "miami", "miami beach", "fort lauderdale", "hallandale beach",
+            "west palm beach", "palm beach", "boca raton", "hollywood",
+            "deerfield beach", "delray beach", "aventura", "coral gables",
+            "key west", "key biscayne", "sweetwater", "doral", "hialeah",
+            "homestead", "sunny isles beach", "surfside", "bal harbour",
+            "north miami", "north miami beach", "miami gardens", "miami lakes",
+            "coconut grove", "pompano beach", "lauderdale by the sea",
+            "plantation", "weston", "davie", "sunrise", "pembroke pines",
+            "miramar", "cooper city", "boynton beach", "jupiter",
+            "riviera beach", "lake worth", "naples", "bonita springs",
+            "marco island", "fort myers", "cape coral", "sarasota",
+            "clearwater", "st. petersburg", "st petersburg",
+        ]
+        caribbean_countries = [
+            "dominican republic", "bahamas", "jamaica", "cayman islands",
+            "barbados", "aruba", "turks & caicos islands", "turks and caicos",
+            "saint lucia", "st. lucia", "curacao", "u.s. virgin islands",
+            "antigua and barbuda", "trinidad and tobago", "puerto rico",
+        ]
+        southeast_states = [
+            "georgia", "tennessee", "south carolina", "north carolina",
+            "alabama", "mississippi", "arkansas", "virginia",
+        ]
+        mountain_states = [
+            "utah", "wyoming", "idaho", "colorado", "montana",
+            "arizona", "new mexico",
+        ]
+
+        if location == "south_florida":
+            loc_filter = func.lower(PotentialLead.city).in_(south_fl_cities)
+        elif location == "rest_florida":
+            loc_filter = (
+                func.lower(PotentialLead.state) == "florida"
+            ) & ~func.lower(PotentialLead.city).in_(south_fl_cities)
+        elif location == "caribbean":
+            loc_filter = func.lower(PotentialLead.country).in_(caribbean_countries)
+        elif location == "california":
+            loc_filter = func.lower(PotentialLead.state) == "california"
+        elif location == "new_york":
+            loc_filter = func.lower(PotentialLead.state) == "new york"
+        elif location == "texas":
+            loc_filter = func.lower(PotentialLead.state) == "texas"
+        elif location == "southeast":
+            loc_filter = func.lower(PotentialLead.state).in_(southeast_states)
+        elif location == "mountain":
+            loc_filter = func.lower(PotentialLead.state).in_(mountain_states)
+        else:
+            loc_filter = None
+
+        if loc_filter is not None:
+            query = query.where(loc_filter)
+            count_query = count_query.where(loc_filter)
+
+    # ── Sort ──
+    sort_map = {
+        "newest": PotentialLead.created_at.desc().nullslast(),
+        "oldest": PotentialLead.created_at.asc().nullslast(),
+        "score_desc": PotentialLead.lead_score.desc().nullslast(),
+        "score_asc": PotentialLead.lead_score.asc().nullslast(),
+        "name_asc": PotentialLead.hotel_name.asc(),
+        "opening": PotentialLead.opening_date.asc().nullslast(),
+    }
+    order_by = sort_map.get(
+        sort or "score_desc", PotentialLead.lead_score.desc().nullslast()
+    )
+
+    leads, total, pages = await _paginate_leads(
+        db, query, count_query, page, per_page, order_by=order_by
+    )
     return _lead_list_response(leads, total, page, per_page, pages)
+
 
 
 @app.get("/leads/hot", response_model=LeadListResponse, tags=["Leads"])
@@ -1048,6 +1189,159 @@ async def delete_lead(lead_id: int, db: AsyncSession = Depends(get_db)):
     logger.info(f"Deleted lead: {hotel_name} (ID: {lead_id})")
 
     return {"message": "Lead deleted", "id": lead_id}
+
+
+# -----------------------------------------------------------------------------
+# JSON API Endpoints (React frontend) — with full CRM logic
+# FIX C-04: These mirror the dashboard HTMX logic but return JSON.
+# The React frontend calls these instead of the simpler REST endpoints above.
+# -----------------------------------------------------------------------------
+
+
+@app.post("/api/leads/{lead_id}/approve", response_model=LeadResponse, tags=["Leads"])
+async def api_approve_lead(lead_id: int, db: AsyncSession = Depends(get_db)):
+    """Approve a lead — checks contacts, pushes to Insightly CRM, returns JSON."""
+    result = await db.execute(select(PotentialLead).where(PotentialLead.id == lead_id))
+    lead = result.scalar_one_or_none()
+    if not lead:
+        raise HTTPException(status_code=404, detail="Lead not found")
+
+    # Block if no contacts (must enrich first)
+    contacts_result = await db.execute(
+        select(LeadContact)
+        .where(LeadContact.lead_id == lead_id)
+        .order_by(LeadContact.score.desc())
+    )
+    contacts = [c.to_dict() for c in contacts_result.scalars().all()]
+    if not contacts:
+        raise HTTPException(
+            status_code=422,
+            detail="Enrich first — no contacts to push to CRM",
+        )
+
+    lead.status = "approved"
+    lead.updated_at = local_now()
+
+    # Push contacts as Insightly Leads
+    from app.services.insightly import get_insightly_client
+
+    crm = get_insightly_client()
+    if crm.enabled and not lead.insightly_id:
+        pushed = await crm.push_contacts_as_leads(
+            contacts=contacts,
+            hotel_name=lead.hotel_name,
+            brand=lead.brand or "",
+            brand_tier=lead.brand_tier or "",
+            city=lead.city or "",
+            state=lead.state or "",
+            country=lead.country or "USA",
+            opening_date=lead.opening_date or "",
+            room_count=lead.room_count or 0,
+            lead_score=lead.lead_score or 0,
+            description=lead.description or "",
+            source_url=lead.source_url or "",
+            management_company=lead.management_company or "",
+            developer=lead.developer or "",
+            owner=lead.owner or "",
+            slh_lead_id=lead.id,
+        )
+        successful = [p for p in pushed if p[1]]
+        if successful:
+            lead.insightly_id = successful[0][1]
+            logger.info(
+                f"Insightly: pushed {len(successful)} contacts for "
+                f"{lead.hotel_name} → Lead IDs: {[p[1] for p in successful]}"
+            )
+        else:
+            logger.warning(f"Insightly: failed to push contacts for {lead.hotel_name}")
+
+    await db.commit()
+    await db.refresh(lead)
+
+    logger.info(f"API: Approved lead {lead.hotel_name} (ID: {lead.id})")
+    return LeadResponse.model_validate(lead)
+
+
+@app.post("/api/leads/{lead_id}/reject", response_model=LeadResponse, tags=["Leads"])
+async def api_reject_lead(
+    lead_id: int,
+    reason: Optional[str] = Query(None),
+    db: AsyncSession = Depends(get_db),
+):
+    """Reject a lead — cleans up Insightly, returns JSON."""
+    result = await db.execute(select(PotentialLead).where(PotentialLead.id == lead_id))
+    lead = result.scalar_one_or_none()
+    if not lead:
+        raise HTTPException(status_code=404, detail="Lead not found")
+
+    lead.status = "rejected"
+    lead.rejection_reason = reason
+    lead.notes = f"{lead.notes or ''}\nRejected: {reason or 'No reason given'}".strip()
+    lead.updated_at = local_now()
+
+    # Remove from Insightly if previously pushed
+    if lead.insightly_id:
+        from app.services.insightly import get_insightly_client
+
+        crm = get_insightly_client()
+        if crm.enabled:
+            deleted = await crm.delete_leads_by_slh_id(lead.id)
+            logger.info(f"Insightly: deleted {deleted} leads for {lead.hotel_name}")
+        lead.insightly_id = None
+
+    await db.commit()
+    await db.refresh(lead)
+
+    logger.info(
+        f"API: Rejected lead {lead.hotel_name} (ID: {lead.id}, Reason: {reason})"
+    )
+    return LeadResponse.model_validate(lead)
+
+
+@app.post("/api/leads/{lead_id}/restore", response_model=LeadResponse, tags=["Leads"])
+async def api_restore_lead(lead_id: int, db: AsyncSession = Depends(get_db)):
+    """Restore a rejected/deleted lead — cleans up Insightly, returns JSON."""
+    result = await db.execute(select(PotentialLead).where(PotentialLead.id == lead_id))
+    lead = result.scalar_one_or_none()
+    if not lead:
+        raise HTTPException(status_code=404, detail="Lead not found")
+
+    lead.status = "new"
+    lead.rejection_reason = None
+    lead.updated_at = local_now()
+
+    # Remove from Insightly if previously pushed
+    if lead.insightly_id:
+        from app.services.insightly import get_insightly_client
+
+        crm = get_insightly_client()
+        if crm.enabled:
+            deleted = await crm.delete_leads_by_slh_id(lead.id)
+            logger.info(f"Insightly: deleted {deleted} leads for {lead.hotel_name}")
+        lead.insightly_id = None
+
+    await db.commit()
+    await db.refresh(lead)
+
+    logger.info(f"API: Restored lead {lead.hotel_name} (ID: {lead.id})")
+    return LeadResponse.model_validate(lead)
+
+
+@app.post("/api/leads/{lead_id}/delete", tags=["Leads"])
+async def api_soft_delete_lead(lead_id: int, db: AsyncSession = Depends(get_db)):
+    """Soft-delete a lead (can be restored from Deleted tab), returns JSON."""
+    result = await db.execute(select(PotentialLead).where(PotentialLead.id == lead_id))
+    lead = result.scalar_one_or_none()
+    if not lead:
+        raise HTTPException(status_code=404, detail="Lead not found")
+
+    lead.status = "deleted"
+    lead.updated_at = local_now()
+
+    await db.commit()
+
+    logger.info(f"API: Soft-deleted lead {lead.hotel_name} (ID: {lead.id})")
+    return {"status": "deleted", "id": lead_id}
 
 
 # -----------------------------------------------------------------------------
@@ -2671,22 +2965,8 @@ async def scrape_with_progress(request: Request):
 
 
 # =============================================================================
-# URL EXTRACT FEATURE - Backend Endpoints
+# URL EXTRACT FEATURE
 # =============================================================================
-# ADD these to app/main.py
-#
-# STEP 1: Add this global variable near the other globals (around line 50-60,
-#          near where _pending_configs is defined):
-#
-#     _pending_extract_url = ""
-#
-# STEP 2: Add both endpoint functions BEFORE the cancel endpoint
-#          (around line 1920, before @app.post("/api/dashboard/scrape/cancel/..."))
-# =============================================================================
-
-
-# --- ENDPOINT 1: Trigger URL extraction ---
-# Paste this after the scrape/stream endpoint block and before scrape/cancel
 
 
 @app.post("/api/dashboard/extract-url", tags=["Dashboard"])

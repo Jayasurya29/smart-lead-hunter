@@ -115,7 +115,7 @@ export default function LeadDetail({ leadId, onClose }: Props) {
       <div className="flex-1 overflow-y-auto">
         {activeTab === 'overview' && <OverviewTab lead={lead} />}
         {activeTab === 'contacts' && <ContactsTab contacts={safeContacts} isLoading={contactsLoading} />}
-        {activeTab === 'edit' && <EditTab lead={lead} />}
+        {activeTab === 'edit' && <EditTab key={lead.id} lead={lead} />}
         {activeTab === 'sources' && <SourcesTab lead={lead} />}
       </div>
     </div>
@@ -170,12 +170,27 @@ function OverviewTab({ lead }: { lead: any }) {
       {lead.score_breakdown && typeof lead.score_breakdown === 'object' && Object.keys(lead.score_breakdown).length > 0 && (
         <Section title="Score Breakdown">
           <div className="space-y-1.5">
-            {Object.entries(lead.score_breakdown).map(([key, val]) => (
-              <div key={key} className="flex items-center justify-between">
-                <span className="text-[11px] text-stone-500 capitalize">{key.replace(/_/g, ' ')}</span>
-                <span className="text-[11px] font-bold text-navy-800 tabular-nums">{String(val)}</span>
-              </div>
-            ))}
+            {Object.entries(lead.score_breakdown).map(([key, val]) => {
+              // val can be: number, string, or object like {points: 25, match: "Waldorf", note: "..."}
+              let points: string
+              let note: string | null = null
+              if (val && typeof val === 'object' && !Array.isArray(val)) {
+                const obj = val as Record<string, any>
+                points = obj.points !== undefined ? String(obj.points) : '—'
+                note = obj.match || obj.note || null
+              } else {
+                points = String(val ?? '—')
+              }
+              return (
+                <div key={key} className="flex items-center justify-between gap-2">
+                  <div className="min-w-0">
+                    <span className="text-[11px] text-stone-500 capitalize">{key.replace(/_/g, ' ')}</span>
+                    {note && <span className="text-[10px] text-stone-400 ml-1.5 truncate">({note})</span>}
+                  </div>
+                  <span className="text-[11px] font-bold text-navy-800 tabular-nums flex-shrink-0">{points} pts</span>
+                </div>
+              )
+            })}
           </div>
         </Section>
       )}
