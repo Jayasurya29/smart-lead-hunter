@@ -1,0 +1,96 @@
+"""
+Smart Lead Hunter — Location Configuration
+=============================================
+Single source of truth for all geographic filter lists.
+Used by: routes/leads.py, routes/dashboard.py, scorer.py
+"""
+
+SOUTH_FLORIDA_CITIES = [
+    "miami",
+    "miami beach",
+    "fort lauderdale",
+    "hallandale beach",
+    "west palm beach",
+    "palm beach",
+    "boca raton",
+    "hollywood",
+    "deerfield beach",
+    "delray beach",
+    "aventura",
+    "coral gables",
+    "key west",
+    "key biscayne",
+    "sweetwater",
+    "doral",
+    "hialeah",
+    "homestead",
+    "sunny isles beach",
+    "surfside",
+    "bal harbour",
+    "north miami",
+    "north miami beach",
+    "miami gardens",
+    "miami lakes",
+    "coconut grove",
+    "pompano beach",
+    "lauderdale by the sea",
+    "plantation",
+    "weston",
+    "davie",
+    "sunrise",
+    "pembroke pines",
+    "miramar",
+    "cooper city",
+    "boynton beach",
+    "jupiter",
+    "riviera beach",
+    "lake worth",
+    "naples",
+    "bonita springs",
+    "marco island",
+    "fort myers",
+    "cape coral",
+    "sarasota",
+    "clearwater",
+    "st. petersburg",
+    "st petersburg",
+]
+
+CARIBBEAN_COUNTRIES = [
+    "dominican republic",
+    "bahamas",
+    "jamaica",
+    "cayman islands",
+    "barbados",
+    "aruba",
+    "turks & caicos islands",
+    "turks and caicos",
+    "saint lucia",
+    "st. lucia",
+    "curacao",
+    "u.s. virgin islands",
+    "antigua and barbuda",
+    "trinidad and tobago",
+    "puerto rico",
+]
+
+SOUTHEAST_STATES = [
+    "georgia",
+    "tennessee",
+    "south carolina",
+    "north carolina",
+    "alabama",
+    "mississippi",
+    "arkansas",
+    "virginia",
+]
+
+MOUNTAIN_STATES = [
+    "utah",
+    "wyoming",
+    "idaho",
+    "colorado",
+    "montana",
+    "arizona",
+    "new mexico",
+]

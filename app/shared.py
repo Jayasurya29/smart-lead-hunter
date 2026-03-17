@@ -256,7 +256,28 @@ def lead_list_response(leads, total, page, per_page, pages) -> LeadListResponse:
 
 
 async def get_dashboard_stats(db: AsyncSession) -> dict:
-    """Fetch all dashboard stats in 2 queries using SQL aggregation."""
+    """Fetch all dashboard stats in 2 queries using SQL aggregation.
+
+    Results are cached in Redis for 30 seconds to reduce DB load
+    when multiple browser tabs poll /stats simultaneously.
+    """
+    # Try Redis cache first
+    try:
+        from app.config import settings
+
+        redis_url = getattr(settings, "redis_url", None)
+        if redis_url:
+            import redis.asyncio as aioredis
+
+            r = aioredis.from_url(redis_url, socket_connect_timeout=1)
+            cached = await r.get("slh:dashboard_stats")
+            if cached:
+                await r.aclose()
+                return json.loads(cached)
+            await r.aclose()
+    except Exception:
+        pass  # Cache miss or Redis down — fall through to DB
+
     now = local_now()
     today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
     week_start = today_start - timedelta(days=now.weekday())
@@ -338,7 +359,7 @@ async def get_dashboard_stats(db: AsyncSession) -> dict:
     )
     sr = source_result.one()
 
-    return {
+    stats = {
         "total_leads": lr.total or 0,
         "new_leads": lr.new or 0,
         "approved_leads": lr.approved or 0,
@@ -355,3 +376,19 @@ async def get_dashboard_stats(db: AsyncSession) -> dict:
         "active_sources": sr.active or 0,
         "healthy_sources": sr.healthy or 0,
     }
+
+    # Cache in Redis (30s TTL)
+    try:
+        from app.config import settings
+
+        redis_url = getattr(settings, "redis_url", None)
+        if redis_url:
+            import redis.asyncio as aioredis
+
+            r = aioredis.from_url(redis_url, socket_connect_timeout=1)
+            await r.setex("slh:dashboard_stats", 30, json.dumps(stats))
+            await r.aclose()
+    except Exception:
+        pass  # Cache write failed — no big deal
+
+    return stats

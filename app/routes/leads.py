@@ -5,6 +5,7 @@ from datetime import timedelta
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import JSONResponse
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -112,102 +113,22 @@ async def list_leads(
 
     # Location filter
     if location:
-        south_fl_cities = [
-            "miami",
-            "miami beach",
-            "fort lauderdale",
-            "hallandale beach",
-            "west palm beach",
-            "palm beach",
-            "boca raton",
-            "hollywood",
-            "deerfield beach",
-            "delray beach",
-            "aventura",
-            "coral gables",
-            "key west",
-            "key biscayne",
-            "sweetwater",
-            "doral",
-            "hialeah",
-            "homestead",
-            "sunny isles beach",
-            "surfside",
-            "bal harbour",
-            "north miami",
-            "north miami beach",
-            "miami gardens",
-            "miami lakes",
-            "coconut grove",
-            "pompano beach",
-            "lauderdale by the sea",
-            "plantation",
-            "weston",
-            "davie",
-            "sunrise",
-            "pembroke pines",
-            "miramar",
-            "cooper city",
-            "boynton beach",
-            "jupiter",
-            "riviera beach",
-            "lake worth",
-            "naples",
-            "bonita springs",
-            "marco island",
-            "fort myers",
-            "cape coral",
-            "sarasota",
-            "clearwater",
-            "st. petersburg",
-            "st petersburg",
-        ]
-        caribbean_countries = [
-            "dominican republic",
-            "bahamas",
-            "jamaica",
-            "cayman islands",
-            "barbados",
-            "aruba",
-            "turks & caicos islands",
-            "turks and caicos",
-            "saint lucia",
-            "st. lucia",
-            "curacao",
-            "u.s. virgin islands",
-            "antigua and barbuda",
-            "trinidad and tobago",
-            "puerto rico",
-        ]
-        southeast_states = [
-            "georgia",
-            "tennessee",
-            "south carolina",
-            "north carolina",
-            "alabama",
-            "mississippi",
-            "arkansas",
-            "virginia",
-        ]
-        mountain_states = [
-            "utah",
-            "wyoming",
-            "idaho",
-            "colorado",
-            "montana",
-            "arizona",
-            "new mexico",
-        ]
+        from app.config.locations import (
+            SOUTH_FLORIDA_CITIES,
+            CARIBBEAN_COUNTRIES,
+            SOUTHEAST_STATES,
+            MOUNTAIN_STATES,
+        )
 
         loc_filter = None
         if location == "south_florida":
-            loc_filter = func.lower(PotentialLead.city).in_(south_fl_cities)
+            loc_filter = func.lower(PotentialLead.city).in_(SOUTH_FLORIDA_CITIES)
         elif location == "rest_florida":
             loc_filter = (func.lower(PotentialLead.state) == "florida") & ~func.lower(
                 PotentialLead.city
-            ).in_(south_fl_cities)
+            ).in_(SOUTH_FLORIDA_CITIES)
         elif location == "caribbean":
-            loc_filter = func.lower(PotentialLead.country).in_(caribbean_countries)
+            loc_filter = func.lower(PotentialLead.country).in_(CARIBBEAN_COUNTRIES)
         elif location == "california":
             loc_filter = func.lower(PotentialLead.state) == "california"
         elif location == "new_york":
@@ -215,9 +136,9 @@ async def list_leads(
         elif location == "texas":
             loc_filter = func.lower(PotentialLead.state) == "texas"
         elif location == "southeast":
-            loc_filter = func.lower(PotentialLead.state).in_(southeast_states)
+            loc_filter = func.lower(PotentialLead.state).in_(SOUTHEAST_STATES)
         elif location == "mountain":
-            loc_filter = func.lower(PotentialLead.state).in_(mountain_states)
+            loc_filter = func.lower(PotentialLead.state).in_(MOUNTAIN_STATES)
 
         if loc_filter is not None:
             query = query.where(loc_filter)
@@ -480,35 +401,54 @@ async def api_approve_lead(lead_id: int, db: AsyncSession = Depends(get_db)):
     from app.services.insightly import get_insightly_client
 
     crm = get_insightly_client()
+    crm_error = None
     if crm.enabled and not lead.insightly_id:
-        pushed = await crm.push_contacts_as_leads(
-            contacts=contacts,
-            hotel_name=lead.hotel_name,
-            brand=lead.brand or "",
-            brand_tier=lead.brand_tier or "",
-            city=lead.city or "",
-            state=lead.state or "",
-            country=lead.country or "USA",
-            opening_date=lead.opening_date or "",
-            room_count=lead.room_count or 0,
-            lead_score=lead.lead_score or 0,
-            description=lead.description or "",
-            source_url=lead.source_url or "",
-            management_company=lead.management_company or "",
-            developer=lead.developer or "",
-            owner=lead.owner or "",
-            slh_lead_id=lead.id,
-        )
-        successful = [p for p in pushed if p[1]]
-        if successful:
-            lead.insightly_id = successful[0][1]
-            logger.info(
-                f"Insightly: pushed {len(successful)} contacts for {lead.hotel_name}"
+        try:
+            pushed = await crm.push_contacts_as_leads(
+                contacts=contacts,
+                hotel_name=lead.hotel_name,
+                brand=lead.brand or "",
+                brand_tier=lead.brand_tier or "",
+                city=lead.city or "",
+                state=lead.state or "",
+                country=lead.country or "USA",
+                opening_date=lead.opening_date or "",
+                room_count=lead.room_count or 0,
+                lead_score=lead.lead_score or 0,
+                description=lead.description or "",
+                source_url=lead.source_url or "",
+                management_company=lead.management_company or "",
+                developer=lead.developer or "",
+                owner=lead.owner or "",
+                slh_lead_id=lead.id,
             )
+            successful = [p for p in pushed if p[1]]
+            if successful:
+                lead.insightly_id = successful[0][1]
+                lead.sync_error = None
+                logger.info(
+                    f"Insightly: pushed {len(successful)} contacts for {lead.hotel_name}"
+                )
+            else:
+                crm_error = "CRM push returned no successful records"
+                lead.sync_error = crm_error
+                logger.warning(f"Insightly: push returned empty for {lead.hotel_name}")
+        except Exception as e:
+            crm_error = f"CRM sync failed: {str(e)[:100]}"
+            lead.sync_error = crm_error
+            logger.error(f"Insightly: push failed for {lead.hotel_name}: {e}")
 
     await db.commit()
     await db.refresh(lead)
-    return LeadResponse.model_validate(lead)
+
+    response = LeadResponse.model_validate(lead)
+    # Include CRM warning in response so frontend can show it
+    if crm_error:
+        return JSONResponse(
+            content={**response.model_dump(mode="json"), "crm_warning": crm_error},
+            status_code=200,
+        )
+    return response
 
 
 @router.post("/api/leads/{lead_id}/reject", response_model=LeadResponse, tags=["Leads"])
