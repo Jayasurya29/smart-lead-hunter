@@ -10,8 +10,17 @@ const STATUS_MAP: Record<LeadTab, string> = {
   deleted: 'deleted',
 }
 
+export interface LeadFilterState {
+  timeline: string
+  location: string
+  tier: string
+  year: string
+  added: string
+  sort: string
+}
+
 // ── Lead list with full filter support ──
-export function useLeads(tab: LeadTab, page: number = 1, search: string = '', filters: Record<string, string> = {}) {
+export function useLeads(tab: LeadTab, page: number = 1, search: string = '', filters: LeadFilterState = { timeline: '', location: '', tier: '', year: '', added: '', sort: 'newest' }) {
   return useQuery({
     queryKey: ['leads', tab, page, search, filters],
     queryFn: () => fetchLeads({
@@ -112,6 +121,7 @@ export function useEnrichLead() {
     onSuccess: (_data, id) => {
       qc.invalidateQueries({ queryKey: ['lead', id] })
       qc.invalidateQueries({ queryKey: ['contacts', id] })
+      qc.invalidateQueries({ queryKey: ['leads'] })
     },
   })
 }

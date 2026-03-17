@@ -40,30 +40,36 @@ export async function fetchLead(id: number): Promise<Lead> {
   return data
 }
 
-export async function approveLead(id: number): Promise<void> {
-  await api.post(`/dashboard/leads/${id}/approve`)
+// REST JSON endpoints (not the HTMX /api/dashboard/ ones that return HTML)
+export async function approveLead(id: number): Promise<Lead> {
+  const { data } = await api.post<Lead>(`/leads/${id}/approve`)
+  return data
 }
 
-export async function rejectLead(id: number, reason?: string): Promise<void> {
+export async function rejectLead(id: number, reason?: string): Promise<Lead> {
   const params = reason ? `?reason=${encodeURIComponent(reason)}` : ''
-  await api.post(`/dashboard/leads/${id}/reject${params}`)
+  const { data } = await api.post<Lead>(`/leads/${id}/reject${params}`)
+  return data
 }
 
-export async function restoreLead(id: number): Promise<void> {
-  await api.post(`/dashboard/leads/${id}/restore`)
+export async function restoreLead(id: number): Promise<Lead> {
+  // Uses the HTMX endpoint — but we Accept JSON via client interceptor
+  const { data } = await api.post(`/api/dashboard/leads/${id}/restore`)
+  return data
 }
 
 export async function deleteLead(id: number): Promise<void> {
-  await api.post(`/dashboard/leads/${id}/delete`)
+  // Soft-delete (moves to "deleted" tab, can be restored)
+  await api.post(`/api/dashboard/leads/${id}/delete`)
 }
 
 export async function editLead(id: number, fields: Partial<Lead>): Promise<any> {
-  const { data } = await api.patch(`/dashboard/leads/${id}/edit`, fields)
+  const { data } = await api.patch(`/api/dashboard/leads/${id}/edit`, fields)
   return data
 }
 
 export async function enrichLead(id: number): Promise<any> {
-  const { data } = await api.post(`/dashboard/leads/${id}/enrich`)
+  const { data } = await api.post(`/api/dashboard/leads/${id}/enrich`)
   return data
 }
 
@@ -76,29 +82,44 @@ export async function fetchStats(): Promise<DashboardStats> {
 // ── Contacts ──
 
 export async function fetchContacts(leadId: number): Promise<Contact[]> {
-  const { data } = await api.get<Contact[]>(`/dashboard/leads/${leadId}/contacts`)
+  const { data } = await api.get<Contact[]>(`/api/dashboard/leads/${leadId}/contacts`)
   return data
 }
 
 export async function saveContact(leadId: number, contactId: number): Promise<void> {
-  await api.post(`/dashboard/leads/${leadId}/contacts/${contactId}/save`)
+  await api.post(`/api/dashboard/leads/${leadId}/contacts/${contactId}/save`)
+}
+
+export async function unsaveContact(leadId: number, contactId: number): Promise<void> {
+  await api.post(`/api/dashboard/leads/${leadId}/contacts/${contactId}/unsave`)
+}
+
+export async function deleteContact(leadId: number, contactId: number): Promise<void> {
+  await api.delete(`/api/dashboard/leads/${leadId}/contacts/${contactId}`)
 }
 
 export async function setPrimaryContact(leadId: number, contactId: number): Promise<void> {
-  await api.post(`/dashboard/leads/${leadId}/contacts/${contactId}/set-primary`)
+  await api.post(`/api/dashboard/leads/${leadId}/contacts/${contactId}/set-primary`)
 }
 
 // ── Scrape ──
 
 export async function triggerScrape(mode: string = 'full', sourceIds: number[] = []): Promise<any> {
-  const { data } = await api.post('/dashboard/scrape', { mode, source_ids: sourceIds })
+  const { data } = await api.post('/api/dashboard/scrape', { mode, source_ids: sourceIds })
   return data
 }
 
 // ── Discovery ──
 
 export async function triggerDiscovery(queries: number = 10): Promise<any> {
-  const { data } = await api.post('/dashboard/discovery', { queries })
+  const { data } = await api.post('/api/dashboard/discovery/start', { mode: 'full', extract_leads: true, queries })
+  return data
+}
+
+// ── Extract URL ──
+
+export async function triggerExtractUrl(url: string): Promise<any> {
+  const { data } = await api.post('/api/dashboard/extract-url', { url })
   return data
 }
 

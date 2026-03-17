@@ -1,14 +1,8 @@
 import { cn } from '@/lib/utils'
 import { SlidersHorizontal, X } from 'lucide-react'
+import type { LeadFilterState } from '@/hooks/useLeads'
 
-export interface Filters {
-  timeline: string
-  location: string
-  tier: string
-  year: string
-  added: string
-  sort: string
-}
+export type Filters = LeadFilterState
 
 export const DEFAULT_FILTERS: Filters = {
   timeline: '',

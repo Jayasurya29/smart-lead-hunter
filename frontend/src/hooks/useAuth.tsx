@@ -25,7 +25,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       return
     }
     try {
-      await api.get('/stats', { headers: { 'X-API-Key': token } })
+      // Use the dedicated auth verification endpoint
+      await api.get('/api/auth/verify', { headers: { 'X-API-Key': token } })
       api.defaults.headers.common['X-API-Key'] = token
       setIsAuthenticated(true)
     } catch {

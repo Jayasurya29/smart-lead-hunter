@@ -32,8 +32,8 @@ export default function ExtractModal({ onClose }: Props) {
         try {
           const d = JSON.parse(e.data)
           if (d.message) setLogs(p => [...p, d.message])
-          if (d.status === 'complete' || d.done) {
-            setStatus('done'); es.close()
+          if (d.type === 'complete' || d.type === 'error') {
+            setStatus(d.type === 'error' ? 'error' : 'done'); es.close()
             qc.invalidateQueries({ queryKey: ['leads'] })
             qc.invalidateQueries({ queryKey: ['stats'] })
           }

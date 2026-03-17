@@ -1,10 +1,10 @@
 import { useState } from 'react'
-import { useLeads } from '@/hooks/useLeads'
+import { useLeads, type LeadFilterState } from '@/hooks/useLeads'
 import type { LeadTab } from '@/api/types'
 import StatsCards from '@/components/stats/StatsCards'
 import LeadTable from '@/components/leads/LeadTable'
 import LeadDetail from '@/components/leads/LeadDetail'
-import FilterBar, { DEFAULT_FILTERS, type Filters } from '@/components/leads/FilterBar'
+import FilterBar, { DEFAULT_FILTERS } from '@/components/leads/FilterBar'
 import { cn } from '@/lib/utils'
 import { Inbox, CheckCircle2, XCircle, Trash2, Search, X } from 'lucide-react'
 
@@ -20,7 +20,7 @@ export default function Dashboard() {
   const [page, setPage] = useState(1)
   const [search, setSearch] = useState('')
   const [selectedLeadId, setSelectedLeadId] = useState<number | null>(null)
-  const [filters, setFilters] = useState<Filters>(DEFAULT_FILTERS)
+  const [filters, setFilters] = useState<LeadFilterState>(DEFAULT_FILTERS)
 
   // Pass filters to API
   const { data, isLoading } = useLeads(tab, page, search, filters)
@@ -36,7 +36,7 @@ export default function Dashboard() {
     setPage(1)
   }
 
-  function handleFilterChange(newFilters: Filters) {
+  function handleFilterChange(newFilters: LeadFilterState) {
     setFilters(newFilters)
     setPage(1)
   }

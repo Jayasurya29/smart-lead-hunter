@@ -159,8 +159,9 @@ export default function ScrapeModal({ onClose }: Props) {
       try {
         const d = JSON.parse(e.data)
         if (d.message) setLogs(p => [...p, d.message])
-        if (d.status === 'complete' || d.done) {
-          setStatus('done'); es.close()
+        // Backend SSE sends type='complete' (not status='complete')
+        if (d.type === 'complete' || d.type === 'error') {
+          setStatus(d.type === 'error' ? 'error' : 'done'); es.close()
           qc.invalidateQueries({ queryKey: ['leads'] })
           qc.invalidateQueries({ queryKey: ['stats'] })
         }
@@ -181,8 +182,8 @@ export default function ScrapeModal({ onClose }: Props) {
       setLogs(['Submitting URL for extraction...'])
       try {
         const { data } = await api.post('/api/dashboard/extract-url', { url: url.trim() })
-        const extractId = data?.extract_id || data?.id
-        connectStream(`/api/dashboard/extract-url/stream${extractId ? `?extract_id=${extractId}` : ''}`)
+        const extractId = data?.extract_id || data?.id || ''
+        connectStream(`/api/dashboard/extract-url/stream?extract_id=${extractId}`)
       } catch (err: any) {
         setStatus('error'); setLogs(p => [...p, `Error: ${err.message || 'Failed to extract'}`])
       }
@@ -193,8 +194,8 @@ export default function ScrapeModal({ onClose }: Props) {
     setLogs([`Starting ${mode} scrape...`])
     try {
       const result = await triggerScrape(apiMode, ids)
-      const scrapeId = result?.scrape_id || result?.id
-      connectStream(`/api/dashboard/scrape/stream${scrapeId ? `?scrape_id=${scrapeId}` : ''}`)
+      const scrapeId = result?.scrape_id || ''
+      connectStream(`/api/dashboard/scrape/stream?scrape_id=${scrapeId}`)
     } catch (err: any) {
       setStatus('error'); setLogs(p => [...p, `Error: ${err.message || 'Failed to start'}`])
     }

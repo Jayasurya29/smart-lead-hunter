@@ -22,16 +22,20 @@ export default function DiscoveryModal({ onClose }: Props) {
     setLogs(['Starting source discovery...'])
     try {
       const result = await triggerDiscovery(queries)
-      const discoveryId = result?.discovery_id || result?.id
+      const discoveryId = result?.discovery_id || ''
       const token = localStorage.getItem('slh_token')
-      const url = `/api/dashboard/discovery/stream${discoveryId ? `?discovery_id=${discoveryId}` : ''}${token ? `${discoveryId ? '&' : '?'}api_key=${token}` : ''}`
-      const es = new EventSource(url)
+      const streamUrl = `/api/dashboard/discovery/stream?discovery_id=${discoveryId}${token ? `&api_key=${token}` : ''}`
+      const es = new EventSource(streamUrl)
       esRef.current = es
       es.onmessage = (e) => {
         try {
           const d = JSON.parse(e.data)
           if (d.message) setLogs(p => [...p, d.message])
-          if (d.status === 'complete' || d.done) { setStatus('done'); es.close(); qc.invalidateQueries({ queryKey: ['stats'] }) }
+          if (d.type === 'complete' || d.type === 'error') {
+            setStatus(d.type === 'error' ? 'error' : 'done'); es.close()
+            qc.invalidateQueries({ queryKey: ['leads'] })
+            qc.invalidateQueries({ queryKey: ['stats'] })
+          }
         } catch { if (e.data && e.data !== 'ping') setLogs(p => [...p, e.data]) }
       }
       es.onerror = () => { es.close(); setStatus('done'); setLogs(p => [...p, '— Stream ended —']); qc.invalidateQueries({ queryKey: ['stats'] }) }
