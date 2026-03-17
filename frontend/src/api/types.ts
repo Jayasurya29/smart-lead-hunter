@@ -1,4 +1,4 @@
-// Types matching FastAPI Pydantic schemas
+// Types matching FastAPI backend response shapes exactly
 
 export interface Lead {
   id: number
@@ -15,7 +15,9 @@ export interface Lead {
   contact_title: string | null
   contact_email: string | null
   contact_phone: string | null
+  contact_linkedin: string | null
   opening_date: string | null
+  opening_year: number | null
   room_count: number | null
   description: string | null
   key_insights: string | null
@@ -24,6 +26,7 @@ export interface Lead {
   owner: string | null
   lead_score: number | null
   score_breakdown: Record<string, any> | null
+  estimated_revenue: number | null
   status: string
   source_url: string | null
   source_site: string | null
@@ -42,19 +45,31 @@ export interface LeadListResponse {
   pages: number
 }
 
-export interface Source {
+// Matches the /api/dashboard/sources/list response shape exactly
+export interface SourceInfo {
   id: number
   name: string
-  base_url: string
-  source_type: string | null
-  priority: number | null
-  is_active: boolean
-  last_scraped_at: string | null
-  leads_found: number
-  health_status: string | null
-  gold_count?: number
+  type: string           // backend sends "type" not "source_type"
+  priority: number
+  frequency: string
+  health: string         // backend sends "health" not "health_status"
+  leads: number          // backend sends "leads" not "leads_found"
+  gold_count: number
+  last_scraped: string | null  // backend sends "last_scraped" not "last_scraped_at"
+  // Only on due_sources:
+  reason?: string
+  mode?: string
 }
 
+export interface SourcesListResponse {
+  sources: SourceInfo[]
+  due_sources: SourceInfo[]
+  categories: { type: string; label: string; count: number }[]
+  total: number
+  total_due: number
+}
+
+// Matches GET /stats response (StatsResponse pydantic model)
 export interface DashboardStats {
   total_leads: number
   new_leads: number
@@ -87,18 +102,22 @@ export interface Contact {
   score: number
   is_primary: boolean
   is_saved: boolean
-}
-
-export interface User {
-  id: number
-  email: string
-  full_name: string
-  role: 'admin' | 'manager' | 'viewer'
-}
-
-export interface AuthResponse {
-  access_token: string
-  token_type: string
+  found_via: string | null
+  source_detail: string | null
+  evidence_url: string | null
 }
 
 export type LeadTab = 'pipeline' | 'approved' | 'rejected' | 'deleted'
+
+// SSE event from backend scrape/extract/discovery streams
+export interface SSEEvent {
+  type: 'started' | 'info' | 'source_start' | 'source_complete' | 'url_error' | 'leads_found' | 'complete' | 'error' | 'cancelled' | 'phase' | 'stats' | 'success' | 'warning'
+  message?: string
+  scrape_id?: string
+  source?: string
+  current?: number
+  total?: number
+  pages?: number
+  stats?: Record<string, any>
+  duration_seconds?: number
+}

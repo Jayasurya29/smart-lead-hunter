@@ -1,8 +1,14 @@
 import { cn } from '@/lib/utils'
 import { SlidersHorizontal, X } from 'lucide-react'
-import type { LeadFilterState } from '@/hooks/useLeads'
 
-export type Filters = LeadFilterState
+export interface Filters {
+  timeline: string
+  location: string
+  tier: string
+  year: string
+  added: string
+  sort: string
+}
 
 export const DEFAULT_FILTERS: Filters = {
   timeline: '',
@@ -57,11 +63,11 @@ export default function FilterBar({ filters, onChange }: Props) {
         value={filters.timeline} onChange={v => set('timeline', v)} placeholder="Timeline"
         isActive={!!filters.timeline}
         options={[
-          { value: 'hot', label: 'Hot (6–12mo)' },
-          { value: 'urgent', label: 'Urgent (3–6mo)' },
-          { value: 'warm', label: 'Warm (12–18mo)' },
+          { value: 'hot', label: 'Hot (6-12mo)' },
+          { value: 'urgent', label: 'Urgent (3-6mo)' },
+          { value: 'warm', label: 'Warm (12-18mo)' },
           { value: 'cool', label: 'Cool (18mo+)' },
-          { value: 'late', label: 'Late (0–3mo)' },
+          { value: 'late', label: 'Late (0-3mo)' },
           { value: 'tbd', label: 'TBD' },
         ]}
       />
@@ -96,6 +102,7 @@ export default function FilterBar({ filters, onChange }: Props) {
         value={filters.year} onChange={v => set('year', v)} placeholder="Year"
         isActive={!!filters.year}
         options={[
+          { value: '2025', label: '2025' },
           { value: '2026', label: '2026' },
           { value: '2027', label: '2027' },
           { value: '2028', label: '2028+' },
@@ -113,7 +120,6 @@ export default function FilterBar({ filters, onChange }: Props) {
         ]}
       />
 
-      {/* Spacer to push sort right */}
       <div className="flex-1" />
 
       <FilterSelect
@@ -131,7 +137,7 @@ export default function FilterBar({ filters, onChange }: Props) {
       {activeCount > 0 && (
         <button
           onClick={() => onChange({ ...DEFAULT_FILTERS })}
-          className="flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider text-coral-600 hover:text-coral-700 transition ml-1"
+          className="flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider text-red-500 hover:text-red-600 transition ml-1"
         >
           <X className="w-3 h-3" />
           Clear ({activeCount})

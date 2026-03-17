@@ -1,7 +1,11 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { fetchLeads, fetchLead, fetchStats, fetchContacts, approveLead, rejectLead, restoreLead, deleteLead, enrichLead } from '@/api/leads'
+import {
+  fetchLeads, fetchLead, fetchStats, fetchContacts, fetchSources,
+  approveLead, rejectLead, restoreLead, deleteLead, enrichLead,
+  saveContact, unsaveContact, deleteContact, setPrimaryContact,
+} from '@/api/leads'
 import type { LeadFilters } from '@/api/leads'
-import type { LeadTab } from '@/api/types'
+import type { LeadTab, SourcesListResponse } from '@/api/types'
 
 const STATUS_MAP: Record<LeadTab, string> = {
   pipeline: 'new',
@@ -10,17 +14,7 @@ const STATUS_MAP: Record<LeadTab, string> = {
   deleted: 'deleted',
 }
 
-export interface LeadFilterState {
-  timeline: string
-  location: string
-  tier: string
-  year: string
-  added: string
-  sort: string
-}
-
-// ── Lead list with full filter support ──
-export function useLeads(tab: LeadTab, page: number = 1, search: string = '', filters: LeadFilterState = { timeline: '', location: '', tier: '', year: '', added: '', sort: 'newest' }) {
+export function useLeads(tab: LeadTab, page: number, search: string, filters: { timeline?: string; location?: string; tier?: string; year?: string; added?: string; sort?: string }) {
   return useQuery({
     queryKey: ['leads', tab, page, search, filters],
     queryFn: () => fetchLeads({
@@ -40,7 +34,6 @@ export function useLeads(tab: LeadTab, page: number = 1, search: string = '', fi
   })
 }
 
-// ── Single lead ──
 export function useLead(id: number | null) {
   return useQuery({
     queryKey: ['lead', id],
@@ -49,7 +42,6 @@ export function useLead(id: number | null) {
   })
 }
 
-// ── Dashboard stats ──
 export function useStats() {
   return useQuery({
     queryKey: ['stats'],
@@ -59,7 +51,6 @@ export function useStats() {
   })
 }
 
-// ── Contacts ──
 export function useContacts(leadId: number | null) {
   return useQuery({
     queryKey: ['contacts', leadId],
@@ -68,50 +59,45 @@ export function useContacts(leadId: number | null) {
   })
 }
 
+export function useSources() {
+  return useQuery<SourcesListResponse>({
+    queryKey: ['sources'],
+    queryFn: fetchSources,
+    staleTime: 60_000,
+  })
+}
+
 // ── Mutations ──
 
-export function useApproveLead() {
+function useLeadMutation<T = number>(
+  fn: (arg: T) => Promise<any>,
+  extraInvalidate?: string[][]
+) {
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: (id: number) => approveLead(id),
+    mutationFn: fn,
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['leads'] })
       qc.invalidateQueries({ queryKey: ['stats'] })
+      extraInvalidate?.forEach(key => qc.invalidateQueries({ queryKey: key }))
     },
   })
+}
+
+export function useApproveLead() {
+  return useLeadMutation((id: number) => approveLead(id))
 }
 
 export function useRejectLead() {
-  const qc = useQueryClient()
-  return useMutation({
-    mutationFn: ({ id, reason }: { id: number; reason?: string }) => rejectLead(id, reason),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['leads'] })
-      qc.invalidateQueries({ queryKey: ['stats'] })
-    },
-  })
+  return useLeadMutation(({ id, reason }: { id: number; reason?: string }) => rejectLead(id, reason))
 }
 
 export function useRestoreLead() {
-  const qc = useQueryClient()
-  return useMutation({
-    mutationFn: (id: number) => restoreLead(id),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['leads'] })
-      qc.invalidateQueries({ queryKey: ['stats'] })
-    },
-  })
+  return useLeadMutation((id: number) => restoreLead(id))
 }
 
 export function useDeleteLead() {
-  const qc = useQueryClient()
-  return useMutation({
-    mutationFn: (id: number) => deleteLead(id),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['leads'] })
-      qc.invalidateQueries({ queryKey: ['stats'] })
-    },
-  })
+  return useLeadMutation((id: number) => deleteLead(id))
 }
 
 export function useEnrichLead() {
@@ -122,6 +108,53 @@ export function useEnrichLead() {
       qc.invalidateQueries({ queryKey: ['lead', id] })
       qc.invalidateQueries({ queryKey: ['contacts', id] })
       qc.invalidateQueries({ queryKey: ['leads'] })
+      qc.invalidateQueries({ queryKey: ['stats'] })
+    },
+  })
+}
+
+export function useSaveContact() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ leadId, contactId }: { leadId: number; contactId: number }) =>
+      saveContact(leadId, contactId),
+    onSuccess: (_data, { leadId }) => {
+      qc.invalidateQueries({ queryKey: ['contacts', leadId] })
+    },
+  })
+}
+
+export function useUnsaveContact() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ leadId, contactId }: { leadId: number; contactId: number }) =>
+      unsaveContact(leadId, contactId),
+    onSuccess: (_data, { leadId }) => {
+      qc.invalidateQueries({ queryKey: ['contacts', leadId] })
+    },
+  })
+}
+
+export function useDeleteContact() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ leadId, contactId }: { leadId: number; contactId: number }) =>
+      deleteContact(leadId, contactId),
+    onSuccess: (_data, { leadId }) => {
+      qc.invalidateQueries({ queryKey: ['contacts', leadId] })
+      qc.invalidateQueries({ queryKey: ['lead', leadId] })
+    },
+  })
+}
+
+export function useSetPrimaryContact() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ leadId, contactId }: { leadId: number; contactId: number }) =>
+      setPrimaryContact(leadId, contactId),
+    onSuccess: (_data, { leadId }) => {
+      qc.invalidateQueries({ queryKey: ['contacts', leadId] })
+      qc.invalidateQueries({ queryKey: ['lead', leadId] })
     },
   })
 }
