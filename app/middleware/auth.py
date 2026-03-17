@@ -20,12 +20,14 @@ import os
 import secrets
 from dotenv import load_dotenv
 
-load_dotenv()
+
 from fastapi import HTTPException, Security, status
 from fastapi.security import APIKeyHeader
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.responses import JSONResponse
+
+load_dotenv()
 
 # ─── Simple Dependency (per-endpoint) ───
 
