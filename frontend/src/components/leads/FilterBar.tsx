@@ -16,7 +16,7 @@ export const DEFAULT_FILTERS: Filters = {
   tier: '',
   year: '',
   added: '',
-  sort: 'newest',
+  sort: 'score_desc',
 }
 
 interface Props {
@@ -77,13 +77,13 @@ export default function FilterBar({ filters, onChange }: Props) {
         isActive={!!filters.location}
         options={[
           { value: 'south_florida', label: 'South Florida' },
-          { value: 'rest_of_florida', label: 'Rest of Florida' },
+          { value: 'rest_florida', label: 'Rest of Florida' },
           { value: 'caribbean', label: 'Caribbean' },
           { value: 'california', label: 'California' },
           { value: 'new_york', label: 'New York' },
           { value: 'texas', label: 'Texas' },
           { value: 'southeast', label: 'Southeast' },
-          { value: 'mountain_west', label: 'Mountain West' },
+          { value: 'mountain', label: 'Mountain West' },
         ]}
       />
 
@@ -127,10 +127,11 @@ export default function FilterBar({ filters, onChange }: Props) {
         isActive={false}
         options={[
           { value: 'newest', label: 'Newest First' },
-          { value: 'score_high', label: 'Highest Score' },
-          { value: 'score_low', label: 'Lowest Score' },
-          { value: 'opening_soon', label: 'Opening Soon' },
-          { value: 'hotel_az', label: 'A → Z' },
+          { value: 'oldest', label: 'Oldest First' },
+          { value: 'score_desc', label: 'Highest Score' },
+          { value: 'score_asc', label: 'Lowest Score' },
+          { value: 'opening', label: 'Opening Soon' },
+          { value: 'name_asc', label: 'A → Z' },
         ]}
       />
 
