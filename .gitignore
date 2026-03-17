@@ -76,3 +76,9 @@ htmlcov/
 blobs/
 manifests/
 celerybeat-schedule.*
+
+# Frontend
+frontend/node_modules/
+frontend/dist/
+frontend/.env
+frontend/.env.local

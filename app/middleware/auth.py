@@ -18,6 +18,9 @@ Environment:
 
 import os
 import secrets
+from dotenv import load_dotenv
+
+load_dotenv()
 from fastapi import HTTPException, Security, status
 from fastapi.security import APIKeyHeader
 from starlette.middleware.base import BaseHTTPMiddleware

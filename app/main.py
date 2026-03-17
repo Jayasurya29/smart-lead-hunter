@@ -693,6 +693,12 @@ async def root():
     }
 
 
+@app.get("/api/auth/verify")
+async def verify_auth(request: Request):
+    """Verifies API key is valid — used by frontend login."""
+    return {"status": "ok"}
+
+
 @app.get("/health", tags=["Health"])
 async def health_check(db: AsyncSession = Depends(get_db)):
     """Health check endpoint — verifies DB, Gemini API, and Redis."""
