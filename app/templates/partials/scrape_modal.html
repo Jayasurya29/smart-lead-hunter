@@ -4,14 +4,14 @@
      x-data="scrapeController()"
      @open-scrape-modal.window="openModal()"
      @open-url-extract.window="openUrlExtract($event.detail)">
-    
+
     <!-- Backdrop -->
     <div class="absolute inset-0 bg-gray-900 bg-opacity-60 backdrop-blur-sm" @click="closeModal()"></div>
-    
+
     <!-- Modal -->
     <div class="absolute inset-0 flex items-center justify-center p-4">
         <div class="bg-white rounded-xl shadow-2xl w-full max-w-3xl overflow-hidden max-h-[90vh] flex flex-col" @click.stop>
-            
+
             <!-- ============ SETUP VIEW (source selection) ============ -->
             <template x-if="view === 'setup'">
                 <div class="flex flex-col max-h-[90vh]">
@@ -86,12 +86,12 @@
                                 Clear
                             </button>
                         </div>
-                        
+
                         <!-- Source checkboxes -->
                         <div class="space-y-1">
                             <template x-for="src in allSources" :key="src.id">
                                 <label class="flex items-center p-2 rounded-lg hover:bg-gray-50 cursor-pointer group">
-                                    <input type="checkbox" :value="src.id" 
+                                    <input type="checkbox" :value="src.id"
                                            :checked="selectedSources.includes(src.id)"
                                            @change="toggleSource(src.id)"
                                            class="h-4 w-4 text-indigo-600 rounded border-gray-300">
@@ -173,7 +173,7 @@
                                 </div>
                             </div>
                             <div class="relative">
-                                <input type="url" 
+                                <input type="url"
                                        x-model="extractUrl"
                                        @keydown.enter="startScrape()"
                                        placeholder="https://"
@@ -186,11 +186,11 @@
                             </div>
                             <div class="mt-3 flex flex-wrap gap-2">
                                 <span class="text-xs text-emerald-600 font-medium">Try:</span>
-                                <button @click="extractUrl = 'https://www.hoteldive.com/news/top-hotel-openings-2026/810298/'" 
+                                <button @click="extractUrl = 'https://www.hoteldive.com/news/top-hotel-openings-2026/810298/'"
                                         class="text-xs px-2 py-1 bg-white border border-emerald-200 rounded-md text-emerald-700 hover:bg-emerald-100 transition-colors cursor-pointer">
                                     Hotel Dive 2026
                                 </button>
-                                <button @click="extractUrl = 'https://opulist.co/blog/the-most-beautiful-new-hotels-opening-in-the-us-in-2026'" 
+                                <button @click="extractUrl = 'https://opulist.co/blog/the-most-beautiful-new-hotels-opening-in-the-us-in-2026'"
                                         class="text-xs px-2 py-1 bg-white border border-emerald-200 rounded-md text-emerald-700 hover:bg-emerald-100 transition-colors cursor-pointer">
                                     Opulist US 2026
                                 </button>
@@ -390,16 +390,16 @@ function scrapeController() {
         // Views: setup | progress
         view: 'setup',
         scrapeMode: 'smart',  // smart | manual | full | url
-        
+
         // Source data
         allSources: [],
         dueSources: [],
         selectedSources: [],
         categories: [],
-        
+
         // URL Extract
         extractUrl: '',
-        
+
         // Progress state
         phase: 'scraping',
         phaseIndex: 0,
@@ -413,7 +413,7 @@ function scrapeController() {
         _retryCount: 0,
         _maxRetries: 5,
         _closed: false,
-        
+
         stats: { sources: 0, pages: 0, extracted: 0, saved: 0 },
         sourcesProgress: [],
         events: [],
@@ -527,7 +527,7 @@ function scrapeController() {
                     body: JSON.stringify({ url: this.extractUrl })
                 });
                 const data = await resp.json();
-                
+
                 if (resp.ok && data.status !== 'error') {
                     this.log('success', 'URL extract started');
                     this.connectSSE('/api/dashboard/extract-url/stream?extract_id=' + data.extract_id);
@@ -557,7 +557,7 @@ function scrapeController() {
                     })
                 });
                 const data = await resp.json();
-                
+
                 if (resp.ok) {
                     this.log('success', `Scrape queued (${this.scrapeMode} mode)`);
                     this.connectSSE('/api/dashboard/scrape/stream?scrape_id=' + data.scrape_id);

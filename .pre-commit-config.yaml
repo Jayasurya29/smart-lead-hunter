@@ -3,5 +3,16 @@
     rev: v0.8.6
     hooks:
       - id: ruff
-        args: ["--fix", "--select", "E,F,W", "--ignore", "E501,E701,E702,E402"]
+        args: ["--fix", "--select", "E,F,W", "--ignore", "E501"]
+        files: ^app/
       - id: ruff-format
+        files: ^app/
+
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-added-large-files
+        args: ["--maxkb=500"]

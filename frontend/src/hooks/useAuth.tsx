@@ -35,7 +35,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
     setIsLoading(false)
   }
-  
+
   async function login(apiKey: string): Promise<boolean> {
     try {
       const resp = await api.get('/api/auth/verify', {

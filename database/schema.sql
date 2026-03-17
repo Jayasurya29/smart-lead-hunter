@@ -26,24 +26,24 @@ CREATE TABLE IF NOT EXISTS sources (
     max_depth INTEGER DEFAULT 2,                    -- How deep to crawl links
     use_playwright BOOLEAN DEFAULT false,           -- true = JS-heavy site, false = simple HTML
     is_active BOOLEAN DEFAULT true,
-    
+
     -- Tracking
     last_scraped_at TIMESTAMPTZ,
     last_success_at TIMESTAMPTZ,
     leads_found INTEGER DEFAULT 0,
     success_rate DECIMAL(5,2) DEFAULT 0.00,
     consecutive_failures INTEGER DEFAULT 0,
-    
+
     -- Health monitoring
     health_status VARCHAR(20) DEFAULT 'new',        -- healthy, degraded, failing, dead, new
-    
+
     -- Notes
     notes TEXT,
-    
+
     -- Timestamps
     created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW(),
-    
+
     UNIQUE(base_url)
 );
 
@@ -54,7 +54,7 @@ CREATE TABLE IF NOT EXISTS sources (
 
 CREATE TABLE IF NOT EXISTS potential_leads (
     id SERIAL PRIMARY KEY,
-    
+
     -- Hotel Information
     hotel_name VARCHAR(255) NOT NULL,
     hotel_name_normalized VARCHAR(255),              -- Lowercase, no special chars (for dedup)
@@ -62,19 +62,19 @@ CREATE TABLE IF NOT EXISTS potential_leads (
     brand_tier VARCHAR(20),                          -- tier1_ultra_luxury, tier2_luxury, tier3_upper_upscale, tier4_upscale, tier5_skip
     hotel_type VARCHAR(50),                          -- resort, hotel, boutique, all-inclusive
     hotel_website VARCHAR(500),
-    
+
     -- Location
     city VARCHAR(100),
     state VARCHAR(100),
     country VARCHAR(100) DEFAULT 'USA',
     location_type VARCHAR(20),                       -- florida, caribbean, usa, international
-    
+
     -- Contact Information
     contact_name VARCHAR(200),
     contact_title VARCHAR(100),
     contact_email VARCHAR(255),
     contact_phone VARCHAR(50),
-    
+
     -- Hotel Details
     opening_date VARCHAR(50),                        -- Flexible: "Q2 2026", "June 2026", "2026"
     opening_year INTEGER,                            -- Extracted year for filtering
@@ -82,44 +82,44 @@ CREATE TABLE IF NOT EXISTS potential_leads (
     description TEXT,
      -- Key Insights (for sales team)
     key_insights TEXT,
-    
+
     -- Stakeholders
     management_company VARCHAR(200),
     developer VARCHAR(200),
     owner VARCHAR(200),
 
-    
+
     -- Scoring (0-100)
     lead_score INTEGER CHECK (lead_score >= 0 AND lead_score <= 100),
     score_breakdown JSONB,                           -- {"location": 30, "brand": 25, "timing": 20, ...}
     estimated_revenue INTEGER,                       -- Estimated uniform revenue in dollars
-    
+
     -- Source Tracking
     source_id INTEGER REFERENCES sources(id),
     source_url TEXT,
     source_site VARCHAR(100),
     scraped_at TIMESTAMPTZ DEFAULT NOW(),
-    
+
     -- Workflow Status
     status VARCHAR(20) DEFAULT 'new',                -- new, claimed, approved, rejected, pushed
     claimed_by VARCHAR(100),
     claimed_at TIMESTAMPTZ,
     rejection_reason VARCHAR(100),                   -- duplicate, budget_brand, international, old_opening, bad_data
     notes TEXT,
-    
+
     -- Insightly CRM Sync
     insightly_id INTEGER,
     synced_at TIMESTAMPTZ,
     sync_error TEXT,
-    
+
     -- Deduplication
     embedding VECTOR(384),                           -- For semantic similarity
     duplicate_of_id INTEGER REFERENCES potential_leads(id),
     similarity_score DECIMAL(5,4),                   -- How similar to duplicate (0.0-1.0)
-    
+
     -- Raw data
     raw_data JSONB,
-    
+
     -- Timestamps
     created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW()
@@ -135,7 +135,7 @@ CREATE TABLE IF NOT EXISTS scrape_logs (
     source_id INTEGER REFERENCES sources(id),
     started_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     completed_at TIMESTAMPTZ,
-    
+
     -- Stats
     urls_scraped INTEGER DEFAULT 0,
     pages_crawled INTEGER DEFAULT 0,
@@ -143,12 +143,12 @@ CREATE TABLE IF NOT EXISTS scrape_logs (
     leads_new INTEGER DEFAULT 0,
     leads_duplicate INTEGER DEFAULT 0,
     leads_skipped INTEGER DEFAULT 0,                 -- Skipped due to filters (budget, international)
-    
+
     -- Status
     status VARCHAR(20) DEFAULT 'running',            -- running, success, failed, partial
     error_message TEXT,
     errors JSONB,                                    -- Array of error details
-    
+
     -- Timestamps
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
@@ -169,7 +169,7 @@ CREATE TABLE IF NOT EXISTS source_health_log (
     response_time_ms INTEGER,
     error_message TEXT,
     action_taken VARCHAR(50),                        -- none, rotated_url, triggered_healing, flagged_human
-    
+
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
@@ -199,11 +199,11 @@ CREATE INDEX IF NOT EXISTS idx_leads_normalized_name ON potential_leads(hotel_na
 CREATE INDEX IF NOT EXISTS idx_leads_insightly ON potential_leads(insightly_id);
 
 -- Vector similarity index for deduplication (requires ~100 rows first)
--- CREATE INDEX IF NOT EXISTS idx_leads_embedding ON potential_leads 
+-- CREATE INDEX IF NOT EXISTS idx_leads_embedding ON potential_leads
 -- USING ivfflat (embedding vector_cosine_ops) WITH (lists = 100);
 
 -- Fuzzy matching index for hotel name
-CREATE INDEX IF NOT EXISTS idx_leads_name_trgm ON potential_leads 
+CREATE INDEX IF NOT EXISTS idx_leads_name_trgm ON potential_leads
 USING gin (hotel_name gin_trgm_ops);
 
 -- Scrape Logs indexes
@@ -228,13 +228,13 @@ END;
 $$ language 'plpgsql';
 
 DROP TRIGGER IF EXISTS update_leads_updated_at ON potential_leads;
-CREATE TRIGGER update_leads_updated_at 
-    BEFORE UPDATE ON potential_leads 
+CREATE TRIGGER update_leads_updated_at
+    BEFORE UPDATE ON potential_leads
     FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
 DROP TRIGGER IF EXISTS update_sources_updated_at ON sources;
-CREATE TRIGGER update_sources_updated_at 
-    BEFORE UPDATE ON sources 
+CREATE TRIGGER update_sources_updated_at
+    BEFORE UPDATE ON sources
     FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
 -- ============================================================
@@ -245,7 +245,7 @@ CREATE TRIGGER update_sources_updated_at
 CREATE OR REPLACE VIEW v_daily_sources AS
 SELECT id, name, base_url, source_type, priority, entry_urls, use_playwright, health_status
 FROM sources
-WHERE is_active = true 
+WHERE is_active = true
   AND scrape_frequency = 'daily'
   AND health_status != 'dead'
 ORDER BY priority DESC, last_scraped_at ASC NULLS FIRST;
@@ -260,7 +260,7 @@ ORDER BY consecutive_failures DESC;
 
 -- View: Recent qualified leads (score >= 50, not rejected)
 CREATE OR REPLACE VIEW v_qualified_leads AS
-SELECT 
+SELECT
     id, hotel_name, brand, brand_tier, city, state, country,
     opening_date, room_count, lead_score, estimated_revenue,
     contact_email, status, created_at
@@ -287,6 +287,6 @@ SELECT
 -- ============================================================
 
 SELECT 'Schema created successfully!' as status;
-SELECT 
+SELECT
     (SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_type = 'BASE TABLE') as tables_created,
     (SELECT COUNT(*) FROM information_schema.views WHERE table_schema = 'public') as views_created;

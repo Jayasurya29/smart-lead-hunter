@@ -5,7 +5,7 @@ Sets optimal scrape frequencies based on source type and priority.
 
 Logic:
 - Chain newsrooms: They post 1-3x/week → scrape 2x/week
-- Luxury independent: Slow posters → weekly  
+- Luxury independent: Slow posters → weekly
 - Aggregators (Hotel Dive, etc): Active daily → daily
 - Industry pubs: 2-3x/week content → every 3 days
 - Florida/Caribbean regional: Weekly content → weekly
@@ -30,7 +30,7 @@ FREQUENCY_RULES = {
     },
     "luxury_independent": {
         "scrape_frequency": "weekly",
-        "discovery_interval_days": 14, 
+        "discovery_interval_days": 14,
         "max_depth": 2,
         "notes_suffix": "Luxury brands post infrequently"
     },
@@ -82,11 +82,11 @@ async def tune_sources():
             select(Source).order_by(Source.source_type, Source.priority.desc())
         )
         sources = result.scalars().all()
-        
+
         print(f"📊 Tuning {len(sources)} sources\n")
         print(f"{'Source':<45} {'Type':<20} {'P':<3} {'Old Freq':<12} {'New Freq':<15} {'Discovery'}")
         print("─" * 130)
-        
+
         updated = 0
         for src in sources:
             rules = FREQUENCY_RULES.get(src.source_type, {
@@ -95,46 +95,46 @@ async def tune_sources():
                 "max_depth": 2,
                 "notes_suffix": "Unknown type"
             })
-            
+
             new_freq = rules["scrape_frequency"]
             discovery_days = rules["discovery_interval_days"]
-            
+
             # Priority override: high-priority sources get more frequent scraping
             if src.priority >= PRIORITY_OVERRIDE_THRESHOLD:
                 if new_freq in ("weekly", "twice_weekly"):
                     new_freq = "every_3_days"
                     discovery_days = min(discovery_days, 7)
-            
+
             # High-yield override: if source has historically found lots of leads
             if (src.leads_found or 0) > 10:
                 if new_freq == "weekly":
                     new_freq = "every_3_days"
-            
+
             old_freq = src.scrape_frequency
             changed = old_freq != new_freq
-            
+
             src.scrape_frequency = new_freq
             src.discovery_interval_days = discovery_days
             src.max_depth = rules.get("max_depth", src.max_depth)
-            
+
             marker = "🔄" if changed else "  "
             print(f"{marker} {src.name[:43]:<43} {src.source_type:<20} {src.priority:<3} {old_freq:<12} {new_freq:<15} {discovery_days}d")
-            
+
             if changed:
                 updated += 1
-        
+
         await session.commit()
         print(f"\n✅ Updated {updated} sources")
-        
+
         # Summary
         freq_counts = {}
         for src in sources:
             freq_counts[src.scrape_frequency] = freq_counts.get(src.scrape_frequency, 0) + 1
-        
+
         print(f"\n📋 Frequency Distribution:")
         for freq, count in sorted(freq_counts.items()):
             print(f"   {freq:<15} {count} sources")
-        
+
         # Estimate daily scrape load
         daily_map = {
             "daily": 1.0,

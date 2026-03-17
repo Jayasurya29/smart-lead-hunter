@@ -90,16 +90,19 @@ class APIKeyMiddleware(BaseHTTPMiddleware):
     def __init__(self, app, exclude_paths: list[str] | None = None):
         super().__init__(app)
         # Exact path matches — only these specific paths skip auth
-        self.exclude_exact = set(exclude_paths or [
-            "/health",
-            "/docs",
-            "/redoc",
-            "/openapi.json",
-        ])
+        self.exclude_exact = set(
+            exclude_paths
+            or [
+                "/health",
+                "/docs",
+                "/redoc",
+                "/openapi.json",
+            ]
+        )
         # Prefix matches — ALL sub-routes under these are public
         self.exclude_prefixes = [
-            "/dashboard",        # HTMX HTML pages (served by Jinja2)
-            "/static",           # Static files
+            "/dashboard",  # HTMX HTML pages (served by Jinja2)
+            "/static",  # Static files
             # SSE streams: EventSource can't send custom headers;
             # gated by one-time scrape_id/discovery_id tokens
             "/api/dashboard/scrape/stream",

@@ -40,7 +40,7 @@
                 hx-target="#detail-panel"
                 hx-swap="innerHTML"
                 onclick="document.querySelectorAll('.lead-row').forEach(r => r.classList.remove('bg-blue-100')); this.classList.add('bg-blue-100');">
-                
+
                 <!-- Score -->
                 <td class="px-3 py-2 whitespace-nowrap">
                     {% if lead.lead_score >= 70 %}
@@ -57,7 +57,7 @@
                     </span>
                     {% endif %}
                 </td>
-                
+
                 <!-- Hotel Name & Brand -->
                 <td class="px-3 py-2">
                     <div class="text-sm font-medium text-gray-900 truncate max-w-[200px]" title="{{ lead.hotel_name }}">
@@ -67,7 +67,7 @@
                     <div class="text-xs text-gray-500 truncate max-w-[200px]">{{ lead.brand }}</div>
                     {% endif %}
                 </td>
-                
+
                 <!-- Location -->
                 <td class="px-3 py-2 whitespace-nowrap">
                     <div class="text-sm text-gray-900">
@@ -82,12 +82,12 @@
                     </span>
                     {% endif %}
                 </td>
-                
+
                 <!-- Opening Date -->
                 <td class="px-3 py-2 whitespace-nowrap text-sm text-gray-500">
                     {{ lead.opening_date or lead.opening_year or '—' }}
                 </td>
-                
+
                 <!-- Status -->
                 <td class="px-3 py-2 whitespace-nowrap">
                     {% if lead.status == 'new' %}
@@ -108,7 +108,7 @@
                     </span>
                     {% endif %}
                 </td>
-                
+
                 <!-- Actions -->
                 <td class="px-3 py-2 whitespace-nowrap text-center" onclick="event.stopPropagation();">
                     {% if lead.status == 'new' %}
@@ -156,7 +156,7 @@
             ← Previous
         </span>
         {% endif %}
-        
+
         <!-- Page indicator -->
         <span class="px-3 py-2 text-sm text-gray-700">
             Page <strong>{{ pagination.page }}</strong> of <strong>{{ pagination.pages }}</strong>

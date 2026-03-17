@@ -801,8 +801,12 @@ async def list_leads(
     timeline: Optional[str] = None,  # hot, urgent, warm, cool, late, expired, tbd
     year: Optional[str] = None,  # 2025, 2026, 2027, 2028
     added: Optional[str] = None,  # today, this_week, last_7, last_30
-    sort: Optional[str] = "score_desc",  # newest, oldest, score_desc, score_asc, opening, name_asc
-    location: Optional[str] = None,  # south_florida, rest_florida, caribbean, california, etc.
+    sort: Optional[
+        str
+    ] = "score_desc",  # newest, oldest, score_desc, score_asc, opening, name_asc
+    location: Optional[
+        str
+    ] = None,  # south_florida, rest_florida, caribbean, california, etc.
     db: AsyncSession = Depends(get_db),
 ):
     """List leads with full filtering, pagination, and sorting.
@@ -828,7 +832,15 @@ async def list_leads(
     today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
 
     # ── Timeline filter ──
-    if timeline and timeline in ("hot", "urgent", "warm", "cool", "late", "expired", "tbd"):
+    if timeline and timeline in (
+        "hot",
+        "urgent",
+        "warm",
+        "cool",
+        "late",
+        "expired",
+        "tbd",
+    ):
         from app.services.utils import get_timeline_label
 
         label_map = {
@@ -886,40 +898,98 @@ async def list_leads(
     # ── Location filter (city-level granularity, ported from dashboard) ──
     if location:
         south_fl_cities = [
-            "miami", "miami beach", "fort lauderdale", "hallandale beach",
-            "west palm beach", "palm beach", "boca raton", "hollywood",
-            "deerfield beach", "delray beach", "aventura", "coral gables",
-            "key west", "key biscayne", "sweetwater", "doral", "hialeah",
-            "homestead", "sunny isles beach", "surfside", "bal harbour",
-            "north miami", "north miami beach", "miami gardens", "miami lakes",
-            "coconut grove", "pompano beach", "lauderdale by the sea",
-            "plantation", "weston", "davie", "sunrise", "pembroke pines",
-            "miramar", "cooper city", "boynton beach", "jupiter",
-            "riviera beach", "lake worth", "naples", "bonita springs",
-            "marco island", "fort myers", "cape coral", "sarasota",
-            "clearwater", "st. petersburg", "st petersburg",
+            "miami",
+            "miami beach",
+            "fort lauderdale",
+            "hallandale beach",
+            "west palm beach",
+            "palm beach",
+            "boca raton",
+            "hollywood",
+            "deerfield beach",
+            "delray beach",
+            "aventura",
+            "coral gables",
+            "key west",
+            "key biscayne",
+            "sweetwater",
+            "doral",
+            "hialeah",
+            "homestead",
+            "sunny isles beach",
+            "surfside",
+            "bal harbour",
+            "north miami",
+            "north miami beach",
+            "miami gardens",
+            "miami lakes",
+            "coconut grove",
+            "pompano beach",
+            "lauderdale by the sea",
+            "plantation",
+            "weston",
+            "davie",
+            "sunrise",
+            "pembroke pines",
+            "miramar",
+            "cooper city",
+            "boynton beach",
+            "jupiter",
+            "riviera beach",
+            "lake worth",
+            "naples",
+            "bonita springs",
+            "marco island",
+            "fort myers",
+            "cape coral",
+            "sarasota",
+            "clearwater",
+            "st. petersburg",
+            "st petersburg",
         ]
         caribbean_countries = [
-            "dominican republic", "bahamas", "jamaica", "cayman islands",
-            "barbados", "aruba", "turks & caicos islands", "turks and caicos",
-            "saint lucia", "st. lucia", "curacao", "u.s. virgin islands",
-            "antigua and barbuda", "trinidad and tobago", "puerto rico",
+            "dominican republic",
+            "bahamas",
+            "jamaica",
+            "cayman islands",
+            "barbados",
+            "aruba",
+            "turks & caicos islands",
+            "turks and caicos",
+            "saint lucia",
+            "st. lucia",
+            "curacao",
+            "u.s. virgin islands",
+            "antigua and barbuda",
+            "trinidad and tobago",
+            "puerto rico",
         ]
         southeast_states = [
-            "georgia", "tennessee", "south carolina", "north carolina",
-            "alabama", "mississippi", "arkansas", "virginia",
+            "georgia",
+            "tennessee",
+            "south carolina",
+            "north carolina",
+            "alabama",
+            "mississippi",
+            "arkansas",
+            "virginia",
         ]
         mountain_states = [
-            "utah", "wyoming", "idaho", "colorado", "montana",
-            "arizona", "new mexico",
+            "utah",
+            "wyoming",
+            "idaho",
+            "colorado",
+            "montana",
+            "arizona",
+            "new mexico",
         ]
 
         if location == "south_florida":
             loc_filter = func.lower(PotentialLead.city).in_(south_fl_cities)
         elif location == "rest_florida":
-            loc_filter = (
-                func.lower(PotentialLead.state) == "florida"
-            ) & ~func.lower(PotentialLead.city).in_(south_fl_cities)
+            loc_filter = (func.lower(PotentialLead.state) == "florida") & ~func.lower(
+                PotentialLead.city
+            ).in_(south_fl_cities)
         elif location == "caribbean":
             loc_filter = func.lower(PotentialLead.country).in_(caribbean_countries)
         elif location == "california":
@@ -956,7 +1026,6 @@ async def list_leads(
         db, query, count_query, page, per_page, order_by=order_by
     )
     return _lead_list_response(leads, total, page, per_page, pages)
-
 
 
 @app.get("/leads/hot", response_model=LeadListResponse, tags=["Leads"])

@@ -2,7 +2,7 @@
 # SMART LEAD HUNTER — Production Dockerfile
 # Fixes: AR5 (no Dockerfile) + SH1 (runs as non-root)
 # ============================================================
-# Multi-stage build: 
+# Multi-stage build:
 #   Stage 1 — Install Python deps + Playwright
 #   Stage 2 — Slim runtime image
 # ============================================================
