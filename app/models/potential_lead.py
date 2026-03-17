@@ -57,6 +57,9 @@ class PotentialLead(Base):
     # Hotel Details
     opening_date = Column(String(50))  # Flexible: "Q2 2026", "June 2026", "2026"
     opening_year = Column(Integer)  # Extracted year for filtering
+    timeline_label = Column(
+        String(10)
+    )  # HOT, URGENT, WARM, COOL, LATE, EXPIRED, TBD (computed on save/rescore)
     room_count = Column(Integer)
     description = Column(Text)
 
@@ -138,6 +141,7 @@ class PotentialLead(Base):
             # Project Details
             "opening_date": self.opening_date,
             "opening_year": self.opening_year,
+            "timeline_label": self.timeline_label,
             "room_count": self.room_count,
             "description": self.description,
             # Key Insights - THE IMPORTANT STUFF!

@@ -22,7 +22,7 @@ from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, ConfigDict
 from pathlib import Path
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func, text, or_, case, update, literal
+from sqlalchemy import select, func, text, or_, case, update
 
 import asyncio
 import json
@@ -598,12 +598,15 @@ async def _get_dashboard_stats(db: AsyncSession) -> dict:
 
     Uses SQLAlchemy conditional aggregation:  count() + filter()
     so the database scans the leads table once and the sources table once.
+
+    FIX H-04: Timeline counts now use the timeline_label column (SQL)
+    instead of fetching all opening_dates and computing in Python.
     """
     now = local_now()
     today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
     week_start = today_start - timedelta(days=now.weekday())
 
-    # -- Single query for ALL lead counts (Audit Fix P-04: portable case() syntax) --
+    # -- Single query for ALL lead counts + timeline counts --
     lead_result = await db.execute(
         select(
             func.count(PotentialLead.id).label("total"),
@@ -617,9 +620,47 @@ async def _get_dashboard_stats(db: AsyncSession) -> dict:
             func.sum(
                 case((PotentialLead.status.in_(["rejected", "bad"]), 1), else_=0)
             ).label("rejected"),
-            # Hot/Warm now calculated in Python (timeline-based, not score-based)
-            literal(0).label("hot"),
-            literal(0).label("warm"),
+            # FIX H-04: Timeline counts from timeline_label column (no Python loop)
+            func.sum(
+                case(
+                    (
+                        (PotentialLead.timeline_label == "HOT")
+                        & PotentialLead.status.in_(["new", "approved"]),
+                        1,
+                    ),
+                    else_=0,
+                )
+            ).label("hot"),
+            func.sum(
+                case(
+                    (
+                        (PotentialLead.timeline_label == "URGENT")
+                        & PotentialLead.status.in_(["new", "approved"]),
+                        1,
+                    ),
+                    else_=0,
+                )
+            ).label("urgent"),
+            func.sum(
+                case(
+                    (
+                        (PotentialLead.timeline_label == "WARM")
+                        & PotentialLead.status.in_(["new", "approved"]),
+                        1,
+                    ),
+                    else_=0,
+                )
+            ).label("warm"),
+            func.sum(
+                case(
+                    (
+                        (PotentialLead.timeline_label == "COOL")
+                        & PotentialLead.status.in_(["new", "approved"]),
+                        1,
+                    ),
+                    else_=0,
+                )
+            ).label("cool"),
             func.sum(case((PotentialLead.created_at >= today_start, 1), else_=0)).label(
                 "today"
             ),
@@ -633,7 +674,7 @@ async def _get_dashboard_stats(db: AsyncSession) -> dict:
     )
     lr = lead_result.one()
 
-    # -- Single query for ALL source counts (Audit Fix P-04) --
+    # -- Single query for ALL source counts --
     source_result = await db.execute(
         select(
             func.count(Source.id).label("total"),
@@ -645,30 +686,16 @@ async def _get_dashboard_stats(db: AsyncSession) -> dict:
     )
     sr = source_result.one()
 
-    # Calculate Hot/Warm/Urgent from opening timeline
-    from app.services.utils import get_timeline_label
-
-    timeline_result = await db.execute(
-        select(PotentialLead.opening_date).where(
-            PotentialLead.status.in_(["new", "approved"])
-        )
-    )
-    timeline_counts = {"HOT": 0, "URGENT": 0, "WARM": 0, "COOL": 0}
-    for row in timeline_result.scalars().all():
-        label = get_timeline_label(row or "")
-        if label in timeline_counts:
-            timeline_counts[label] += 1
-
     return {
         "total_leads": lr.total or 0,
         "new_leads": lr.new or 0,
         "approved_leads": lr.approved or 0,
         "pending_leads": lr.pending or 0,
         "rejected_leads": lr.rejected or 0,
-        "hot_leads": timeline_counts["HOT"],
-        "urgent_leads": timeline_counts["URGENT"],
-        "warm_leads": timeline_counts["WARM"],
-        "cool_leads": timeline_counts["COOL"],
+        "hot_leads": lr.hot or 0,
+        "urgent_leads": lr.urgent or 0,
+        "warm_leads": lr.warm or 0,
+        "cool_leads": lr.cool or 0,
         "leads_today": lr.today or 0,
         "leads_this_week": lr.this_week or 0,
         "deleted_leads": lr.deleted or 0,
@@ -831,7 +858,7 @@ async def list_leads(
     now = local_now()
     today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
 
-    # ── Timeline filter ──
+    # ── Timeline filter (uses precomputed column — no full-table scan) ──
     if timeline and timeline in (
         "hot",
         "urgent",
@@ -841,33 +868,9 @@ async def list_leads(
         "expired",
         "tbd",
     ):
-        from app.services.utils import get_timeline_label
-
-        label_map = {
-            "hot": "HOT",
-            "urgent": "URGENT",
-            "warm": "WARM",
-            "cool": "COOL",
-            "late": "LATE",
-            "expired": "EXPIRED",
-            "tbd": "TBD",
-        }
-        timeline_q = await db.execute(
-            select(PotentialLead.id, PotentialLead.opening_date).where(
-                PotentialLead.status.in_(["new", "approved"])
-            )
-        )
-        matching_ids = [
-            row[0]
-            for row in timeline_q.all()
-            if get_timeline_label(row[1] or "") == label_map[timeline]
-        ]
-        if matching_ids:
-            query = query.where(PotentialLead.id.in_(matching_ids))
-            count_query = count_query.where(PotentialLead.id.in_(matching_ids))
-        else:
-            query = query.where(PotentialLead.id == -1)
-            count_query = count_query.where(PotentialLead.id == -1)
+        label = timeline.upper()
+        query = query.where(PotentialLead.timeline_label == label)
+        count_query = count_query.where(PotentialLead.timeline_label == label)
 
     # ── Year filter ──
     if year:
@@ -1656,31 +1659,7 @@ async def dashboard_page(
             )
         )
     if score in ("hot", "urgent", "warm", "cool", "late", "expired", "tbd"):
-        from app.services.utils import get_timeline_label
-
-        timeline_q = await db.execute(
-            select(PotentialLead.id, PotentialLead.opening_date).where(
-                PotentialLead.status.in_(["new", "approved"])
-            )
-        )
-        label_map = {
-            "hot": "HOT",
-            "urgent": "URGENT",
-            "warm": "WARM",
-            "cool": "COOL",
-            "late": "LATE",
-            "expired": "EXPIRED",
-            "tbd": "TBD",
-        }
-        matching_ids = [
-            row[0]
-            for row in timeline_q.all()
-            if get_timeline_label(row[1] or "") == label_map[score]
-        ]
-        if matching_ids:
-            query = query.where(PotentialLead.id.in_(matching_ids))
-        else:
-            query = query.where(PotentialLead.id == -1)
+        query = query.where(PotentialLead.timeline_label == score.upper())
 
     if location:
         south_fl_cities = [
@@ -2014,6 +1993,12 @@ async def dashboard_edit_lead(
     # Audit Fix: Keep normalized name in sync when hotel_name changes
     if "hotel_name" in data and data["hotel_name"]:
         lead.hotel_name_normalized = normalize_hotel_name(data["hotel_name"])
+
+    # Keep timeline_label in sync when opening_date changes
+    if "opening_date" in data:
+        from app.services.utils import get_timeline_label
+
+        lead.timeline_label = get_timeline_label(data["opening_date"] or "")
 
     # Audit Fix 5b: Wrap room_count safely
     # Rescore lead after edits

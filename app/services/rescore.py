@@ -226,6 +226,11 @@ async def rescore_lead(lead_id: int, session: AsyncSession) -> Optional[Dict]:
     if score_result.get("location_type"):
         lead.location_type = score_result["location_type"]
 
+    # Recalculate timeline label from opening date
+    from app.services.utils import get_timeline_label
+
+    lead.timeline_label = get_timeline_label(lead.opening_date or "")
+
     # Update score tier
     if new_score >= SCORE_HOT_THRESHOLD:
         lead.lead_score_tier = "HOT"

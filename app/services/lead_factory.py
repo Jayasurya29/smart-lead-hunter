@@ -18,7 +18,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.potential_lead import PotentialLead
-from app.services.utils import normalize_hotel_name, local_now
+from app.services.utils import normalize_hotel_name, local_now, get_timeline_label
 from app.services.scorer import calculate_lead_score
 from app.config.intelligence_config import SCORE_HOT_THRESHOLD, SCORE_WARM_THRESHOLD
 
@@ -119,6 +119,7 @@ def prepare_lead(
         opening_date=lead_dict.get("opening_date"),
         opening_year=score_result.get("opening_year")
         or extract_year(lead_dict.get("opening_date")),
+        timeline_label=get_timeline_label(lead_dict.get("opening_date") or ""),
         room_count=room_count,
         contact_name=lead_dict.get("contact_name"),
         contact_title=lead_dict.get("contact_title"),
@@ -181,6 +182,7 @@ def enrich_existing_lead(existing: PotentialLead, lead_dict: Dict) -> bool:
         elif field == "opening_date" and len(str(new_val)) > len(str(old_val)):
             # "March 2026" is more specific than "2026"
             setattr(existing, field, new_val)
+            existing.timeline_label = get_timeline_label(str(new_val))
             enriched = True
         elif field == "room_count" and not old_val and new_val:
             setattr(existing, field, new_val)
@@ -229,6 +231,9 @@ def enrich_existing_lead(existing: PotentialLead, lead_dict: Dict) -> bool:
             enriched = True
 
     if enriched:
+        # Recalculate timeline_label if opening_date was set or updated
+        if existing.opening_date:
+            existing.timeline_label = get_timeline_label(existing.opening_date)
         existing.updated_at = local_now()
 
     return enriched

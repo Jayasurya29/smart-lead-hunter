@@ -1,7 +1,7 @@
 import React from 'react'
 import type { Lead } from '@/api/types'
 import { cn, getScoreBg, getTierLabel, getTierColor, formatLocation, relativeDate, getTimelineLabel, getTimelineColor } from '@/lib/utils'
-import { ChevronLeft, ChevronRight, Hotel, CheckCircle2, XCircle, Undo2, Trash2 } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Hotel, CheckCircle2, XCircle, Undo2, Trash2, Loader2 } from 'lucide-react'
 import { useApproveLead, useRejectLead, useRestoreLead, useDeleteLead } from '@/hooks/useLeads'
 import type { UseMutationResult } from '@tanstack/react-query'
 
@@ -142,6 +142,13 @@ function LeadRow({ lead, isSelected, onSelect, approveMut, rejectMut, restoreMut
   const isApproved = lead.status === 'approved'
   const isRejected = lead.status === 'rejected' || lead.status === 'deleted'
 
+  // FIX L-06: Track if THIS lead has a pending mutation (prevents double-clicks + CRM double-push)
+  const isApproving = approveMut.isPending && approveMut.variables === lead.id
+  const isRejecting = rejectMut.isPending && (rejectMut.variables as any)?.id === lead.id
+  const isRestoring = restoreMut.isPending && restoreMut.variables === lead.id
+  const isDeleting = deleteMut.isPending && deleteMut.variables === lead.id
+  const isBusy = isApproving || isRejecting || isRestoring || isDeleting
+
   return (
     <tr
       onClick={onSelect}
@@ -206,16 +213,26 @@ function LeadRow({ lead, isSelected, onSelect, approveMut, rejectMut, restoreMut
         <div className="row-actions flex items-center justify-end gap-0.5">
           {isNew && (
             <>
-              <ActionBtn onClick={(e) => { e.stopPropagation(); approveMut.mutate(lead.id) }} color="emerald" title="Approve"><CheckCircle2 className="w-4 h-4" /></ActionBtn>
-              <ActionBtn onClick={(e) => { e.stopPropagation(); rejectMut.mutate({ id: lead.id }) }} color="red" title="Reject"><XCircle className="w-4 h-4" /></ActionBtn>
-              <ActionBtn onClick={(e) => { e.stopPropagation(); deleteMut.mutate(lead.id) }} color="gray" title="Delete"><Trash2 className="w-4 h-4" /></ActionBtn>
+              <ActionBtn onClick={(e) => { e.stopPropagation(); approveMut.mutate(lead.id) }} color="emerald" title="Approve" disabled={isBusy} loading={isApproving}>
+                {isApproving ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle2 className="w-4 h-4" />}
+              </ActionBtn>
+              <ActionBtn onClick={(e) => { e.stopPropagation(); rejectMut.mutate({ id: lead.id }) }} color="red" title="Reject" disabled={isBusy} loading={isRejecting}>
+                {isRejecting ? <Loader2 className="w-4 h-4 animate-spin" /> : <XCircle className="w-4 h-4" />}
+              </ActionBtn>
+              <ActionBtn onClick={(e) => { e.stopPropagation(); deleteMut.mutate(lead.id) }} color="gray" title="Delete" disabled={isBusy} loading={isDeleting}>
+                {isDeleting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
+              </ActionBtn>
             </>
           )}
           {isApproved && (
-            <ActionBtn onClick={(e) => { e.stopPropagation(); rejectMut.mutate({ id: lead.id }) }} color="red" title="Reject"><XCircle className="w-4 h-4" /></ActionBtn>
+            <ActionBtn onClick={(e) => { e.stopPropagation(); rejectMut.mutate({ id: lead.id }) }} color="red" title="Reject" disabled={isBusy} loading={isRejecting}>
+              {isRejecting ? <Loader2 className="w-4 h-4 animate-spin" /> : <XCircle className="w-4 h-4" />}
+            </ActionBtn>
           )}
           {isRejected && (
-            <ActionBtn onClick={(e) => { e.stopPropagation(); restoreMut.mutate(lead.id) }} color="blue" title="Restore"><Undo2 className="w-4 h-4" /></ActionBtn>
+            <ActionBtn onClick={(e) => { e.stopPropagation(); restoreMut.mutate(lead.id) }} color="blue" title="Restore" disabled={isBusy} loading={isRestoring}>
+              {isRestoring ? <Loader2 className="w-4 h-4 animate-spin" /> : <Undo2 className="w-4 h-4" />}
+            </ActionBtn>
           )}
         </div>
       </td>
@@ -228,9 +245,11 @@ interface ActionBtnProps {
   color: string
   title: string
   children: React.ReactNode
+  disabled?: boolean
+  loading?: boolean
 }
 
-function ActionBtn({ onClick, color, title, children }: ActionBtnProps) {
+function ActionBtn({ onClick, color, title, children, disabled, loading }: ActionBtnProps) {
   const colors: Record<string, string> = {
     emerald: 'hover:bg-emerald-50 text-emerald-500 hover:text-emerald-700',
     red: 'hover:bg-red-50 text-red-400 hover:text-red-600',
@@ -238,7 +257,16 @@ function ActionBtn({ onClick, color, title, children }: ActionBtnProps) {
     gray: 'hover:bg-stone-100 text-stone-400 hover:text-stone-600',
   }
   return (
-    <button onClick={onClick} title={title} className={cn('p-2 rounded-lg transition-all duration-100', colors[color] || colors.gray)}>
+    <button
+      onClick={onClick}
+      title={title}
+      disabled={disabled}
+      className={cn(
+        'p-2 rounded-lg transition-all duration-100',
+        disabled ? 'opacity-40 cursor-not-allowed' : colors[color] || colors.gray,
+        loading && 'opacity-70',
+      )}
+    >
       {children}
     </button>
   )
