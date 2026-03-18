@@ -33,7 +33,9 @@ export function useLeads(tab: LeadTab, page: number, search: string, filters: { 
       sort: filters.sort || undefined,
     }),
     refetchInterval: 30_000,
-    staleTime: 10_000,
+    staleTime: 30_000,    // Show cached data for 30s before refetching
+    gcTime: 5 * 60_000,   // Keep in memory 5min (survives tab switches)
+    placeholderData: (prev: any) => prev,  // Show old data instantly while refetching
   })
 }
 
@@ -50,7 +52,8 @@ export function useStats() {
     queryKey: ['stats'],
     queryFn: fetchStats,
     refetchInterval: 30_000,
-    staleTime: 10_000,
+    staleTime: 30_000,    // Cached stats show instantly for 30s
+    gcTime: 5 * 60_000,   // Survive tab switches
   })
 }
 

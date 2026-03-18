@@ -56,9 +56,6 @@ class Source(Base):
     # Notes
     notes = Column(Text)
 
-    # Source Intelligence - adaptive learning data
-    source_intelligence = Column(JSONB, default=dict)
-
     # Source Intelligence — adaptive learning data
     source_intelligence = Column(JSONB, default=dict)
 

@@ -1,56 +1,30 @@
-import { useState, useRef, useEffect } from 'react'
-import { useQueryClient } from '@tanstack/react-query'
-import { X, Link2, Loader2, CheckCircle2, AlertCircle } from 'lucide-react'
-import { triggerExtractUrl, createSSEStream } from '@/api/leads'
-import type { SSEEvent } from '@/api/types'
+import { useState } from 'react'
+import { X, Link2, Loader2 } from 'lucide-react'
+import { triggerExtractUrl } from '@/api/leads'
+import { useBackgroundTask } from '@/hooks/useBackgroundTask'
 import { cn } from '@/lib/utils'
 
 interface Props { onClose: () => void }
 
 export default function ExtractModal({ onClose }: Props) {
   const [url, setUrl] = useState('')
-  const [status, setStatus] = useState<'idle' | 'running' | 'done' | 'error'>('idle')
-  const [logs, setLogs] = useState<string[]>([])
-  const logRef = useRef<HTMLDivElement>(null)
-  const esRef = useRef<EventSource | null>(null)
-  const qc = useQueryClient()
+  const [starting, setStarting] = useState(false)
+  const [error, setError] = useState('')
 
-  useEffect(() => () => { esRef.current?.close() }, [])
-  useEffect(() => { if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight }, [logs])
+  const { startTask } = useBackgroundTask()
 
   async function handleExtract() {
     if (!url.trim()) return
-    setStatus('running')
-    setLogs(['Submitting URL for extraction...'])
+    setStarting(true)
+    setError('')
     try {
       const result = await triggerExtractUrl(url.trim())
       const extractId = result.extract_id || ''
-      const es = createSSEStream(`/api/dashboard/extract-url/stream?extract_id=${extractId}`)
-      esRef.current = es
-      es.onmessage = (e) => {
-        try {
-          const d: SSEEvent = JSON.parse(e.data)
-          if (d.message) setLogs(p => [...p, d.message])
-          if (d.type === 'complete' || d.type === 'error') {
-            setStatus(d.type === 'error' ? 'error' : 'done')
-            es.close()
-            qc.invalidateQueries({ queryKey: ['leads'] })
-            qc.invalidateQueries({ queryKey: ['stats'] })
-          }
-        } catch {
-          if (e.data && e.data !== 'ping') setLogs(p => [...p, e.data])
-        }
-      }
-      es.onerror = () => {
-        es.close()
-        setStatus('done')
-        setLogs(p => [...p, '— Stream ended —'])
-        qc.invalidateQueries({ queryKey: ['leads'] })
-        qc.invalidateQueries({ queryKey: ['stats'] })
-      }
+      startTask('extract', `/api/dashboard/extract-url/stream?extract_id=${extractId}`)
+      onClose()
     } catch (err: any) {
-      setStatus('error')
-      setLogs(p => [...p, `Error: ${err?.response?.data?.message || err.message || 'Failed to extract'}`])
+      setStarting(false)
+      setError(err?.response?.data?.message || err.message || 'Failed to start extraction')
     }
   }
 
@@ -69,52 +43,33 @@ export default function ExtractModal({ onClose }: Props) {
           </button>
         </div>
 
-        <div className="p-5">
-          {status === 'idle' && (
-            <div className="space-y-4">
-              <div>
-                <label className="text-[11px] font-semibold text-stone-500 uppercase tracking-wider mb-2 block">Article URL</label>
-                <input type="url" value={url} onChange={e => setUrl(e.target.value)}
-                  placeholder="https://example.com/hotel-openings-2026"
-                  className="w-full px-3.5 py-2.5 text-sm border-2 border-stone-200 rounded-lg focus:ring-0 focus:border-blue-400 outline-none transition-colors bg-white"
-                  autoFocus onKeyDown={e => e.key === 'Enter' && url.trim() && handleExtract()} />
-                <p className="text-[10px] text-stone-400 mt-1.5">Paste any article with hotel opening news — we'll extract and score every lead.</p>
-              </div>
-              <button onClick={handleExtract} disabled={!url.trim()}
-                className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-blue-600 text-white text-sm font-semibold rounded-lg hover:bg-blue-700 disabled:bg-stone-300 disabled:text-stone-500 transition-all shadow-sm active:scale-[0.98]">
-                <Link2 className="w-4 h-4" /> Extract Leads
-              </button>
-            </div>
-          )}
-
-          {status !== 'idle' && (
-            <div>
-              <div className="flex items-center gap-2 mb-3">
-                {status === 'running' && <Loader2 className="w-4 h-4 text-blue-500 animate-spin" />}
-                {status === 'done' && <CheckCircle2 className="w-4 h-4 text-emerald-500" />}
-                {status === 'error' && <AlertCircle className="w-4 h-4 text-red-500" />}
-                <span className="text-xs font-semibold text-stone-800">
-                  {status === 'running' ? 'Extracting leads...' : status === 'done' ? 'Extraction complete' : 'Extraction failed'}
-                </span>
-              </div>
-              <div ref={logRef} className="bg-stone-950 text-stone-400 rounded-lg p-3 h-60 overflow-y-auto font-mono text-[11px] leading-relaxed">
-                {logs.map((log, i) => (
-                  <div key={i} className={cn(
-                    log.includes('Error') || log.includes('❌') ? 'text-red-400' :
-                    log.includes('✅') || log.includes('Saved') ? 'text-emerald-400' :
-                    log.includes('Phase') || log.includes('—') ? 'text-blue-400' : '',
-                  )}>{log}</div>
-                ))}
-              </div>
-            </div>
-          )}
-        </div>
-
-        {(status === 'done' || status === 'error') && (
-          <div className="px-5 py-3 border-t border-stone-200 bg-stone-50 flex justify-end">
-            <button onClick={onClose} className="px-4 py-1.5 text-xs font-semibold bg-stone-900 text-white rounded-lg hover:bg-stone-800 transition">Close</button>
+        <div className="p-5 space-y-4">
+          <div>
+            <label className="text-[11px] font-semibold text-stone-500 uppercase tracking-wider mb-2 block">Article URL</label>
+            <input type="url" value={url} onChange={e => setUrl(e.target.value)}
+              placeholder="https://example.com/hotel-openings-2026"
+              className="w-full px-3.5 py-2.5 text-sm border-2 border-stone-200 rounded-lg focus:ring-0 focus:border-blue-400 outline-none transition-colors bg-white"
+              autoFocus
+              disabled={starting}
+              onKeyDown={e => e.key === 'Enter' && url.trim() && !starting && handleExtract()} />
+            <p className="text-[10px] text-stone-400 mt-1.5">Paste any article with hotel opening news — we'll extract and score every lead.</p>
           </div>
-        )}
+
+          {error && (
+            <div className="text-xs text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">{error}</div>
+          )}
+
+          <button onClick={handleExtract} disabled={!url.trim() || starting}
+            className={cn(
+              'w-full flex items-center justify-center gap-2 px-4 py-2.5 text-sm font-semibold rounded-lg transition-all shadow-sm active:scale-[0.98]',
+              !url.trim() || starting
+                ? 'bg-stone-300 text-stone-500 cursor-not-allowed shadow-none'
+                : 'bg-blue-600 text-white hover:bg-blue-700',
+            )}>
+            {starting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Link2 className="w-4 h-4" />}
+            {starting ? 'Starting...' : 'Extract Leads'}
+          </button>
+        </div>
       </div>
     </div>
   )

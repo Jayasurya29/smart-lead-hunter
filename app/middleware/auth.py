@@ -169,7 +169,10 @@ class APIKeyMiddleware(BaseHTTPMiddleware):
             try:
                 from jose import jwt as jose_jwt, JWTError
 
-                jwt_secret = os.getenv("JWT_SECRET_KEY", "")
+                jwt_secret = (
+                    os.getenv("JWT_SECRET_KEY", "")
+                    or "dev-only-insecure-key-do-not-use-in-production"
+                )
                 if jwt_secret and jwt_secret != "CHANGE_ME_32_CHARS_MINIMUM_SECRET":
                     payload = jose_jwt.decode(
                         jwt_cookie, jwt_secret, algorithms=["HS256"]
@@ -203,5 +206,3 @@ class APIKeyMiddleware(BaseHTTPMiddleware):
                 "detail": "Authentication required. Provide X-API-Key header or sign in."
             },
         )
-
-        return await call_next(request)

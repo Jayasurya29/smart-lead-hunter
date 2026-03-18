@@ -28,6 +28,7 @@ import os
 import random
 import string
 import time
+import re as _re
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 from typing import Optional
@@ -36,7 +37,7 @@ import bcrypt
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from fastapi.responses import JSONResponse
 from jose import JWTError, jwt
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -102,11 +103,28 @@ def _get_client_ip(request: Request) -> str:
 
 # ── Schemas ─────────────────────────────────────────────────────────────────
 
+_AUTH_EMAIL_RE = _re.compile(r"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$")
+
 
 class LoginRequest(BaseModel):
     email: str
     password: str
     remember: bool = False
+
+    @field_validator("email")
+    @classmethod
+    def validate_email(cls, v: str) -> str:
+        v = v.strip().lower()
+        if not v or not _AUTH_EMAIL_RE.match(v):
+            raise ValueError("Invalid email format")
+        return v
+
+    @field_validator("password")
+    @classmethod
+    def password_not_empty(cls, v: str) -> str:
+        if not v:
+            raise ValueError("Password cannot be empty")
+        return v
 
 
 class RegisterRequest(BaseModel):
@@ -116,14 +134,72 @@ class RegisterRequest(BaseModel):
     role: str = "sales"
     password: str
 
+    @field_validator("first_name", "last_name")
+    @classmethod
+    def name_not_empty(cls, v: str) -> str:
+        v = v.strip()
+        if not v:
+            raise ValueError("Name cannot be empty")
+        if len(v) > 100:
+            raise ValueError("Name must be 100 characters or fewer")
+        return v
+
+    @field_validator("email")
+    @classmethod
+    def validate_email(cls, v: str) -> str:
+        v = v.strip().lower()
+        if not v or not _AUTH_EMAIL_RE.match(v):
+            raise ValueError("Invalid email format")
+        return v
+
+    @field_validator("role")
+    @classmethod
+    def validate_role(cls, v: str) -> str:
+        if v not in VALID_ROLES:
+            raise ValueError(
+                f"Invalid role: {v}. Must be one of: {', '.join(sorted(VALID_ROLES))}"
+            )
+        return v
+
+    @field_validator("password")
+    @classmethod
+    def password_not_empty(cls, v: str) -> str:
+        if not v:
+            raise ValueError("Password cannot be empty")
+        return v
+
 
 class VerifyRequest(BaseModel):
     email: str
     code: str
 
+    @field_validator("email")
+    @classmethod
+    def validate_email(cls, v: str) -> str:
+        v = v.strip().lower()
+        if not v or not _AUTH_EMAIL_RE.match(v):
+            raise ValueError("Invalid email format")
+        return v
+
+    @field_validator("code")
+    @classmethod
+    def validate_code(cls, v: str) -> str:
+        v = v.strip()
+        if not v or not v.isdigit() or len(v) != 6:
+            raise ValueError("Code must be exactly 6 digits")
+        return v
+
 
 class ResendRequest(BaseModel):
     email: str
+
+    @field_validator("email")
+    @classmethod
+    def validate_email(cls, v: str) -> str:
+        v = v.strip().lower()
+        if not v or not _AUTH_EMAIL_RE.match(v):
+            raise ValueError("Invalid email format")
+        return v
 
 
 # ── Password helpers ─────────────────────────────────────────────────────────

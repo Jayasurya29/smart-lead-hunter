@@ -360,6 +360,69 @@ async def dashboard_edit_lead(
     """Edit lead fields from the detail panel"""
     data = await checked_json(request)
 
+    # ── Input validation ──
+    import re as _re
+
+    _email_re = _re.compile(r"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$")
+    _valid_tiers = {
+        "tier1_ultra_luxury",
+        "tier2_luxury",
+        "tier3_upper_upscale",
+        "tier4_upscale",
+        "tier5_skip",
+        "unknown",
+        "",
+    }
+    errors = []
+
+    if "hotel_name" in data:
+        name = str(data["hotel_name"]).strip() if data["hotel_name"] else ""
+        if not name:
+            errors.append("Hotel name cannot be empty")
+        elif len(name) > 255:
+            errors.append("Hotel name must be 255 characters or fewer")
+
+    if "contact_email" in data and data["contact_email"]:
+        email = str(data["contact_email"]).strip()
+        if email and not _email_re.match(email):
+            errors.append(f"Invalid email format: {email}")
+
+    if "room_count" in data and data["room_count"] is not None:
+        try:
+            rc = int(data["room_count"])
+            if rc < 0:
+                errors.append("Room count cannot be negative")
+        except (ValueError, TypeError):
+            errors.append("Room count must be a number")
+
+    if "brand_tier" in data and data["brand_tier"]:
+        if str(data["brand_tier"]).strip() not in _valid_tiers:
+            errors.append(f"Invalid brand tier: {data['brand_tier']}")
+
+    # Cap string field lengths
+    for field, max_len in [
+        ("city", 100),
+        ("state", 100),
+        ("country", 100),
+        ("brand", 100),
+        ("contact_name", 200),
+        ("contact_title", 100),
+        ("contact_phone", 50),
+        ("management_company", 200),
+        ("developer", 200),
+        ("owner", 200),
+        ("opening_date", 50),
+    ]:
+        if field in data and data[field] and len(str(data[field])) > max_len:
+            errors.append(f"{field} must be {max_len} characters or fewer")
+
+    for field, max_len in [("description", 5000), ("notes", 5000)]:
+        if field in data and data[field] and len(str(data[field])) > max_len:
+            errors.append(f"{field} must be {max_len} characters or fewer")
+
+    if errors:
+        return JSONResponse(content={"detail": "; ".join(errors)}, status_code=422)
+
     result = await db.execute(select(PotentialLead).where(PotentialLead.id == lead_id))
     lead = result.scalar_one_or_none()
 

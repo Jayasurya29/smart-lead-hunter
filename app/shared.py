@@ -255,28 +255,81 @@ def lead_list_response(leads, total, page, per_page, pages) -> LeadListResponse:
     )
 
 
+# ── Persistent Redis connection pool (singleton) ──
+_stats_redis = None
+_stats_redis_broken = False
+
+
+async def _get_redis():
+    """Get or create a persistent Redis connection. Returns None if unavailable."""
+    global _stats_redis, _stats_redis_broken
+
+    # Don't retry a broken connection every request — backoff for 60s
+    if _stats_redis_broken:
+        return None
+
+    if _stats_redis is not None:
+        try:
+            await _stats_redis.ping()
+            return _stats_redis
+        except Exception:
+            # Connection went stale — recreate
+            try:
+                await _stats_redis.aclose()
+            except Exception:
+                pass
+            _stats_redis = None
+
+    try:
+        from app.config import settings
+        import redis.asyncio as aioredis
+
+        redis_url = getattr(settings, "redis_url", None)
+        if not redis_url:
+            return None
+
+        _stats_redis = aioredis.from_url(
+            redis_url,
+            socket_connect_timeout=1,
+            socket_timeout=1,
+            decode_responses=True,
+        )
+        await _stats_redis.ping()
+        return _stats_redis
+    except Exception:
+        _stats_redis = None
+        _stats_redis_broken = True
+
+        # Reset broken flag after 60s so it retries
+        async def _reset_broken():
+            import asyncio
+
+            global _stats_redis_broken
+            await asyncio.sleep(60)
+            _stats_redis_broken = False
+
+        import asyncio
+
+        asyncio.create_task(_reset_broken())
+        return None
+
+
 async def get_dashboard_stats(db: AsyncSession) -> dict:
     """Fetch all dashboard stats in 2 queries using SQL aggregation.
 
     Results are cached in Redis for 30 seconds to reduce DB load
     when multiple browser tabs poll /stats simultaneously.
+    Uses a persistent connection pool — no new TCP handshake per request.
     """
-    # Try Redis cache first
-    try:
-        from app.config import settings
-
-        redis_url = getattr(settings, "redis_url", None)
-        if redis_url:
-            import redis.asyncio as aioredis
-
-            r = aioredis.from_url(redis_url, socket_connect_timeout=1)
+    # Try Redis cache first (persistent connection, sub-ms)
+    r = await _get_redis()
+    if r:
+        try:
             cached = await r.get("slh:dashboard_stats")
             if cached:
-                await r.aclose()
                 return json.loads(cached)
-            await r.aclose()
-    except Exception:
-        pass  # Cache miss or Redis down — fall through to DB
+        except Exception:
+            pass  # Cache miss or error — fall through to DB
 
     now = local_now()
     today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
@@ -377,18 +430,11 @@ async def get_dashboard_stats(db: AsyncSession) -> dict:
         "healthy_sources": sr.healthy or 0,
     }
 
-    # Cache in Redis (30s TTL)
-    try:
-        from app.config import settings
-
-        redis_url = getattr(settings, "redis_url", None)
-        if redis_url:
-            import redis.asyncio as aioredis
-
-            r = aioredis.from_url(redis_url, socket_connect_timeout=1)
+    # Cache in Redis (30s TTL) — reuses persistent connection
+    if r:
+        try:
             await r.setex("slh:dashboard_stats", 30, json.dumps(stats))
-            await r.aclose()
-    except Exception:
-        pass  # Cache write failed — no big deal
+        except Exception:
+            pass
 
     return stats
