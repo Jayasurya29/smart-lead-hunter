@@ -48,3 +48,68 @@ select.filter-select {
 .tab-active::after { content: ''; position: absolute; bottom: -1px; left: 0; right: 0; height: 2px; background: #253d5e; border-radius: 2px 2px 0 0; }
 .score-hot { box-shadow: 0 0 0 3px rgba(232,93,74,0.1); }
 .score-warm { box-shadow: 0 0 0 3px rgba(212,168,83,0.1); }
+
+/* ── Add these keyframes to the BOTTOM of index.css ── */
+
+/* Auth page animations */
+@keyframes gradientShift {
+  0%   { background-position: 0% 50%; }
+  50%  { background-position: 100% 50%; }
+  100% { background-position: 0% 50%; }
+}
+@keyframes logoFloat {
+  0%, 100% { transform: translateY(0) scale(1); box-shadow: 0 20px 60px rgba(0,0,0,0.35); }
+  50%       { transform: translateY(-12px) scale(1.03); box-shadow: 0 28px 72px rgba(0,0,0,0.45); }
+}
+@keyframes blobFloat {
+  0%, 100% { transform: translate(0,0) scale(1); }
+  33%       { transform: translate(30px,-50px) scale(1.1); }
+  66%       { transform: translate(-20px,30px) scale(0.9); }
+}
+@keyframes dotGrid {
+  0%   { transform: translate(0,0); }
+  100% { transform: translate(48px,48px); }
+}
+@keyframes patternMove {
+  0%   { transform: translate(0,0); }
+  100% { transform: translate(28px,28px); }
+}
+@keyframes pulseDot {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50%       { opacity: 0.4; transform: scale(0.7); }
+}
+@keyframes cardSlideUp {
+  from { opacity: 0; transform: translateY(32px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@keyframes iconPulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(245,158,11,0.4); }
+  50%       { box-shadow: 0 0 0 16px rgba(245,158,11,0); }
+}
+@keyframes otpShake {
+  0%, 100% { transform: translateX(0); }
+  25%       { transform: translateX(-8px); }
+  75%       { transform: translateX(8px); }
+}
+@keyframes toastIn {
+  from { transform: translateX(400px); opacity: 0; }
+  to   { transform: translateX(0);     opacity: 1; }
+}
+@keyframes modalIn {
+  from { opacity: 0; transform: translateY(-32px) scale(0.95); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+.animate-gradient-shift { animation: gradientShift 15s ease infinite; background-size: 200% 200%; }
+.animate-logo-float     { animation: logoFloat 3s ease-in-out infinite; }
+.animate-blob-1         { animation: blobFloat 10s ease-in-out infinite; animation-delay: 0s; }
+.animate-blob-2         { animation: blobFloat 10s ease-in-out infinite; animation-delay: 2s; }
+.animate-blob-3         { animation: blobFloat 10s ease-in-out infinite; animation-delay: 4s; }
+.animate-dot-grid       { animation: dotGrid 20s linear infinite; }
+.animate-pattern-move   { animation: patternMove 20s linear infinite; }
+.animate-pulse-dot      { animation: pulseDot 2s ease-in-out infinite; }
+.animate-card-slide-up  { animation: cardSlideUp 0.55s ease-out; }
+.animate-icon-pulse     { animation: iconPulse 2s ease-in-out infinite; }
+.animate-otp-shake      { animation: otpShake 0.4s ease; }
+.animate-toast-in       { animation: toastIn 0.35s cubic-bezier(0.68,-0.55,0.265,1.55); }
+.animate-modal-in       { animation: modalIn 0.35s ease-out; }

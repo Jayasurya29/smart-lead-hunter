@@ -78,7 +78,7 @@ async def _cleanup_stale_data(_patch_engine):
 
 @pytest_asyncio.fixture
 async def client():
-    from app.main import app
+    from app.main_old import app
 
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(

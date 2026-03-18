@@ -103,6 +103,7 @@ class APIKeyMiddleware(BaseHTTPMiddleware):
         self.exclude_prefixes = [
             "/dashboard",  # HTMX HTML pages (served by Jinja2)
             "/static",  # Static files
+            "/auth/",  # Login/register/verify (must work without auth)
             # SSE streams: EventSource can't send custom headers;
             # gated by one-time scrape_id/discovery_id tokens
             "/api/dashboard/scrape/stream",
@@ -146,34 +147,61 @@ class APIKeyMiddleware(BaseHTTPMiddleware):
         if not needs_auth:
             return await call_next(request)
 
-        # Validate API key from header
+        # ── AUTH CHECK: API Key OR JWT Cookie ──
+        # Method 1: X-API-Key header (for scripts, Celery, automation)
         api_key = request.headers.get("X-API-Key", "")
-        # Fallback: check query param (for EventSource which can't set headers)
+        # Method 2: api_key query param (for EventSource which can't set headers)
         if not api_key:
             api_key = request.query_params.get("api_key", "")
 
-        try:
-            valid_key = _get_valid_api_key()
-        except RuntimeError:
-            # If API_AUTH_KEY not set, behaviour depends on environment
-            env = os.getenv("ENVIRONMENT", "development")
-            if env == "production":
-                return JSONResponse(
-                    status_code=500,
-                    content={"detail": "Server misconfigured: API_AUTH_KEY not set"},
+        # Check API key first (fast path for automation)
+        if api_key:
+            try:
+                valid_key = _get_valid_api_key()
+                if secrets.compare_digest(api_key, valid_key):
+                    return await call_next(request)
+            except RuntimeError:
+                pass  # API_AUTH_KEY not set — try JWT below
+
+        # Method 3: JWT cookie (for browser sessions)
+        jwt_cookie = request.cookies.get("slh_session", "")
+        if jwt_cookie:
+            try:
+                from jose import jwt as jose_jwt, JWTError
+
+                jwt_secret = os.getenv("JWT_SECRET_KEY", "")
+                if jwt_secret and jwt_secret != "CHANGE_ME_32_CHARS_MINIMUM_SECRET":
+                    payload = jose_jwt.decode(
+                        jwt_cookie, jwt_secret, algorithms=["HS256"]
+                    )
+                    if payload.get("sub"):
+                        return await call_next(request)
+            except (JWTError, Exception):
+                pass  # Invalid/expired token — fall through to reject
+
+        # Neither method worked — check if we should allow dev bypass
+        if not api_key and not jwt_cookie:
+            try:
+                _get_valid_api_key()
+            except RuntimeError:
+                env = os.getenv("ENVIRONMENT", "development")
+                if env == "production":
+                    return JSONResponse(
+                        status_code=500,
+                        content={"detail": "Server misconfigured: no auth configured"},
+                    )
+                import logging as _logging
+
+                _logging.getLogger(__name__).warning(
+                    "No auth configured — allowing request (dev mode only)"
                 )
-            # Dev mode — allow through but log warning
-            import logging as _logging
+                return await call_next(request)
 
-            _logging.getLogger(__name__).warning(
-                "API_AUTH_KEY not set — auth disabled (dev mode only)"
-            )
-            return await call_next(request)
-
-        if not api_key or not secrets.compare_digest(api_key, valid_key):
-            return JSONResponse(
-                status_code=401,
-                content={"detail": "Invalid or missing X-API-Key header"},
-            )
+        return JSONResponse(
+            status_code=401,
+            content={
+                "detail": "Authentication required. Provide X-API-Key header or sign in."
+            },
+        )
 
         return await call_next(request)

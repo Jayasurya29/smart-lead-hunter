@@ -29,6 +29,7 @@ from app.routes.sources import router as sources_router
 from app.routes.dashboard import router as dashboard_router
 from app.routes.scraping import router as scraping_router
 from app.routes.contacts import router as contacts_router
+from app.routes.auth import router as auth_router
 
 logger = logging.getLogger(__name__)
 
@@ -161,6 +162,7 @@ async def rate_limit_middleware(request: Request, call_next):
 # -----------------------------------------------------------------------------
 # Include Route Modules
 # -----------------------------------------------------------------------------
+app.include_router(auth_router)  # /auth/* — must be before other routes
 app.include_router(health_router)
 app.include_router(leads_router)
 app.include_router(sources_router)

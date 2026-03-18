@@ -1,66 +1,72 @@
 import { createContext, useContext, useState, useEffect, ReactNode } from 'react'
 import api from '@/api/client'
 
+interface User {
+  id: number
+  first_name: string
+  last_name: string
+  email: string
+  role: 'sales' | 'admin'
+}
+
 interface AuthContextType {
+  user: User | null
   isAuthenticated: boolean
   isLoading: boolean
-  login: (apiKey: string) => Promise<boolean>
-  logout: () => void
+  login: (email: string, password: string, remember?: boolean) => Promise<{ success: boolean; error?: string }>
+  logout: () => Promise<void>
 }
 
 const AuthContext = createContext<AuthContextType | null>(null)
 
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [isAuthenticated, setIsAuthenticated] = useState(false)
+  const [user, setUser] = useState<User | null>(null)
   const [isLoading, setIsLoading] = useState(true)
 
   useEffect(() => {
+    // On mount, check if we have a valid session (cookie-based, browser handles it)
     checkAuth()
   }, [])
 
   async function checkAuth() {
-    const token = localStorage.getItem('slh_token')
-    if (!token) {
+    try {
+      const resp = await api.get('/auth/me')
+      setUser(resp.data)
+    } catch {
+      setUser(null)
+    } finally {
       setIsLoading(false)
-      return
     }
-    try {
-      // Use the dedicated auth verification endpoint
-      await api.get('/api/auth/verify', { headers: { 'X-API-Key': token } })
-      api.defaults.headers.common['X-API-Key'] = token
-      setIsAuthenticated(true)
-    } catch {
-      localStorage.removeItem('slh_token')
-      setIsAuthenticated(false)
-    }
-    setIsLoading(false)
   }
 
-  async function login(apiKey: string): Promise<boolean> {
+  async function login(email: string, password: string, remember = false): Promise<{ success: boolean; error?: string }> {
     try {
-      const resp = await api.get('/api/auth/verify', {
-        headers: { 'X-API-Key': apiKey },
-      })
-      if (resp.status === 200) {
-        localStorage.setItem('slh_token', apiKey)
-        api.defaults.headers.common['X-API-Key'] = apiKey
-        setIsAuthenticated(true)
-        return true
-      }
-    } catch {
-      // Login failed
+      const resp = await api.post('/auth/login', { email, password, remember })
+      setUser(resp.data.user)
+      return { success: true }
+    } catch (err: any) {
+      const detail = err.response?.data?.detail || 'Invalid email or password'
+      return { success: false, error: detail }
     }
-    return false
   }
 
-  function logout() {
-    localStorage.removeItem('slh_token')
-    delete api.defaults.headers.common['X-API-Key']
-    setIsAuthenticated(false)
+  async function logout() {
+    try {
+      await api.post('/auth/logout')
+    } catch {
+      // ignore
+    }
+    setUser(null)
   }
 
   return (
-    <AuthContext.Provider value={{ isAuthenticated, isLoading, login, logout }}>
+    <AuthContext.Provider value={{
+      user,
+      isAuthenticated: !!user,
+      isLoading,
+      login,
+      logout,
+    }}>
       {children}
     </AuthContext.Provider>
   )
