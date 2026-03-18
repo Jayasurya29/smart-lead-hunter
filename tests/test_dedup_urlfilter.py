@@ -12,7 +12,6 @@ Covers:
   - URL filter: priority scoring
 """
 
-import pytest
 
 
 # ═══════════════════════════════════════════════════════════════════════

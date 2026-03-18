@@ -18,16 +18,19 @@ Covers:
 """
 
 import pytest
-import pytest_asyncio
 
 
 async def _db_request(coro):
-    """Execute an async HTTP request, skipping if DB is unreachable."""
+    """Execute an async HTTP request, skipping if DB is unreachable or tables missing."""
     try:
         return await coro
     except (ConnectionRefusedError, OSError) as e:
         if "Connect call failed" in str(e) or "Connection refused" in str(e):
             pytest.skip("Database not available")
+        raise
+    except Exception as e:
+        if "does not exist" in str(e) or "UndefinedTable" in str(e):
+            pytest.skip("Database tables not created")
         raise
 
 

@@ -9,7 +9,7 @@ All tests are pure unit tests — no database required.
 
 import time
 from datetime import datetime, timedelta, timezone
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -135,7 +135,7 @@ class TestJWTTokens:
         assert payload["role"] == "admin"
 
     def test_remember_me_longer_expiry(self):
-        from app.routes.auth import create_token, decode_token, REMEMBER_DAYS, SESSION_HOURS
+        from app.routes.auth import create_token, decode_token
         normal = create_token(1, "a@b.com", "sales", remember=False)
         remember = create_token(1, "a@b.com", "sales", remember=True)
 
@@ -174,7 +174,7 @@ class TestRateLimiting:
     """Tests for auth rate limiter."""
 
     def test_allows_under_limit(self):
-        from app.routes.auth import _check_rate_limit, _login_attempts
+        from app.routes.auth import _check_rate_limit
         # Use a unique IP to avoid cross-test contamination
         test_ip = f"rate-test-{time.monotonic()}"
         for _ in range(5):
@@ -199,7 +199,7 @@ class TestCookieSettings:
 
     def test_cookie_is_httponly(self):
         """Cookie must be httponly to prevent XSS access."""
-        from app.routes.auth import set_auth_cookie, COOKIE_NAME
+        from app.routes.auth import set_auth_cookie
         from unittest.mock import MagicMock
 
         response = MagicMock()

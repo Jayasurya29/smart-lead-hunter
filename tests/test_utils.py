@@ -13,7 +13,6 @@ Covers:
   - extract_year (lead_factory helper)
 """
 
-import re
 from datetime import datetime
 
 import pytest

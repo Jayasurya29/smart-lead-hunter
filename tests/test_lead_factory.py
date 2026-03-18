@@ -12,7 +12,6 @@ Covers:
   - Normalization of hotel names
 """
 
-import pytest
 
 
 class TestJunkDetection:

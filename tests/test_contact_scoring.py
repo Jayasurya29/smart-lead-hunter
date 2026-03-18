@@ -12,7 +12,6 @@ Covers:
   - HR Director inclusion (critical title per memory)
 """
 
-import pytest
 
 
 # ═══════════════════════════════════════════════════════════════════════
