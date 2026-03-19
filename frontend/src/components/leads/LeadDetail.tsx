@@ -217,6 +217,12 @@ function OverviewTab({ lead, contactList, onEnrich, enriching }: {
         </Section>
       )}
 
+      {lead.source_extractions && typeof lead.source_extractions === 'object' && Object.keys(lead.source_extractions).length > 0 && (
+        <Section title={`Key Insights (${Object.keys(lead.source_extractions).length} sources)`}>
+          <KeyInsights extractions={lead.source_extractions as Record<string, any>} />
+        </Section>
+      )}
+
       <Section title="Primary Contact">
         {contactList.length > 0 ? (
           <div className="bg-navy-50/40 rounded-lg p-3.5 border border-navy-100/50">
@@ -253,12 +259,6 @@ function OverviewTab({ lead, contactList, onEnrich, enriching }: {
           </button>
         )}
       </Section>
-
-      {lead.source_extractions && typeof lead.source_extractions === 'object' && Object.keys(lead.source_extractions).length > 0 && (
-        <Section title={`Key Insights (${Object.keys(lead.source_extractions).length} sources)`}>
-          <KeyInsights extractions={lead.source_extractions as Record<string, any>} />
-        </Section>
-      )}
 
       <Section title="Metadata">
         <div className="space-y-2 text-sm">
@@ -342,38 +342,37 @@ function ContactsTab({ contacts, loading, leadId, onEnrich, enriching }: {
             </div>
 
             <div className="flex-1 min-w-0">
+              {/* Name + Score */}
               <div className="flex items-center gap-2">
                 <span className="text-sm font-semibold text-navy-900">{c.name}</span>
                 {c.is_primary && <Star className="w-3.5 h-3.5 text-gold-500 fill-gold-500" />}
-              </div>
-              {c.title && <p className="text-xs text-stone-500 mt-0.5">{c.title}</p>}
-
-              {/* Badges */}
-              <div className="flex items-center gap-2 mt-2 flex-wrap">
-                {c.scope && (
-                  <span className={cn(
-                    'text-2xs font-bold px-2 py-0.5 rounded-full uppercase',
-                    c.scope === 'hotel_specific' ? 'bg-emerald-50 text-emerald-600' : 'bg-stone-100 text-stone-500',
-                  )}>
-                    {c.scope === 'hotel_specific' ? 'Hotel' : 'Chain'}
-                  </span>
-                )}
-                {c.confidence && (
-                  <span className={cn(
-                    'text-2xs font-bold px-2 py-0.5 rounded-full uppercase',
-                    c.confidence === 'high' ? 'bg-emerald-50 text-emerald-600' :
-                    c.confidence === 'medium' ? 'bg-gold-50 text-gold-600' : 'bg-stone-100 text-stone-500',
-                  )}>
-                    {c.confidence}
-                  </span>
-                )}
                 {c.score > 0 && (
-                  <span className="text-2xs font-bold text-stone-400">Score: {c.score}</span>
+                  <div className="flex flex-col items-end ml-auto">
+                    <span className="text-sm font-bold text-navy-900">{c.score}</span>
+                    {c.confidence && (
+                      <span className={cn(
+                        'text-2xs font-bold uppercase',
+                        c.confidence === 'high' ? 'text-emerald-600' :
+                        c.confidence === 'medium' ? 'text-gold-600' : 'text-stone-400',
+                      )}>
+                        {c.confidence}
+                      </span>
+                    )}
+                  </div>
                 )}
               </div>
+              {/* Title */}
+              {c.title && <p className="text-xs text-stone-500 mt-0.5">{c.title}</p>}
+              {/* Organization */}
+              {c.organization && <p className="text-xs text-stone-400 mt-0.5">{c.organization}</p>}
 
               {/* Contact links */}
-              <div className="flex items-center gap-4 mt-2.5 flex-wrap">
+              <div className="flex items-center gap-3 mt-2 flex-wrap">
+                {c.linkedin && (
+                  <a href={c.linkedin} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium text-blue-700 bg-blue-50 rounded-md hover:bg-blue-100 transition">
+                    <Linkedin className="w-3.5 h-3.5" /> LinkedIn
+                  </a>
+                )}
                 {c.email && (
                   <a href={`mailto:${c.email}`} className="flex items-center gap-1.5 text-xs text-navy-600 hover:underline">
                     <Mail className="w-3.5 h-3.5" /> {c.email}
@@ -384,28 +383,65 @@ function ContactsTab({ contacts, loading, leadId, onEnrich, enriching }: {
                     <Phone className="w-3.5 h-3.5" /> {c.phone}
                   </a>
                 )}
-                {c.linkedin && (
-                  <a href={c.linkedin} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1.5 text-xs text-blue-600 hover:underline">
-                    <Linkedin className="w-3.5 h-3.5" /> LinkedIn
-                  </a>
+              </div>
+
+              {/* Scope badge + Source detail */}
+              {(c.scope || c.source_detail) && (
+                <div className="flex items-start gap-2 mt-2.5 flex-wrap">
+                  {c.scope && (
+                    <span className={cn(
+                      'text-2xs font-bold px-2 py-0.5 rounded-full uppercase flex-shrink-0',
+                      c.scope === 'hotel_specific' ? 'bg-emerald-50 text-emerald-600' : 'bg-stone-100 text-stone-500',
+                    )}>
+                      {c.scope === 'hotel_specific' ? 'Hotel Specific' : c.scope === 'chain_area' ? 'Chain/Area' : c.scope.replace(/_/g, ' ')}
+                    </span>
+                  )}
+                  {c.source_detail && typeof c.source_detail === 'string' && (
+                    <span className="text-xs text-stone-500">{c.source_detail}</span>
+                  )}
+                </div>
+              )}
+
+              {/* Evidence URL */}
+              {c.evidence_url && typeof c.evidence_url === 'string' && (
+                <a
+                  href={c.evidence_url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center gap-1.5 mt-1.5 text-xs text-blue-600 hover:underline"
+                >
+                  <ExternalLink className="w-3 h-3" /> View Evidence
+                </a>
+              )}
+
+              {/* Actions row */}
+              <div className="flex items-center gap-2 mt-2.5">
+                <button
+                  onClick={() => handleSave(c.id)}
+                  className={cn(
+                    'inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium rounded-md border transition',
+                    c.is_saved
+                      ? 'border-navy-200 bg-navy-50 text-navy-700'
+                      : 'border-stone-200 text-stone-500 hover:bg-stone-50',
+                  )}
+                >
+                  {c.is_saved ? <BookmarkCheck className="w-3 h-3" /> : <Bookmark className="w-3 h-3" />}
+                  {c.is_saved ? 'Saved' : 'Save'}
+                </button>
+                {!c.is_primary && (
+                  <button
+                    onClick={() => handleSetPrimary(c.id)}
+                    className="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium rounded-md border border-stone-200 text-stone-500 hover:bg-stone-50 transition"
+                  >
+                    <Star className="w-3 h-3" /> Set Primary
+                  </button>
+                )}
+                {c.is_primary && (
+                  <span className="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-semibold rounded-md bg-gold-50 text-gold-600 border border-gold-200">
+                    <Star className="w-3 h-3 fill-gold-500" /> Primary
+                  </span>
                 )}
               </div>
-            </div>
-
-            {/* Actions */}
-            <div className="flex items-center gap-1 flex-shrink-0">
-              {!c.is_primary && (
-                <button onClick={() => handleSetPrimary(c.id)} title="Set Primary" className="p-1.5 rounded-lg hover:bg-stone-100 text-stone-400 hover:text-gold-600 transition">
-                  <Star className="w-4 h-4" />
-                </button>
-              )}
-              <button
-                onClick={() => handleSave(c.id)}
-                title={c.is_saved ? 'Saved' : 'Save'}
-                className={cn('p-1.5 rounded-lg transition', c.is_saved ? 'text-navy-600' : 'text-stone-400 hover:bg-stone-100 hover:text-navy-600')}
-              >
-                {c.is_saved ? <BookmarkCheck className="w-4 h-4" /> : <Bookmark className="w-4 h-4" />}
-              </button>
             </div>
           </div>
         </div>
@@ -642,30 +678,39 @@ function SourcesTab({ lead }: { lead: Lead }) {
    ═══════════════════════════════════════════════════ */
 
 function KeyInsights({ extractions }: { extractions: Record<string, any> }) {
-  // Collect key_insights from all sources
-  const insights: string[] = []
+  const merged: Record<string, string> = {}
+  const skipFields = new Set(['key_insights', 'confidence', 'relevance_score', 'extraction_date'])
+
   for (const [_url, data] of Object.entries(extractions)) {
     if (!data || typeof data !== 'object') continue
-    const ki = data.key_insights
-    if (ki && typeof ki === 'string' && ki.length > 10) {
-      // Skip generic "no details" messages
-      if (ki.toLowerCase().includes('no specific details') || ki.toLowerCase().includes('no additional details')) continue
-      if (!insights.includes(ki)) insights.push(ki)
+    for (const [key, val] of Object.entries(data)) {
+      if (skipFields.has(key)) continue
+      if (val === null || val === undefined) continue
+      if (typeof val === 'object' && !Array.isArray(val)) continue
+      const display = Array.isArray(val) ? val.join(', ') : String(val)
+      if (!display) continue
+      if (!merged[key] || display.length > merged[key].length) {
+        merged[key] = display
+      }
     }
   }
 
-  if (insights.length === 0) return null
+  const entries = Object.entries(merged).filter(([_, v]) => v)
+  if (entries.length === 0) return null
 
   return (
     <div className="bg-navy-50/30 rounded-lg border border-navy-100/50 p-4">
-      <ul className="space-y-2">
-        {insights.map((insight, i) => (
-          <li key={i} className="flex gap-2.5 text-sm text-navy-800">
-            <span className="text-navy-400 flex-shrink-0 mt-0.5">•</span>
-            <span>{insight}</span>
-          </li>
+      <div className="grid grid-cols-2 gap-x-6 gap-y-2.5">
+        {entries.map(([key, value]) => (
+          <div key={key}>
+            <span className="field-label block">{key.replace(/_/g, ' ')}</span>
+            <span className="text-sm text-navy-800 font-medium">{value}</span>
+          </div>
         ))}
-      </ul>
+      </div>
+      <p className="text-2xs text-stone-400 mt-3">
+        Combined from {Object.keys(extractions).length} source{Object.keys(extractions).length !== 1 ? 's' : ''} — best available data per field
+      </p>
     </div>
   )
 }

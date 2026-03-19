@@ -77,6 +77,8 @@ export interface Contact {
   is_primary: boolean
   is_saved: boolean
   source_detail: string | null
+  found_via: string | null
+  evidence_url: string | null
 }
 
 /* ── Sources ── */
