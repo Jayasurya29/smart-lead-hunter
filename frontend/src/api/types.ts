@@ -12,7 +12,7 @@ export interface Lead {
   country: string | null
   opening_date: string | null
   opening_year: number | string | null
-  rooms: number | null
+  room_count: number | null
   lead_score: number | null
   status: string
   location_type: string | null

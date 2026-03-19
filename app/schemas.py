@@ -134,6 +134,9 @@ class LeadBase(BaseModel):
     brand_tier: Optional[str] = None
     location_type: Optional[str] = None
     hotel_website: Optional[str] = None
+    management_company: Optional[str] = None
+    developer: Optional[str] = None
+    owner: Optional[str] = None
     description: Optional[str] = None
     notes: Optional[str] = None
 

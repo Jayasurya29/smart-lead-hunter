@@ -34,7 +34,6 @@ export default function LeadDetail({ leadId, tab, onClose }: Props) {
   const { data: lead, isLoading } = useLead(leadId)
   const { data: contacts, isLoading: contactsLoading } = useContacts(leadId)
   const [activeTab, setActiveTab] = useState<DetailTab>('overview')
-  const qc = useQueryClient()
 
   const approveMut = useApproveLead()
   const rejectMut  = useRejectLead()
@@ -63,8 +62,8 @@ export default function LeadDetail({ leadId, tab, onClose }: Props) {
 
   return (
     <div className="h-full flex flex-col bg-white animate-slideIn">
-      {/* Header */}
-      <div className="px-5 pt-5 pb-4 flex-shrink-0 border-b border-stone-100">
+      {/* ═══ HEADER — name, score, badges ═══ */}
+      <div className="px-5 pt-5 pb-3 flex-shrink-0 border-b border-slate-100 bg-gradient-to-b from-slate-50/50 to-white">
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0 flex-1">
             <h2 className="text-lg font-bold text-navy-900 leading-snug truncate">
@@ -87,8 +86,7 @@ export default function LeadDetail({ leadId, tab, onClose }: Props) {
           </div>
         </div>
 
-        {/* Badges */}
-        <div className="flex items-center gap-2 mt-2.5 flex-wrap">
+        <div className="flex items-center gap-2 mt-2 flex-wrap">
           {lead.brand_tier && (
             <span className={cn('inline-flex px-2 py-0.5 rounded text-xs font-bold', getTierColor(lead.brand_tier))}>
               {getTierShort(lead.brand_tier)} — {getTierLabel(lead.brand_tier)}
@@ -98,61 +96,10 @@ export default function LeadDetail({ leadId, tab, onClose }: Props) {
             {timeline}
           </span>
         </div>
-
-        {/* Action buttons */}
-        <div className="flex items-center gap-2 mt-3">
-          {isNew && (
-            <>
-              <button
-                onClick={() => approveMut.mutate(leadId)}
-                disabled={approveMut.isPending}
-                className="flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 transition disabled:opacity-50"
-              >
-                {approveMut.isPending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <CheckCircle2 className="w-3.5 h-3.5" />}
-                Approve
-              </button>
-              <button
-                onClick={() => rejectMut.mutate({ id: leadId })}
-                disabled={rejectMut.isPending}
-                className="flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold rounded-lg border border-red-200 text-red-600 hover:bg-red-50 transition disabled:opacity-50"
-              >
-                {rejectMut.isPending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <XCircle className="w-3.5 h-3.5" />}
-                Reject
-              </button>
-              <button
-                onClick={() => { deleteMut.mutate(leadId); onClose() }}
-                disabled={deleteMut.isPending}
-                className="flex items-center gap-1.5 px-3 py-2 text-xs font-medium rounded-lg border border-stone-200 text-stone-400 hover:bg-stone-50 transition disabled:opacity-50 ml-auto"
-              >
-                <Trash2 className="w-3.5 h-3.5" />
-              </button>
-            </>
-          )}
-          {isApproved && (
-            <button
-              onClick={() => rejectMut.mutate({ id: leadId })}
-              disabled={rejectMut.isPending}
-              className="flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold rounded-lg border border-red-200 text-red-600 hover:bg-red-50 transition disabled:opacity-50"
-            >
-              {rejectMut.isPending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <XCircle className="w-3.5 h-3.5" />}
-              Reject
-            </button>
-          )}
-          {isRejected && (
-            <button
-              onClick={() => restoreMut.mutate(leadId)}
-              disabled={restoreMut.isPending}
-              className="flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold rounded-lg border border-blue-200 text-blue-600 hover:bg-blue-50 transition disabled:opacity-50"
-            >
-              {restoreMut.isPending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Undo2 className="w-3.5 h-3.5" />}
-              Restore
-            </button>
-          )}
-        </div>
       </div>
 
-      {/* Tabs */}
-      <div className="flex border-b border-stone-100 px-5 flex-shrink-0">
+      {/* ═══ TABS ═══ */}
+      <div className="flex border-b border-slate-100 px-5 flex-shrink-0">
         {(['overview', 'contacts', 'edit', 'sources'] as DetailTab[]).map((t) => (
           <button
             key={t}
@@ -170,12 +117,65 @@ export default function LeadDetail({ leadId, tab, onClose }: Props) {
         ))}
       </div>
 
-      {/* Tab content */}
+      {/* ═══ TAB CONTENT — scrollable ═══ */}
       <div className="flex-1 overflow-y-auto p-5">
         {activeTab === 'overview'  && <OverviewTab lead={lead} contactList={contactList} onEnrich={() => enrichMut.mutate(leadId)} enriching={enrichMut.isPending} />}
         {activeTab === 'contacts'  && <ContactsTab contacts={contactList} loading={contactsLoading} leadId={leadId} onEnrich={() => enrichMut.mutate(leadId)} enriching={enrichMut.isPending} />}
         {activeTab === 'edit'      && <EditTab lead={lead} leadId={leadId} />}
         {activeTab === 'sources'   && <SourcesTab lead={lead} />}
+      </div>
+
+      {/* ═══ STICKY ACTION BAR — always visible at bottom ═══ */}
+      <div className="px-5 py-3 border-t border-slate-100 bg-slate-50/50 flex-shrink-0">
+        <div className="flex items-center gap-2">
+          {isNew && (
+            <>
+              <button
+                onClick={() => approveMut.mutate(leadId)}
+                disabled={approveMut.isPending}
+                className="flex items-center gap-1.5 px-4 py-2 text-xs font-semibold rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 transition disabled:opacity-50"
+              >
+                {approveMut.isPending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <CheckCircle2 className="w-3.5 h-3.5" />}
+                Approve
+              </button>
+              <button
+                onClick={() => rejectMut.mutate({ id: leadId })}
+                disabled={rejectMut.isPending}
+                className="flex items-center gap-1.5 px-4 py-2 text-xs font-semibold rounded-lg border border-stone-200 text-stone-600 hover:bg-stone-50 transition disabled:opacity-50"
+              >
+                {rejectMut.isPending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <XCircle className="w-3.5 h-3.5" />}
+                Reject
+              </button>
+              <button
+                onClick={() => { deleteMut.mutate(leadId); onClose() }}
+                disabled={deleteMut.isPending}
+                className="flex items-center gap-1.5 px-3 py-2 text-xs font-medium rounded-lg border border-stone-200 text-stone-400 hover:bg-stone-50 transition disabled:opacity-50 ml-auto"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+              </button>
+            </>
+          )}
+          {isApproved && (
+            <button
+              onClick={() => rejectMut.mutate({ id: leadId })}
+              disabled={rejectMut.isPending}
+              className="flex items-center gap-1.5 px-4 py-2 text-xs font-semibold rounded-lg border border-red-200 text-red-600 hover:bg-red-50 transition disabled:opacity-50"
+            >
+              {rejectMut.isPending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <XCircle className="w-3.5 h-3.5" />}
+              Reject
+            </button>
+          )}
+          {isRejected && (
+            <button
+              onClick={() => restoreMut.mutate(leadId)}
+              disabled={restoreMut.isPending}
+              className="flex items-center gap-1.5 px-4 py-2 text-xs font-semibold rounded-lg border border-blue-200 text-blue-600 hover:bg-blue-50 transition disabled:opacity-50"
+            >
+              {restoreMut.isPending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Undo2 className="w-3.5 h-3.5" />}
+              Restore
+            </button>
+          )}
+        </div>
       </div>
     </div>
   )
@@ -191,11 +191,12 @@ function OverviewTab({ lead, contactList, onEnrich, enriching }: {
 }) {
   return (
     <div className="space-y-6 animate-fadeIn">
+      {/* Details */}
       <Section title="Details">
         <div className="grid grid-cols-2 gap-4">
           <Field icon={Calendar}  label="Opening"    value={formatOpening(lead)} />
           <Field icon={MapPin}    label="Location"   value={formatLocation(lead)} />
-          <Field icon={Building2} label="Rooms"      value={lead.rooms ? `${lead.rooms} rooms` : '—'} />
+          <Field icon={Building2} label="Rooms"      value={lead.room_count ? `${lead.room_count} rooms` : '—'} />
           <Field icon={Layers}    label="Brand Tier"  value={getTierLabel(lead.brand_tier)} />
           {lead.management_company && <Field icon={Building2} label="Mgmt Co."   value={lead.management_company} />}
           {lead.developer         && <Field icon={Building2} label="Developer"   value={lead.developer} />}
@@ -203,7 +204,8 @@ function OverviewTab({ lead, contactList, onEnrich, enriching }: {
         </div>
       </Section>
 
-      {lead.hotel_website && (
+      {/* Website */}
+      {lead.hotel_website && typeof lead.hotel_website === 'string' && (
         <Section title="Website">
           <a
             href={lead.hotel_website.startsWith('http') ? lead.hotel_website : `https://${lead.hotel_website}`}
@@ -217,15 +219,10 @@ function OverviewTab({ lead, contactList, onEnrich, enriching }: {
         </Section>
       )}
 
-      {lead.source_extractions && typeof lead.source_extractions === 'object' && Object.keys(lead.source_extractions).length > 0 && (
-        <Section title={`Key Insights (${Object.keys(lead.source_extractions).length} sources)`}>
-          <KeyInsights extractions={lead.source_extractions as Record<string, any>} />
-        </Section>
-      )}
-
+      {/* Primary Contact */}
       <Section title="Primary Contact">
         {contactList.length > 0 ? (
-          <div className="bg-navy-50/40 rounded-lg p-3.5 border border-navy-100/50">
+          <div className="bg-slate-50 rounded-lg p-3.5 border border-slate-200/80">
             <div className="flex items-center gap-3">
               <div className="w-10 h-10 rounded-full bg-gradient-to-br from-navy-400 to-navy-600 flex items-center justify-center flex-shrink-0">
                 <span className="text-white font-bold text-sm">
@@ -260,6 +257,14 @@ function OverviewTab({ lead, contactList, onEnrich, enriching }: {
         )}
       </Section>
 
+      {/* Key Insights — AI bullet points */}
+      {lead.source_extractions && typeof lead.source_extractions === 'object' && Object.keys(lead.source_extractions).length > 0 && (
+        <Section title={`Key Insights (${Object.keys(lead.source_extractions).length} sources)`}>
+          <KeyInsights extractions={lead.source_extractions as Record<string, any>} />
+        </Section>
+      )}
+
+      {/* Metadata */}
       <Section title="Metadata">
         <div className="space-y-2 text-sm">
           {[
@@ -334,6 +339,7 @@ function ContactsTab({ contacts, loading, leadId, onEnrich, enriching }: {
           )}
         >
           <div className="flex items-start gap-3">
+            {/* Avatar */}
             <div className={cn(
               'w-9 h-9 rounded-full flex items-center justify-center flex-shrink-0 text-sm font-bold',
               c.is_primary ? 'bg-navy-600 text-white' : 'bg-stone-200 text-stone-600',
@@ -342,7 +348,7 @@ function ContactsTab({ contacts, loading, leadId, onEnrich, enriching }: {
             </div>
 
             <div className="flex-1 min-w-0">
-              {/* Name + Score */}
+              {/* Name + Score/Confidence */}
               <div className="flex items-center gap-2">
                 <span className="text-sm font-semibold text-navy-900">{c.name}</span>
                 {c.is_primary && <Star className="w-3.5 h-3.5 text-gold-500 fill-gold-500" />}
@@ -385,7 +391,7 @@ function ContactsTab({ contacts, loading, leadId, onEnrich, enriching }: {
                 )}
               </div>
 
-              {/* Scope badge + Source detail */}
+              {/* Scope + Source detail */}
               {(c.scope || c.source_detail) && (
                 <div className="flex items-start gap-2 mt-2.5 flex-wrap">
                   {c.scope && (
@@ -414,7 +420,7 @@ function ContactsTab({ contacts, loading, leadId, onEnrich, enriching }: {
                 </a>
               )}
 
-              {/* Actions row */}
+              {/* Actions */}
               <div className="flex items-center gap-2 mt-2.5">
                 <button
                   onClick={() => handleSave(c.id)}
@@ -469,17 +475,16 @@ function EditTab({ lead, leadId }: { lead: Lead; leadId: number }) {
   const [saveMsg, setSaveMsg] = useState('')
   const [form, setForm] = useState({
     hotel_name:         lead.hotel_name || '',
-    brand_name:         lead.brand_name || '',
+    brand:              lead.brand || lead.brand_name || '',
     brand_tier:         lead.brand_tier || '',
     city:               lead.city || '',
     state:              lead.state || '',
     country:            lead.country || '',
     opening_date:       lead.opening_date || '',
-    rooms:              lead.rooms ? String(lead.rooms) : '',
+    room_count:         lead.room_count ? String(lead.room_count) : '',
     management_company: lead.management_company || '',
     developer:          lead.developer || '',
     owner:              lead.owner || '',
-    hotel_website:      lead.hotel_website || '',
   })
 
   function handleChange(key: string, val: string) {
@@ -492,7 +497,7 @@ function EditTab({ lead, leadId }: { lead: Lead; leadId: number }) {
     try {
       await editLead(leadId, {
         ...form,
-        rooms: form.rooms ? Number(form.rooms) : undefined,
+        room_count: form.room_count ? Number(form.room_count) : undefined,
       } as any)
       setSaveMsg('Saved!')
       qc.invalidateQueries({ queryKey: ['lead', leadId] })
@@ -508,17 +513,16 @@ function EditTab({ lead, leadId }: { lead: Lead; leadId: number }) {
     <div className="space-y-4 animate-fadeIn">
       <div className="grid grid-cols-2 gap-4">
         <EditField label="Hotel Name" value={form.hotel_name}    onChange={(v) => handleChange('hotel_name', v)} span={2} />
-        <EditField label="Brand"      value={form.brand_name}    onChange={(v) => handleChange('brand_name', v)} />
+        <EditField label="Brand"      value={form.brand}         onChange={(v) => handleChange('brand', v)} />
         <EditField label="Brand Tier" value={form.brand_tier}    onChange={(v) => handleChange('brand_tier', v)} />
         <EditField label="City"       value={form.city}          onChange={(v) => handleChange('city', v)} />
         <EditField label="State"      value={form.state}         onChange={(v) => handleChange('state', v)} />
         <EditField label="Country"    value={form.country}       onChange={(v) => handleChange('country', v)} />
         <EditField label="Opening"    value={form.opening_date}  onChange={(v) => handleChange('opening_date', v)} />
-        <EditField label="Rooms"      value={form.rooms}         onChange={(v) => handleChange('rooms', v)} />
-        <EditField label="Mgmt Co."   value={form.management_company} onChange={(v) => handleChange('management_company', v)} />
+        <EditField label="Rooms"      value={form.room_count}    onChange={(v) => handleChange('room_count', v)} />
+        <EditField label="Mgmt Co."   value={form.management_company} onChange={(v) => handleChange('management_company', v)} span={2} />
         <EditField label="Developer"  value={form.developer}     onChange={(v) => handleChange('developer', v)} />
         <EditField label="Owner"      value={form.owner}         onChange={(v) => handleChange('owner', v)} />
-        <EditField label="Website"    value={form.hotel_website}  onChange={(v) => handleChange('hotel_website', v)} span={2} />
       </div>
 
       <div className="flex items-center gap-3 pt-2">
@@ -562,22 +566,18 @@ function EditField({ label, value, onChange, span }: {
    ═══════════════════════════════════════════════════ */
 
 function SourcesTab({ lead }: { lead: Lead }) {
-  // Collect all source URLs from every possible field
   const sourceList: string[] = []
 
-  // source_url — single string, may contain commas
   if (lead.source_url) {
     lead.source_url.split(',').map((s) => s.trim()).filter(Boolean).forEach((u) => {
       if (!sourceList.includes(u)) sourceList.push(u)
     })
   }
-  // source_urls — array
   if (lead.source_urls && Array.isArray(lead.source_urls)) {
     lead.source_urls.forEach((u) => {
       if (u && !sourceList.includes(u)) sourceList.push(u)
     })
   }
-  // sources — array or comma string
   if (lead.sources) {
     const arr = Array.isArray(lead.sources)
       ? lead.sources
@@ -619,6 +619,7 @@ function SourcesTab({ lead }: { lead: Lead }) {
                   {extraction && typeof extraction === 'object' && Object.keys(extraction).length > 0 && (
                     <div className="px-3.5 py-2.5 border-t border-stone-100 grid grid-cols-2 gap-x-4 gap-y-1 text-xs">
                       {Object.entries(extraction).map(([k, v]) => {
+                        if (k === 'key_insights') return null
                         if (v === null || v === undefined) return null
                         if (typeof v === 'object' && !Array.isArray(v)) return null
                         const display = Array.isArray(v) ? v.join(', ') : String(v)
@@ -674,43 +675,32 @@ function SourcesTab({ lead }: { lead: Lead }) {
 
 
 /* ═══════════════════════════════════════════════════
-   KEY INSIGHTS — merges best data from all source extractions
+   KEY INSIGHTS — AI-generated bullet points
    ═══════════════════════════════════════════════════ */
 
 function KeyInsights({ extractions }: { extractions: Record<string, any> }) {
-  const merged: Record<string, string> = {}
-  const skipFields = new Set(['key_insights', 'confidence', 'relevance_score', 'extraction_date'])
-
+  const insights: string[] = []
   for (const [_url, data] of Object.entries(extractions)) {
     if (!data || typeof data !== 'object') continue
-    for (const [key, val] of Object.entries(data)) {
-      if (skipFields.has(key)) continue
-      if (val === null || val === undefined) continue
-      if (typeof val === 'object' && !Array.isArray(val)) continue
-      const display = Array.isArray(val) ? val.join(', ') : String(val)
-      if (!display) continue
-      if (!merged[key] || display.length > merged[key].length) {
-        merged[key] = display
-      }
+    const ki = data.key_insights
+    if (ki && typeof ki === 'string' && ki.length > 10) {
+      if (ki.toLowerCase().includes('no specific details') || ki.toLowerCase().includes('no additional details')) continue
+      if (!insights.includes(ki)) insights.push(ki)
     }
   }
 
-  const entries = Object.entries(merged).filter(([_, v]) => v)
-  if (entries.length === 0) return null
+  if (insights.length === 0) return null
 
   return (
-    <div className="bg-navy-50/30 rounded-lg border border-navy-100/50 p-4">
-      <div className="grid grid-cols-2 gap-x-6 gap-y-2.5">
-        {entries.map(([key, value]) => (
-          <div key={key}>
-            <span className="field-label block">{key.replace(/_/g, ' ')}</span>
-            <span className="text-sm text-navy-800 font-medium">{value}</span>
-          </div>
+    <div className="bg-slate-50 rounded-lg border border-slate-200/80 p-4">
+      <ul className="space-y-2">
+        {insights.map((insight, i) => (
+          <li key={i} className="flex gap-2.5 text-[13px] leading-relaxed text-slate-700">
+            <span className="text-slate-400 flex-shrink-0 mt-0.5">•</span>
+            <span>{insight}</span>
+          </li>
         ))}
-      </div>
-      <p className="text-2xs text-stone-400 mt-3">
-        Combined from {Object.keys(extractions).length} source{Object.keys(extractions).length !== 1 ? 's' : ''} — best available data per field
-      </p>
+      </ul>
     </div>
   )
 }

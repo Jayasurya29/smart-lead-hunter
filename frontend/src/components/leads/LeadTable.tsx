@@ -6,7 +6,8 @@ import {
 } from '@/lib/utils'
 import { useApproveLead, useRejectLead, useRestoreLead, useDeleteLead } from '@/hooks/useLeads'
 import {
-  CheckCircle2, XCircle, Undo2, Trash2, ChevronUp, ChevronDown, ChevronsUpDown,
+  CheckCircle2, XCircle, Undo2, Trash2,
+  ChevronLeft, ChevronRight, ChevronUp, ChevronDown, ChevronsUpDown,
 } from 'lucide-react'
 
 interface Props {
@@ -181,15 +182,15 @@ export default function LeadTable({
       <div className="flex-1 overflow-y-auto">
         <table className="w-full">
           <thead className="sticky top-0 z-10">
-            <tr className="bg-stone-100/80 backdrop-blur-sm">
+            <tr className="bg-slate-50/90 backdrop-blur-sm border-b border-slate-100">
               {COLUMNS.map((col) => (
                 <th
                   key={col.key}
                   onClick={() => col.sortAsc && onSort?.(getNextSort(col, currentSort))}
                   className={cn(
-                    'px-3 py-2.5 text-left text-xs font-bold text-stone-400 uppercase tracking-wider group',
+                    'px-3 py-2.5 text-left text-[11px] font-bold text-slate-400 uppercase tracking-wider group',
                     col.width,
-                    col.sortAsc && 'cursor-pointer hover:text-stone-600 select-none transition-colors',
+                    col.sortAsc && 'cursor-pointer hover:text-slate-600 select-none transition-colors',
                   )}
                 >
                   <span className="flex items-center gap-1">
@@ -201,7 +202,7 @@ export default function LeadTable({
               <th className="px-3 py-2.5 w-24" />
             </tr>
           </thead>
-          <tbody className="divide-y divide-stone-100">
+          <tbody className="divide-y divide-slate-100/80">
             {sortedLeads.map((lead) => {
               const timeline = getTimelineLabel(lead)
               return (
@@ -224,11 +225,11 @@ export default function LeadTable({
                   </td>
 
                   <td className="px-3 py-2.5 max-w-[280px]">
-                    <div className="truncate text-[15px] font-semibold text-navy-900 leading-snug">
+                    <div className="truncate text-[15px] font-bold text-navy-950 leading-snug">
                       {lead.hotel_name || lead.name || '—'}
                     </div>
-                    {lead.brand_name && (
-                      <div className="truncate text-xs text-stone-400 leading-snug">{lead.brand_name}</div>
+                    {(lead.brand || lead.brand_name) && (
+                      <div className="truncate text-xs text-stone-400 leading-snug">{lead.brand || lead.brand_name}</div>
                     )}
                   </td>
 
@@ -249,17 +250,17 @@ export default function LeadTable({
                   </td>
 
                   <td className="px-3 py-2.5">
-                    <span className="text-sm text-stone-600 truncate block max-w-[200px]">
+                    <span className="text-sm text-navy-800 font-medium truncate block max-w-[200px]">
                       {formatLocation(lead)}
                     </span>
                   </td>
 
                   <td className="px-3 py-2.5">
-                    <span className="text-sm text-stone-600">{formatOpening(lead)}</span>
+                    <span className="text-sm font-medium text-navy-800">{formatOpening(lead)}</span>
                   </td>
 
                   <td className="px-3 py-2.5">
-                    <span className="text-xs text-stone-400">{relativeDate(lead.created_at)}</span>
+                    <span className="text-xs text-slate-400 font-medium">{relativeDate(lead.created_at)}</span>
                   </td>
 
                   <td className="px-2 py-2.5">
@@ -298,28 +299,51 @@ export default function LeadTable({
 
       {/* ── Page Numbers ── */}
       {totalPages > 1 && (
-        <div className="flex items-center justify-between px-4 py-2.5 border-t border-stone-100 bg-white flex-shrink-0">
+        <div className="flex items-center justify-between px-4 py-2.5 border-t border-slate-100 bg-white/80 flex-shrink-0">
           <span className="text-xs text-stone-400">
             Page {page} of {totalPages} · {total} lead{total !== 1 ? 's' : ''}
           </span>
-          <div className="flex items-center gap-1 overflow-x-scroll max-w-[240px] pb-1.5 scrollbar-pages">
-            {Array.from({ length: totalPages }).map((_, i) => {
-              const pageNum = i + 1
+          <div className="flex items-center gap-1">
+            <button
+              onClick={() => onPageChange(page - 1)}
+              disabled={page <= 1}
+              className="p-1.5 rounded hover:bg-stone-100 disabled:opacity-30 disabled:cursor-not-allowed transition"
+            >
+              <ChevronLeft className="w-4 h-4 text-stone-500" />
+            </button>
+            {Array.from({ length: Math.min(totalPages, 7) }).map((_, i) => {
+              let pageNum: number
+              if (totalPages <= 7) {
+                pageNum = i + 1
+              } else if (page <= 4) {
+                pageNum = i + 1
+              } else if (page >= totalPages - 3) {
+                pageNum = totalPages - 6 + i
+              } else {
+                pageNum = page - 3 + i
+              }
               return (
                 <button
                   key={pageNum}
                   onClick={() => onPageChange(pageNum)}
                   className={cn(
-                    'w-7 h-7 rounded text-xs font-semibold transition flex-shrink-0',
+                    'w-8 h-8 rounded text-xs font-semibold transition',
                     page === pageNum
                       ? 'bg-navy-900 text-white'
-                      : 'text-stone-400 hover:bg-stone-100 hover:text-stone-600',
+                      : 'text-stone-500 hover:bg-stone-100',
                   )}
                 >
                   {pageNum}
                 </button>
               )
             })}
+            <button
+              onClick={() => onPageChange(page + 1)}
+              disabled={page >= totalPages}
+              className="p-1.5 rounded hover:bg-stone-100 disabled:opacity-30 disabled:cursor-not-allowed transition"
+            >
+              <ChevronRight className="w-4 h-4 text-stone-500" />
+            </button>
           </div>
         </div>
       )}

@@ -42,7 +42,7 @@ function AppLayoutInner({ children }: { children: ReactNode }) {
   return (
     <div className="h-full flex flex-col">
 
-      <header className="bg-white border-b border-stone-200/80 h-[72px] flex-shrink-0 relative z-30">
+      <header className="bg-white/95 backdrop-blur-md border-b border-slate-200/60 h-[72px] flex-shrink-0 relative z-30 shadow-[0_1px_3px_rgba(0,0,0,0.04)]">
         <div className="h-full px-6 flex items-center justify-between">
 
           <div className="flex items-center gap-6">
@@ -128,7 +128,7 @@ function AppLayoutInner({ children }: { children: ReactNode }) {
         </div>
       </header>
 
-      <main className="flex-1 overflow-hidden bg-stone-50">{children}</main>
+      <main className="flex-1 overflow-hidden bg-[#f4f4f5]">{children}</main>
 
       {bg.summary && <ResultToast />}
 

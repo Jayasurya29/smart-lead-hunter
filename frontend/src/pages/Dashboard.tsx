@@ -116,7 +116,7 @@ export default function Dashboard() {
 
       <div className="flex-1 flex overflow-hidden px-4 pb-3 gap-3">
         <div className={cn(
-          'bg-white rounded-xl border border-stone-200 shadow-soft overflow-hidden flex flex-col transition-all duration-300',
+          'bg-white rounded-xl border border-slate-200/80 shadow-sm overflow-hidden flex flex-col transition-all duration-300',
           selectedLeadId ? 'flex-[3]' : 'flex-1',
         )}>
           <LeadTable
@@ -135,7 +135,7 @@ export default function Dashboard() {
         </div>
 
         {selectedLeadId && (
-          <div className="flex-[2] bg-white rounded-xl border border-stone-200 shadow-soft overflow-hidden animate-slideIn">
+          <div className="flex-[2] bg-white rounded-xl border border-slate-200/80 shadow-sm overflow-hidden animate-slideIn">
             <LeadDetail leadId={selectedLeadId} tab={tab} onClose={() => setSelectedLeadId(null)} />
           </div>
         )}

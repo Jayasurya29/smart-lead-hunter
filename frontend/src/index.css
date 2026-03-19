@@ -1,12 +1,11 @@
 @import "tailwindcss/base";
 @import "tailwindcss/components";
 @import "tailwindcss/utilities";
-@import url('https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,300;9..40,400;9..40,500;9..40,600;9..40,700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,300;9..40,400;9..40,500;9..40,600;9..40,700;9..40,800&display=swap');
 
 /* ═══════════════════════════════════════════════════
-   SMART LEAD HUNTER — Design Foundation
-   Theme: "Boutique Hotel Lobby"
-   Warm, refined, premium. Hospitality meets tech.
+   SMART LEAD HUNTER — 2026 Design System
+   Premium SaaS · Clean · High Contrast · Fast
 
    FONT SIZE FLOOR: 11px (text-2xs). Nothing goes below.
    ═══════════════════════════════════════════════════ */
@@ -17,11 +16,11 @@
 html, body, #root { height: 100%; }
 
 body {
-  font-family: 'DM Sans', system-ui, sans-serif;
+  font-family: 'DM Sans', system-ui, -apple-system, sans-serif;
   font-size: 15px;
   line-height: 1.5;
-  color: #1f2937;
-  background: #faf9f7;
+  color: #0f172a;
+  background: #f4f4f5;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
@@ -29,10 +28,10 @@ body {
 
 /* ── 2. SCROLLBAR ── */
 
-::-webkit-scrollbar { width: 5px; height: 5px; }
+::-webkit-scrollbar { width: 6px; height: 6px; }
 ::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: #d4cfc5; border-radius: 10px; }
-::-webkit-scrollbar-thumb:hover { background: #b0a99e; }
+::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 10px; }
+::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
 
 
 /* ── 3. FORM CONTROLS ── */
@@ -40,7 +39,7 @@ body {
 select.filter-select {
   @apply h-8 px-3 pr-8 text-xs font-semibold rounded-lg outline-none cursor-pointer
          transition-all duration-150 appearance-none;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 24 24' fill='none' stroke='%237a7265' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 24 24' fill='none' stroke='%2364748b' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
   background-repeat: no-repeat;
   background-position: right 10px center;
   background-size: 10px;
@@ -61,7 +60,7 @@ select.filter-select {
 .animate-scaleIn  { animation: scaleIn 0.25s cubic-bezier(0.16, 1, 0.3, 1); }
 
 .skeleton {
-  background: linear-gradient(90deg, #f0ede8 25%, #e8e4dd 50%, #f0ede8 75%);
+  background: linear-gradient(90deg, #f1f5f9 25%, #e2e8f0 50%, #f1f5f9 75%);
   background-size: 200% 100%;
   animation: shimmer 1.5s infinite;
 }
@@ -70,19 +69,19 @@ select.filter-select {
 /* ── 5. TABLE ROWS ── */
 
 .lead-row {
-  transition: all 0.15s cubic-bezier(0.16, 1, 0.3, 1);
+  transition: all 0.12s ease;
 }
 .lead-row:hover {
-  background: linear-gradient(90deg, rgba(10,22,40,0.02) 0%, rgba(10,22,40,0.04) 100%);
+  background: #f8fafc;
 }
 .lead-row.active {
-  background: linear-gradient(90deg, rgba(10,22,40,0.04) 0%, rgba(10,22,40,0.06) 100%);
-  border-left: 3px solid #253d5e;
+  background: #f1f5f9;
+  border-left: 3px solid #1e3a5f;
 }
 .lead-row .row-actions {
   opacity: 0;
   transform: translateX(4px);
-  transition: all 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+  transition: all 0.15s ease;
 }
 .lead-row:hover .row-actions,
 .lead-row.active .row-actions {
@@ -94,16 +93,20 @@ select.filter-select {
 /* ── 6. UI COMPONENTS ── */
 
 .modal-backdrop {
-  background: rgba(10,22,40,0.5);
-  backdrop-filter: blur(8px);
+  background: rgba(0,0,0,0.45);
+  backdrop-filter: blur(12px);
 }
 
 .stat-card {
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
   transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
 }
 .stat-card:hover {
-  transform: translateY(-1px);
-  box-shadow: 0 4px 12px rgba(0,0,0,0.06);
+  transform: translateY(-2px);
+  box-shadow: 0 8px 32px rgba(0,0,0,0.08);
+  border-color: #cbd5e1;
 }
 
 .tab-active { position: relative; }
@@ -112,17 +115,16 @@ select.filter-select {
   position: absolute;
   bottom: -1px; left: 0; right: 0;
   height: 2px;
-  background: #253d5e;
+  background: #1e3a5f;
   border-radius: 2px 2px 0 0;
 }
 
-.score-hot  { box-shadow: 0 0 0 3px rgba(232,93,74,0.1); }
-.score-warm { box-shadow: 0 0 0 3px rgba(212,168,83,0.1); }
+.score-hot  { box-shadow: 0 0 0 3px rgba(239,68,68,0.12); }
+.score-warm { box-shadow: 0 0 0 3px rgba(245,158,11,0.12); }
 
 
 /* ── 7. REUSABLE UTILITIES ── */
 
-/* Header action buttons (Run Scrape, Discovery) */
 .header-action {
   @apply flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold rounded-lg
          transition-all duration-150 shadow-sm;
@@ -134,14 +136,12 @@ select.filter-select {
   @apply bg-stone-200 text-stone-400 cursor-not-allowed shadow-none;
 }
 
-/* Section headers throughout the app (e.g. "DETAILS", "METADATA") */
 .section-label {
-  @apply text-xs font-bold text-stone-400 uppercase tracking-[0.08em] mb-2;
+  @apply text-[11px] font-extrabold text-slate-400 uppercase tracking-[0.1em] mb-2;
 }
 
-/* Field labels inside detail panels */
 .field-label {
-  @apply text-2xs text-stone-400 uppercase font-bold tracking-wider;
+  @apply text-[11px] text-slate-400 uppercase font-bold tracking-wider;
 }
 
 
@@ -211,12 +211,12 @@ select.filter-select {
 .animate-toast-in       { animation: toastIn 0.35s cubic-bezier(0.68,-0.55,0.265,1.55); }
 .animate-modal-in       { animation: modalIn 0.35s ease-out; }
 
-/* Scrollable page numbers — always show track */
+/* Scrollable page numbers */
 .scrollbar-pages {
   scrollbar-width: thin;
-  scrollbar-color: #253d5e #e8e4dd;
+  scrollbar-color: #1e3a5f #e2e8f0;
 }
 .scrollbar-pages::-webkit-scrollbar { height: 4px; }
-.scrollbar-pages::-webkit-scrollbar-track { background: #e8e4dd; border-radius: 10px; }
-.scrollbar-pages::-webkit-scrollbar-thumb { background: #253d5e; border-radius: 10px; min-width: 30px; }
-.scrollbar-pages::-webkit-scrollbar-thumb:hover { background: #1a2d4a; }
+.scrollbar-pages::-webkit-scrollbar-track { background: #e2e8f0; border-radius: 10px; }
+.scrollbar-pages::-webkit-scrollbar-thumb { background: #1e3a5f; border-radius: 10px; min-width: 30px; }
+.scrollbar-pages::-webkit-scrollbar-thumb:hover { background: #0f2a4a; }
