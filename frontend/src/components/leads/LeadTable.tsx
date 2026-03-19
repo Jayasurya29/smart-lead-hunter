@@ -1,107 +1,325 @@
-import React from 'react'
-import type { Lead } from '@/api/types'
-import { cn, getScoreBg, getTierLabel, getTierColor, formatLocation, relativeDate, getTimelineLabel, getTimelineColor } from '@/lib/utils'
-import { ChevronLeft, ChevronRight, Hotel, CheckCircle2, XCircle, Undo2, Trash2, Loader2 } from 'lucide-react'
+import { useMemo } from 'react'
+import type { Lead, LeadTab } from '@/api/types'
+import {
+  cn, getScoreColor, getScoreRing, getTimelineLabel, getTimelineColor,
+  getTierShort, getTierColor, formatLocation, formatOpening, relativeDate,
+} from '@/lib/utils'
 import { useApproveLead, useRejectLead, useRestoreLead, useDeleteLead } from '@/hooks/useLeads'
-import type { UseMutationResult } from '@tanstack/react-query'
+import {
+  CheckCircle2, XCircle, Undo2, Trash2, ChevronUp, ChevronDown, ChevronsUpDown,
+} from 'lucide-react'
 
 interface Props {
   leads: Lead[]
   total: number
   page: number
-  pages: number
+  totalPages: number
+  tab: LeadTab
   selectedId: number | null
   onSelect: (id: number) => void
   onPageChange: (page: number) => void
-  isLoading: boolean
-  currentTab: string
+  onSort?: (sort: string) => void
+  currentSort?: string
+  isLoading?: boolean
 }
 
-export default function LeadTable({ leads, total, page, pages, selectedId, onSelect, onPageChange, isLoading, currentTab }: Props) {
+/* ── Sort config ── */
+
+interface ColDef {
+  key: string
+  label: string
+  sortAsc?: string
+  sortDesc?: string
+  width?: string
+}
+
+const COLUMNS: ColDef[] = [
+  { key: 'score',    label: 'Score',    sortAsc: 'score_low',     sortDesc: 'score_high',    width: 'w-16' },
+  { key: 'hotel',    label: 'Hotel',    sortAsc: 'hotel_az',      sortDesc: 'hotel_za' },
+  { key: 'tier',     label: 'Tier',     sortAsc: 'tier_asc',      sortDesc: 'tier_desc',     width: 'w-16' },
+  { key: 'time',     label: 'Time',     sortAsc: 'time_asc',      sortDesc: 'time_desc',     width: 'w-16' },
+  { key: 'location', label: 'Location', sortAsc: 'location_az',   sortDesc: 'location_za' },
+  { key: 'opening',  label: 'Opening',  sortAsc: 'opening_soon',  sortDesc: 'opening_late',  width: 'w-28' },
+  { key: 'added',    label: 'Added',    sortAsc: 'oldest',        sortDesc: 'newest',        width: 'w-20' },
+]
+
+function getNextSort(col: ColDef, current: string): string {
+  if (!col.sortAsc || !col.sortDesc) return current
+  // Default first click = desc (highest score, newest, etc.)
+  if (current === col.sortDesc) return col.sortAsc
+  if (current === col.sortAsc) return col.sortDesc
+  return col.sortDesc
+}
+
+function getSortIcon(col: ColDef, current: string) {
+  if (!col.sortAsc) return null
+  if (current === col.sortAsc)  return <ChevronUp className="w-3 h-3 text-navy-600" />
+  if (current === col.sortDesc) return <ChevronDown className="w-3 h-3 text-navy-600" />
+  return <ChevronsUpDown className="w-3 h-3 text-stone-300 group-hover:text-stone-400" />
+}
+
+/* ── Timeline ordering for sort ── */
+const TIMELINE_ORDER: Record<string, number> = {
+  'Late': 0, 'Urgent': 1, 'Hot': 2, 'Warm': 3, 'Cool': 4, 'TBD': 5,
+}
+const TIER_ORDER: Record<string, number> = {
+  'tier1_ultra_luxury': 0, 'tier2_luxury': 1, 'tier3_upper_upscale': 2,
+  'tier4_upscale': 3, 'tier4_low': 4, 'tier5_budget': 5,
+}
+
+/* ── Client-side sort (works immediately, no backend needed) ── */
+
+function sortLeads(leads: Lead[], sort: string): Lead[] {
+  const sorted = [...leads]
+
+  sorted.sort((a, b) => {
+    switch (sort) {
+      case 'score_high':
+        return (b.lead_score ?? 0) - (a.lead_score ?? 0)
+      case 'score_low':
+        return (a.lead_score ?? 0) - (b.lead_score ?? 0)
+
+      case 'hotel_az':
+        return (a.hotel_name || a.name || '').localeCompare(b.hotel_name || b.name || '')
+      case 'hotel_za':
+        return (b.hotel_name || b.name || '').localeCompare(a.hotel_name || a.name || '')
+
+      case 'tier_asc': {
+        const ta = TIER_ORDER[a.brand_tier || ''] ?? 99
+        const tb = TIER_ORDER[b.brand_tier || ''] ?? 99
+        return ta - tb
+      }
+      case 'tier_desc': {
+        const ta = TIER_ORDER[a.brand_tier || ''] ?? 99
+        const tb = TIER_ORDER[b.brand_tier || ''] ?? 99
+        return tb - ta
+      }
+
+      case 'time_asc': {
+        const ta = TIMELINE_ORDER[getTimelineLabel(a)] ?? 99
+        const tb = TIMELINE_ORDER[getTimelineLabel(b)] ?? 99
+        return ta - tb
+      }
+      case 'time_desc': {
+        const ta = TIMELINE_ORDER[getTimelineLabel(a)] ?? 99
+        const tb = TIMELINE_ORDER[getTimelineLabel(b)] ?? 99
+        return tb - ta
+      }
+
+      case 'location_az':
+        return formatLocation(a).localeCompare(formatLocation(b))
+      case 'location_za':
+        return formatLocation(b).localeCompare(formatLocation(a))
+
+      case 'opening_soon': {
+        const oa = a.opening_date || String(a.opening_year || 'zzzz')
+        const ob = b.opening_date || String(b.opening_year || 'zzzz')
+        return oa.localeCompare(ob)
+      }
+      case 'opening_late': {
+        const oa = a.opening_date || String(a.opening_year || '')
+        const ob = b.opening_date || String(b.opening_year || '')
+        return ob.localeCompare(oa)
+      }
+
+      case 'newest':
+        return new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+      case 'oldest':
+        return new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
+
+      default:
+        return 0
+    }
+  })
+
+  return sorted
+}
+
+
+export default function LeadTable({
+  leads, total, page, totalPages, tab,
+  selectedId, onSelect, onPageChange, onSort, currentSort = 'newest', isLoading,
+}: Props) {
   const approveMut = useApproveLead()
-  const rejectMut = useRejectLead()
+  const rejectMut  = useRejectLead()
   const restoreMut = useRestoreLead()
-  const deleteMut = useDeleteLead()
+  const deleteMut  = useDeleteLead()
+
+  const isNew      = tab === 'pipeline'
+  const isApproved = tab === 'approved'
+  const isRejected = tab === 'rejected'
+
+  // Client-side sort
+  const sortedLeads = useMemo(() => sortLeads(leads, currentSort), [leads, currentSort])
 
   if (isLoading) {
     return (
-      <div className="bg-white rounded-lg border border-stone-200 overflow-hidden shadow-sm">
-        <div className="h-12 bg-stone-50 border-b border-stone-200" />
+      <div className="space-y-px p-1">
         {Array.from({ length: 12 }).map((_, i) => (
-          <div key={i} className="h-[60px] border-b border-stone-100 px-5">
-            <div className="skeleton h-4 rounded mt-5 w-full" style={{ animationDelay: `${i * 0.03}s` }} />
-          </div>
+          <div key={i} className="skeleton h-[48px] rounded" style={{ animationDelay: `${i * 0.03}s` }} />
         ))}
       </div>
     )
   }
 
-  if (leads.length === 0) {
+  if (!sortedLeads.length) {
     return (
-      <div className="bg-white rounded-lg border border-stone-200 shadow-sm">
-        <div className="text-center py-24">
-          <Hotel className="w-12 h-12 mx-auto mb-3 text-stone-300" />
-          <p className="text-base font-semibold text-stone-500">No leads found</p>
-          <p className="text-sm text-stone-400 mt-1">Try adjusting your filters or run a new scrape.</p>
+      <div className="flex flex-col items-center justify-center py-20 text-stone-400">
+        <div className="text-4xl mb-3">
+          {isNew ? '📭' : isApproved ? '✅' : isRejected ? '🚫' : '🗑️'}
         </div>
+        <p className="text-sm font-medium">No leads in {tab}</p>
+        <p className="text-xs mt-1">
+          {isNew ? 'Run a scrape to find new leads' : `No ${tab} leads yet`}
+        </p>
       </div>
     )
   }
 
   return (
-    <div className="bg-white rounded-lg border border-stone-200 overflow-hidden shadow-sm">
-      <div className="overflow-x-auto">
+    <div className="flex flex-col h-full">
+      <div className="flex-1 overflow-y-auto">
         <table className="w-full">
-          <thead>
-            <tr className="bg-stone-50/80 border-b border-stone-200">
-              <th className="px-4 py-3 text-[11px] font-bold text-stone-400 uppercase tracking-[0.08em] text-center w-18">Score</th>
-              <th className="px-4 py-3 text-[11px] font-bold text-stone-400 uppercase tracking-[0.08em] text-left">Hotel</th>
-              <th className="px-4 py-3 text-[11px] font-bold text-stone-400 uppercase tracking-[0.08em] text-left w-28">Tier</th>
-              <th className="px-4 py-3 text-[11px] font-bold text-stone-400 uppercase tracking-[0.08em] text-left w-44">Location</th>
-              <th className="px-4 py-3 text-[11px] font-bold text-stone-400 uppercase tracking-[0.08em] text-left w-40">Opening</th>
-              <th className="px-4 py-3 text-[11px] font-bold text-stone-400 uppercase tracking-[0.08em] text-left w-24">Added</th>
-              <th className="px-4 py-3 w-28"></th>
+          <thead className="sticky top-0 z-10">
+            <tr className="bg-stone-100/80 backdrop-blur-sm">
+              {COLUMNS.map((col) => (
+                <th
+                  key={col.key}
+                  onClick={() => col.sortAsc && onSort?.(getNextSort(col, currentSort))}
+                  className={cn(
+                    'px-3 py-2.5 text-left text-xs font-bold text-stone-400 uppercase tracking-wider group',
+                    col.width,
+                    col.sortAsc && 'cursor-pointer hover:text-stone-600 select-none transition-colors',
+                  )}
+                >
+                  <span className="flex items-center gap-1">
+                    {col.label}
+                    {getSortIcon(col, currentSort)}
+                  </span>
+                </th>
+              ))}
+              <th className="px-3 py-2.5 w-24" />
             </tr>
           </thead>
-          <tbody>
-            {leads.map((lead) => (
-              <LeadRow
-                key={lead.id}
-                lead={lead}
-                isSelected={selectedId === lead.id}
-                onSelect={() => onSelect(lead.id)}
-                approveMut={approveMut}
-                rejectMut={rejectMut}
-                restoreMut={restoreMut}
-                deleteMut={deleteMut}
-              />
-            ))}
+          <tbody className="divide-y divide-stone-100">
+            {sortedLeads.map((lead) => {
+              const timeline = getTimelineLabel(lead)
+              return (
+                <tr
+                  key={lead.id}
+                  onClick={() => onSelect(lead.id)}
+                  className={cn(
+                    'lead-row cursor-pointer',
+                    selectedId === lead.id && 'active',
+                  )}
+                >
+                  <td className="px-3 py-2.5">
+                    <span className={cn(
+                      'inline-flex items-center justify-center w-9 h-7 text-xs font-bold rounded',
+                      getScoreColor(lead.lead_score),
+                      getScoreRing(lead.lead_score),
+                    )}>
+                      {lead.lead_score ?? '—'}
+                    </span>
+                  </td>
+
+                  <td className="px-3 py-2.5 max-w-[280px]">
+                    <div className="truncate text-[15px] font-semibold text-navy-900 leading-snug">
+                      {lead.hotel_name || lead.name || '—'}
+                    </div>
+                    {lead.brand_name && (
+                      <div className="truncate text-xs text-stone-400 leading-snug">{lead.brand_name}</div>
+                    )}
+                  </td>
+
+                  <td className="px-3 py-2.5">
+                    {lead.brand_tier ? (
+                      <span className={cn('inline-flex px-2 py-0.5 rounded text-2xs font-bold', getTierColor(lead.brand_tier))}>
+                        {getTierShort(lead.brand_tier)}
+                      </span>
+                    ) : (
+                      <span className="text-xs text-stone-300">—</span>
+                    )}
+                  </td>
+
+                  <td className="px-3 py-2.5">
+                    <span className={cn('inline-flex px-2 py-0.5 rounded text-2xs font-bold', getTimelineColor(timeline))}>
+                      {timeline}
+                    </span>
+                  </td>
+
+                  <td className="px-3 py-2.5">
+                    <span className="text-sm text-stone-600 truncate block max-w-[200px]">
+                      {formatLocation(lead)}
+                    </span>
+                  </td>
+
+                  <td className="px-3 py-2.5">
+                    <span className="text-sm text-stone-600">{formatOpening(lead)}</span>
+                  </td>
+
+                  <td className="px-3 py-2.5">
+                    <span className="text-xs text-stone-400">{relativeDate(lead.created_at)}</span>
+                  </td>
+
+                  <td className="px-2 py-2.5">
+                    <div className="row-actions flex items-center gap-0.5 justify-end">
+                      {isNew && (
+                        <>
+                          <ActionBtn onClick={(e) => { e.stopPropagation(); approveMut.mutate(lead.id) }} color="emerald" title="Approve" pending={approveMut.isPending}>
+                            <CheckCircle2 className="w-4 h-4" />
+                          </ActionBtn>
+                          <ActionBtn onClick={(e) => { e.stopPropagation(); rejectMut.mutate({ id: lead.id }) }} color="red" title="Reject" pending={rejectMut.isPending}>
+                            <XCircle className="w-4 h-4" />
+                          </ActionBtn>
+                          <ActionBtn onClick={(e) => { e.stopPropagation(); deleteMut.mutate(lead.id) }} color="gray" title="Delete" pending={deleteMut.isPending}>
+                            <Trash2 className="w-4 h-4" />
+                          </ActionBtn>
+                        </>
+                      )}
+                      {isApproved && (
+                        <ActionBtn onClick={(e) => { e.stopPropagation(); rejectMut.mutate({ id: lead.id }) }} color="red" title="Reject" pending={rejectMut.isPending}>
+                          <XCircle className="w-4 h-4" />
+                        </ActionBtn>
+                      )}
+                      {isRejected && (
+                        <ActionBtn onClick={(e) => { e.stopPropagation(); restoreMut.mutate(lead.id) }} color="blue" title="Restore" pending={restoreMut.isPending}>
+                          <Undo2 className="w-4 h-4" />
+                        </ActionBtn>
+                      )}
+                    </div>
+                  </td>
+                </tr>
+              )
+            })}
           </tbody>
         </table>
       </div>
 
-      {pages > 1 && (
-        <div className="flex items-center justify-between px-5 py-3 bg-stone-50/50 border-t border-stone-200">
-          <span className="text-xs font-semibold text-stone-400 uppercase tracking-wider">
-            {total} leads · Page {page} of {pages}
+      {/* ── Page Numbers ── */}
+      {totalPages > 1 && (
+        <div className="flex items-center justify-between px-4 py-2.5 border-t border-stone-100 bg-white flex-shrink-0">
+          <span className="text-xs text-stone-400">
+            Page {page} of {totalPages} · {total} lead{total !== 1 ? 's' : ''}
           </span>
-          <div className="flex items-center gap-1">
-            <PgBtn onClick={() => onPageChange(page - 1)} disabled={page <= 1}><ChevronLeft className="w-4 h-4" /></PgBtn>
-            {getPageNumbers(page, pages).map((pn, i) =>
-              pn === '...' ? (
-                <span key={`dot-${i}`} className="w-8 h-8 flex items-center justify-center text-xs text-stone-400">…</span>
-              ) : (
+          <div className="flex items-center gap-1 overflow-x-scroll max-w-[240px] pb-1.5 scrollbar-pages">
+            {Array.from({ length: totalPages }).map((_, i) => {
+              const pageNum = i + 1
+              return (
                 <button
-                  key={pn}
-                  onClick={() => onPageChange(pn as number)}
+                  key={pageNum}
+                  onClick={() => onPageChange(pageNum)}
                   className={cn(
-                    'w-8 h-8 flex items-center justify-center rounded-lg text-xs font-semibold transition',
-                    page === pn ? 'bg-navy-900 text-white border border-navy-800 shadow-sm' : 'border border-stone-200 text-stone-600 hover:bg-white hover:text-navy-700'
+                    'w-7 h-7 rounded text-xs font-semibold transition flex-shrink-0',
+                    page === pageNum
+                      ? 'bg-navy-900 text-white'
+                      : 'text-stone-400 hover:bg-stone-100 hover:text-stone-600',
                   )}
-                >{pn}</button>
+                >
+                  {pageNum}
+                </button>
               )
-            )}
-            <PgBtn onClick={() => onPageChange(page + 1)} disabled={page >= pages}><ChevronRight className="w-4 h-4" /></PgBtn>
+            })}
           </div>
         </div>
       )}
@@ -109,162 +327,27 @@ export default function LeadTable({ leads, total, page, pages, selectedId, onSel
   )
 }
 
-function PgBtn({ onClick, disabled, children }: { onClick: () => void; disabled: boolean; children: React.ReactNode }) {
-  return (
-    <button onClick={onClick} disabled={disabled} className="w-8 h-8 flex items-center justify-center rounded-lg border border-stone-200 text-stone-500 hover:bg-white hover:text-navy-700 disabled:opacity-25 disabled:cursor-not-allowed transition">
-      {children}
-    </button>
-  )
-}
-
-function getPageNumbers(current: number, total: number): (number | string)[] {
-  if (total <= 7) return Array.from({ length: total }, (_, i) => i + 1)
-  if (current <= 3) return [1, 2, 3, 4, '...', total]
-  if (current >= total - 2) return [1, '...', total - 3, total - 2, total - 1, total]
-  return [1, '...', current - 1, current, current + 1, '...', total]
-}
-
-// ── Row ──
-
-interface LeadRowProps {
-  lead: Lead
-  isSelected: boolean
-  onSelect: () => void
-  approveMut: ReturnType<typeof useApproveLead>
-  rejectMut: ReturnType<typeof useRejectLead>
-  restoreMut: ReturnType<typeof useRestoreLead>
-  deleteMut: ReturnType<typeof useDeleteLead>
-}
-
-function LeadRow({ lead, isSelected, onSelect, approveMut, rejectMut, restoreMut, deleteMut }: LeadRowProps) {
-  const timeline = getTimelineLabel(lead.opening_date)
-  const isNew = lead.status === 'new'
-  const isApproved = lead.status === 'approved'
-  const isRejected = lead.status === 'rejected' || lead.status === 'deleted'
-
-  // FIX L-06: Track if THIS lead has a pending mutation (prevents double-clicks + CRM double-push)
-  const isApproving = approveMut.isPending && approveMut.variables === lead.id
-  const isRejecting = rejectMut.isPending && (rejectMut.variables as any)?.id === lead.id
-  const isRestoring = restoreMut.isPending && restoreMut.variables === lead.id
-  const isDeleting = deleteMut.isPending && deleteMut.variables === lead.id
-  const isBusy = isApproving || isRejecting || isRestoring || isDeleting
-
-  return (
-    <tr
-      onClick={onSelect}
-      className={cn('lead-row cursor-pointer border-b border-stone-100 last:border-b-0', isSelected && 'active')}
-    >
-      <td className="px-4 py-3.5 text-center">
-        <div className={cn(
-          'inline-flex items-center justify-center w-11 h-11 rounded-xl border-2 text-sm font-bold tabular-nums',
-          getScoreBg(lead.lead_score),
-          lead.lead_score && lead.lead_score >= 70 && 'score-hot',
-          lead.lead_score && lead.lead_score >= 50 && lead.lead_score < 70 && 'score-warm',
-        )}>
-          {lead.lead_score ?? '—'}
-        </div>
-      </td>
-
-      <td className="px-4 py-3.5">
-        <div className="font-semibold text-navy-900 text-sm leading-tight truncate max-w-[320px]">
-          {lead.hotel_name}
-        </div>
-        {lead.brand && (
-          <div className="text-xs text-stone-400 mt-0.5 truncate font-medium">{lead.brand}</div>
-        )}
-      </td>
-
-      <td className="px-4 py-3.5">
-        {lead.brand_tier && lead.brand_tier !== 'tier5_skip' && (
-          <span className={cn(
-            'inline-block text-[10px] font-bold px-2 py-1 rounded-md tracking-wide',
-            getTierColor(lead.brand_tier),
-          )}>
-            {getTierLabel(lead.brand_tier)}
-          </span>
-        )}
-      </td>
-
-      <td className="px-4 py-3.5">
-        <span className="text-[13px] text-stone-600 truncate block max-w-[180px]">
-          {formatLocation(lead.city, lead.state, lead.country)}
-        </span>
-      </td>
-
-      <td className="px-4 py-3.5">
-        <div className="flex items-center gap-2">
-          <span className={cn(
-            'text-[10px] font-bold px-2 py-1 rounded-md border uppercase tracking-wide',
-            getTimelineColor(timeline),
-          )}>
-            {timeline}
-          </span>
-          {lead.opening_date && timeline !== 'TBD' && (
-            <span className="text-xs text-stone-400 truncate max-w-[100px]">{lead.opening_date}</span>
-          )}
-        </div>
-      </td>
-
-      <td className="px-4 py-3.5">
-        <span className="text-xs text-stone-400 font-medium">{relativeDate(lead.created_at)}</span>
-      </td>
-
-      <td className="px-4 py-3.5 text-right">
-        <div className="row-actions flex items-center justify-end gap-0.5">
-          {isNew && (
-            <>
-              <ActionBtn onClick={(e) => { e.stopPropagation(); approveMut.mutate(lead.id) }} color="emerald" title="Approve" disabled={isBusy} loading={isApproving}>
-                {isApproving ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle2 className="w-4 h-4" />}
-              </ActionBtn>
-              <ActionBtn onClick={(e) => { e.stopPropagation(); rejectMut.mutate({ id: lead.id }) }} color="red" title="Reject" disabled={isBusy} loading={isRejecting}>
-                {isRejecting ? <Loader2 className="w-4 h-4 animate-spin" /> : <XCircle className="w-4 h-4" />}
-              </ActionBtn>
-              <ActionBtn onClick={(e) => { e.stopPropagation(); deleteMut.mutate(lead.id) }} color="gray" title="Delete" disabled={isBusy} loading={isDeleting}>
-                {isDeleting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
-              </ActionBtn>
-            </>
-          )}
-          {isApproved && (
-            <ActionBtn onClick={(e) => { e.stopPropagation(); rejectMut.mutate({ id: lead.id }) }} color="red" title="Reject" disabled={isBusy} loading={isRejecting}>
-              {isRejecting ? <Loader2 className="w-4 h-4 animate-spin" /> : <XCircle className="w-4 h-4" />}
-            </ActionBtn>
-          )}
-          {isRejected && (
-            <ActionBtn onClick={(e) => { e.stopPropagation(); restoreMut.mutate(lead.id) }} color="blue" title="Restore" disabled={isBusy} loading={isRestoring}>
-              {isRestoring ? <Loader2 className="w-4 h-4 animate-spin" /> : <Undo2 className="w-4 h-4" />}
-            </ActionBtn>
-          )}
-        </div>
-      </td>
-    </tr>
-  )
-}
-
-interface ActionBtnProps {
-  onClick: (e: React.MouseEvent<HTMLButtonElement>) => void
+function ActionBtn({ onClick, color, title, children, pending }: {
+  onClick: (e: React.MouseEvent) => void
   color: string
   title: string
   children: React.ReactNode
-  disabled?: boolean
-  loading?: boolean
-}
-
-function ActionBtn({ onClick, color, title, children, disabled, loading }: ActionBtnProps) {
+  pending?: boolean
+}) {
   const colors: Record<string, string> = {
     emerald: 'hover:bg-emerald-50 text-emerald-500 hover:text-emerald-700',
-    red: 'hover:bg-red-50 text-red-400 hover:text-red-600',
-    blue: 'hover:bg-blue-50 text-blue-500 hover:text-blue-700',
-    gray: 'hover:bg-stone-100 text-stone-400 hover:text-stone-600',
+    red:     'hover:bg-red-50 text-red-400 hover:text-red-600',
+    blue:    'hover:bg-blue-50 text-blue-500 hover:text-blue-700',
+    gray:    'hover:bg-stone-100 text-stone-400 hover:text-stone-600',
   }
   return (
     <button
       onClick={onClick}
       title={title}
-      disabled={disabled}
+      disabled={pending}
       className={cn(
-        'p-2 rounded-lg transition-all duration-100',
-        disabled ? 'opacity-40 cursor-not-allowed' : colors[color] || colors.gray,
-        loading && 'opacity-70',
+        'p-1.5 rounded-md transition-all duration-100 disabled:opacity-40',
+        colors[color] || colors.gray,
       )}
     >
       {children}

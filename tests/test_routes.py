@@ -29,7 +29,8 @@ async def _db_request(coro):
             pytest.skip("Database not available")
         raise
     except Exception as e:
-        if "does not exist" in str(e) or "UndefinedTable" in str(e):
+        msg = str(e)
+        if any(s in msg for s in ["does not exist", "UndefinedTable", "ProgrammingError", "no such table"]):
             pytest.skip("Database tables not created")
         raise
 

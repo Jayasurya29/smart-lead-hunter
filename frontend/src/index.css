@@ -3,68 +3,165 @@
 @import "tailwindcss/utilities";
 @import url('https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,300;9..40,400;9..40,500;9..40,600;9..40,700&display=swap');
 
+/* ═══════════════════════════════════════════════════
+   SMART LEAD HUNTER — Design Foundation
+   Theme: "Boutique Hotel Lobby"
+   Warm, refined, premium. Hospitality meets tech.
+
+   FONT SIZE FLOOR: 11px (text-2xs). Nothing goes below.
+   ═══════════════════════════════════════════════════ */
+
+
+/* ── 1. BASE RESET ── */
+
 html, body, #root { height: 100%; }
+
 body {
   font-family: 'DM Sans', system-ui, sans-serif;
+  font-size: 15px;
+  line-height: 1.5;
   color: #1f2937;
   background: #faf9f7;
   -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
+
+
+/* ── 2. SCROLLBAR ── */
 
 ::-webkit-scrollbar { width: 5px; height: 5px; }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: #d4cfc5; border-radius: 10px; }
 ::-webkit-scrollbar-thumb:hover { background: #b0a99e; }
 
+
+/* ── 3. FORM CONTROLS ── */
+
 select.filter-select {
+  @apply h-8 px-3 pr-8 text-xs font-semibold rounded-lg outline-none cursor-pointer
+         transition-all duration-150 appearance-none;
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 24 24' fill='none' stroke='%237a7265' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
   background-repeat: no-repeat;
-  background-position: right 8px center;
+  background-position: right 10px center;
   background-size: 10px;
 }
 
-@keyframes slideIn { from { transform: translateX(16px); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
-@keyframes slideUp { from { transform: translateY(12px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
-@keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
-@keyframes scaleIn { from { transform: scale(0.96); opacity: 0; } to { transform: scale(1); opacity: 1; } }
-@keyframes shimmer { 0% { background-position: -200% 0; } 100% { background-position: 200% 0; } }
 
-.animate-slideIn { animation: slideIn 0.28s cubic-bezier(0.16, 1, 0.3, 1); }
-.animate-slideUp { animation: slideUp 0.3s cubic-bezier(0.16, 1, 0.3, 1); }
-.animate-fadeIn { animation: fadeIn 0.2s ease-out; }
-.animate-scaleIn { animation: scaleIn 0.25s cubic-bezier(0.16, 1, 0.3, 1); }
-.skeleton { background: linear-gradient(90deg, #f0ede8 25%, #e8e4dd 50%, #f0ede8 75%); background-size: 200% 100%; animation: shimmer 1.5s infinite; }
+/* ── 4. CORE ANIMATIONS ── */
 
-.lead-row { transition: all 0.15s cubic-bezier(0.16, 1, 0.3, 1); }
-.lead-row:hover { background: linear-gradient(90deg, rgba(10,22,40,0.02) 0%, rgba(10,22,40,0.04) 100%); }
-.lead-row.active { background: linear-gradient(90deg, rgba(10,22,40,0.04) 0%, rgba(10,22,40,0.06) 100%); border-left: 3px solid #253d5e; }
-.lead-row .row-actions { opacity: 0; transform: translateX(4px); transition: all 0.18s cubic-bezier(0.16, 1, 0.3, 1); }
-.lead-row:hover .row-actions, .lead-row.active .row-actions { opacity: 1; transform: translateX(0); }
+@keyframes slideIn  { from { transform: translateX(16px); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+@keyframes slideUp  { from { transform: translateY(12px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+@keyframes fadeIn   { from { opacity: 0; } to { opacity: 1; } }
+@keyframes scaleIn  { from { transform: scale(0.96); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+@keyframes shimmer  { 0% { background-position: -200% 0; } 100% { background-position: 200% 0; } }
 
-.modal-backdrop { background: rgba(10,22,40,0.5); backdrop-filter: blur(8px); }
-.stat-card { transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1); }
-.stat-card:hover { transform: translateY(-1px); box-shadow: 0 4px 12px rgba(0,0,0,0.06); }
+.animate-slideIn  { animation: slideIn 0.28s cubic-bezier(0.16, 1, 0.3, 1); }
+.animate-slideUp  { animation: slideUp 0.3s  cubic-bezier(0.16, 1, 0.3, 1); }
+.animate-fadeIn   { animation: fadeIn  0.2s  ease-out; }
+.animate-scaleIn  { animation: scaleIn 0.25s cubic-bezier(0.16, 1, 0.3, 1); }
+
+.skeleton {
+  background: linear-gradient(90deg, #f0ede8 25%, #e8e4dd 50%, #f0ede8 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.5s infinite;
+}
+
+
+/* ── 5. TABLE ROWS ── */
+
+.lead-row {
+  transition: all 0.15s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.lead-row:hover {
+  background: linear-gradient(90deg, rgba(10,22,40,0.02) 0%, rgba(10,22,40,0.04) 100%);
+}
+.lead-row.active {
+  background: linear-gradient(90deg, rgba(10,22,40,0.04) 0%, rgba(10,22,40,0.06) 100%);
+  border-left: 3px solid #253d5e;
+}
+.lead-row .row-actions {
+  opacity: 0;
+  transform: translateX(4px);
+  transition: all 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.lead-row:hover .row-actions,
+.lead-row.active .row-actions {
+  opacity: 1;
+  transform: translateX(0);
+}
+
+
+/* ── 6. UI COMPONENTS ── */
+
+.modal-backdrop {
+  background: rgba(10,22,40,0.5);
+  backdrop-filter: blur(8px);
+}
+
+.stat-card {
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.stat-card:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(0,0,0,0.06);
+}
+
 .tab-active { position: relative; }
-.tab-active::after { content: ''; position: absolute; bottom: -1px; left: 0; right: 0; height: 2px; background: #253d5e; border-radius: 2px 2px 0 0; }
-.score-hot { box-shadow: 0 0 0 3px rgba(232,93,74,0.1); }
+.tab-active::after {
+  content: '';
+  position: absolute;
+  bottom: -1px; left: 0; right: 0;
+  height: 2px;
+  background: #253d5e;
+  border-radius: 2px 2px 0 0;
+}
+
+.score-hot  { box-shadow: 0 0 0 3px rgba(232,93,74,0.1); }
 .score-warm { box-shadow: 0 0 0 3px rgba(212,168,83,0.1); }
 
-/* ── Add these keyframes to the BOTTOM of index.css ── */
 
-/* Auth page animations */
+/* ── 7. REUSABLE UTILITIES ── */
+
+/* Header action buttons (Run Scrape, Discovery) */
+.header-action {
+  @apply flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold rounded-lg
+         transition-all duration-150 shadow-sm;
+}
+.header-action:active {
+  transform: scale(0.97);
+}
+.header-action:disabled {
+  @apply bg-stone-200 text-stone-400 cursor-not-allowed shadow-none;
+}
+
+/* Section headers throughout the app (e.g. "DETAILS", "METADATA") */
+.section-label {
+  @apply text-xs font-bold text-stone-400 uppercase tracking-[0.08em] mb-2;
+}
+
+/* Field labels inside detail panels */
+.field-label {
+  @apply text-2xs text-stone-400 uppercase font-bold tracking-wider;
+}
+
+
+/* ═══════════════════════════════════════════════════
+   8. AUTH PAGE ANIMATIONS
+   ═══════════════════════════════════════════════════ */
+
 @keyframes gradientShift {
   0%   { background-position: 0% 50%; }
   50%  { background-position: 100% 50%; }
   100% { background-position: 0% 50%; }
 }
 @keyframes logoFloat {
-  0%, 100% { transform: translateY(0) scale(1); box-shadow: 0 20px 60px rgba(0,0,0,0.35); }
-  50%       { transform: translateY(-12px) scale(1.03); box-shadow: 0 28px 72px rgba(0,0,0,0.45); }
+  0%, 100% { transform: translateY(0) scale(1);    box-shadow: 0 20px 60px rgba(0,0,0,0.35); }
+  50%      { transform: translateY(-12px) scale(1.03); box-shadow: 0 28px 72px rgba(0,0,0,0.45); }
 }
 @keyframes blobFloat {
   0%, 100% { transform: translate(0,0) scale(1); }
-  33%       { transform: translate(30px,-50px) scale(1.1); }
-  66%       { transform: translate(-20px,30px) scale(0.9); }
+  33%      { transform: translate(30px,-50px) scale(1.1); }
+  66%      { transform: translate(-20px,30px) scale(0.9); }
 }
 @keyframes dotGrid {
   0%   { transform: translate(0,0); }
@@ -76,7 +173,7 @@ select.filter-select {
 }
 @keyframes pulseDot {
   0%, 100% { opacity: 1; transform: scale(1); }
-  50%       { opacity: 0.4; transform: scale(0.7); }
+  50%      { opacity: 0.4; transform: scale(0.7); }
 }
 @keyframes cardSlideUp {
   from { opacity: 0; transform: translateY(32px); }
@@ -84,12 +181,12 @@ select.filter-select {
 }
 @keyframes iconPulse {
   0%, 100% { box-shadow: 0 0 0 0 rgba(245,158,11,0.4); }
-  50%       { box-shadow: 0 0 0 16px rgba(245,158,11,0); }
+  50%      { box-shadow: 0 0 0 16px rgba(245,158,11,0); }
 }
 @keyframes otpShake {
   0%, 100% { transform: translateX(0); }
-  25%       { transform: translateX(-8px); }
-  75%       { transform: translateX(8px); }
+  25%      { transform: translateX(-8px); }
+  75%      { transform: translateX(8px); }
 }
 @keyframes toastIn {
   from { transform: translateX(400px); opacity: 0; }
@@ -113,3 +210,13 @@ select.filter-select {
 .animate-otp-shake      { animation: otpShake 0.4s ease; }
 .animate-toast-in       { animation: toastIn 0.35s cubic-bezier(0.68,-0.55,0.265,1.55); }
 .animate-modal-in       { animation: modalIn 0.35s ease-out; }
+
+/* Scrollable page numbers — always show track */
+.scrollbar-pages {
+  scrollbar-width: thin;
+  scrollbar-color: #253d5e #e8e4dd;
+}
+.scrollbar-pages::-webkit-scrollbar { height: 4px; }
+.scrollbar-pages::-webkit-scrollbar-track { background: #e8e4dd; border-radius: 10px; }
+.scrollbar-pages::-webkit-scrollbar-thumb { background: #253d5e; border-radius: 10px; min-width: 30px; }
+.scrollbar-pages::-webkit-scrollbar-thumb:hover { background: #1a2d4a; }

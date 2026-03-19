@@ -118,6 +118,13 @@ async def list_leads(
             CARIBBEAN_COUNTRIES,
             SOUTHEAST_STATES,
             MOUNTAIN_STATES,
+            NORTHEAST_STATES,
+            DC_NAMES,
+            MIDWEST_STATES,
+            PACIFIC_NW_STATES,
+            LAS_VEGAS_CITIES,
+            NEW_ORLEANS_CITIES,
+            HAWAII_CITIES,
         )
 
         loc_filter = None
@@ -139,19 +146,48 @@ async def list_leads(
             loc_filter = func.lower(PotentialLead.state).in_(SOUTHEAST_STATES)
         elif location == "mountain":
             loc_filter = func.lower(PotentialLead.state).in_(MOUNTAIN_STATES)
+        elif location == "northeast":
+            loc_filter = func.lower(PotentialLead.state).in_(NORTHEAST_STATES)
+        elif location == "dc":
+            loc_filter = func.lower(PotentialLead.city).in_(DC_NAMES) | func.lower(
+                PotentialLead.state
+            ).in_(DC_NAMES)
+        elif location == "midwest":
+            loc_filter = func.lower(PotentialLead.state).in_(MIDWEST_STATES)
+        elif location == "pacific_nw":
+            loc_filter = func.lower(PotentialLead.state).in_(PACIFIC_NW_STATES)
+        elif location == "las_vegas":
+            loc_filter = func.lower(PotentialLead.city).in_(LAS_VEGAS_CITIES)
+        elif location == "new_orleans":
+            loc_filter = func.lower(PotentialLead.city).in_(NEW_ORLEANS_CITIES)
+        elif location == "hawaii":
+            loc_filter = (func.lower(PotentialLead.state) == "hawaii") | func.lower(
+                PotentialLead.city
+            ).in_(HAWAII_CITIES)
 
         if loc_filter is not None:
             query = query.where(loc_filter)
             count_query = count_query.where(loc_filter)
 
-    # Sort
+    # Sort — supports both old keys and new frontend keys
     sort_map = {
+        # Original keys
         "newest": PotentialLead.created_at.desc().nullslast(),
         "oldest": PotentialLead.created_at.asc().nullslast(),
         "score_desc": PotentialLead.lead_score.desc().nullslast(),
         "score_asc": PotentialLead.lead_score.asc().nullslast(),
-        "name_asc": PotentialLead.hotel_name.asc(),
+        "name_asc": PotentialLead.hotel_name.asc().nullslast(),
         "opening": PotentialLead.opening_date.asc().nullslast(),
+        # New keys from React frontend
+        "name_desc": PotentialLead.hotel_name.desc().nullslast(),
+        "opening_asc": PotentialLead.opening_date.asc().nullslast(),
+        "opening_desc": PotentialLead.opening_date.desc().nullslast(),
+        "tier_asc": PotentialLead.brand_tier.asc().nullslast(),
+        "tier_desc": PotentialLead.brand_tier.desc().nullslast(),
+        "time_asc": PotentialLead.timeline_label.asc().nullslast(),
+        "time_desc": PotentialLead.timeline_label.desc().nullslast(),
+        "location_asc": PotentialLead.city.asc().nullslast(),
+        "location_desc": PotentialLead.city.desc().nullslast(),
     }
     order_by = sort_map.get(
         sort or "score_desc", PotentialLead.lead_score.desc().nullslast()
@@ -442,7 +478,6 @@ async def api_approve_lead(lead_id: int, db: AsyncSession = Depends(get_db)):
     await db.refresh(lead)
 
     response = LeadResponse.model_validate(lead)
-    # Include CRM warning in response so frontend can show it
     if crm_error:
         return JSONResponse(
             content={**response.model_dump(mode="json"), "crm_warning": crm_error},

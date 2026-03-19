@@ -1,291 +1,331 @@
-import { useState, useMemo, useCallback } from 'react'
-import { X, Zap, Target, Radio, Rocket, Loader2, Star, Search } from 'lucide-react'
-import { triggerScrape } from '@/api/leads'
-import { useSources } from '@/hooks/useLeads'
+import { useState, useRef, useEffect } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
 import { useBackgroundTask } from '@/hooks/useBackgroundTask'
-import type { SourceInfo } from '@/api/types'
+import {
+  X, Play, Loader2, CheckCircle2, AlertCircle,
+  Zap, RotateCcw, Link2, Globe,
+} from 'lucide-react'
+import { triggerScrape, triggerExtractUrl, fetchSources } from '@/api/leads'
 import { cn } from '@/lib/utils'
-
-type ScrapeMode = 'smart' | 'manual' | 'full'
 
 interface Props { onClose: () => void }
 
-const CATEGORIES: { key: string; label: string }[] = [
-  { key: 'aggregator', label: 'Aggregators' },
-  { key: 'caribbean', label: 'Caribbean' },
-  { key: 'chain_newsroom', label: 'Chain Newsrooms' },
-  { key: 'florida', label: 'Florida' },
-  { key: 'industry', label: 'Industry' },
-  { key: 'luxury_independent', label: 'Luxury' },
-  { key: 'travel_pub', label: 'Travel Pubs' },
-  { key: 'pr_wire', label: 'PR Wire' },
-]
-
-const MODE_CONFIG = [
-  { key: 'smart' as const, label: 'Smart', desc: 'Only due sources', icon: Zap, color: 'amber' },
-  { key: 'manual' as const, label: 'Manual', desc: 'Pick sources', icon: Target, color: 'emerald' },
-  { key: 'full' as const, label: 'Full Sweep', desc: 'All sources', icon: Radio, color: 'blue' },
-]
-
-const MODE_STYLES: Record<string, { bg: string; border: string; text: string }> = {
-  amber:   { bg: 'bg-amber-50',   border: 'border-amber-400',   text: 'text-amber-600' },
-  emerald: { bg: 'bg-emerald-50', border: 'border-emerald-400', text: 'text-emerald-600' },
-  blue:    { bg: 'bg-blue-50',    border: 'border-blue-400',    text: 'text-blue-600' },
-}
+type Mode = 'smart' | 'full' | 'url'
 
 export default function ScrapeModal({ onClose }: Props) {
-  const [mode, setMode] = useState<ScrapeMode>('smart')
-  const [starting, setStarting] = useState(false)
-  const [error, setError] = useState('')
-  const [selected, setSelected] = useState<Set<number>>(new Set())
-  const [activeCategories, setActiveCategories] = useState<Set<string>>(new Set())
-  const [search, setSearch] = useState('')
+  const [mode, setMode] = useState<Mode>('smart')
+  const [status, setStatus] = useState<'idle' | 'running' | 'done' | 'error'>('idle')
+  const [logs, setLogs] = useState<string[]>([])
+  const [sources, setSources] = useState<any[]>([])
+  const [selectedSources, setSelectedSources] = useState<number[]>([])
+  const [extractUrl, setExtractUrl] = useState('')
+  const logRef = useRef<HTMLDivElement>(null)
+  const esRef = useRef<EventSource | null>(null)
+  const qc = useQueryClient()
+  const bg = useBackgroundTask()
 
-  const { startTask } = useBackgroundTask()
-  const { data: sourcesData, isLoading: sourcesLoading } = useSources()
-
-  const allSources = useMemo(() => sourcesData?.sources || [], [sourcesData])
-  const dueSources = useMemo(() => sourcesData?.due_sources || [], [sourcesData])
-
-  const categoryCounts = useMemo(() => {
-    const c: Record<string, number> = {}
-    allSources.forEach(s => { c[s.type || 'other'] = (c[s.type || 'other'] || 0) + 1 })
-    return c
-  }, [allSources])
-
-  const filteredSources = useMemo(() => {
-    let list = allSources
-    if (activeCategories.size > 0) list = list.filter(s => activeCategories.has(s.type || ''))
-    if (search.trim()) {
-      const q = search.toLowerCase()
-      list = list.filter(s => s.name.toLowerCase().includes(q))
-    }
-    return list
-  }, [allSources, activeCategories, search])
-
-  const toggleSource = useCallback((id: number) => {
-    setSelected(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n })
+  /* Load sources on mount */
+  useEffect(() => {
+    fetchSources()
+      .then((data) => {
+        const list = Array.isArray(data) ? data : data?.sources || []
+        setSources(list)
+      })
+      .catch(() => {})
+    return () => { esRef.current?.close() }
   }, [])
 
-  const toggleCategory = useCallback((key: string) => {
-    setActiveCategories(prev => { const n = new Set(prev); n.has(key) ? n.delete(key) : n.add(key); return n })
-  }, [])
+  /* Auto-scroll log */
+  useEffect(() => {
+    if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight
+  }, [logs])
 
-  function switchMode(m: ScrapeMode) {
-    setMode(m); setSelected(new Set()); setActiveCategories(new Set()); setSearch('')
+  function toggleSource(id: number) {
+    setSelectedSources((prev) =>
+      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id],
+    )
   }
 
-  async function handleStart() {
-    setStarting(true)
-    setError('')
-    const ids = mode === 'manual' ? Array.from(selected) : []
+  function addLog(msg: string) {
+    setLogs((prev) => [...prev, msg])
+  }
+
+  /* Connect SSE stream */
+  function connectSSE(path: string, taskType: 'scrape' | 'extract') {
+    const es = new EventSource(path)
+    esRef.current = es
+    bg.startTask(taskType)
+
+    es.onmessage = (e) => {
+      try {
+        const data = JSON.parse(e.data)
+        if (data.message) {
+          addLog(data.message)
+          bg.addEvent()
+        }
+        if (data.type === 'complete' || data.done || data.status === 'complete') {
+          setStatus('done')
+          es.close()
+          const newLeads = data.stats?.leads_saved ?? data.stats?.leads_found ?? 0
+          const duration = data.duration_seconds ?? 0
+          bg.completeTask({
+            type: taskType,
+            message: taskType === 'extract' ? 'URL extraction complete' : 'Scrape complete',
+            newLeads,
+            duration,
+          })
+          qc.invalidateQueries({ queryKey: ['leads'] })
+          qc.invalidateQueries({ queryKey: ['stats'] })
+        }
+        if (data.type === 'error') {
+          addLog(`❌ ${data.message}`)
+          setStatus('error')
+          es.close()
+          bg.failTask(data.message)
+        }
+      } catch {
+        if (e.data && e.data !== 'ping') addLog(e.data)
+      }
+    }
+
+    es.onerror = () => {
+      es.close()
+      if (status === 'running') {
+        setStatus('done')
+        addLog('Stream ended.')
+        bg.completeTask({ type: taskType, message: 'Stream ended', newLeads: 0, duration: 0 })
+      }
+    }
+  }
+
+  /* Start scrape */
+  async function handleStartScrape() {
+    setStatus('running')
+    setLogs([`Starting ${mode} scrape...`])
     try {
-      const result = await triggerScrape(mode, ids)
-      const scrapeId = result.scrape_id || ''
-      // Hand off to background — modal closes
-      startTask('scrape', `/api/dashboard/scrape/stream?scrape_id=${scrapeId}`)
+      const result = await triggerScrape(mode, selectedSources)
+      const scrapeId = result?.scrape_id || result?.id
+      const url = `/api/dashboard/scrape/stream${scrapeId ? `?scrape_id=${scrapeId}` : ''}`
+      connectSSE(url, 'scrape')
       onClose()
     } catch (err: any) {
-      setStarting(false)
-      setError(err?.response?.data?.message || err.message || 'Failed to start scrape')
+      addLog(`❌ Failed to start: ${err.message}`)
+      setStatus('error')
     }
   }
 
-  const actionLabel =
-    mode === 'smart'  ? `Start Pipeline (${dueSources.length} due)` :
-    mode === 'manual' ? `Scrape ${selected.size} Source${selected.size !== 1 ? 's' : ''}` :
-    `Sweep All ${allSources.length}`
+  /* Start URL extract */
+  async function handleStartExtract() {
+    if (!extractUrl.trim()) return
+    setStatus('running')
+    setLogs([`Extracting from: ${extractUrl}`])
+    try {
+      const result = await triggerExtractUrl(extractUrl.trim())
+      const extractId = result?.extract_id || result?.id
+      const url = `/api/dashboard/extract-url/stream${extractId ? `?extract_id=${extractId}` : ''}`
+      connectSSE(url, 'extract')
+      onClose()
+    } catch (err: any) {
+      addLog(`❌ Failed: ${err.message}`)
+      setStatus('error')
+    }
+  }
 
-  const canStart =
-    !starting && (
-      mode === 'smart'  ? dueSources.length > 0 :
-      mode === 'manual' ? selected.size > 0 :
-      allSources.length > 0
-    )
+  const isRunning = status === 'running'
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center modal-backdrop animate-fadeIn" onClick={onClose}>
-      <div className="bg-white rounded-xl shadow-2xl w-full max-w-[580px] mx-4 overflow-hidden animate-scaleIn flex flex-col max-h-[82vh]" onClick={e => e.stopPropagation()}>
-        {/* Header */}
-        <div className="flex items-center justify-between px-5 py-4 border-b border-stone-100">
-          <div className="flex items-center gap-2.5">
-            <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-emerald-400 to-emerald-600 flex items-center justify-center shadow-sm">
-              <Rocket className="w-4 h-4 text-white" />
-            </div>
-            <div>
-              <h3 className="text-[15px] font-bold text-stone-900">Run Scrape Pipeline</h3>
-              <p className="text-[11px] text-stone-400">
-                {sourcesLoading ? 'Loading sources...' : `${allSources.length} sources · ${dueSources.length} due`}
-              </p>
-            </div>
+    <div className="fixed inset-0 z-50 modal-backdrop flex items-center justify-center animate-fadeIn">
+      <div className="bg-white rounded-2xl shadow-modal w-[520px] max-h-[85vh] flex flex-col overflow-hidden animate-scaleIn">
+
+        {/* ── Header ── */}
+        <div className="px-5 py-4 flex items-center justify-between border-b border-stone-100">
+          <div>
+            <h2 className="text-[15px] font-bold text-navy-900">
+              {mode === 'url' ? 'Extract from URL' : 'Run Scrape'}
+            </h2>
+            <p className="text-[11px] text-stone-400 mt-0.5">
+              {mode === 'smart' ? 'Scrape sources due for refresh' :
+               mode === 'full'  ? 'Full sweep of all active sources' :
+               'Extract leads from a specific article URL'}
+            </p>
           </div>
           <button onClick={onClose} className="p-1.5 text-stone-400 hover:text-stone-600 rounded-lg hover:bg-stone-100 transition">
             <X className="w-4 h-4" />
           </button>
         </div>
 
-        {/* Mode Cards */}
-        <div className="grid grid-cols-3 gap-2 px-5 pt-4 pb-3">
-          {MODE_CONFIG.map(m => {
-            const active = mode === m.key
-            const styles = MODE_STYLES[m.color]
+        {/* ── Mode tabs ── */}
+        <div className="px-5 pt-3 flex gap-1">
+          {([
+            { key: 'smart', label: 'Smart', icon: Zap },
+            { key: 'full',  label: 'Full Sweep', icon: RotateCcw },
+            { key: 'url',   label: 'URL Extract', icon: Link2 },
+          ] as { key: Mode; label: string; icon: React.ElementType }[]).map((m) => {
+            const Icon = m.icon
             return (
-              <button key={m.key} onClick={() => switchMode(m.key)} disabled={starting} className={cn(
-                'p-3 rounded-lg border-2 text-left transition-all duration-150',
-                active ? `${styles.bg} ${styles.border}` : 'border-stone-200 hover:border-stone-300',
-                starting && 'opacity-50 pointer-events-none',
-              )}>
-                <m.icon className={cn('w-4 h-4 mb-1.5', active ? styles.text : 'text-stone-400')} />
-                <div className={cn('text-[12px] font-bold', active ? 'text-stone-900' : 'text-stone-700')}>{m.label}</div>
-                <div className="text-[10px] text-stone-400 mt-0.5">{m.desc}</div>
+              <button
+                key={m.key}
+                onClick={() => !isRunning && setMode(m.key)}
+                disabled={isRunning}
+                className={cn(
+                  'flex items-center gap-1.5 px-3 py-1.5 text-[11px] font-semibold rounded-md transition',
+                  mode === m.key
+                    ? 'bg-navy-900 text-white'
+                    : 'text-stone-500 hover:bg-stone-100 disabled:opacity-50',
+                )}
+              >
+                <Icon className="w-3 h-3" /> {m.label}
               </button>
             )
           })}
         </div>
 
-        {/* Smart Mode Info */}
-        {mode === 'smart' && (
-          <div className="px-5 pb-2">
-            <div className="flex items-center gap-3 p-3.5 rounded-lg bg-amber-50 border border-amber-200">
-              <Zap className="w-5 h-5 text-amber-500 flex-shrink-0" />
+        {/* ── Body ── */}
+        <div className="flex-1 overflow-y-auto px-5 py-3">
+
+          {/* URL input (url mode) */}
+          {mode === 'url' && status === 'idle' && (
+            <div className="space-y-3">
               <div>
-                <div className="text-[13px] font-semibold text-stone-800">
-                  {dueSources.length} source{dueSources.length !== 1 ? 's' : ''} due for scraping
-                </div>
-                <div className="text-[11px] text-stone-400 mt-0.5">Based on schedule intervals and last scrape times</div>
-                {dueSources.length > 0 && (
-                  <div className="mt-2 flex flex-wrap gap-1">
-                    {dueSources.slice(0, 8).map(s => (
-                      <span key={s.id} className="text-[10px] bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded font-medium">
-                        {s.name}
-                      </span>
-                    ))}
-                    {dueSources.length > 8 && (
-                      <span className="text-[10px] text-amber-500 font-medium">+{dueSources.length - 8} more</span>
-                    )}
-                  </div>
-                )}
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Source Picker (manual + full) */}
-        {(mode === 'manual' || mode === 'full') && (
-          <>
-            <div className="px-5 pb-2 space-y-2">
-              {mode === 'manual' && (
+                <label className="block text-[10px] font-bold text-stone-400 uppercase tracking-wider mb-1">Article URL</label>
                 <div className="relative">
-                  <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-stone-400" />
-                  <input type="text" value={search} onChange={e => setSearch(e.target.value)}
-                    placeholder="Search sources..." className="w-full pl-8 pr-3 py-1.5 text-xs rounded-lg border border-stone-200 bg-stone-50 text-stone-700 placeholder:text-stone-400 outline-none focus:border-stone-400 transition" />
+                  <Globe className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-stone-400" />
+                  <input
+                    type="url"
+                    value={extractUrl}
+                    onChange={(e) => setExtractUrl(e.target.value)}
+                    placeholder="https://lodgingmagazine.com/..."
+                    className="w-full h-9 pl-9 pr-3 text-[12px] bg-stone-50 border border-stone-200 rounded-lg outline-none focus:border-navy-400 focus:ring-1 focus:ring-navy-200 transition"
+                  />
+                </div>
+              </div>
+              <p className="text-[10px] text-stone-400">
+                Paste a hotel news article URL. The AI will extract any new hotel leads from it.
+              </p>
+            </div>
+          )}
+
+          {/* Source list (smart/full mode) */}
+          {mode !== 'url' && status === 'idle' && (
+            <div className="space-y-2" style={{ maxHeight: '320px', overflowY: 'auto' }}>
+              {mode === 'full' && (
+                <div className="bg-gold-50 border border-gold-200 rounded-lg p-3 mb-2">
+                  <p className="text-[11px] font-semibold text-gold-700">
+                    ⚠️ Full sweep will scrape all {sources.filter((s) => s.is_active !== false).length} active sources
+                  </p>
+                  <p className="text-[10px] text-gold-600 mt-0.5">This may take 30-90 minutes.</p>
                 </div>
               )}
-              <div className="flex flex-wrap gap-1.5 items-center">
-                {CATEGORIES.filter(c => categoryCounts[c.key]).map(cat => (
-                  <button key={cat.key} onClick={() => toggleCategory(cat.key)}
-                    className={cn('px-2 py-1 rounded-md text-[11px] font-medium border transition-all',
-                      activeCategories.has(cat.key) ? 'bg-emerald-50 border-emerald-300 text-emerald-700' : 'border-stone-200 text-stone-500 hover:border-stone-300',
-                    )}>
-                    {cat.label} <span className="opacity-50">({categoryCounts[cat.key]})</span>
-                  </button>
-                ))}
-                {mode === 'manual' && (
-                  <div className="ml-auto flex items-center gap-1">
-                    <button onClick={() => setSelected(new Set(filteredSources.map(s => s.id)))}
-                      className="px-2 py-1 rounded-md text-[11px] font-bold border bg-emerald-50 border-emerald-300 text-emerald-700">Select All</button>
-                    <button onClick={() => setSelected(new Set())}
-                      className="px-2 py-1 text-[11px] font-medium text-stone-400 hover:text-stone-600 transition">Clear</button>
-                  </div>
-                )}
-              </div>
-            </div>
-            <div className="border-t border-stone-100 overflow-y-auto max-h-[260px]">
-              {sourcesLoading ? (
-                <div className="py-10 text-center text-xs text-stone-400">Loading sources...</div>
-              ) : filteredSources.length === 0 ? (
-                <div className="py-10 text-center text-xs text-stone-400">No sources match your filters</div>
-              ) : (
-                filteredSources.map(source => {
-                  const checked = mode === 'full' || selected.has(source.id)
-                  return (
-                    <label key={source.id} className={cn(
-                      'flex items-start gap-3 px-5 py-2.5 cursor-pointer transition-colors border-b border-stone-50',
-                      checked ? 'bg-stone-50/60' : 'hover:bg-stone-50/40',
-                    )}>
-                      <input type="checkbox" checked={checked}
-                        onChange={() => mode === 'manual' && toggleSource(source.id)}
-                        disabled={mode === 'full'}
-                        className="mt-1 w-4 h-4 rounded border-stone-300 accent-emerald-600" />
+              {mode === 'smart' && sources.length === 0 && (
+                <div className="text-center py-8 text-stone-400">
+                  <p className="text-sm font-medium">Loading sources...</p>
+                </div>
+              )}
+              {mode === 'smart' && sources.length > 0 && (
+                <>
+                  <p className="text-[10px] text-stone-400 font-medium">
+                    {selectedSources.length > 0
+                      ? `${selectedSources.length} source${selectedSources.length !== 1 ? 's' : ''} selected`
+                      : 'Select specific sources or start to scrape all due sources'}
+                  </p>
+                  {sources.filter((s) => s.is_active !== false).map((s) => (
+                    <label
+                      key={s.id}
+                      className={cn(
+                        'flex items-center gap-3 px-3 py-2 rounded-lg border cursor-pointer transition',
+                        selectedSources.includes(s.id)
+                          ? 'border-navy-300 bg-navy-50'
+                          : 'border-stone-100 hover:border-stone-200',
+                      )}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={selectedSources.includes(s.id)}
+                        onChange={() => toggleSource(s.id)}
+                        className="w-3.5 h-3.5 rounded border-stone-300 text-navy-600 focus:ring-navy-500"
+                      />
                       <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <span className="text-[13px] font-semibold text-stone-800">{source.name}</span>
-                          <HealthBadge status={source.health} />
-                          {source.gold_count > 0 && (
-                            <span className="inline-flex items-center gap-px">
-                              <Star className="w-3 h-3 fill-amber-400 text-amber-400" />
-                              <span className="text-[10px] font-semibold text-amber-600">{source.gold_count}</span>
-                            </span>
-                          )}
-                          {source.leads > 0 && (
-                            <span className="text-[11px] font-semibold text-stone-500 tabular-nums">{source.leads} leads</span>
-                          )}
-                        </div>
-                        <div className="text-[11px] text-stone-400 mt-0.5">
-                          {source.type?.replace(/_/g, ' ')} · P{source.priority}
-                          {source.last_scraped && ` · Last: ${new Date(source.last_scraped).toLocaleDateString()}`}
-                        </div>
+                        <p className="text-[12px] font-semibold text-navy-900 truncate">{s.name}</p>
+                        {s.url && <p className="text-[10px] text-stone-400 truncate">{s.url}</p>}
                       </div>
+                      {s.gold_url_count > 0 && (
+                        <span className="text-[10px] text-gold-600 font-medium">⭐ {s.gold_url_count}</span>
+                      )}
                     </label>
-                  )
-                })
+                  ))}
+                </>
               )}
             </div>
-          </>
-        )}
+          )}
 
-        {/* Error */}
-        {error && (
-          <div className="px-5 py-2">
-            <div className="text-xs text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">{error}</div>
-          </div>
-        )}
+          {/* Running/Done log */}
+          {(status === 'running' || status === 'done' || status === 'error') && (
+            <div className="space-y-2">
+              <div className="flex items-center gap-2">
+                {status === 'running' && <Loader2 className="w-4 h-4 text-emerald-500 animate-spin" />}
+                {status === 'done'    && <CheckCircle2 className="w-4 h-4 text-emerald-500" />}
+                {status === 'error'   && <AlertCircle className="w-4 h-4 text-coral-500" />}
+                <span className="text-[12px] font-semibold text-navy-900">
+                  {status === 'running' ? 'Processing...' : status === 'done' ? 'Complete' : 'Failed'}
+                </span>
+              </div>
+              <div
+                ref={logRef}
+                className="bg-navy-950 text-stone-400 rounded-lg p-3 h-60 overflow-y-auto font-mono text-[10px] leading-relaxed"
+              >
+                {logs.map((log, i) => (
+                  <div
+                    key={i}
+                    className={cn(
+                      log.includes('Error') || log.includes('❌') ? 'text-red-400' :
+                      log.includes('✅') || log.includes('Saved') || log.includes('complete') || log.includes('found') ? 'text-emerald-400' :
+                      log.includes('Phase') || log.includes('Starting') || log.includes('━') ? 'text-amber-400' :
+                      '',
+                    )}
+                  >
+                    {log}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
 
-        {/* Footer */}
-        <div className="flex items-center justify-between px-5 py-3 border-t border-stone-100 mt-auto">
-          <span className="text-[11px] text-stone-400 tabular-nums">
-            {mode === 'manual' && `${selected.size} of ${filteredSources.length} sources selected`}
-            {mode === 'full' && `All ${allSources.length} active sources`}
-            {mode === 'smart' && `${dueSources.length} due sources`}
-          </span>
-          <div className="flex items-center gap-2">
-            <button onClick={onClose} className="px-4 py-2 text-xs font-semibold text-stone-500 border border-stone-200 rounded-lg hover:bg-stone-50 transition">Cancel</button>
-            <button onClick={handleStart} disabled={!canStart}
-              className={cn('px-5 py-2 text-xs font-bold text-white rounded-lg transition-all shadow-sm flex items-center gap-1.5 active:scale-[0.98]',
-                canStart ? 'bg-emerald-600 hover:bg-emerald-700' : 'bg-stone-200 text-stone-400 cursor-not-allowed shadow-none',
-              )}>
-              {starting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Rocket className="w-3.5 h-3.5" />}
-              {starting ? 'Starting...' : actionLabel}
+        {/* ── Footer ── */}
+        <div className="px-5 py-3 border-t border-stone-100 bg-stone-50/50 flex items-center justify-end gap-2">
+          {status === 'idle' && (
+            <>
+              <button onClick={onClose} className="px-3 py-1.5 text-[11px] font-semibold text-stone-500 hover:text-stone-700 transition">
+                Cancel
+              </button>
+              {mode === 'url' ? (
+                <button
+                  onClick={handleStartExtract}
+                  disabled={!extractUrl.trim()}
+                  className="flex items-center gap-1.5 px-4 py-2 text-[11px] font-semibold bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition disabled:opacity-40"
+                >
+                  <Link2 className="w-3 h-3" /> Extract
+                </button>
+              ) : (
+                <button
+                  onClick={handleStartScrape}
+                  className="flex items-center gap-1.5 px-4 py-2 text-[11px] font-semibold bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition"
+                >
+                  <Play className="w-3 h-3" /> Start {mode === 'smart' ? 'Smart' : 'Full'} Scrape
+                </button>
+              )}
+            </>
+          )}
+          {(status === 'done' || status === 'error') && (
+            <button
+              onClick={onClose}
+              className="px-4 py-1.5 text-[11px] font-semibold bg-navy-900 text-white rounded-lg hover:bg-navy-800 transition"
+            >
+              Close
             </button>
-          </div>
+          )}
         </div>
       </div>
     </div>
-  )
-}
-
-function HealthBadge({ status }: { status: string | null }) {
-  if (!status) return null
-  const styles: Record<string, string> = {
-    healthy: 'bg-emerald-100 text-emerald-700',
-    degraded: 'bg-amber-100 text-amber-700',
-    failing: 'bg-red-100 text-red-700',
-    dead: 'bg-stone-200 text-stone-500',
-    new: 'bg-blue-100 text-blue-700',
-  }
-  return (
-    <span className={cn('text-[10px] font-semibold px-1.5 py-0.5 rounded', styles[status] || 'bg-stone-100 text-stone-500')}>
-      {status}
-    </span>
   )
 }

@@ -175,10 +175,13 @@ async def _patch_engine():
         db_url = settings.database_url.replace(
             "postgresql://", "postgresql+asyncpg://"
         )
+
         test_engine = create_async_engine(db_url, poolclass=NullPool, echo=False)
-        # Quick connectivity check
+        # Quick connectivity check + create tables for CI
         async with test_engine.begin() as conn:
             await conn.execute(text("SELECT 1"))
+            await conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
+            await conn.run_sync(database.Base.metadata.create_all)
 
         database.engine = test_engine
         database.async_session = async_sessionmaker(

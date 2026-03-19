@@ -7,6 +7,7 @@ import LoginPage from '@/pages/Login'
 import RegisterPage from '@/pages/Register'
 import Dashboard from '@/pages/Dashboard'
 import { Loader2 } from 'lucide-react'
+import UsersPage from '@/pages/Users'
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { isAuthenticated, isLoading } = useAuth()
@@ -49,6 +50,14 @@ export default function AppRouter() {
             element={
               <ProtectedRoute>
                 <Dashboard />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/users"
+            element={
+              <ProtectedRoute>
+                <UsersPage />
               </ProtectedRoute>
             }
           />

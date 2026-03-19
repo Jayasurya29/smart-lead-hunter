@@ -284,6 +284,8 @@ class LeadResponse(LeadBase):
     status: str
     source_url: Optional[str] = None
     source_site: Optional[str] = None
+    source_urls: Optional[list] = None
+    source_extractions: Optional[dict] = None
     created_at: datetime
     updated_at: Optional[datetime] = None
 

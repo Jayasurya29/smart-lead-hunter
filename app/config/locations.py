@@ -72,6 +72,17 @@ CARIBBEAN_COUNTRIES = [
     "antigua and barbuda",
     "trinidad and tobago",
     "puerto rico",
+    "bermuda",
+    "grenada",
+    "st. kitts and nevis",
+    "saint kitts and nevis",
+    "bonaire",
+    "anguilla",
+    "british virgin islands",
+    "montserrat",
+    "dominica",
+    "haiti",
+    "belize",
 ]
 
 SOUTHEAST_STATES = [
@@ -83,6 +94,9 @@ SOUTHEAST_STATES = [
     "mississippi",
     "arkansas",
     "virginia",
+    "louisiana",
+    "kentucky",
+    "west virginia",
 ]
 
 MOUNTAIN_STATES = [
@@ -93,4 +107,81 @@ MOUNTAIN_STATES = [
     "montana",
     "arizona",
     "new mexico",
+]
+
+NORTHEAST_STATES = [
+    "new york",
+    "new jersey",
+    "pennsylvania",
+    "massachusetts",
+    "connecticut",
+    "maryland",
+    "delaware",
+    "rhode island",
+    "maine",
+    "vermont",
+    "new hampshire",
+]
+
+# DC is stored as city or state depending on the source
+DC_NAMES = [
+    "washington",
+    "washington d.c.",
+    "washington dc",
+    "district of columbia",
+]
+
+MIDWEST_STATES = [
+    "illinois",
+    "ohio",
+    "michigan",
+    "minnesota",
+    "wisconsin",
+    "indiana",
+    "iowa",
+    "missouri",
+    "kansas",
+    "nebraska",
+    "north dakota",
+    "south dakota",
+]
+
+PACIFIC_NW_STATES = [
+    "washington",
+    "oregon",
+]
+
+LAS_VEGAS_CITIES = [
+    "las vegas",
+    "henderson",
+    "north las vegas",
+    "summerlin",
+    "paradise",
+    "spring valley",
+    "enterprise",
+]
+
+NEW_ORLEANS_CITIES = [
+    "new orleans",
+    "metairie",
+    "kenner",
+    "gretna",
+    "harvey",
+    "marrero",
+]
+
+HAWAII_CITIES = [
+    "honolulu",
+    "waikiki",
+    "maui",
+    "kailua",
+    "kona",
+    "hilo",
+    "lahaina",
+    "wailea",
+    "kapalua",
+    "kauai",
+    "lihue",
+    "poipu",
+    "lanai",
 ]

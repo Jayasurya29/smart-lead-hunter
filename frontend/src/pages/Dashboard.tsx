@@ -12,7 +12,7 @@ const TABS: { key: LeadTab; label: string; icon: React.ElementType }[] = [
   { key: 'pipeline', label: 'Pipeline', icon: Inbox },
   { key: 'approved', label: 'Approved', icon: CheckCircle2 },
   { key: 'rejected', label: 'Rejected', icon: XCircle },
-  { key: 'deleted', label: 'Deleted', icon: Trash2 },
+  { key: 'deleted',  label: 'Deleted',  icon: Trash2 },
 ]
 
 export default function Dashboard() {
@@ -22,12 +22,15 @@ export default function Dashboard() {
   const [selectedLeadId, setSelectedLeadId] = useState<number | null>(null)
   const [filters, setFilters] = useState<Filters>(DEFAULT_FILTERS)
 
-  const { data, isLoading } = useLeads(tab, page, search, filters)
+  const { data, isLoading } = useLeads(tab, page, search, filters as unknown as Record<string, string>)
+
+  const totalPages = data?.total_pages ?? (data as any)?.pages ?? (Math.ceil((data?.total || 0) / (data?.per_page || 25)) || 1)
 
   function handleTabChange(newTab: LeadTab) {
     setTab(newTab)
     setPage(1)
     setSelectedLeadId(null)
+    setFilters(DEFAULT_FILTERS)
   }
 
   function handleSearch(val: string) {
@@ -40,37 +43,50 @@ export default function Dashboard() {
     setPage(1)
   }
 
-  function handleTimelineClick(timeline: string) {
-    setFilters(prev => ({ ...prev, timeline }))
+  function handleSort(sort: string) {
+    setFilters((prev) => ({ ...prev, sort }))
     setPage(1)
-    if (tab !== 'pipeline') setTab('pipeline')
+  }
+
+  function handleStatClick(action: { tab?: string; timeline?: string }) {
+    if (action.tab) setTab(action.tab as LeadTab)
+    if (action.timeline) {
+      setFilters({ ...DEFAULT_FILTERS, timeline: action.timeline })
+    } else {
+      setFilters(DEFAULT_FILTERS)
+    }
+    setPage(1)
+    setSelectedLeadId(null)
   }
 
   return (
     <div className="h-full flex flex-col">
-      {/* Stats */}
       <div className="px-4 pt-3 pb-2 flex-shrink-0">
-        <StatsCards activeTimeline={filters.timeline} onTimelineClick={handleTimelineClick} />
+        <StatsCards onFilter={handleStatClick} />
       </div>
 
-      {/* Toolbar */}
-      <div className="px-4 pb-2 flex-shrink-0 space-y-2">
-        <div className="flex items-center justify-between gap-4">
-          <div className="flex gap-px bg-stone-200/60 p-0.5 rounded-lg">
+      <div className="px-4 pb-2 flex-shrink-0 space-y-2.5">
+        <div className="flex items-center gap-4">
+          <div className="flex gap-px bg-stone-200/60 p-0.5 rounded-lg flex-shrink-0">
             {TABS.map((t) => {
               const Icon = t.icon
               const count = data && t.key === tab ? data.total : undefined
               return (
-                <button key={t.key} onClick={() => handleTabChange(t.key)}
+                <button
+                  key={t.key}
+                  onClick={() => handleTabChange(t.key)}
                   className={cn(
-                    'flex items-center gap-1.5 px-3 py-1.5 text-[11px] font-semibold rounded-md transition-all duration-150',
-                    tab === t.key ? 'bg-white text-stone-900 shadow-sm' : 'text-stone-500 hover:text-stone-700',
-                  )}>
-                  <Icon className="w-3.5 h-3.5" />
+                    'flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold rounded-md transition-all duration-150',
+                    tab === t.key
+                      ? 'bg-white text-navy-900 shadow-sm'
+                      : 'text-stone-500 hover:text-stone-700',
+                  )}
+                >
+                  <Icon className="w-4 h-4" />
                   {t.label}
                   {count !== undefined && (
-                    <span className={cn('text-[10px] ml-0.5 tabular-nums', tab === t.key ? 'text-stone-600' : 'text-stone-400')}>
-                      ({count})
+                    <span className={cn('text-2xs ml-0.5 tabular-nums', tab === t.key ? 'text-navy-500' : 'text-stone-400')}>
+                      {count}
                     </span>
                   )}
                 </button>
@@ -78,39 +94,49 @@ export default function Dashboard() {
             })}
           </div>
 
-          <div className="relative w-72">
-            <Search className="w-4 h-4 text-stone-400 absolute left-3 top-1/2 -translate-y-1/2" />
-            <input type="text" placeholder="Search hotels, brands, cities..."
-              value={search} onChange={(e) => handleSearch(e.target.value)}
-              className="w-full pl-10 pr-9 py-2 text-sm border-2 border-stone-200 rounded-lg focus:border-blue-400 focus:ring-0 outline-none transition-colors bg-white" />
+          <div className="relative flex-1 max-w-lg">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-stone-400" />
+            <input
+              type="text"
+              value={search}
+              onChange={(e) => handleSearch(e.target.value)}
+              placeholder="Search hotel, brand, city..."
+              className="w-full h-9 pl-9 pr-9 text-sm bg-white border border-stone-200 rounded-lg outline-none focus:border-navy-400 focus:ring-2 focus:ring-navy-100 transition placeholder:text-stone-400"
+            />
             {search && (
-              <button onClick={() => handleSearch('')} className="absolute right-3 top-1/2 -translate-y-1/2 text-stone-400 hover:text-stone-600 transition">
-                <X className="w-4 h-4" />
+              <button onClick={() => handleSearch('')} className="absolute right-2.5 top-1/2 -translate-y-1/2 p-0.5 text-stone-400 hover:text-stone-600 rounded transition">
+                <X className="w-3.5 h-3.5" />
               </button>
             )}
           </div>
         </div>
+
         <FilterBar filters={filters} onChange={handleFilterChange} />
       </div>
 
-      {/* Main: Table + Detail */}
-      <div className="flex-1 overflow-hidden flex gap-3 px-4 pb-3">
-        <div className={cn('overflow-auto transition-all duration-250', selectedLeadId ? 'w-[58%]' : 'w-full')}>
+      <div className="flex-1 flex overflow-hidden px-4 pb-3 gap-3">
+        <div className={cn(
+          'bg-white rounded-xl border border-stone-200 shadow-soft overflow-hidden flex flex-col transition-all duration-300',
+          selectedLeadId ? 'flex-[3]' : 'flex-1',
+        )}>
           <LeadTable
             leads={data?.leads || []}
             total={data?.total || 0}
             page={page}
-            pages={data?.pages || 1}
+            totalPages={totalPages}
+            tab={tab}
             selectedId={selectedLeadId}
             onSelect={setSelectedLeadId}
             onPageChange={setPage}
+            onSort={handleSort}
+            currentSort={filters.sort}
             isLoading={isLoading}
-            currentTab={tab}
           />
         </div>
+
         {selectedLeadId && (
-          <div className="w-[42%] overflow-hidden">
-            <LeadDetail leadId={selectedLeadId} onClose={() => setSelectedLeadId(null)} />
+          <div className="flex-[2] bg-white rounded-xl border border-stone-200 shadow-soft overflow-hidden animate-slideIn">
+            <LeadDetail leadId={selectedLeadId} tab={tab} onClose={() => setSelectedLeadId(null)} />
           </div>
         )}
       </div>

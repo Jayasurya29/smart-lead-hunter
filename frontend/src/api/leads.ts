@@ -1,7 +1,10 @@
+
 import api from './client'
 import type { Lead, LeadListResponse, DashboardStats, Contact, SourcesListResponse } from './types'
 
-// ── Leads ──
+/* ════════════════════════════════════════
+   LEADS
+   ════════════════════════════════════════ */
 
 export interface LeadFilters {
   page?: number
@@ -9,8 +12,7 @@ export interface LeadFilters {
   status?: string
   search?: string
   min_score?: number
-  location_type?: string
-  location?: string  // FIX C-03: city-level location filter (south_florida, rest_florida, etc.)
+  location?: string
   brand_tier?: string
   timeline?: string
   year?: string
@@ -18,13 +20,38 @@ export interface LeadFilters {
   sort?: string
 }
 
+/* Map frontend sort keys → backend sort keys */
+const SORT_MAP: Record<string, string> = {
+  score_high:   'score_desc',
+  score_low:    'score_asc',
+  hotel_az:     'name_asc',
+  hotel_za:     'name_desc',
+  newest:       'newest',
+  oldest:       'oldest',
+  opening_soon: 'opening_asc',
+  opening_late: 'opening_desc',
+  tier_asc:     'tier_asc',
+  tier_desc:    'tier_desc',
+  time_asc:     'time_asc',
+  time_desc:    'time_desc',
+  location_az:  'location_asc',
+  location_za:  'location_desc',
+}
+
 export async function fetchLeads(filters: LeadFilters = {}): Promise<LeadListResponse> {
   const params = new URLSearchParams()
-  Object.entries(filters).forEach(([key, val]) => {
-    if (val !== undefined && val !== null && val !== '') {
-      params.set(key, String(val))
-    }
-  })
+  if (filters.page)       params.set('page', String(filters.page))
+  if (filters.per_page)   params.set('per_page', String(filters.per_page))
+  if (filters.status)     params.set('status', filters.status)
+  if (filters.search)     params.set('search', filters.search)
+  if (filters.min_score)  params.set('min_score', String(filters.min_score))
+  if (filters.location)   params.set('location', filters.location)
+  if (filters.brand_tier) params.set('brand_tier', filters.brand_tier)
+  if (filters.timeline)   params.set('timeline', filters.timeline)
+  if (filters.year)       params.set('year', filters.year)
+  if (filters.added)      params.set('added', filters.added)
+  if (filters.sort)       params.set('sort', SORT_MAP[filters.sort] || filters.sort)
+
   const { data } = await api.get<LeadListResponse>(`/leads?${params}`)
   return data
 }
@@ -34,31 +61,25 @@ export async function fetchLead(id: number): Promise<Lead> {
   return data
 }
 
-// ─── FIX C-04: Use /api/leads/ JSON endpoints that include full CRM logic ───
-// These call the new JSON-returning API endpoints (not the simpler REST ones
-// that skip contact checks and Insightly sync)
+/* ════════════════════════════════════════
+   LEAD ACTIONS
+   ════════════════════════════════════════ */
 
-export async function approveLead(id: number): Promise<Lead> {
-  const { data } = await api.post<Lead>(`/api/leads/${id}/approve`)
-  return data
+export async function approveLead(id: number): Promise<void> {
+  await api.post(`/api/dashboard/leads/${id}/approve`)
 }
 
-export async function rejectLead(id: number, reason?: string): Promise<Lead> {
+export async function rejectLead(id: number, reason?: string): Promise<void> {
   const params = reason ? `?reason=${encodeURIComponent(reason)}` : ''
-  const { data } = await api.post<Lead>(`/api/leads/${id}/reject${params}`)
-  return data
+  await api.post(`/api/dashboard/leads/${id}/reject${params}`)
 }
 
-// FIX: Use dedicated restore endpoint (clears rejection_reason, cleans up Insightly)
-export async function restoreLead(id: number): Promise<Lead> {
-  const { data } = await api.post<Lead>(`/api/leads/${id}/restore`)
-  return data
+export async function restoreLead(id: number): Promise<void> {
+  await api.post(`/api/dashboard/leads/${id}/restore`)
 }
 
-// FIX: Use dedicated soft-delete endpoint (sets status to "deleted")
-export async function deleteLead(id: number): Promise<any> {
-  const { data } = await api.post(`/api/leads/${id}/delete`)
-  return data
+export async function deleteLead(id: number): Promise<void> {
+  await api.post(`/api/dashboard/leads/${id}/delete`)
 }
 
 export async function editLead(id: number, fields: Partial<Lead>): Promise<any> {
@@ -71,17 +92,22 @@ export async function enrichLead(id: number): Promise<any> {
   return data
 }
 
-// ── Stats ──
+/* ════════════════════════════════════════
+   STATS
+   ════════════════════════════════════════ */
+
 export async function fetchStats(): Promise<DashboardStats> {
   const { data } = await api.get<DashboardStats>('/stats')
   return data
 }
 
-// ── Contacts ──
+/* ════════════════════════════════════════
+   CONTACTS
+   ════════════════════════════════════════ */
 
 export async function fetchContacts(leadId: number): Promise<Contact[]> {
   const { data } = await api.get<Contact[]>(`/api/dashboard/leads/${leadId}/contacts`)
-  return data
+  return Array.isArray(data) ? data : []
 }
 
 export async function saveContact(leadId: number, contactId: number): Promise<void> {
@@ -100,9 +126,11 @@ export async function setPrimaryContact(leadId: number, contactId: number): Prom
   await api.post(`/api/dashboard/leads/${leadId}/contacts/${contactId}/set-primary`)
 }
 
-// ── Scrape ──
+/* ════════════════════════════════════════
+   SCRAPE
+   ════════════════════════════════════════ */
 
-export async function triggerScrape(mode: string, sourceIds: number[] = []): Promise<{ scrape_id: string }> {
+export async function triggerScrape(mode: string, sourceIds: number[] = []): Promise<any> {
   const { data } = await api.post('/api/dashboard/scrape', { mode, source_ids: sourceIds })
   return data
 }
@@ -111,32 +139,29 @@ export async function cancelScrape(scrapeId: string): Promise<void> {
   await api.post(`/api/dashboard/scrape/cancel/${scrapeId}`)
 }
 
-// ── Extract URL ──
+/* ════════════════════════════════════════
+   URL EXTRACT
+   ════════════════════════════════════════ */
 
-export async function triggerExtractUrl(url: string): Promise<{ extract_id: string }> {
+export async function triggerExtractUrl(url: string): Promise<any> {
   const { data } = await api.post('/api/dashboard/extract-url', { url })
   return data
 }
 
-// ── Discovery ──
+/* ════════════════════════════════════════
+   DISCOVERY
+   ════════════════════════════════════════ */
 
-export async function triggerDiscovery(mode: string = 'full', extractLeads: boolean = true): Promise<{ discovery_id: string }> {
+export async function triggerDiscovery(mode: string = 'full', extractLeads: boolean = true): Promise<any> {
   const { data } = await api.post('/api/dashboard/discovery/start', { mode, extract_leads: extractLeads })
   return data
 }
 
-// ── Sources ──
+/* ════════════════════════════════════════
+   SOURCES
+   ════════════════════════════════════════ */
 
-export async function fetchSources(): Promise<SourcesListResponse> {
-  const { data } = await api.get<SourcesListResponse>('/api/dashboard/sources/list')
+export async function fetchSources(): Promise<any> {
+  const { data } = await api.get('/api/dashboard/sources/list')
   return data
-}
-
-// ── SSE Stream Helper ──
-// FIX H-02: Don't pass API key in URL — SSE endpoints are already excluded
-// from auth and gated by one-time tokens (scrape_id, extract_id, discovery_id).
-// Passing the key in the URL exposes it in browser history and server logs.
-
-export function createSSEStream(path: string): EventSource {
-  return new EventSource(path)
 }
