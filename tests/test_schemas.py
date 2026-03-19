@@ -102,6 +102,8 @@ class TestLeadResponseSchema:
         lead.score_breakdown = {"brand": 20}
         lead.source_url = "https://test.com"
         lead.source_site = "test.com"
+        lead.source_urls = ["https://test.com"]
+        lead.source_extractions = {"https://test.com": {"city": "Miami"}}
         lead.contact_email = None
         lead.contact_phone = None
         lead.contact_name = None
