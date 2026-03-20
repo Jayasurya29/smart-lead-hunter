@@ -11,11 +11,9 @@ import logging
 import re
 import time
 from datetime import timedelta
-from pathlib import Path
 from typing import Optional
 
 from fastapi import HTTPException, Request
-from fastapi.templating import Jinja2Templates
 from sqlalchemy import select, func, case
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -25,11 +23,6 @@ from app.schemas import LeadResponse, LeadListResponse
 
 logger = logging.getLogger(__name__)
 
-# -----------------------------------------------------------------------------
-# Templates
-# -----------------------------------------------------------------------------
-templates_path = Path(__file__).parent / "templates"
-templates = Jinja2Templates(directory=str(templates_path))
 
 # -----------------------------------------------------------------------------
 # Scrape Job Tracking
@@ -120,11 +113,7 @@ def require_ajax(request: Request):
     """Dependency that rejects non-AJAX requests to prevent CSRF."""
     requested_with = request.headers.get("x-requested-with", "")
     content_type = request.headers.get("content-type", "")
-    if (
-        "xmlhttprequest" in requested_with.lower()
-        or "hx-request" in request.headers
-        or "application/json" in content_type
-    ):
+    if "xmlhttprequest" in requested_with.lower() or "application/json" in content_type:
         return True
     raise HTTPException(
         status_code=403, detail="CSRF check failed: missing required header"

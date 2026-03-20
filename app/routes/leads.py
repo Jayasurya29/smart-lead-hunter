@@ -34,7 +34,7 @@ router = APIRouter()
 
 
 # -----------------------------------------------------------------------------
-# Lead List (full filtering for React + HTMX)
+# Lead List (full filtering for React frontend)
 # -----------------------------------------------------------------------------
 
 

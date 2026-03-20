@@ -101,7 +101,6 @@ class APIKeyMiddleware(BaseHTTPMiddleware):
         )
         # Prefix matches — ALL sub-routes under these are public
         self.exclude_prefixes = [
-            "/dashboard",  # HTMX HTML pages (served by Jinja2)
             "/static",  # Static files
             "/auth/",  # Login/register/verify (must work without auth)
             # SSE streams: EventSource can't send custom headers;
@@ -109,7 +108,7 @@ class APIKeyMiddleware(BaseHTTPMiddleware):
             "/api/dashboard/scrape/stream",
             "/api/dashboard/extract-url/stream",
             "/api/dashboard/discovery/stream",
-            # Read-only HTMX partials polled by old dashboard
+            # Read-only endpoints
             "/api/dashboard/stats",
             "/api/dashboard/sources/list",
             # Auth verification endpoint (must work without auth to verify keys)
