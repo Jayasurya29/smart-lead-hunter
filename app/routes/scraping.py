@@ -1045,7 +1045,7 @@ async def discovery_stream(request: Request):
 
             async def run_discovery():
                 try:
-                    from discover_sources import WebDiscoveryEngine
+                    from scripts.discover_sources import WebDiscoveryEngine
 
                     eng = WebDiscoveryEngine(
                         dry_run=dry_run,

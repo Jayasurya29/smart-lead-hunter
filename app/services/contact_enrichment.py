@@ -537,7 +537,7 @@ async def _search_serper(query: str, max_results: int = 5) -> list[dict]:
 async def _search_duckduckgo(query: str, max_results: int = 3) -> list[dict]:
     """Search DuckDuckGo using the ddgs package. Free fallback when Serper unavailable."""
     try:
-        from ddgs import DDGS
+        from duckduckgo_search import DDGS
 
         def _sync_search():
             return list(DDGS().text(query, max_results=max_results))

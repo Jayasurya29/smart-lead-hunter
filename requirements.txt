@@ -133,5 +133,5 @@ pytest-asyncio>=0.23.0,<1.0
 # The scraping_engine.py handles this automatically!
 #
 # =============================================================================
-bcrypt
-python-jose[cryptography]
+bcrypt>=4.1.0,<5.0
+python-jose[cryptography]>=3.3.0,<4.0

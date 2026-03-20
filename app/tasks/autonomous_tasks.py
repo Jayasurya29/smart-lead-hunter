@@ -394,7 +394,7 @@ def weekly_discovery(self) -> Dict[str, Any]:
     async def _discover():
         results = {"sources_found": 0, "leads_found": 0, "queries_run": 0}
         try:
-            from discover_sources import WebDiscoveryEngine
+            from scripts.discover_sources import WebDiscoveryEngine
 
             engine = WebDiscoveryEngine(
                 dry_run=False, min_quality=35, sources_only=False

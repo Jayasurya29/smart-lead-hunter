@@ -43,7 +43,7 @@ from sqlalchemy import select
 from app.database import async_session
 from app.models import Source
 from app.models.failed_domain import FailedDomain
-from ddgs import DDGS
+from duckduckgo_search import DDGS
 
 logger = logging.getLogger(__name__)
 
