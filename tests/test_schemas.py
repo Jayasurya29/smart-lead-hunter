@@ -114,6 +114,9 @@ class TestLeadResponseSchema:
         lead.brand = "Test"
         lead.brand_tier = "tier2_luxury"
         lead.location_type = "florida"
+        lead.management_company = "Test Management"
+        lead.developer = "Test Developer"
+        lead.owner = "Test Owner"
         lead.hotel_website = None
         lead.description = None
         lead.notes = None
