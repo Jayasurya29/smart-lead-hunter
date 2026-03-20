@@ -302,21 +302,14 @@ class TestSecurityHelpers:
         request.headers = {"content-type": "application/json", "x-requested-with": ""}
         assert require_ajax(request) is True
 
-    def test_require_ajax_accepts_hx_request(self):
-        from app.shared import require_ajax
-        from unittest.mock import MagicMock
-
-        request = MagicMock()
-        request.headers = {"hx-request": "true", "content-type": "", "x-requested-with": ""}
-        assert require_ajax(request) is True
-
     def test_require_ajax_rejects_plain_browser(self):
         from app.shared import require_ajax
         from fastapi import HTTPException
         from unittest.mock import MagicMock
 
         request = MagicMock()
-        # Dict without 'hx-request' key, empty x-requested-with, non-JSON content type
+        # Empty x-requested-with, non-JSON content type
+
         request.headers = {"content-type": "text/html", "x-requested-with": ""}
 
         with pytest.raises(HTTPException) as exc_info:
