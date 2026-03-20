@@ -33,6 +33,7 @@ export function useLeads(
       sort:       filters.sort || undefined,
     }),
     refetchInterval: 30_000,
+    refetchIntervalInBackground: false,  // FIX L-09: stop polling in background tabs
     staleTime: 10_000,
   })
 }
@@ -50,6 +51,7 @@ export function useStats() {
     queryKey: ['stats'],
     queryFn: fetchStats,
     refetchInterval: 30_000,
+    refetchIntervalInBackground: false,  // FIX L-09: stop polling in background tabs
     staleTime: 10_000,
   })
 }

@@ -25,7 +25,7 @@ from __future__ import annotations
 
 import logging
 import os
-import random
+import secrets
 import string
 import time
 import re as _re
@@ -223,7 +223,8 @@ def verify_otp(otp: str, hashed: str) -> bool:
 
 
 def generate_otp() -> str:
-    return "".join(random.choices(string.digits, k=6))
+    # FIX M-08: Use cryptographically secure RNG instead of random.choices
+    return "".join(secrets.choice(string.digits) for _ in range(6))
 
 
 def validate_password(password: str) -> Optional[str]:

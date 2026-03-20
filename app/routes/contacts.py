@@ -27,6 +27,7 @@ router = APIRouter()
 async def enrich_lead(lead_id: int, _csrf=Depends(require_ajax)):
     """Enrich a lead with contact information via web search."""
     try:
+        # Session 1: Read lead data (extract to local vars, then close)
         async with async_session() as session:
             result = await session.execute(
                 select(PotentialLead).where(PotentialLead.id == lead_id)
@@ -42,8 +43,10 @@ async def enrich_lead(lead_id: int, _csrf=Depends(require_ajax)):
             country = lead.country or "USA"
             management_company = lead.management_company or ""
             opening_date = lead.opening_date or ""
+            # FIX C-04: Capture updated_at for optimistic lock check
+            lead_updated_at = lead.updated_at
 
-        # Run enrichment
+        # Run enrichment (network calls — can take 10-30 seconds)
         from app.services.contact_enrichment import ContactEnrichmentEngine
 
         engine = ContactEnrichmentEngine(
@@ -61,7 +64,7 @@ async def enrich_lead(lead_id: int, _csrf=Depends(require_ajax)):
             opening_date=opening_date,
         )
 
-        # Save results
+        # Session 2: Save results (with optimistic lock check)
         async with async_session() as session:
             lead_result = await session.execute(
                 select(PotentialLead).where(PotentialLead.id == lead_id)
@@ -69,6 +72,20 @@ async def enrich_lead(lead_id: int, _csrf=Depends(require_ajax)):
             lead = lead_result.scalar_one_or_none()
             if not lead:
                 return {"status": "error", "message": "Lead not found after enrichment"}
+
+            # FIX C-04: Optimistic lock — warn if lead was edited during enrichment
+            # Only fill empty fields (never overwrite), so concurrent edits are safe
+            # for fields that were already populated. Log a warning for awareness.
+            if (
+                lead_updated_at
+                and lead.updated_at
+                and lead.updated_at > lead_updated_at
+            ):
+                logger.warning(
+                    f"Lead {lead_id} was modified during enrichment "
+                    f"(before={lead_updated_at}, now={lead.updated_at}). "
+                    f"Only filling empty fields to avoid overwriting edits."
+                )
 
             updated_fields = []
 
@@ -271,12 +288,13 @@ async def delete_contact(lead_id: int, contact_id: int, _csrf=Depends(require_aj
         if not contact:
             raise HTTPException(status_code=404, detail="Contact not found")
         await session.delete(contact)
-        await session.commit()
+        # Flush the delete so rescore sees the updated contact count
+        await session.flush()
         try:
             await rescore_lead(lead_id, session)
-            await session.commit()
         except Exception:
             pass
+        await session.commit()
         return {"status": "deleted", "contact_id": contact_id}
 
 

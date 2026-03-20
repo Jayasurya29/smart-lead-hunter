@@ -24,7 +24,7 @@ export default function Dashboard() {
 
   const { data, isLoading } = useLeads(tab, page, search, filters as unknown as Record<string, string>)
 
-  const totalPages = data?.total_pages ?? (data as any)?.pages ?? (Math.ceil((data?.total || 0) / (data?.per_page || 25)) || 1)
+  const totalPages = data?.pages ?? (Math.ceil((data?.total || 0) / (data?.per_page || 25)) || 1)
 
   function handleTabChange(newTab: LeadTab) {
     setTab(newTab)

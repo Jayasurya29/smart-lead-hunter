@@ -14,14 +14,35 @@ from app.models import PotentialLead, Source
 from app.models.lead_contact import LeadContact
 from app.services.rescore import rescore_lead
 from app.services.utils import local_now, normalize_hotel_name
+from app.services.audit import log_action
 from app.shared import (
     require_ajax,
     checked_json,
 )
 
+# FIX M-13: Reuse schema constants instead of redefining them
+from app.schemas import VALID_BRAND_TIERS, _EMAIL_RE
+
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+# FIX M-13: Validation config for dashboard edit — compiled once at import,
+# not per-request. Field length caps in one place.
+_EDIT_STRING_LIMITS = {
+    "city": 100,
+    "state": 100,
+    "country": 100,
+    "brand": 100,
+    "contact_name": 200,
+    "contact_title": 100,
+    "contact_phone": 50,
+    "management_company": 200,
+    "developer": 200,
+    "owner": 200,
+    "opening_date": 50,
+}
+_EDIT_LONG_LIMITS = {"description": 5000, "notes": 5000}
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -39,19 +60,7 @@ async def dashboard_edit_lead(
     """Edit lead fields from the detail panel"""
     data = await checked_json(request)
 
-    # ── Input validation ──
-    import re as _re
-
-    _email_re = _re.compile(r"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$")
-    _valid_tiers = {
-        "tier1_ultra_luxury",
-        "tier2_luxury",
-        "tier3_upper_upscale",
-        "tier4_upscale",
-        "tier5_skip",
-        "unknown",
-        "",
-    }
+    # ── Input validation (FIX M-13: uses shared constants from schemas.py) ──
     errors = []
 
     if "hotel_name" in data:
@@ -63,7 +72,7 @@ async def dashboard_edit_lead(
 
     if "contact_email" in data and data["contact_email"]:
         email = str(data["contact_email"]).strip()
-        if email and not _email_re.match(email):
+        if email and not _EMAIL_RE.match(email):
             errors.append(f"Invalid email format: {email}")
 
     if "room_count" in data and data["room_count"] is not None:
@@ -75,27 +84,14 @@ async def dashboard_edit_lead(
             errors.append("Room count must be a number")
 
     if "brand_tier" in data and data["brand_tier"]:
-        if str(data["brand_tier"]).strip() not in _valid_tiers:
+        if str(data["brand_tier"]).strip() not in VALID_BRAND_TIERS:
             errors.append(f"Invalid brand tier: {data['brand_tier']}")
 
-    # Cap string field lengths
-    for field, max_len in [
-        ("city", 100),
-        ("state", 100),
-        ("country", 100),
-        ("brand", 100),
-        ("contact_name", 200),
-        ("contact_title", 100),
-        ("contact_phone", 50),
-        ("management_company", 200),
-        ("developer", 200),
-        ("owner", 200),
-        ("opening_date", 50),
-    ]:
+    for field, max_len in _EDIT_STRING_LIMITS.items():
         if field in data and data[field] and len(str(data[field])) > max_len:
             errors.append(f"{field} must be {max_len} characters or fewer")
 
-    for field, max_len in [("description", 5000), ("notes", 5000)]:
+    for field, max_len in _EDIT_LONG_LIMITS.items():
         if field in data and data[field] and len(str(data[field])) > max_len:
             errors.append(f"{field} must be {max_len} characters or fewer")
 
@@ -129,6 +125,13 @@ async def dashboard_edit_lead(
         "description",
         "notes",
     ]
+
+    # A-01: Capture old values for audit trail
+    old_values = {}
+    for field in editable_fields:
+        if field in data:
+            old_val = getattr(lead, field, None)
+            old_values[field] = old_val
 
     for field in editable_fields:
         if field in data:
@@ -177,6 +180,8 @@ async def dashboard_edit_lead(
     if scoring_changed:
         await db.flush()
         await rescore_lead(lead.id, db)
+        # FIX H-05: Refresh lead after rescore — lead_score/score_breakdown may be stale
+        await db.refresh(lead)
         if "brand_tier" in data and data["brand_tier"]:
             auto_points = (lead.score_breakdown or {}).get("brand", {}).get("points", 0)
             manual_points = tier_points_map.get(data["brand_tier"], 0)
@@ -189,6 +194,36 @@ async def dashboard_edit_lead(
         lead.brand_tier = data["brand_tier"]
 
     lead.updated_at = local_now()
+
+    # A-01: Audit log for edits — only log fields that actually changed
+    new_values = {k: data[k] for k in old_values if data.get(k) != old_values[k]}
+    if new_values:
+        changed_old = {k: old_values[k] for k in new_values}
+        # Extract user email from JWT cookie
+        user_email = "unknown"
+        cookie = request.cookies.get("slh_session", "")
+        if cookie:
+            try:
+                from jose import jwt as jose_jwt
+                import os
+
+                secret = (
+                    os.getenv("JWT_SECRET_KEY", "")
+                    or "dev-only-insecure-key-do-not-use-in-production"
+                )
+                payload = jose_jwt.decode(cookie, secret, algorithms=["HS256"])
+                user_email = payload.get("email", "unknown")
+            except Exception:
+                pass
+        await log_action(
+            session=db,
+            action="edit",
+            lead=lead,
+            user_email=user_email,
+            old_values=changed_old,
+            new_values=new_values,
+        )
+
     await db.commit()
     await db.refresh(lead)
     return JSONResponse(
@@ -498,3 +533,72 @@ async def dashboard_sources_list(db: AsyncSession = Depends(get_db)):
         "total": len(all_sources),
         "total_due": len(due_sources),
     }
+
+
+# ═══════════════════════════════════════════════════════════════
+#  A-03: BATCH CONTACT COUNTS (eliminates N+1 queries)
+# ═══════════════════════════════════════════════════════════════
+
+
+@router.get("/api/dashboard/leads/contact-counts", tags=["Dashboard"])
+async def batch_contact_counts(
+    ids: str = Query("", description="Comma-separated lead IDs"),
+    db: AsyncSession = Depends(get_db),
+):
+    """Return {lead_id: contact_count} for a batch of leads in one query.
+
+    Frontend calls this once per page load with visible lead IDs,
+    instead of N separate /contacts requests.
+
+    Usage: GET /api/dashboard/leads/contact-counts?ids=1,2,3,45,67
+    """
+    if not ids.strip():
+        return {}
+
+    try:
+        lead_ids = [int(x.strip()) for x in ids.split(",") if x.strip().isdigit()]
+    except ValueError:
+        return {}
+
+    if not lead_ids or len(lead_ids) > 200:
+        return {}
+
+    from sqlalchemy import func as sqlfunc
+
+    result = await db.execute(
+        select(
+            LeadContact.lead_id,
+            sqlfunc.count(LeadContact.id).label("count"),
+        )
+        .where(LeadContact.lead_id.in_(lead_ids))
+        .group_by(LeadContact.lead_id)
+    )
+
+    return {row.lead_id: row.count for row in result.all()}
+
+
+# ═══════════════════════════════════════════════════════════════
+#  A-01: AUDIT LOG VIEWER
+# ═══════════════════════════════════════════════════════════════
+
+
+@router.get("/api/dashboard/audit-log", tags=["Dashboard"])
+async def get_audit_log(
+    lead_id: Optional[int] = None,
+    action: Optional[str] = None,
+    limit: int = Query(50, ge=1, le=200),
+    db: AsyncSession = Depends(get_db),
+):
+    """View audit trail — filterable by lead or action type."""
+    from app.models.audit_log import AuditLog
+
+    query = select(AuditLog).order_by(AuditLog.created_at.desc())
+
+    if lead_id:
+        query = query.where(AuditLog.lead_id == lead_id)
+    if action:
+        query = query.where(AuditLog.action == action)
+
+    query = query.limit(limit)
+    result = await db.execute(query)
+    return [row.to_dict() for row in result.scalars().all()]

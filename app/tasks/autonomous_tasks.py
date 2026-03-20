@@ -513,6 +513,32 @@ def daily_health_check(self) -> Dict[str, Any]:
 
             await session.commit()
 
+        # FIX M-09: Cleanup expired pending registrations (24h+ old)
+        try:
+            from app.models.user import PendingRegistration
+            from datetime import datetime, timezone
+
+            cutoff = datetime.now(timezone.utc) - timedelta(hours=24)
+            async with async_session() as session:
+                expired = await session.execute(
+                    select(PendingRegistration).where(
+                        PendingRegistration.otp_expires_at < cutoff
+                    )
+                )
+                expired_rows = expired.scalars().all()
+                cleaned_pending = len(expired_rows)
+                for row in expired_rows:
+                    await session.delete(row)
+                await session.commit()
+                if cleaned_pending:
+                    logger.info(
+                        f"  Cleaned {cleaned_pending} expired pending registrations"
+                    )
+                results["pending_registrations_cleaned"] = cleaned_pending
+        except Exception as e:
+            logger.warning(f"  Pending registration cleanup failed: {e}")
+            results["pending_registrations_cleaned"] = 0
+
         logger.info(
             f"Health Check: {results['sources_checked']} checked, "
             f"{results['sources_deactivated']} deactivated, "

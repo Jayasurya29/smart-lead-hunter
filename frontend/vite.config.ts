@@ -13,35 +13,35 @@ export default defineConfig({
     port: 3000,
     proxy: {
       '/api': {
-        target: 'http://192.168.1.151:8000',
+        target: 'http://localhost:8000',
         changeOrigin: true,
       },
       '/auth': {
-        target: 'http://192.168.1.151:8000',
+        target: 'http://localhost:8000',
         changeOrigin: true,
       },
       '/leads': {
-        target: 'http://192.168.1.151:8000',
+        target: 'http://localhost:8000',
         changeOrigin: true,
       },
       '/sources': {
-        target: 'http://192.168.1.151:8000',
+        target: 'http://localhost:8000',
         changeOrigin: true,
       },
       '/stats': {
-        target: 'http://192.168.1.151:8000',
+        target: 'http://localhost:8000',
         changeOrigin: true,
       },
       '/health': {
-        target: 'http://192.168.1.151:8000',
+        target: 'http://localhost:8000',
         changeOrigin: true,
       },
       '/scrape': {
-        target: 'http://192.168.1.151:8000',
+        target: 'http://localhost:8000',
         changeOrigin: true,
       },
       '/static': {
-        target: 'http://192.168.1.151:8000',
+        target: 'http://localhost:8000',
         changeOrigin: true,
       },
     },

@@ -37,7 +37,7 @@ export interface LeadListResponse {
   total: number
   page: number
   per_page: number
-  total_pages: number
+  pages: number  // FIX H-10: was "total_pages" but backend sends "pages"
 }
 
 /* ── Stats ── */

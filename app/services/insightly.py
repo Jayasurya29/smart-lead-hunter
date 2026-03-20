@@ -8,6 +8,10 @@ Flow: Dashboard Approve → each contact becomes an Insightly Lead
 
 API: https://api.insightly.com/v3.1/Help
 Auth: Basic (API key + blank password)
+
+FIXES:
+  C-01: delete_leads_by_slh_id now paginates (was only getting first 500)
+  H-07: Shared httpx.AsyncClient with connection pooling (was new TCP per call)
 """
 
 import base64
@@ -20,6 +24,9 @@ logger = logging.getLogger(__name__)
 # Smart Lead Hunter Lead Source ID (from Insightly)
 SLH_LEAD_SOURCE_ID = 3859952
 
+# Insightly default page size
+_PAGE_SIZE = 500
+
 
 class InsightlyClient:
     """Client for Insightly CRM API v3.1 — pushes contacts as Leads."""
@@ -28,6 +35,7 @@ class InsightlyClient:
         self.api_key = api_key
         self.base_url = f"https://api.{pod}.insightly.com/v3.1"
         self.enabled = bool(api_key)
+        self._client: Optional[httpx.AsyncClient] = None
         if not self.enabled:
             logger.warning("Insightly API key not set — CRM sync disabled.")
 
@@ -39,6 +47,26 @@ class InsightlyClient:
             "Content-Type": "application/json",
             "Accept": "application/json",
         }
+
+    def _get_client(self) -> httpx.AsyncClient:
+        """Get or create shared httpx client with connection pooling.
+
+        FIX H-07: Reuses TCP connections across calls instead of
+        creating a new httpx.AsyncClient per API call.
+        """
+        if self._client is None or self._client.is_closed:
+            self._client = httpx.AsyncClient(
+                timeout=30.0,
+                limits=httpx.Limits(max_connections=10, max_keepalive_connections=5),
+                follow_redirects=True,
+            )
+        return self._client
+
+    async def close(self):
+        """Close the shared HTTP client. Call on app shutdown."""
+        if self._client and not self._client.is_closed:
+            await self._client.aclose()
+            self._client = None
 
     async def push_contacts_as_leads(
         self,
@@ -86,7 +114,9 @@ class InsightlyClient:
             "tier4_upscale": "Upscale",
         }
 
+        client = self._get_client()
         results = []
+
         for contact in contacts:
             name = (contact.get("name") or "").strip()
             if not name:
@@ -156,27 +186,26 @@ class InsightlyClient:
             }
 
             try:
-                async with httpx.AsyncClient(timeout=30.0) as client:
-                    resp = await client.post(
-                        f"{self.base_url}/Leads",
-                        headers=self.headers,
-                        json=lead_record,
-                    )
+                resp = await client.post(
+                    f"{self.base_url}/Leads",
+                    headers=self.headers,
+                    json=lead_record,
+                )
 
-                    if resp.status_code in (200, 201):
-                        result = resp.json()
-                        lead_id = result.get("LEAD_ID")
-                        logger.info(
-                            f"Insightly: pushed '{name}' ({contact.get('title', '')}) "
-                            f"at {hotel_name} → Lead ID {lead_id}"
-                        )
-                        results.append((name, lead_id))
-                    else:
-                        logger.error(
-                            f"Insightly: failed to push '{name}': "
-                            f"{resp.status_code} — {resp.text[:200]}"
-                        )
-                        results.append((name, None))
+                if resp.status_code in (200, 201):
+                    result = resp.json()
+                    lead_id = result.get("LEAD_ID")
+                    logger.info(
+                        f"Insightly: pushed '{name}' ({contact.get('title', '')}) "
+                        f"at {hotel_name} → Lead ID {lead_id}"
+                    )
+                    results.append((name, lead_id))
+                else:
+                    logger.error(
+                        f"Insightly: failed to push '{name}': "
+                        f"{resp.status_code} — {resp.text[:200]}"
+                    )
+                    results.append((name, None))
 
             except httpx.RequestError as e:
                 logger.error(f"Insightly: request error pushing '{name}': {e}")
@@ -190,17 +219,17 @@ class InsightlyClient:
             return False
 
         try:
-            async with httpx.AsyncClient(timeout=15.0) as client:
-                resp = await client.get(
-                    f"{self.base_url}/Leads/Search",
-                    headers=self.headers,
-                    params={
-                        "$filter": f"SLH_Lead_ID__c eq {slh_lead_id}",
-                        "$top": 1,
-                    },
-                )
-                if resp.status_code == 200:
-                    return len(resp.json()) > 0
+            client = self._get_client()
+            resp = await client.get(
+                f"{self.base_url}/Leads/Search",
+                headers=self.headers,
+                params={
+                    "$filter": f"SLH_Lead_ID__c eq {slh_lead_id}",
+                    "$top": 1,
+                },
+            )
+            if resp.status_code == 200:
+                return len(resp.json()) > 0
         except httpx.RequestError:
             pass
         return False
@@ -210,53 +239,108 @@ class InsightlyClient:
 
         SAFETY: Only deletes leads where LEAD_SOURCE_ID matches SLH
         AND SLH_Lead_ID custom field matches. Never touches other leads.
+
+        FIX C-01: Now paginates through ALL Insightly leads instead of
+        only checking the first 500 (Insightly default page size).
         """
         if not self.enabled:
             return 0
 
         deleted = 0
+        client = self._get_client()
+
         try:
-            async with httpx.AsyncClient(timeout=30.0) as client:
-                # Get ALL leads and filter locally (Search endpoint is unreliable)
+            # FIX C-01: Paginate through all leads
+            all_leads = await self._fetch_all_leads(client)
+
+            for lead in all_leads:
+                # SAFETY: Only touch Smart Lead Hunter leads
+                if lead.get("LEAD_SOURCE_ID") != SLH_LEAD_SOURCE_ID:
+                    continue
+
+                # Match by SLH_Lead_ID custom field
+                slh_id_match = False
+                for cf in lead.get("CUSTOMFIELDS", []):
+                    if cf.get("FIELD_NAME") == "SLH_Lead_ID__c":
+                        try:
+                            if int(cf.get("FIELD_VALUE", 0)) == slh_lead_id:
+                                slh_id_match = True
+                        except (ValueError, TypeError):
+                            pass
+                        break
+
+                if not slh_id_match:
+                    continue
+
+                lid = lead.get("LEAD_ID")
+                try:
+                    del_resp = await client.delete(
+                        f"{self.base_url}/Leads/{lid}",
+                        headers=self.headers,
+                    )
+                    if del_resp.status_code == 202:
+                        deleted += 1
+                        logger.info(
+                            f"Insightly: deleted Lead ID {lid} (SLH #{slh_lead_id})"
+                        )
+                    else:
+                        logger.warning(
+                            f"Insightly: delete Lead ID {lid} returned {del_resp.status_code}"
+                        )
+                except httpx.RequestError as e:
+                    logger.error(f"Insightly: error deleting Lead ID {lid}: {e}")
+
+        except Exception as e:
+            logger.error(f"Insightly: error in delete_leads_by_slh_id: {e}")
+
+        return deleted
+
+    async def _fetch_all_leads(self, client: httpx.AsyncClient) -> List[Dict]:
+        """Fetch ALL leads from Insightly with pagination.
+
+        FIX C-01: Insightly returns max 500 per page by default.
+        Previously only fetched the first page, missing leads beyond 500.
+        Now paginates through all pages using $skip/$top.
+        """
+        all_leads: List[Dict] = []
+        skip = 0
+
+        while True:
+            try:
                 resp = await client.get(
                     f"{self.base_url}/Leads",
                     headers=self.headers,
+                    params={"$skip": skip, "$top": _PAGE_SIZE},
                 )
-                if resp.status_code == 200:
-                    for lead in resp.json():
-                        # SAFETY: Only touch Smart Lead Hunter leads
-                        if lead.get("LEAD_SOURCE_ID") != SLH_LEAD_SOURCE_ID:
-                            continue
-
-                        # Match by SLH_Lead_ID custom field
-                        slh_id_match = False
-                        for cf in lead.get("CUSTOMFIELDS", []):
-                            if cf.get("FIELD_NAME") == "SLH_Lead_ID__c":
-                                if int(cf.get("FIELD_VALUE", 0)) == slh_lead_id:
-                                    slh_id_match = True
-                                break
-
-                        if not slh_id_match:
-                            continue
-
-                        lid = lead.get("LEAD_ID")
-                        del_resp = await client.delete(
-                            f"{self.base_url}/Leads/{lid}",
-                            headers=self.headers,
-                        )
-                        if del_resp.status_code == 202:
-                            deleted += 1
-                            logger.info(
-                                f"Insightly: deleted SLH Lead ID {lid} (SLH #{slh_lead_id})"
-                            )
-                else:
+                if resp.status_code != 200:
                     logger.error(
-                        f"Insightly: failed to fetch leads for cleanup: {resp.status_code}"
+                        f"Insightly: failed to fetch leads page (skip={skip}): "
+                        f"{resp.status_code}"
                     )
-        except httpx.RequestError as e:
-            logger.error(f"Insightly: error deleting leads: {e}")
+                    break
 
-        return deleted
+                batch = resp.json()
+                if not batch:
+                    break
+
+                all_leads.extend(batch)
+
+                if len(batch) < _PAGE_SIZE:
+                    break
+
+                skip += _PAGE_SIZE
+
+            except httpx.RequestError as e:
+                logger.error(
+                    f"Insightly: request error fetching leads (skip={skip}): {e}"
+                )
+                break
+
+        logger.info(
+            f"Insightly: fetched {len(all_leads)} total leads "
+            f"across {(skip // _PAGE_SIZE) + 1} pages"
+        )
+        return all_leads
 
     async def test_connection(self) -> Dict[str, Any]:
         """Test Insightly API connection."""
@@ -264,19 +348,19 @@ class InsightlyClient:
             return {"connected": False, "error": "API key not set"}
 
         try:
-            async with httpx.AsyncClient(timeout=10.0) as client:
-                resp = await client.get(
-                    f"{self.base_url}/Users/Me",
-                    headers=self.headers,
-                )
-                if resp.status_code == 200:
-                    user = resp.json()
-                    return {
-                        "connected": True,
-                        "user": user.get("EMAIL_ADDRESS"),
-                    }
-                else:
-                    return {"connected": False, "error": f"HTTP {resp.status_code}"}
+            client = self._get_client()
+            resp = await client.get(
+                f"{self.base_url}/Users/Me",
+                headers=self.headers,
+            )
+            if resp.status_code == 200:
+                user = resp.json()
+                return {
+                    "connected": True,
+                    "user": user.get("EMAIL_ADDRESS"),
+                }
+            else:
+                return {"connected": False, "error": f"HTTP {resp.status_code}"}
 
         except httpx.RequestError as e:
             return {"connected": False, "error": str(e)}

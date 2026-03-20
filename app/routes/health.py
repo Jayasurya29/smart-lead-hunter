@@ -19,7 +19,18 @@ router = APIRouter()
 
 @router.get("/", tags=["Health"])
 async def root():
-    """Root endpoint - API info"""
+    """Root endpoint — serves React app if built, otherwise API info."""
+    from pathlib import Path
+    from fastapi.responses import FileResponse
+
+    index = (
+        Path(__file__).resolve().parent.parent.parent
+        / "frontend"
+        / "dist"
+        / "index.html"
+    )
+    if index.is_file():
+        return FileResponse(str(index))
     return {
         "name": "Smart Lead Hunter",
         "version": "1.0.0",
@@ -96,6 +107,22 @@ async def health_check(db: AsyncSession = Depends(get_db)):
                 components["redis"] = "healthy"
     except Exception as e:
         components["redis"] = f"unhealthy: {safe_error(e)}"
+
+    # 4. Insightly CRM (FIX L-11: was missing from health check)
+    try:
+        from app.services.insightly import get_insightly_client
+
+        crm = get_insightly_client()
+        if not crm.enabled:
+            components["insightly"] = "not configured"
+        else:
+            crm_result = await crm.test_connection()
+            if crm_result.get("connected"):
+                components["insightly"] = "healthy"
+            else:
+                components["insightly"] = f"error: {crm_result.get('error', 'unknown')}"
+    except Exception as e:
+        components["insightly"] = f"unhealthy: {safe_error(e)}"
 
     # Overall status
     healthy_count = sum(1 for v in components.values() if v == "healthy")

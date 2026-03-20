@@ -110,14 +110,65 @@ def safe_error(e: Exception, fallback: str = "Operation failed") -> str:
 
 
 def require_ajax(request: Request):
-    """Dependency that rejects non-AJAX requests to prevent CSRF."""
+    """Dependency that rejects non-AJAX requests to prevent CSRF.
+
+    FIX C-05: Added Origin/Referer validation on top of the header check.
+    The X-Requested-With header alone is insufficient because fetch() can
+    set custom headers on same-origin requests. We now also verify that
+    the Origin (or Referer) matches our known origins.
+
+    Defense layers:
+    1. CORS middleware blocks cross-origin preflight (first line of defense)
+    2. SameSite=Lax cookie prevents cross-site cookie sending on POST
+    3. This check: Origin/Referer must match allowed origins (belt + suspenders)
+    4. X-Requested-With or Content-Type header must be present
+    """
+    # Layer 1: Check AJAX header (proves this isn't a plain <form> submit)
     requested_with = request.headers.get("x-requested-with", "")
     content_type = request.headers.get("content-type", "")
-    if "xmlhttprequest" in requested_with.lower() or "application/json" in content_type:
-        return True
-    raise HTTPException(
-        status_code=403, detail="CSRF check failed: missing required header"
+    has_ajax_header = (
+        "xmlhttprequest" in requested_with.lower() or "application/json" in content_type
     )
+    if not has_ajax_header:
+        raise HTTPException(
+            status_code=403, detail="CSRF check failed: missing required header"
+        )
+
+    # Layer 2: Validate Origin or Referer against allowed origins
+    import os
+
+    env = os.getenv("ENVIRONMENT", "development")
+    if env == "production":
+        allowed_origins = {"https://leads.jauniforms.com"}
+    else:
+        allowed_origins = {
+            "http://localhost:8000",
+            "http://localhost:3000",
+            "http://127.0.0.1:8000",
+            "http://192.168.30.59:8000",
+            "http://192.168.30.59:3000",
+        }
+
+    origin = request.headers.get("origin", "")
+    referer = request.headers.get("referer", "")
+
+    # Extract origin from referer (https://host:port/path → https://host:port)
+    if not origin and referer:
+        from urllib.parse import urlparse
+
+        parsed = urlparse(referer)
+        origin = f"{parsed.scheme}://{parsed.netloc}" if parsed.scheme else ""
+
+    # If we have an origin, it must match. If no origin at all (same-origin
+    # requests in some browsers omit it), allow through — the cookie SameSite
+    # policy is the backstop.
+    if origin and origin not in allowed_origins:
+        logger.warning(f"CSRF: rejected request from origin {origin}")
+        raise HTTPException(
+            status_code=403, detail="CSRF check failed: origin not allowed"
+        )
+
+    return True
 
 
 async def checked_json(request: Request, max_size: int = MAX_BODY_SIZE) -> dict:
@@ -246,15 +297,21 @@ def lead_list_response(leads, total, page, per_page, pages) -> LeadListResponse:
 
 # ── Persistent Redis connection pool (singleton) ──
 _stats_redis = None
-_stats_redis_broken = False
+_stats_redis_broken_until: float = (
+    0.0  # FIX M-14: timestamp-based backoff (was fire-and-forget task)
+)
 
 
 async def _get_redis():
     """Get or create a persistent Redis connection. Returns None if unavailable."""
-    global _stats_redis, _stats_redis_broken
+    global _stats_redis, _stats_redis_broken_until
 
-    # Don't retry a broken connection every request — backoff for 60s
-    if _stats_redis_broken:
+    # FIX M-14: Simple timestamp check instead of asyncio.create_task that could
+    # get silently cancelled on shutdown, leaving the flag stuck forever.
+    import time
+
+    now = time.monotonic()
+    if _stats_redis_broken_until > now:
         return None
 
     if _stats_redis is not None:
@@ -287,19 +344,8 @@ async def _get_redis():
         return _stats_redis
     except Exception:
         _stats_redis = None
-        _stats_redis_broken = True
-
-        # Reset broken flag after 60s so it retries
-        async def _reset_broken():
-            import asyncio
-
-            global _stats_redis_broken
-            await asyncio.sleep(60)
-            _stats_redis_broken = False
-
-        import asyncio
-
-        asyncio.create_task(_reset_broken())
+        # Backoff 60s before retrying
+        _stats_redis_broken_until = now + 60.0
         return None
 
 

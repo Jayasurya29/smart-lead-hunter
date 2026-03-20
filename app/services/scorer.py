@@ -1491,58 +1491,11 @@ def get_timing_score(opening_date: str = None) -> Tuple[int, str, int]:
         return (0, f"{year} - EXPIRED", year)
 
     # Parse month from date string
-    opening_month = 6  # default to mid-year if unknown
-    month_names = {
-        "january": 1,
-        "february": 2,
-        "march": 3,
-        "april": 4,
-        "may": 5,
-        "june": 6,
-        "july": 7,
-        "august": 8,
-        "september": 9,
-        "october": 10,
-        "november": 11,
-        "december": 12,
-        "jan": 1,
-        "feb": 2,
-        "mar": 3,
-        "apr": 4,
-        "jun": 6,
-        "jul": 7,
-        "aug": 8,
-        "sep": 9,
-        "sept": 9,
-        "oct": 10,
-        "nov": 11,
-        "dec": 12,
-    }
-    for name, num in month_names.items():
-        if name in date_str:
-            opening_month = num
-            break
-    else:
-        # No month name found — try quarter/season references
-        if "q1" in date_str or "first quarter" in date_str:
-            opening_month = 2
-        elif "q2" in date_str or "second quarter" in date_str or "spring" in date_str:
-            opening_month = 5
-        elif "q3" in date_str or "third quarter" in date_str or "summer" in date_str:
-            opening_month = 8
-        elif (
-            "q4" in date_str
-            or "fourth quarter" in date_str
-            or "fall" in date_str
-            or "winter" in date_str
-        ):
-            opening_month = 11
-        elif "early" in date_str:
-            opening_month = 3
-        elif "mid" in date_str:
-            opening_month = 6
-        elif "late" in date_str or "end" in date_str:
-            opening_month = 10
+    # FIX H-01: Use shared parser from utils.py (was divergent — scorer mapped
+    # "winter" → 11/Nov, utils mapped "winter" → 2/Feb). Now consistent.
+    from app.services.utils import parse_month_from_text
+
+    opening_month = parse_month_from_text(date_str, default=6)
 
     # Calculate months until opening
     months_out = (year - current_year) * 12 + (opening_month - current_month)

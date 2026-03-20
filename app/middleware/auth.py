@@ -168,13 +168,30 @@ class APIKeyMiddleware(BaseHTTPMiddleware):
             try:
                 from jose import jwt as jose_jwt, JWTError
 
-                jwt_secret = (
-                    os.getenv("JWT_SECRET_KEY", "")
-                    or "dev-only-insecure-key-do-not-use-in-production"
-                )
-                if jwt_secret and jwt_secret != "CHANGE_ME_32_CHARS_MINIMUM_SECRET":
+                jwt_secret = os.getenv("JWT_SECRET_KEY", "")
+                # FIX C-02: Block insecure dev key in production
+                _insecure_keys = {
+                    "",
+                    "CHANGE_ME_32_CHARS_MINIMUM_SECRET",
+                    "dev-only-insecure-key-do-not-use-in-production",
+                }
+                env = os.getenv("ENVIRONMENT", "development")
+                if env == "production" and jwt_secret in _insecure_keys:
+                    # Production with no real secret — reject JWT auth entirely
+                    pass
+                elif jwt_secret and jwt_secret not in _insecure_keys:
                     payload = jose_jwt.decode(
                         jwt_cookie, jwt_secret, algorithms=["HS256"]
+                    )
+                    if payload.get("sub"):
+                        return await call_next(request)
+                elif env != "production":
+                    # Dev mode — allow the insecure key
+                    fallback = (
+                        jwt_secret or "dev-only-insecure-key-do-not-use-in-production"
+                    )
+                    payload = jose_jwt.decode(
+                        jwt_cookie, fallback, algorithms=["HS256"]
                     )
                     if payload.get("sub"):
                         return await call_next(request)

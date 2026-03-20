@@ -67,8 +67,85 @@ def clean_html_to_text(html: str) -> str:
 
 
 # ═══════════════════════════════════════════════════════════════
-# OPENING DATE TIMELINE
+# OPENING DATE PARSING — Single source of truth
 # ═══════════════════════════════════════════════════════════════
+
+# FIX H-01: Shared month-from-text parser used by BOTH utils (timeline labels)
+# and scorer (timing score). Previously divergent: scorer mapped "winter" → Nov,
+# utils mapped "winter" → Feb. "Winter 2027" = early 2027, so month 2 is correct.
+
+_MONTH_NAMES = {
+    "january": 1,
+    "february": 2,
+    "march": 3,
+    "april": 4,
+    "may": 5,
+    "june": 6,
+    "july": 7,
+    "august": 8,
+    "september": 9,
+    "october": 10,
+    "november": 11,
+    "december": 12,
+    "jan": 1,
+    "feb": 2,
+    "mar": 3,
+    "apr": 4,
+    "jun": 6,
+    "jul": 7,
+    "aug": 8,
+    "sep": 9,
+    "sept": 9,
+    "oct": 10,
+    "nov": 11,
+    "dec": 12,
+}
+
+# Quarter/season → representative month
+_SEASON_MONTHS = {
+    "q1": 2,
+    "first quarter": 2,
+    "q2": 5,
+    "second quarter": 5,
+    "spring": 5,
+    "q3": 8,
+    "third quarter": 8,
+    "summer": 8,
+    "q4": 11,
+    "fourth quarter": 11,
+    "fall": 11,
+    "autumn": 11,
+    # "winter" = Q1 of that year (Jan/Feb), NOT Q4
+    "winter": 2,
+    # Vague qualifiers
+    "early": 3,
+    "mid": 6,
+    "late": 10,
+    "end": 10,
+}
+
+
+def parse_month_from_text(text: str, default: int = 6) -> int:
+    """Parse month number from opening date text.
+
+    Single source of truth for month extraction. Used by both
+    months_to_opening() and scorer.get_timing_score().
+
+    Returns month number (1-12), or `default` if no month found.
+    """
+    text_lower = text.lower().strip()
+
+    # Try full/abbreviated month names first
+    for name, num in _MONTH_NAMES.items():
+        if name in text_lower:
+            return num
+
+    # Try quarter/season keywords
+    for keyword, month in _SEASON_MONTHS.items():
+        if keyword in text_lower:
+            return month
+
+    return default
 
 
 def months_to_opening(opening_date: str) -> int:
@@ -92,38 +169,8 @@ def months_to_opening(opening_date: str) -> int:
     else:
         return 99
 
-    # Extract month
-    month = None
-    month_map = {
-        "january": 1,
-        "february": 2,
-        "march": 3,
-        "april": 4,
-        "may": 5,
-        "june": 6,
-        "july": 7,
-        "august": 8,
-        "september": 9,
-        "october": 10,
-        "november": 11,
-        "december": 12,
-    }
-    for name, num in month_map.items():
-        if name in text:
-            month = num
-            break
-
-    if not month:
-        if "q1" in text or "early" in text or "winter" in text:
-            month = 2
-        elif "q2" in text or "spring" in text:
-            month = 5
-        elif "q3" in text or "summer" in text or "mid" in text:
-            month = 7
-        elif "q4" in text or "fall" in text or "autumn" in text or "late" in text:
-            month = 10
-        else:
-            month = 6
+    # FIX H-01: Use shared month parser (was inline duplicate)
+    month = parse_month_from_text(text, default=6)
 
     return (year - now.year) * 12 + (month - now.month)
 
