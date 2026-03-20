@@ -69,8 +69,8 @@ export default function LeadDetail({ leadId, tab, onClose }: Props) {
             <h2 className="text-lg font-bold text-navy-900 leading-snug truncate">
               {lead.hotel_name || lead.name}
             </h2>
-            {lead.brand_name && (
-              <p className="text-sm text-stone-400 mt-0.5">{lead.brand_name}</p>
+            {(lead.brand || lead.brand_name) && (
+              <p className="text-sm text-stone-400 mt-0.5">{lead.brand || lead.brand_name}</p>
             )}
           </div>
           <div className="flex items-center gap-2 flex-shrink-0">
