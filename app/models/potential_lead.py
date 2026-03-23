@@ -88,7 +88,7 @@ class PotentialLead(Base):
 
     # Workflow Status
     status = Column(
-        String(20), default="new"
+        String(20), default="new", index=True
     )  # new, claimed, approved, rejected, pushed
     claimed_by = Column(String(100))
     claimed_at = Column(DateTime(timezone=True))
@@ -98,7 +98,8 @@ class PotentialLead(Base):
     notes = Column(Text)
 
     # Insightly CRM Sync
-    insightly_id = Column(Integer)
+    insightly_id = Column(Integer)  # First/primary Insightly Lead ID (legacy compat)
+    insightly_lead_ids = Column(JSONB, default=list)  # ALL pushed Insightly Lead IDs
     synced_at = Column(DateTime(timezone=True))
     sync_error = Column(Text)
 

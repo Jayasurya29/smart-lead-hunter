@@ -1,3 +1,4 @@
+# ruff: noqa: E402
 """
 Alembic env.py — Async SQLAlchemy support for Smart Lead Hunter
 """

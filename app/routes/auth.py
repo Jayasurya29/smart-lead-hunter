@@ -83,10 +83,15 @@ _LOGIN_LIMIT = 5  # per window
 _LOGIN_WINDOW = 60.0  # seconds
 
 
-def _check_rate_limit(ip: str) -> bool:
-    """Returns True if request is allowed, False if rate limited."""
+def _check_rate_limit(ip: str, action: str = "login") -> bool:
+    """Returns True if request is allowed, False if rate limited.
+
+    FIX: Separate buckets per action so spamming /login doesn't block
+    /register or /resend-code for the same IP.
+    """
+    key = f"{action}:{ip}"
     now = time.monotonic()
-    bucket = _login_attempts[ip]
+    bucket = _login_attempts[key]
     if now > bucket["reset"]:
         bucket["count"] = 0
         bucket["reset"] = now + _LOGIN_WINDOW
@@ -361,7 +366,7 @@ async def register(
 ):
     # Rate limit
     ip = _get_client_ip(request)
-    if not _check_rate_limit(ip):
+    if not _check_rate_limit(ip, "register"):
         return JSONResponse(
             {"success": False, "error": "Too many attempts. Try again in a minute."},
             status_code=429,
@@ -528,7 +533,7 @@ async def resend_code(
 ):
     # Rate limit
     ip = _get_client_ip(request)
-    if not _check_rate_limit(ip):
+    if not _check_rate_limit(ip, "resend"):
         return JSONResponse(
             {"success": False, "error": "Too many attempts. Try again in a minute."},
             status_code=429,

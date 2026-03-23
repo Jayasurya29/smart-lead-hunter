@@ -135,19 +135,9 @@ def require_ajax(request: Request):
         )
 
     # Layer 2: Validate Origin or Referer against allowed origins
-    import os
+    from app.config import settings as _settings
 
-    env = os.getenv("ENVIRONMENT", "development")
-    if env == "production":
-        allowed_origins = {"https://leads.jauniforms.com"}
-    else:
-        allowed_origins = {
-            "http://localhost:8000",
-            "http://localhost:3000",
-            "http://127.0.0.1:8000",
-            "http://192.168.30.59:8000",
-            "http://192.168.30.59:3000",
-        }
+    allowed_origins = set(_settings.allowed_origins)
 
     origin = request.headers.get("origin", "")
     referer = request.headers.get("referer", "")

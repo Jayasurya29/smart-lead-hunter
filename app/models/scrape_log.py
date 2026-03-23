@@ -7,6 +7,7 @@ from sqlalchemy.dialects.postgresql import JSONB
 
 from app.database import Base
 from app.services.utils import local_now
+from datetime import datetime, timezone
 
 
 class ScrapeLog(Base):
@@ -24,7 +25,7 @@ class ScrapeLog(Base):
     started_at = Column(
         DateTime(timezone=True),
         nullable=False,
-        default=lambda: local_now(),
+        default=lambda: datetime.now(timezone.utc),
     )
     completed_at = Column(DateTime(timezone=True))
 
@@ -44,7 +45,9 @@ class ScrapeLog(Base):
     errors = Column(JSONB)  # Array of error details
 
     # Timestamps
-    created_at = Column(DateTime(timezone=True), default=lambda: local_now())
+    created_at = Column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+    )
 
     def __repr__(self):
         return f"<ScrapeLog(id={self.id}, source_id={self.source_id}, status='{self.status}', leads={self.leads_found})>"

@@ -1,12 +1,21 @@
-"""Contact management and lead enrichment endpoints."""
+"""Contact management and lead enrichment endpoints.
+
+FIX: All contact CRUD endpoints now use Depends(get_db) for proper lifecycle.
+FIX: Enrichment errors return proper HTTP status codes (not 200).
+FIX: Removed phantom contact_linkedin reference.
+NOTE: enrich_lead() intentionally uses manual sessions because the enrichment
+      network calls take 10-30s — we don't want to hold a DB connection that long.
+"""
 
 import logging
 import os
 
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import JSONResponse
 from sqlalchemy import select, update
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.database import async_session
+from app.database import get_db, async_session
 from app.models import PotentialLead
 from app.models.lead_contact import LeadContact
 from app.services.rescore import rescore_lead
@@ -26,27 +35,27 @@ router = APIRouter()
 @router.post("/api/dashboard/leads/{lead_id}/enrich", tags=["Dashboard"])
 async def enrich_lead(lead_id: int, _csrf=Depends(require_ajax)):
     """Enrich a lead with contact information via web search."""
+    # Session 1: Read lead data (extract to local vars, then close)
+    async with async_session() as session:
+        result = await session.execute(
+            select(PotentialLead).where(PotentialLead.id == lead_id)
+        )
+        lead = result.scalar_one_or_none()
+        if not lead:
+            raise HTTPException(status_code=404, detail="Lead not found")
+
+        hotel_name = lead.hotel_name
+        brand = lead.brand or ""
+        city = lead.city or ""
+        state = lead.state or ""
+        country = lead.country or "USA"
+        management_company = lead.management_company or ""
+        opening_date = lead.opening_date or ""
+        # FIX C-04: Capture updated_at for optimistic lock check
+        lead_updated_at = lead.updated_at
+
+    # Run enrichment (network calls — can take 10-30 seconds)
     try:
-        # Session 1: Read lead data (extract to local vars, then close)
-        async with async_session() as session:
-            result = await session.execute(
-                select(PotentialLead).where(PotentialLead.id == lead_id)
-            )
-            lead = result.scalar_one_or_none()
-            if not lead:
-                return {"status": "error", "message": "Lead not found"}
-
-            hotel_name = lead.hotel_name
-            brand = lead.brand or ""
-            city = lead.city or ""
-            state = lead.state or ""
-            country = lead.country or "USA"
-            management_company = lead.management_company or ""
-            opening_date = lead.opening_date or ""
-            # FIX C-04: Capture updated_at for optimistic lock check
-            lead_updated_at = lead.updated_at
-
-        # Run enrichment (network calls — can take 10-30 seconds)
         from app.services.contact_enrichment import ContactEnrichmentEngine
 
         engine = ContactEnrichmentEngine(
@@ -63,15 +72,31 @@ async def enrich_lead(lead_id: int, _csrf=Depends(require_ajax)):
             management_company=management_company,
             opening_date=opening_date,
         )
+    except Exception as e:
+        logger.error(f"Enrichment failed for lead {lead_id}: {e}", exc_info=True)
+        return JSONResponse(
+            content={
+                "status": "error",
+                "message": f"Enrichment failed: {str(e)[:200]}",
+            },
+            status_code=502,
+        )
 
-        # Session 2: Save results (with optimistic lock check)
+    # Session 2: Save results (with optimistic lock check)
+    try:
         async with async_session() as session:
             lead_result = await session.execute(
                 select(PotentialLead).where(PotentialLead.id == lead_id)
             )
             lead = lead_result.scalar_one_or_none()
             if not lead:
-                return {"status": "error", "message": "Lead not found after enrichment"}
+                return JSONResponse(
+                    content={
+                        "status": "error",
+                        "message": "Lead not found after enrichment",
+                    },
+                    status_code=404,
+                )
 
             # FIX C-04: Optimistic lock — warn if lead was edited during enrichment
             # Only fill empty fields (never overwrite), so concurrent edits are safe
@@ -218,8 +243,13 @@ async def enrich_lead(lead_id: int, _csrf=Depends(require_ajax)):
         }
 
     except Exception as e:
-        logger.error(f"Enrichment failed for lead {lead_id}: {e}", exc_info=True)
-        return {"status": "error", "message": f"Enrichment failed: {str(e)}"}
+        logger.error(
+            f"Failed to save enrichment for lead {lead_id}: {e}", exc_info=True
+        )
+        return JSONResponse(
+            content={"status": "error", "message": f"Failed to save: {str(e)[:200]}"},
+            status_code=500,
+        )
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -228,108 +258,121 @@ async def enrich_lead(lead_id: int, _csrf=Depends(require_ajax)):
 
 
 @router.get("/api/dashboard/leads/{lead_id}/contacts")
-async def list_contacts(lead_id: int):
-    async with async_session() as session:
-        result = await session.execute(
-            select(LeadContact)
-            .where(LeadContact.lead_id == lead_id)
-            .order_by(
-                LeadContact.is_saved.desc(),
-                LeadContact.is_primary.desc(),
-                LeadContact.score.desc(),
-            )
+async def list_contacts(lead_id: int, db: AsyncSession = Depends(get_db)):
+    result = await db.execute(
+        select(LeadContact)
+        .where(LeadContact.lead_id == lead_id)
+        .order_by(
+            LeadContact.is_saved.desc(),
+            LeadContact.is_primary.desc(),
+            LeadContact.score.desc(),
         )
-        return [c.to_dict() for c in result.scalars().all()]
+    )
+    return [c.to_dict() for c in result.scalars().all()]
 
 
 @router.post("/api/dashboard/leads/{lead_id}/contacts/{contact_id}/save")
-async def save_contact(lead_id: int, contact_id: int, _csrf=Depends(require_ajax)):
-    async with async_session() as session:
-        result = await session.execute(
-            select(LeadContact).where(
-                LeadContact.id == contact_id, LeadContact.lead_id == lead_id
-            )
+async def save_contact(
+    lead_id: int,
+    contact_id: int,
+    db: AsyncSession = Depends(get_db),
+    _csrf=Depends(require_ajax),
+):
+    result = await db.execute(
+        select(LeadContact).where(
+            LeadContact.id == contact_id, LeadContact.lead_id == lead_id
         )
-        contact = result.scalar_one_or_none()
-        if not contact:
-            raise HTTPException(status_code=404, detail="Contact not found")
-        contact.is_saved = True
-        contact.updated_at = local_now()
-        await session.commit()
-        return {"status": "saved", "contact_id": contact_id}
+    )
+    contact = result.scalar_one_or_none()
+    if not contact:
+        raise HTTPException(status_code=404, detail="Contact not found")
+    contact.is_saved = True
+    contact.updated_at = local_now()
+    await db.commit()
+    return {"status": "saved", "contact_id": contact_id}
 
 
 @router.post("/api/dashboard/leads/{lead_id}/contacts/{contact_id}/unsave")
-async def unsave_contact(lead_id: int, contact_id: int, _csrf=Depends(require_ajax)):
-    async with async_session() as session:
-        result = await session.execute(
-            select(LeadContact).where(
-                LeadContact.id == contact_id, LeadContact.lead_id == lead_id
-            )
+async def unsave_contact(
+    lead_id: int,
+    contact_id: int,
+    db: AsyncSession = Depends(get_db),
+    _csrf=Depends(require_ajax),
+):
+    result = await db.execute(
+        select(LeadContact).where(
+            LeadContact.id == contact_id, LeadContact.lead_id == lead_id
         )
-        contact = result.scalar_one_or_none()
-        if not contact:
-            raise HTTPException(status_code=404, detail="Contact not found")
-        contact.is_saved = False
-        contact.updated_at = local_now()
-        await session.commit()
-        return {"status": "unsaved", "contact_id": contact_id}
+    )
+    contact = result.scalar_one_or_none()
+    if not contact:
+        raise HTTPException(status_code=404, detail="Contact not found")
+    contact.is_saved = False
+    contact.updated_at = local_now()
+    await db.commit()
+    return {"status": "unsaved", "contact_id": contact_id}
 
 
 @router.delete("/api/dashboard/leads/{lead_id}/contacts/{contact_id}")
-async def delete_contact(lead_id: int, contact_id: int, _csrf=Depends(require_ajax)):
-    async with async_session() as session:
-        result = await session.execute(
-            select(LeadContact).where(
-                LeadContact.id == contact_id, LeadContact.lead_id == lead_id
-            )
+async def delete_contact(
+    lead_id: int,
+    contact_id: int,
+    db: AsyncSession = Depends(get_db),
+    _csrf=Depends(require_ajax),
+):
+    result = await db.execute(
+        select(LeadContact).where(
+            LeadContact.id == contact_id, LeadContact.lead_id == lead_id
         )
-        contact = result.scalar_one_or_none()
-        if not contact:
-            raise HTTPException(status_code=404, detail="Contact not found")
-        await session.delete(contact)
-        # Flush the delete so rescore sees the updated contact count
-        await session.flush()
-        try:
-            await rescore_lead(lead_id, session)
-        except Exception:
-            pass
-        await session.commit()
-        return {"status": "deleted", "contact_id": contact_id}
+    )
+    contact = result.scalar_one_or_none()
+    if not contact:
+        raise HTTPException(status_code=404, detail="Contact not found")
+    await db.delete(contact)
+    # Flush the delete so rescore sees the updated contact count
+    await db.flush()
+    try:
+        await rescore_lead(lead_id, db)
+    except Exception:
+        pass
+    await db.commit()
+    return {"status": "deleted", "contact_id": contact_id}
 
 
 @router.post("/api/dashboard/leads/{lead_id}/contacts/{contact_id}/set-primary")
 async def set_primary_contact(
-    lead_id: int, contact_id: int, _csrf=Depends(require_ajax)
+    lead_id: int,
+    contact_id: int,
+    db: AsyncSession = Depends(get_db),
+    _csrf=Depends(require_ajax),
 ):
-    async with async_session() as session:
-        await session.execute(
-            update(LeadContact)
-            .where(LeadContact.lead_id == lead_id)
-            .values(is_primary=False)
+    await db.execute(
+        update(LeadContact)
+        .where(LeadContact.lead_id == lead_id)
+        .values(is_primary=False)
+    )
+    result = await db.execute(
+        select(LeadContact).where(
+            LeadContact.id == contact_id, LeadContact.lead_id == lead_id
         )
-        result = await session.execute(
-            select(LeadContact).where(
-                LeadContact.id == contact_id, LeadContact.lead_id == lead_id
-            )
-        )
-        contact = result.scalar_one_or_none()
-        if not contact:
-            raise HTTPException(status_code=404, detail="Contact not found")
-        contact.is_primary = True
-        contact.is_saved = True
-        contact.updated_at = local_now()
-        lead_result = await session.execute(
-            select(PotentialLead).where(PotentialLead.id == lead_id)
-        )
-        lead = lead_result.scalar_one_or_none()
-        if lead:
-            lead.contact_name = contact.name
-            lead.contact_title = contact.title
-            lead.contact_email = contact.email
-            lead.contact_phone = contact.phone
-            if hasattr(lead, "contact_linkedin"):
-                lead.contact_linkedin = contact.linkedin
-            lead.updated_at = local_now()
-        await session.commit()
-        return {"status": "primary_set", "contact_id": contact_id}
+    )
+    contact = result.scalar_one_or_none()
+    if not contact:
+        raise HTTPException(status_code=404, detail="Contact not found")
+    contact.is_primary = True
+    contact.is_saved = True
+    contact.updated_at = local_now()
+    lead_result = await db.execute(
+        select(PotentialLead).where(PotentialLead.id == lead_id)
+    )
+    lead = lead_result.scalar_one_or_none()
+    if lead:
+        lead.contact_name = contact.name
+        lead.contact_title = contact.title
+        lead.contact_email = contact.email
+        lead.contact_phone = contact.phone
+        # NOTE: contact_linkedin column does not exist on PotentialLead.
+        # LinkedIn is stored on the LeadContact record only.
+        lead.updated_at = local_now()
+    await db.commit()
+    return {"status": "primary_set", "contact_id": contact_id}

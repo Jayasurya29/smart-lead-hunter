@@ -2408,9 +2408,8 @@ async def save_enrichment_to_lead(lead_id: int, result: EnrichmentResult) -> dic
                 lead.contact_email = best["email"]
                 updated_fields.append("contact_email")
 
-            if best.get("linkedin"):
-                lead.contact_linkedin = best["linkedin"]
-                updated_fields.append("contact_linkedin")
+            # NOTE: contact_linkedin column does not exist on PotentialLead.
+            # LinkedIn is stored on the LeadContact record only.
 
             if best.get("phone"):
                 lead.contact_phone = best["phone"]

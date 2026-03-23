@@ -8,6 +8,7 @@ from app.models.scrape_log import ScrapeLog
 from app.models.failed_domain import FailedDomain
 from app.models.user import User, PendingRegistration
 from app.models.audit_log import AuditLog
+from app.models.lead_contact import LeadContact
 
 __all__ = [
     "PotentialLead",
@@ -17,4 +18,5 @@ __all__ = [
     "User",
     "PendingRegistration",
     "AuditLog",
+    "LeadContact",
 ]

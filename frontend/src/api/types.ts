@@ -3,31 +3,36 @@
 export interface Lead {
   id: number
   hotel_name: string | null
-  name: string | null
-  brand_name: string | null
   brand: string | null
   brand_tier: string | null
+  hotel_type: string | null
+  hotel_website: string | null
   city: string | null
   state: string | null
   country: string | null
+  location_type: string | null
   opening_date: string | null
-  opening_year: number | string | null
+  opening_year: number | null
   room_count: number | null
   lead_score: number | null
   status: string
-  location_type: string | null
   management_company: string | null
   developer: string | null
   owner: string | null
-  hotel_website: string | null
-  source_urls: string[] | null
-  source_url: string | null
-  sources: string[] | string | null
-  source_detail: string | null
-  source_extractions: Record<string, any> | null
-  score_breakdown: Record<string, number | string> | null
-  insightly_id: string | null
+  contact_name: string | null
+  contact_title: string | null
+  contact_email: string | null
+  contact_phone: string | null
+  description: string | null
+  key_insights: string | null
+  notes: string | null
   rejection_reason: string | null
+  source_url: string | null
+  source_site: string | null
+  source_urls: string[] | null
+  source_extractions: Record<string, any> | null
+  score_breakdown: Record<string, any> | null
+  insightly_id: number | null
   created_at: string
   updated_at: string | null
 }
@@ -57,6 +62,7 @@ export interface DashboardStats {
   healthy_sources: number
   leads_today: number
   leads_this_week: number
+  deleted_leads: number
 }
 
 /* ── Contacts ── */
@@ -100,9 +106,13 @@ export interface SourcesListResponse {
 
 export interface User {
   id: number
+  first_name: string
+  last_name: string
   email: string
-  full_name: string
-  role: 'admin' | 'manager' | 'viewer'
+  role: 'sales' | 'admin'
+  is_active: boolean
+  last_login: string | null
+  created_at: string | null
 }
 
 export interface AuthResponse {

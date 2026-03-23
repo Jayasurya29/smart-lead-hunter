@@ -25,11 +25,6 @@ from typing import Dict, Optional
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.config.intelligence_config import (
-    SCORE_HOT_THRESHOLD,
-    SCORE_WARM_THRESHOLD,
-    SCORE_COOL_THRESHOLD,
-)
 
 logger = logging.getLogger(__name__)
 
@@ -231,15 +226,9 @@ async def rescore_lead(lead_id: int, session: AsyncSession) -> Optional[Dict]:
 
     lead.timeline_label = get_timeline_label(lead.opening_date or "")
 
-    # Update score tier
-    if new_score >= SCORE_HOT_THRESHOLD:
-        lead.lead_score_tier = "HOT"
-    elif new_score >= SCORE_WARM_THRESHOLD:
-        lead.lead_score_tier = "WARM"
-    elif new_score >= SCORE_COOL_THRESHOLD:
-        lead.lead_score_tier = "COOL"
-    else:
-        lead.lead_score_tier = "COLD"
+    # NOTE: Score tier is derived from timeline_label (already set above)
+    # and lead_score. No separate column needed — the frontend reads
+    # lead_score + thresholds directly.
 
     return {
         "old_score": old_score,

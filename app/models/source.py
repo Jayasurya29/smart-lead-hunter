@@ -7,6 +7,7 @@ from sqlalchemy.dialects.postgresql import JSONB
 
 from app.database import Base
 from app.services.utils import local_now
+from datetime import datetime, timezone
 
 
 class Source(Base):
@@ -59,12 +60,14 @@ class Source(Base):
     # Source Intelligence — adaptive learning data
     source_intelligence = Column(JSONB, default=dict)
 
-    # Timestamps
-    created_at = Column(DateTime(timezone=True), default=lambda: local_now())
+    # Timestamps — use UTC for storage consistency
+    created_at = Column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+    )
     updated_at = Column(
         DateTime(timezone=True),
-        default=lambda: local_now(),
-        onupdate=lambda: local_now(),
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
     )
 
     def __repr__(self):

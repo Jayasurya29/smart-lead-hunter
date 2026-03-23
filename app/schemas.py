@@ -474,3 +474,4 @@ class StatsResponse(BaseModel):
     healthy_sources: int
     leads_today: int
     leads_this_week: int
+    deleted_leads: int = 0

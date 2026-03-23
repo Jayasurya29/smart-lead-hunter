@@ -1,6 +1,7 @@
 """Dashboard API routes — lead actions, sources list."""
 
 import logging
+import os
 from datetime import timedelta
 from typing import Optional
 
@@ -18,6 +19,7 @@ from app.services.audit import log_action
 from app.shared import (
     require_ajax,
     checked_json,
+    _get_redis,
 )
 
 # FIX M-13: Reuse schema constants instead of redefining them
@@ -26,6 +28,36 @@ from app.schemas import VALID_BRAND_TIERS, _EMAIL_RE
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+
+# ── Shared helper: extract user email from JWT cookie for audit logs ──
+def _get_user_email(request: Request) -> str:
+    """Extract user email from JWT cookie without DB lookup."""
+    cookie = request.cookies.get("slh_session", "")
+    if not cookie:
+        return "unknown"
+    try:
+        from jose import jwt as jose_jwt
+
+        secret = (
+            os.getenv("JWT_SECRET_KEY", "")
+            or "dev-only-insecure-key-do-not-use-in-production"
+        )
+        payload = jose_jwt.decode(cookie, secret, algorithms=["HS256"])
+        return payload.get("email", "unknown")
+    except Exception:
+        return "unknown"
+
+
+async def _invalidate_stats_cache():
+    """Delete cached dashboard stats so next poll gets fresh data."""
+    r = await _get_redis()
+    if r:
+        try:
+            await r.delete("slh:dashboard_stats")
+        except Exception:
+            pass
+
 
 # FIX M-13: Validation config for dashboard edit — compiled once at import,
 # not per-request. Field length caps in one place.
@@ -244,10 +276,12 @@ async def dashboard_edit_lead(
 @router.post("/api/dashboard/leads/{lead_id}/approve", tags=["Dashboard"])
 async def dashboard_approve_lead(
     lead_id: int,
+    request: Request,
     db: AsyncSession = Depends(get_db),
     _csrf=Depends(require_ajax),
 ):
     """Approve lead — push contacts to Insightly CRM"""
+    user_email = _get_user_email(request)
     result = await db.execute(select(PotentialLead).where(PotentialLead.id == lead_id))
     lead = result.scalar_one_or_none()
 
@@ -267,6 +301,7 @@ async def dashboard_approve_lead(
             status_code=400,
         )
 
+    old_status = lead.status
     lead.status = "approved"
     lead.updated_at = local_now()
 
@@ -274,46 +309,72 @@ async def dashboard_approve_lead(
     from app.services.insightly import get_insightly_client
 
     crm = get_insightly_client()
+    crm_error = None
     if crm.enabled and not lead.insightly_id:
-        pushed = await crm.push_contacts_as_leads(
-            contacts=contacts,
-            hotel_name=lead.hotel_name,
-            brand=lead.brand or "",
-            brand_tier=lead.brand_tier or "",
-            city=lead.city or "",
-            state=lead.state or "",
-            country=lead.country or "USA",
-            opening_date=lead.opening_date or "",
-            room_count=lead.room_count or 0,
-            lead_score=lead.lead_score or 0,
-            description=lead.description or "",
-            source_url=lead.source_url or "",
-            management_company=lead.management_company or "",
-            developer=lead.developer or "",
-            owner=lead.owner or "",
-            slh_lead_id=lead.id,
-        )
-        successful = [p for p in pushed if p[1]]
-        if successful:
-            lead.insightly_id = successful[0][1]
-            logger.info(
-                f"Insightly: pushed {len(successful)} contacts for "
-                f"{lead.hotel_name} -> Lead IDs: {[p[1] for p in successful]}"
+        try:
+            pushed = await crm.push_contacts_as_leads(
+                contacts=contacts,
+                hotel_name=lead.hotel_name,
+                brand=lead.brand or "",
+                brand_tier=lead.brand_tier or "",
+                city=lead.city or "",
+                state=lead.state or "",
+                country=lead.country or "USA",
+                opening_date=lead.opening_date or "",
+                room_count=lead.room_count or 0,
+                lead_score=lead.lead_score or 0,
+                description=lead.description or "",
+                source_url=lead.source_url or "",
+                management_company=lead.management_company or "",
+                developer=lead.developer or "",
+                owner=lead.owner or "",
+                slh_lead_id=lead.id,
             )
-        else:
-            logger.warning(f"Insightly: failed to push contacts for {lead.hotel_name}")
+            successful = [p for p in pushed if p[1]]
+            if successful:
+                lead.insightly_id = successful[0][1]
+                lead.insightly_lead_ids = [p[1] for p in successful]
+                lead.sync_error = None
+                logger.info(
+                    f"Insightly: pushed {len(successful)} contacts for "
+                    f"{lead.hotel_name} -> Lead IDs: {[p[1] for p in successful]}"
+                )
+            else:
+                crm_error = "CRM push returned no successful records"
+                lead.sync_error = crm_error
+                logger.warning(f"Insightly: push returned empty for {lead.hotel_name}")
+        except Exception as e:
+            crm_error = f"CRM sync failed: {str(e)[:100]}"
+            lead.sync_error = crm_error
+            logger.error(f"Insightly: push failed for {lead.hotel_name}: {e}")
+
+    # Audit log
+    await log_action(
+        session=db,
+        action="approve",
+        lead=lead,
+        user_email=user_email,
+        old_values={"status": old_status},
+        new_values={"status": "approved"},
+        detail=f"Contacts: {len(contacts)}"
+        + (f", CRM error: {crm_error}" if crm_error else ""),
+    )
 
     await db.commit()
     await db.refresh(lead)
+    await _invalidate_stats_cache()
 
     logger.info(f"Dashboard: Approved lead {lead.hotel_name} (ID: {lead.id})")
 
-    return {
+    resp = {
         "status": "approved",
         "id": lead.id,
         "insightly_id": lead.insightly_id,
         "contacts_pushed": len(contacts),
     }
+    if crm_error:
+        resp["crm_warning"] = crm_error
+    return resp
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -324,34 +385,54 @@ async def dashboard_approve_lead(
 @router.post("/api/dashboard/leads/{lead_id}/reject", tags=["Dashboard"])
 async def dashboard_reject_lead(
     lead_id: int,
+    request: Request,
     reason: Optional[str] = Query(None),
     db: AsyncSession = Depends(get_db),
     _csrf=Depends(require_ajax),
 ):
     """Reject lead — remove from Insightly if previously pushed"""
+    user_email = _get_user_email(request)
     result = await db.execute(select(PotentialLead).where(PotentialLead.id == lead_id))
     lead = result.scalar_one_or_none()
 
     if not lead:
         return JSONResponse(content={"detail": "Lead not found"}, status_code=404)
 
+    old_status = lead.status
     lead.status = "rejected"
     lead.rejection_reason = reason
     lead.notes = f"{lead.notes or ''}\nRejected: {reason or 'No reason given'}".strip()
     lead.updated_at = local_now()
 
-    # Remove from Insightly if previously pushed
-    if lead.insightly_id:
+    # Remove from Insightly if previously pushed — use stored IDs (fast path)
+    if lead.insightly_id or lead.insightly_lead_ids:
         from app.services.insightly import get_insightly_client
 
         crm = get_insightly_client()
         if crm.enabled:
-            deleted = await crm.delete_leads_by_slh_id(lead.id)
+            stored_ids = lead.insightly_lead_ids or []
+            if stored_ids:
+                deleted = await crm.delete_leads_by_ids(stored_ids)
+            else:
+                # Fallback for leads pushed before insightly_lead_ids existed
+                deleted = await crm.delete_leads_by_slh_id(lead.id)
             logger.info(f"Insightly: deleted {deleted} leads for {lead.hotel_name}")
         lead.insightly_id = None
+        lead.insightly_lead_ids = []
+
+    await log_action(
+        session=db,
+        action="reject",
+        lead=lead,
+        user_email=user_email,
+        old_values={"status": old_status},
+        new_values={"status": "rejected", "reason": reason},
+        detail=reason,
+    )
 
     await db.commit()
     await db.refresh(lead)
+    await _invalidate_stats_cache()
 
     logger.info(
         f"Dashboard: Rejected lead {lead.hotel_name} (ID: {lead.id}, Reason: {reason})"
@@ -368,32 +449,51 @@ async def dashboard_reject_lead(
 @router.post("/api/dashboard/leads/{lead_id}/restore", tags=["Dashboard"])
 async def dashboard_restore_lead(
     lead_id: int,
+    request: Request,
     db: AsyncSession = Depends(get_db),
     _csrf=Depends(require_ajax),
 ):
     """Restore rejected/deleted lead back to pipeline"""
+    user_email = _get_user_email(request)
     result = await db.execute(select(PotentialLead).where(PotentialLead.id == lead_id))
     lead = result.scalar_one_or_none()
 
     if not lead:
         return JSONResponse(content={"detail": "Lead not found"}, status_code=404)
 
+    old_status = lead.status
     lead.status = "new"
     lead.rejection_reason = None
     lead.updated_at = local_now()
 
-    # Remove from Insightly if previously pushed
-    if lead.insightly_id:
+    # Remove from Insightly if previously pushed — use stored IDs (fast path)
+    if lead.insightly_id or lead.insightly_lead_ids:
         from app.services.insightly import get_insightly_client
 
         crm = get_insightly_client()
         if crm.enabled:
-            deleted = await crm.delete_leads_by_slh_id(lead.id)
+            stored_ids = lead.insightly_lead_ids or []
+            if stored_ids:
+                deleted = await crm.delete_leads_by_ids(stored_ids)
+            else:
+                # Fallback for leads pushed before insightly_lead_ids existed
+                deleted = await crm.delete_leads_by_slh_id(lead.id)
             logger.info(f"Insightly: deleted {deleted} leads for {lead.hotel_name}")
         lead.insightly_id = None
+        lead.insightly_lead_ids = []
+
+    await log_action(
+        session=db,
+        action="restore",
+        lead=lead,
+        user_email=user_email,
+        old_values={"status": old_status},
+        new_values={"status": "new"},
+    )
 
     await db.commit()
     await db.refresh(lead)
+    await _invalidate_stats_cache()
 
     return {"status": "restored", "id": lead.id}
 
@@ -406,20 +506,30 @@ async def dashboard_restore_lead(
 @router.post("/api/dashboard/leads/{lead_id}/delete", tags=["Dashboard"])
 async def dashboard_delete_lead(
     lead_id: int,
+    request: Request,
     db: AsyncSession = Depends(get_db),
     _csrf=Depends(require_ajax),
 ):
     """Soft-delete a lead (can be restored from Deleted tab)"""
+    user_email = _get_user_email(request)
     result = await db.execute(select(PotentialLead).where(PotentialLead.id == lead_id))
     lead = result.scalar_one_or_none()
 
     if not lead:
         return JSONResponse(content={"detail": "Lead not found"}, status_code=404)
 
+    await log_action(
+        session=db,
+        action="delete",
+        lead=lead,
+        user_email=user_email,
+    )
+
     lead.status = "deleted"
     lead.updated_at = local_now()
 
     await db.commit()
+    await _invalidate_stats_cache()
 
     return {"status": "deleted", "id": lead.id}
 

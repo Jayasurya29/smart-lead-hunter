@@ -234,6 +234,39 @@ class InsightlyClient:
             pass
         return False
 
+    async def delete_leads_by_ids(self, lead_ids: list[int]) -> int:
+        """Delete Insightly leads by their known IDs (O(k) — no full-fetch needed).
+
+        FIX: Uses locally stored IDs from push_contacts_as_leads() instead of
+        fetching ALL CRM leads and scanning. Orders of magnitude faster.
+        """
+        if not self.enabled or not lead_ids:
+            return 0
+
+        deleted = 0
+        client = self._get_client()
+
+        for lid in lead_ids:
+            try:
+                resp = await client.delete(
+                    f"{self.base_url}/Leads/{lid}",
+                    headers=self.headers,
+                )
+                if resp.status_code == 202:
+                    deleted += 1
+                    logger.info(f"Insightly: deleted Lead ID {lid}")
+                elif resp.status_code == 404:
+                    logger.info(f"Insightly: Lead ID {lid} already deleted")
+                    deleted += 1  # Count as success — it's gone
+                else:
+                    logger.warning(
+                        f"Insightly: delete Lead ID {lid} returned {resp.status_code}"
+                    )
+            except httpx.RequestError as e:
+                logger.error(f"Insightly: error deleting Lead ID {lid}: {e}")
+
+        return deleted
+
     async def delete_leads_by_slh_id(self, slh_lead_id: int) -> int:
         """Delete only Smart Lead Hunter leads matching an SLH Lead ID.
 

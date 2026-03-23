@@ -20,7 +20,7 @@ from sqlalchemy import (
 from sqlalchemy.orm import relationship
 
 from app.database import Base
-from app.services.utils import local_now
+from datetime import datetime, timezone
 
 
 class LeadContact(Base):
@@ -68,12 +68,14 @@ class LeadContact(Base):
     )  # e.g., "LinkedIn profile mentions Six Senses Napa Valley"
     evidence_url = Column(Text)  # URL where this contact was found (proof of relevance)
 
-    # Timestamps
-    created_at = Column(DateTime(timezone=True), default=lambda: local_now())
+    # Timestamps — use UTC for storage consistency; convert at presentation layer
+    created_at = Column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+    )
     updated_at = Column(
         DateTime(timezone=True),
-        default=lambda: local_now(),
-        onupdate=lambda: local_now(),
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
     )
     last_enriched_at = Column(
         DateTime(timezone=True)

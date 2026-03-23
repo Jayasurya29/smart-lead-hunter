@@ -69,7 +69,7 @@ async def send_verification_email(to_email: str, first_name: str, otp: str) -> b
 
     try:
         msg = MIMEMultipart("alternative")
-        msg["Subject"] = f"Your verification code: {otp}"
+        msg["Subject"] = "Your Smart Lead Hunter verification code"
         msg["From"] = f"{FROM_NAME} <{SMTP_USER}>"
         msg["To"] = to_email
 

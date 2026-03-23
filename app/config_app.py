@@ -81,6 +81,21 @@ class Settings(BaseSettings):
     environment: str = "production"
     debug: bool = False
 
+    @property
+    def allowed_origins(self) -> list[str]:
+        """Allowed CORS origins — single source of truth for main.py, shared.py, middleware."""
+        if self.environment == "production":
+            return ["https://leads.jauniforms.com"]
+        return [
+            "http://localhost:8000",
+            "http://localhost:3000",
+            "http://127.0.0.1:8000",
+            "http://192.168.30.59:8000",
+            "http://192.168.30.59:3000",
+            "http://192.168.1.151:8000",  # ← ADD
+            "http://192.168.1.151:3000",  # ← ADD
+        ]
+
     # -------------------------------------------------------------------------
     # PYDANTIC CONFIG
     # -------------------------------------------------------------------------

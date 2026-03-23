@@ -7,7 +7,6 @@ Create Date: 2026-03-17
 
 from typing import Sequence, Union
 from alembic import op
-from sqlalchemy import text
 
 revision: str = "003_add_city_index"
 down_revision: Union[str, None] = "002_add_timeline_label"

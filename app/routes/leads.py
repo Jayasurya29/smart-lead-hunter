@@ -1,19 +1,16 @@
-"""Lead CRUD endpoints + JSON API actions with full CRM logic."""
+"""Lead CRUD endpoints — list, detail, create, update."""
 
 import logging
-import os
 from datetime import timedelta
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from fastapi.responses import JSONResponse
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.database import get_db
 from app.models import PotentialLead
-from app.models.lead_contact import LeadContact
 from app.schemas import (
     LeadCreate,
     LeadUpdate,
@@ -22,7 +19,6 @@ from app.schemas import (
 )
 from app.services.lead_factory import save_lead_to_db
 from app.services.utils import local_now
-from app.services.audit import log_action
 from app.shared import (
     apply_lead_filters,
     paginate_leads,
@@ -33,25 +29,6 @@ from app.shared import (
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
-
-
-# A-01: Lightweight user email extractor from JWT cookie (no DB lookup)
-def _get_user_email(request: Request) -> str:
-    """Extract user email from JWT cookie for audit logging."""
-    cookie = request.cookies.get("slh_session", "")
-    if not cookie:
-        return "unknown"
-    try:
-        from jose import jwt as jose_jwt
-
-        secret = (
-            os.getenv("JWT_SECRET_KEY", "")
-            or "dev-only-insecure-key-do-not-use-in-production"
-        )
-        payload = jose_jwt.decode(cookie, secret, algorithms=["HS256"])
-        return payload.get("email", "unknown")
-    except Exception:
-        return "unknown"
 
 
 # -----------------------------------------------------------------------------
@@ -349,235 +326,8 @@ async def update_lead(
     return LeadResponse.model_validate(lead)
 
 
-@router.post("/leads/{lead_id}/approve", response_model=LeadResponse, tags=["Leads"])
-async def approve_lead(lead_id: int, db: AsyncSession = Depends(get_db)):
-    """Legacy endpoint — redirects to the full API version with CRM logic."""
-    # FIX M-01: Old version called crm.push_lead() which doesn't exist.
-    # Delegate to the proper API endpoint that checks contacts + pushes to Insightly.
-    return await api_approve_lead(lead_id, db)
-
-
-@router.post("/leads/{lead_id}/reject", response_model=LeadResponse, tags=["Leads"])
-async def reject_lead(
-    lead_id: int,
-    reason: Optional[str] = Query(None),
-    db: AsyncSession = Depends(get_db),
-):
-    """Legacy endpoint — redirects to the full API version with CRM cleanup."""
-    # FIX M-01: Old version didn't clean up Insightly leads on reject.
-    return await api_reject_lead(lead_id, reason, db)
-
-
-@router.delete("/leads/{lead_id}", tags=["Leads"])
-async def delete_lead(lead_id: int, db: AsyncSession = Depends(get_db)):
-    """Hard-delete a lead"""
-    result = await db.execute(select(PotentialLead).where(PotentialLead.id == lead_id))
-    lead = result.scalar_one_or_none()
-    if not lead:
-        raise HTTPException(status_code=404, detail="Lead not found")
-
-    hotel_name = lead.hotel_name
-    await db.delete(lead)
-    await db.commit()
-    return {"message": f"Lead deleted: {hotel_name}", "id": lead_id}
-
-
-# -----------------------------------------------------------------------------
-# JSON API Lead Actions (React frontend — with full CRM logic)
-# -----------------------------------------------------------------------------
-
-
-@router.post(
-    "/api/leads/{lead_id}/approve", response_model=LeadResponse, tags=["Leads"]
-)
-async def api_approve_lead(
-    lead_id: int, request: Request = None, db: AsyncSession = Depends(get_db)
-):
-    """Approve — checks contacts, pushes to Insightly CRM, returns JSON."""
-    user_email = _get_user_email(request) if request else "system"
-    result = await db.execute(select(PotentialLead).where(PotentialLead.id == lead_id))
-    lead = result.scalar_one_or_none()
-    if not lead:
-        raise HTTPException(status_code=404, detail="Lead not found")
-
-    contacts_result = await db.execute(
-        select(LeadContact)
-        .where(LeadContact.lead_id == lead_id)
-        .order_by(LeadContact.score.desc())
-    )
-    contacts = [c.to_dict() for c in contacts_result.scalars().all()]
-    if not contacts:
-        raise HTTPException(
-            status_code=422, detail="Enrich first — no contacts to push to CRM"
-        )
-
-    lead.status = "approved"
-    lead.updated_at = local_now()
-
-    from app.services.insightly import get_insightly_client
-
-    crm = get_insightly_client()
-    crm_error = None
-    if crm.enabled and not lead.insightly_id:
-        try:
-            pushed = await crm.push_contacts_as_leads(
-                contacts=contacts,
-                hotel_name=lead.hotel_name,
-                brand=lead.brand or "",
-                brand_tier=lead.brand_tier or "",
-                city=lead.city or "",
-                state=lead.state or "",
-                country=lead.country or "USA",
-                opening_date=lead.opening_date or "",
-                room_count=lead.room_count or 0,
-                lead_score=lead.lead_score or 0,
-                description=lead.description or "",
-                source_url=lead.source_url or "",
-                management_company=lead.management_company or "",
-                developer=lead.developer or "",
-                owner=lead.owner or "",
-                slh_lead_id=lead.id,
-            )
-            successful = [p for p in pushed if p[1]]
-            if successful:
-                lead.insightly_id = successful[0][1]
-                lead.sync_error = None
-                logger.info(
-                    f"Insightly: pushed {len(successful)} contacts for {lead.hotel_name}"
-                )
-            else:
-                crm_error = "CRM push returned no successful records"
-                lead.sync_error = crm_error
-                logger.warning(f"Insightly: push returned empty for {lead.hotel_name}")
-        except Exception as e:
-            crm_error = f"CRM sync failed: {str(e)[:100]}"
-            lead.sync_error = crm_error
-            logger.error(f"Insightly: push failed for {lead.hotel_name}: {e}")
-
-    # A-01: Audit log
-    await log_action(
-        session=db,
-        action="approve",
-        lead=lead,
-        user_email=user_email,
-        detail=f"Contacts: {len(contacts)}"
-        + (f", CRM error: {crm_error}" if crm_error else ""),
-    )
-
-    await db.commit()
-    await db.refresh(lead)
-
-    response = LeadResponse.model_validate(lead)
-    if crm_error:
-        return JSONResponse(
-            content={**response.model_dump(mode="json"), "crm_warning": crm_error},
-            status_code=200,
-        )
-    return response
-
-
-@router.post("/api/leads/{lead_id}/reject", response_model=LeadResponse, tags=["Leads"])
-async def api_reject_lead(
-    lead_id: int,
-    reason: Optional[str] = Query(None),
-    request: Request = None,
-    db: AsyncSession = Depends(get_db),
-):
-    """Reject — cleans up Insightly, returns JSON."""
-    user_email = _get_user_email(request) if request else "system"
-    result = await db.execute(select(PotentialLead).where(PotentialLead.id == lead_id))
-    lead = result.scalar_one_or_none()
-    if not lead:
-        raise HTTPException(status_code=404, detail="Lead not found")
-
-    old_status = lead.status
-    lead.status = "rejected"
-    lead.rejection_reason = reason
-    lead.notes = f"{lead.notes or ''}\nRejected: {reason or 'No reason given'}".strip()
-    lead.updated_at = local_now()
-
-    if lead.insightly_id:
-        from app.services.insightly import get_insightly_client
-
-        crm = get_insightly_client()
-        if crm.enabled:
-            await crm.delete_leads_by_slh_id(lead.id)
-        lead.insightly_id = None
-
-    await log_action(
-        session=db,
-        action="reject",
-        lead=lead,
-        user_email=user_email,
-        old_values={"status": old_status},
-        new_values={"status": "rejected", "reason": reason},
-        detail=reason,
-    )
-
-    await db.commit()
-    await db.refresh(lead)
-    return LeadResponse.model_validate(lead)
-
-
-@router.post(
-    "/api/leads/{lead_id}/restore", response_model=LeadResponse, tags=["Leads"]
-)
-async def api_restore_lead(
-    lead_id: int, request: Request = None, db: AsyncSession = Depends(get_db)
-):
-    """Restore — cleans up Insightly, returns JSON."""
-    user_email = _get_user_email(request) if request else "system"
-    result = await db.execute(select(PotentialLead).where(PotentialLead.id == lead_id))
-    lead = result.scalar_one_or_none()
-    if not lead:
-        raise HTTPException(status_code=404, detail="Lead not found")
-
-    old_status = lead.status
-    lead.status = "new"
-    lead.rejection_reason = None
-    lead.updated_at = local_now()
-
-    if lead.insightly_id:
-        from app.services.insightly import get_insightly_client
-
-        crm = get_insightly_client()
-        if crm.enabled:
-            await crm.delete_leads_by_slh_id(lead.id)
-        lead.insightly_id = None
-
-    await log_action(
-        session=db,
-        action="restore",
-        lead=lead,
-        user_email=user_email,
-        old_values={"status": old_status},
-        new_values={"status": "new"},
-    )
-
-    await db.commit()
-    await db.refresh(lead)
-    return LeadResponse.model_validate(lead)
-
-
-@router.post("/api/leads/{lead_id}/delete", tags=["Leads"])
-async def api_soft_delete_lead(
-    lead_id: int, request: Request = None, db: AsyncSession = Depends(get_db)
-):
-    """Soft-delete — returns JSON."""
-    user_email = _get_user_email(request) if request else "system"
-    result = await db.execute(select(PotentialLead).where(PotentialLead.id == lead_id))
-    lead = result.scalar_one_or_none()
-    if not lead:
-        raise HTTPException(status_code=404, detail="Lead not found")
-
-    await log_action(
-        session=db,
-        action="delete",
-        lead=lead,
-        user_email=user_email,
-    )
-
-    lead.status = "deleted"
-    lead.updated_at = local_now()
-    await db.commit()
-    return {"status": "deleted", "id": lead_id}
+# NOTE: All lead actions (approve, reject, restore, delete) are handled
+# exclusively by /api/dashboard/leads/ routes in dashboard.py.
+# The frontend uses those endpoints. Legacy /leads/{id}/approve etc. and
+# /api/leads/{id}/approve have been removed to eliminate dangerous
+# three-way route divergence (audit trail was missing from dashboard routes).

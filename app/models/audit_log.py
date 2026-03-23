@@ -11,7 +11,7 @@ from sqlalchemy import Column, String, Integer, DateTime, Text
 from sqlalchemy.dialects.postgresql import JSONB
 
 from app.database import Base
-from app.services.utils import local_now
+from datetime import datetime, timezone
 
 
 class AuditLog(Base):
@@ -41,9 +41,9 @@ class AuditLog(Base):
     # Extra context
     detail = Column(Text)  # e.g. "Rejected: budget_brand", "CRM push: 3 contacts"
 
-    # When
+    # When — UTC for storage consistency
     created_at = Column(
-        DateTime(timezone=True), default=lambda: local_now(), index=True
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), index=True
     )
 
     def __repr__(self):
