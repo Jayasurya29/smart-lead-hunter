@@ -88,7 +88,8 @@ class TestRateLimitBuckets:
             _check_rate_limit(test_ip)
 
         # Manually reset the bucket's expiry to the past
-        _login_attempts[test_ip]["reset"] = time.monotonic() - 1
+        # Key format is now "action:ip" (default action is "login")
+        _login_attempts[f"login:{test_ip}"]["reset"] = time.monotonic() - 1
 
         # Now it should be allowed again
         assert _check_rate_limit(test_ip) is True

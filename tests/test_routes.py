@@ -221,17 +221,32 @@ class TestLeadEndpoints:
 
     @pytest.mark.asyncio
     async def test_delete_nonexistent_lead(self, authed_client):
-        resp = await _db_request(authed_client.delete("/leads/999999"))
+        resp = await _db_request(
+            authed_client.post(
+                "/api/dashboard/leads/999999/delete",
+                headers={"Content-Type": "application/json"},
+            )
+        )
         assert resp.status_code == 404
 
     @pytest.mark.asyncio
     async def test_approve_nonexistent_lead(self, authed_client):
-        resp = await _db_request(authed_client.post("/api/leads/999999/approve"))
+        resp = await _db_request(
+            authed_client.post(
+                "/api/dashboard/leads/999999/approve",
+                headers={"Content-Type": "application/json"},
+            )
+        )
         assert resp.status_code == 404
 
     @pytest.mark.asyncio
     async def test_reject_nonexistent_lead(self, authed_client):
-        resp = await _db_request(authed_client.post("/api/leads/999999/reject"))
+        resp = await _db_request(
+            authed_client.post(
+                "/api/dashboard/leads/999999/reject",
+                headers={"Content-Type": "application/json"},
+            )
+        )
         assert resp.status_code == 404
 
 
