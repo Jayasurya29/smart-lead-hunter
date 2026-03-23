@@ -12,6 +12,41 @@ export default defineConfig({
   server: {
     port: 3000,
     proxy: {
+      // SSE streaming endpoints — need special handling to prevent
+      // the proxy from buffering/dropping the connection
+      '/api/dashboard/scrape/stream': {
+        target: 'http://localhost:8000',
+        changeOrigin: true,
+        // Disable proxy timeout for long-running SSE streams
+        timeout: 0,
+        // Required: prevent proxy from buffering SSE chunks
+        configure: (proxy) => {
+          proxy.on('proxyReq', (proxyReq) => {
+            proxyReq.setHeader('Accept', 'text/event-stream')
+          })
+        },
+      },
+      '/api/dashboard/extract-url/stream': {
+        target: 'http://localhost:8000',
+        changeOrigin: true,
+        timeout: 0,
+        configure: (proxy) => {
+          proxy.on('proxyReq', (proxyReq) => {
+            proxyReq.setHeader('Accept', 'text/event-stream')
+          })
+        },
+      },
+      '/api/dashboard/discovery/stream': {
+        target: 'http://localhost:8000',
+        changeOrigin: true,
+        timeout: 0,
+        configure: (proxy) => {
+          proxy.on('proxyReq', (proxyReq) => {
+            proxyReq.setHeader('Accept', 'text/event-stream')
+          })
+        },
+      },
+      // Regular API routes
       '/api': {
         target: 'http://localhost:8000',
         changeOrigin: true,

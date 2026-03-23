@@ -3,6 +3,7 @@
 import asyncio
 import json
 import logging
+import os
 import time
 import uuid
 
@@ -14,6 +15,8 @@ from app.database import async_session
 from app.models import Source
 from app.services.utils import local_now
 from app.config.intelligence_config import SKIP_URL_PATTERNS
+from app.services.orchestrator import LeadHunterOrchestrator
+
 from app.shared import (
     active_scrapes,
     scrape_cancellations,
@@ -35,6 +38,22 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
+# Pre-initialized orchestrators keyed by scrape_id / extract_id.
+# POST creates + inits them; GET pops and streams immediately.
+# This avoids the ~1s init silence that killed SSE connections.
+_pending_orchestrators: dict = {}  # id -> orchestrator
+
+
+async def _init_orchestrator() -> LeadHunterOrchestrator:
+    """Create and initialize an orchestrator instance."""
+    orch = LeadHunterOrchestrator(
+        gemini_api_key=os.getenv("GEMINI_API_KEY"),
+        save_to_database=True,
+    )
+    await orch.initialize()
+    return orch
+
+
 @router.post("/api/dashboard/scrape", tags=["Dashboard"])
 async def dashboard_trigger_scrape(request: Request, _csrf=Depends(require_ajax)):
     try:
@@ -44,6 +63,21 @@ async def dashboard_trigger_scrape(request: Request, _csrf=Depends(require_ajax)
         source_ids = body.get("source_ids", [])
 
         scrape_id = str(uuid.uuid4())
+
+        # Initialize orchestrator HERE in the POST (normal JSON endpoint).
+        # The browser waits patiently for JSON — no SSE timeout issues.
+        # Previously this ran inside the SSE GET handler, where ~1s of
+        # silence killed the EventSource connection on Windows/uvicorn.
+        try:
+            orchestrator = await _init_orchestrator()
+            _pending_orchestrators[scrape_id] = orchestrator
+        except BaseException as e:
+            logger.error(f"Dashboard: Pipeline init failed: {e}")
+            return {
+                "status": "error",
+                "message": f"Pipeline init failed: {safe_error(e)}",
+            }
+
         store_pending(
             _pending_configs,
             scrape_id,
@@ -108,34 +142,29 @@ async def scrape_with_progress(request: Request):
     # Periodic cleanup of stale entries (M-05)
     await cleanup_stale_scrapes()
 
-    async def event_generator():
-        orchestrator = None
-        try:
-            import os
+    # ── Retrieve pre-initialized orchestrator from POST handler ──
+    orchestrator = _pending_orchestrators.pop(scrape_id, None)
+    if not orchestrator:
 
+        async def no_orch():
+            yield f"data: {json.dumps({'type': 'error', 'message': 'Pipeline not ready. Please trigger scrape again.'})}\n\n"
+
+        return StreamingResponse(no_orch(), media_type="text/event-stream")
+
+    scrapers = ["httpx"]
+    if orchestrator.scraping_engine.playwright_scraper.available:
+        scrapers.append("playwright")
+    if (
+        orchestrator.scraping_engine.crawl4ai_scraper
+        and orchestrator.scraping_engine.crawl4ai_scraper.available
+    ):
+        scrapers.append("crawl4ai")
+    scraper_list = ", ".join(scrapers)
+
+    async def event_generator():
+        try:
             # Send initial event with scrape ID
             yield f"data: {json.dumps({'type': 'started', 'scrape_id': scrape_id})}\n\n"
-
-            # --- Initialize orchestrator (same one the CLI uses) ---
-            yield f"data: {json.dumps({'type': 'info', 'message': 'Initializing pipeline...'})}\n\n"
-
-            from app.services.orchestrator import LeadHunterOrchestrator
-
-            orchestrator = LeadHunterOrchestrator(
-                gemini_api_key=os.getenv("GEMINI_API_KEY"),
-                save_to_database=True,
-            )
-            await orchestrator.initialize()
-
-            scrapers = ["httpx"]
-            if orchestrator.scraping_engine.playwright_scraper.available:
-                scrapers.append("playwright")
-            if (
-                orchestrator.scraping_engine.crawl4ai_scraper
-                and orchestrator.scraping_engine.crawl4ai_scraper.available
-            ):
-                scrapers.append("crawl4ai")
-            scraper_list = ", ".join(scrapers)
             yield f"data: {json.dumps({'type': 'info', 'message': 'Pipeline ready (scrapers: ' + scraper_list + '). Loading sources...'})}\n\n"
 
             # --- Get active sources from DB ---
@@ -683,9 +712,14 @@ async def scrape_with_progress(request: Request):
 
             yield f"data: {json.dumps({'type': 'complete', 'stats': final_stats, 'duration_seconds': duration})}\n\n"
 
-        except Exception as e:
+        except BaseException as e:
+            # BaseException catches asyncio.CancelledError (Python 3.9+)
+            # which Playwright raises on Windows via subprocess_exec failure.
             logger.error(f"Scrape stream error: {e}")
-            yield f"data: {json.dumps({'type': 'error', 'message': safe_error(e)})}\n\n"
+            try:
+                yield f"data: {json.dumps({'type': 'error', 'message': safe_error(e)})}\n\n"
+            except BaseException:
+                pass  # Client already disconnected
         finally:
             async with _scrape_lock:
                 active_scrapes.pop(scrape_id, None)
@@ -727,6 +761,18 @@ async def dashboard_extract_url(request: Request, _csrf=Depends(require_ajax)):
             url = "https://" + url
 
         extract_id = str(uuid.uuid4())
+
+        # Initialize orchestrator in POST (same pattern as scrape)
+        try:
+            orchestrator = await _init_orchestrator()
+            _pending_orchestrators[extract_id] = orchestrator
+        except BaseException as e:
+            logger.error(f"Dashboard: Extract URL init failed: {e}")
+            return {
+                "status": "error",
+                "message": f"Pipeline init failed: {safe_error(e)}",
+            }
+
         store_pending(_pending_extract_urls, extract_id, url)
 
         logger.info(f"Dashboard: URL extract triggered for {url}")
@@ -763,25 +809,19 @@ async def extract_url_stream(request: Request):
 
         return StreamingResponse(empty(), media_type="text/event-stream")
 
-    async def event_generator():
-        orchestrator = None
-        try:
-            import os
+    # ── Retrieve pre-initialized orchestrator from POST handler ──
+    orchestrator = _pending_orchestrators.pop(extract_id, None)
+    if not orchestrator:
 
+        async def no_orch():
+            yield f"data: {json.dumps({'type': 'error', 'message': 'Pipeline not ready. Please try again.'})}\n\n"
+
+        return StreamingResponse(no_orch(), media_type="text/event-stream")
+
+    async def event_generator():
+        try:
             yield f"data: {json.dumps({'type': 'started', 'scrape_id': 'url-extract'})}\n\n"
             yield f"data: {json.dumps({'type': 'info', 'message': f'Target: {target_url}'})}\n\n"
-
-            # --- Initialize pipeline ---
-            yield f"data: {json.dumps({'type': 'info', 'message': 'Initializing pipeline...'})}\n\n"
-
-            from app.services.orchestrator import LeadHunterOrchestrator
-
-            orchestrator = LeadHunterOrchestrator(
-                gemini_api_key=os.getenv("GEMINI_API_KEY"),
-                save_to_database=True,
-            )
-            await orchestrator.initialize()
-
             yield f"data: {json.dumps({'type': 'info', 'message': 'Pipeline ready.'})}\n\n"
 
             start_time = local_now()
@@ -950,9 +990,12 @@ async def extract_url_stream(request: Request):
 
             yield f"data: {json.dumps({'type': 'complete', 'stats': final_stats, 'duration_seconds': duration})}\n\n"
 
-        except Exception as e:
+        except BaseException as e:
             logger.error(f"URL extract stream error: {e}", exc_info=True)
-            yield f"data: {json.dumps({'type': 'error', 'message': safe_error(e)})}\n\n"
+            try:
+                yield f"data: {json.dumps({'type': 'error', 'message': safe_error(e)})}\n\n"
+            except BaseException:
+                pass
         finally:
             if orchestrator:
                 try:
@@ -1179,9 +1222,12 @@ async def discovery_stream(request: Request):
                 except asyncio.QueueEmpty:
                     await asyncio.sleep(0.3)
 
-        except Exception as e:
+        except BaseException as e:
             logger.error(f"Discovery stream error: {e}")
-            yield f"data: {json.dumps({'type': 'complete', 'message': f'❌ Stream error: {safe_error(e)}', 'stats': {}})}\n\n"
+            try:
+                yield f"data: {json.dumps({'type': 'complete', 'message': f'❌ Stream error: {safe_error(e)}', 'stats': {}})}\n\n"
+            except BaseException:
+                pass
 
     from starlette.responses import StreamingResponse
 

@@ -142,7 +142,8 @@ class LeadHunterOrchestrator:
             self.scraping_engine = ScrapingEngine()
             await self.scraping_engine.initialize()
             logger.info("✅ Scraping engine initialized")
-        except Exception as e:
+        except BaseException as e:
+            # BaseException catches asyncio.CancelledError (Python 3.9+)
             logger.error(f"❌ Scraping engine failed: {e}")
             raise
 

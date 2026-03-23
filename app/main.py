@@ -33,12 +33,12 @@ from app.routes.dashboard import router as dashboard_router
 from app.routes.scraping import router as scraping_router
 from app.routes.contacts import router as contacts_router
 from app.routes.auth import router as auth_router
-import sys
 
-if sys.platform == "win32":
-    import asyncio
-
-    asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
+# NOTE: Do NOT set WindowsProactorEventLoopPolicy here.
+# The ProactorEventLoop uses IOCP which breaks SSE streaming under uvicorn —
+# connections get killed instantly during chunked responses. The default
+# SelectorEventLoop works fine for HTTP/SSE. Playwright/Crawl4AI subprocess
+# support is handled by skipping them on Windows in scraping_engine.py.
 
 
 logger = logging.getLogger(__name__)

@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect, useCallback } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { useBackgroundTask } from '@/hooks/useBackgroundTask'
 import {
@@ -11,10 +11,13 @@ import { cn } from '@/lib/utils'
 interface Props { onClose: () => void }
 
 type Mode = 'smart' | 'full' | 'url'
+type Status = 'idle' | 'running' | 'done' | 'error'
+
+const MAX_RETRIES = 5
 
 export default function ScrapeModal({ onClose }: Props) {
   const [mode, setMode] = useState<Mode>('smart')
-  const [status, setStatus] = useState<'idle' | 'running' | 'done' | 'error'>('idle')
+  const [status, setStatus] = useState<Status>('idle')
   const [logs, setLogs] = useState<string[]>([])
   const [sources, setSources] = useState<any[]>([])
   const [selectedSources, setSelectedSources] = useState<number[]>([])
@@ -24,6 +27,18 @@ export default function ScrapeModal({ onClose }: Props) {
   const qc = useQueryClient()
   const bg = useBackgroundTask()
 
+  // ── FIX: Use refs to avoid stale closures in EventSource callbacks ──
+  const statusRef = useRef<Status>('idle')
+  const retryCountRef = useRef(0)
+  const retryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const closedRef = useRef(false)         // true once we intentionally closed
+  const receivedDataRef = useRef(false)    // true once first SSE message arrives
+  const elapsedRef = useRef(0)
+  const elapsedTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
+
+  // Keep statusRef in sync with state
+  useEffect(() => { statusRef.current = status }, [status])
+
   /* Load sources on mount */
   useEffect(() => {
     fetchSources()
@@ -32,7 +47,12 @@ export default function ScrapeModal({ onClose }: Props) {
         setSources(list)
       })
       .catch(() => {})
-    return () => { esRef.current?.close() }
+    return () => {
+      closedRef.current = true
+      esRef.current?.close()
+      if (retryTimerRef.current) clearTimeout(retryTimerRef.current)
+      if (elapsedTimerRef.current) clearInterval(elapsedTimerRef.current)
+    }
   }, [])
 
   /* Auto-scroll log */
@@ -46,17 +66,29 @@ export default function ScrapeModal({ onClose }: Props) {
     )
   }
 
-  function addLog(msg: string) {
+  const addLog = useCallback((msg: string) => {
     setLogs((prev) => [...prev, msg])
-  }
+  }, [])
 
-  /* Connect SSE stream */
-  function connectSSE(path: string, taskType: 'scrape' | 'extract') {
+  /* ── SSE connection with retry (matches old Alpine.js behavior) ── */
+
+  function createSSE(path: string, taskType: 'scrape' | 'extract') {
+    // Clean up any existing connection
+    if (esRef.current) {
+      esRef.current.close()
+      esRef.current = null
+    }
+
     const es = new EventSource(path)
     esRef.current = es
-    bg.startTask(taskType)
+
+    es.onopen = () => {
+      // Connection established — reset retry counter
+      retryCountRef.current = 0
+    }
 
     es.onmessage = (e) => {
+      receivedDataRef.current = true
       try {
         const data = JSON.parse(e.data)
         if (data.message) {
@@ -65,6 +97,7 @@ export default function ScrapeModal({ onClose }: Props) {
         }
         if (data.type === 'complete' || data.done || data.status === 'complete') {
           setStatus('done')
+          closedRef.current = true
           es.close()
           const newLeads = data.stats?.leads_saved ?? data.stats?.leads_found ?? 0
           const duration = data.duration_seconds ?? 0
@@ -76,12 +109,23 @@ export default function ScrapeModal({ onClose }: Props) {
           })
           qc.invalidateQueries({ queryKey: ['leads'] })
           qc.invalidateQueries({ queryKey: ['stats'] })
+          if (elapsedTimerRef.current) clearInterval(elapsedTimerRef.current)
         }
         if (data.type === 'error') {
           addLog(`❌ ${data.message}`)
           setStatus('error')
+          closedRef.current = true
           es.close()
           bg.failTask(data.message)
+          if (elapsedTimerRef.current) clearInterval(elapsedTimerRef.current)
+        }
+        if (data.type === 'cancelled') {
+          addLog('Scrape cancelled by user')
+          setStatus('done')
+          closedRef.current = true
+          es.close()
+          bg.completeTask({ type: taskType, message: 'Cancelled', newLeads: 0, duration: 0 })
+          if (elapsedTimerRef.current) clearInterval(elapsedTimerRef.current)
         }
       } catch {
         if (e.data && e.data !== 'ping') addLog(e.data)
@@ -90,12 +134,56 @@ export default function ScrapeModal({ onClose }: Props) {
 
     es.onerror = () => {
       es.close()
-      if (status === 'running') {
-        setStatus('done')
-        addLog('Stream ended.')
-        bg.completeTask({ type: taskType, message: 'Stream ended', newLeads: 0, duration: 0 })
+      esRef.current = null
+
+      // If we intentionally closed or already finished, do nothing
+      if (closedRef.current || statusRef.current === 'done' || statusRef.current === 'error') {
+        return
       }
+
+      retryCountRef.current++
+
+      if (retryCountRef.current > MAX_RETRIES) {
+        // Exhausted retries — if we received data before, treat as graceful completion
+        if (receivedDataRef.current && elapsedRef.current > 5) {
+          setStatus('done')
+          addLog('Stream ended — pipeline may still be running on server.')
+          bg.completeTask({ type: taskType, message: 'Stream ended', newLeads: 0, duration: 0 })
+          qc.invalidateQueries({ queryKey: ['leads'] })
+          qc.invalidateQueries({ queryKey: ['stats'] })
+        } else {
+          setStatus('error')
+          addLog('❌ Lost connection to server after multiple retries.')
+          bg.failTask('Connection lost')
+        }
+        if (elapsedTimerRef.current) clearInterval(elapsedTimerRef.current)
+        return
+      }
+
+      // Exponential backoff: 1s, 2s, 4s, 8s, 16s
+      const delay = Math.min(1000 * Math.pow(2, retryCountRef.current - 1), 16000)
+      addLog(`Connection interrupted — retrying in ${Math.round(delay / 1000)}s (attempt ${retryCountRef.current}/${MAX_RETRIES})...`)
+
+      retryTimerRef.current = setTimeout(() => {
+        if (!closedRef.current && statusRef.current === 'running') {
+          createSSE(path, taskType)
+        }
+      }, delay)
     }
+  }
+
+  function connectSSE(path: string, taskType: 'scrape' | 'extract') {
+    closedRef.current = false
+    receivedDataRef.current = false
+    retryCountRef.current = 0
+    elapsedRef.current = 0
+    bg.startTask(taskType)
+
+    // Start elapsed timer
+    if (elapsedTimerRef.current) clearInterval(elapsedTimerRef.current)
+    elapsedTimerRef.current = setInterval(() => { elapsedRef.current++ }, 1000)
+
+    createSSE(path, taskType)
   }
 
   /* Start scrape */
@@ -306,6 +394,7 @@ export default function ScrapeModal({ onClose }: Props) {
                       log.includes('Error') || log.includes('❌') ? 'text-red-400' :
                       log.includes('✅') || log.includes('Saved') || log.includes('complete') || log.includes('found') ? 'text-emerald-400' :
                       log.includes('Phase') || log.includes('Starting') || log.includes('━') ? 'text-amber-400' :
+                      log.includes('retrying') ? 'text-yellow-500' :
                       '',
                     )}
                   >

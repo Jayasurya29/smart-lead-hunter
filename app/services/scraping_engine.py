@@ -12,6 +12,7 @@ import asyncio
 import hashlib
 import logging
 import re
+import sys
 import time
 from collections import deque
 from dataclasses import dataclass, field
@@ -365,17 +366,19 @@ class PlaywrightScraper:
                 )
                 self._initialized = True
                 logger.info("✅ Playwright browser initialized")
-            except Exception as e:
+            except BaseException as e:
+                # BaseException catches asyncio.CancelledError (Python 3.9+)
+                # which Playwright raises on Windows when subprocess_exec fails.
+                # except Exception misses it → kills the entire SSE pipeline.
                 self._disabled = True
-                logger.error(f"❌ Playwright initialization failed: {e}")
+                logger.warning(f"⚠️ Playwright initialization failed: {e}")
                 try:
                     if self._playwright:
                         await self._playwright.stop()
-                except Exception:
+                except BaseException:
                     pass
                 self._playwright = None
                 self._browser = None
-                raise
 
     async def scrape(
         self,
@@ -541,11 +544,10 @@ class Crawl4AIScraper:
             except ImportError:
                 self._disabled = True
                 logger.warning("⚠️ Crawl4AI not installed. Run: pip install crawl4ai")
-                raise
-            except Exception as e:
+            except BaseException as e:
+                # BaseException catches asyncio.CancelledError (Python 3.9+)
                 self._disabled = True
-                logger.error(f"❌ Failed to initialize Crawl4AI: {e}")
-                raise
+                logger.warning(f"⚠️ Failed to initialize Crawl4AI: {e}")
 
     async def scrape(self, url: str, bypass_cache: bool = False) -> ScrapeResult:
         if self._disabled:
@@ -774,7 +776,10 @@ class DeepCrawler:
             if result.success:
                 self._domain_scraper_memory[domain] = "crawl4ai"
                 return result
-        elif source.crawler_type == CrawlerType.PLAYWRIGHT and self._playwright_available():
+        elif (
+            source.crawler_type == CrawlerType.PLAYWRIGHT
+            and self._playwright_available()
+        ):
             result = await self._scrape_with(url, "playwright", source)
             if result.success:
                 self._domain_scraper_memory[domain] = "playwright"
@@ -920,19 +925,32 @@ class ScrapingEngine:
             return
         logger.info("🚀 Initializing Scraping Engine V3...")
         await self.http_scraper.initialize()
-        try:
-            await self.playwright_scraper.initialize()
-        except Exception as e:
-            logger.warning(f"⚠️ Playwright not available: {e}")
-        try:
-            self.crawl4ai_scraper = Crawl4AIScraper(self.config)
-            await self.crawl4ai_scraper.initialize()
-        except ImportError:
-            self.crawl4ai_scraper = None
-            logger.warning("⚠️ Crawl4AI not installed")
-        except Exception as e:
-            self.crawl4ai_scraper = None
-            logger.warning(f"⚠️ Crawl4AI not available: {e}")
+
+        # On Windows, Playwright and Crawl4AI both require subprocess_exec
+        # which is not supported by uvicorn's event loop. The call to
+        # async_playwright().start() HANGS forever (never returns) when
+        # the subprocess transport fails, causing uvicorn to cancel the
+        # entire SSE request via CancelledError. Skip them entirely.
+        if sys.platform == "win32":
+            logger.info(
+                "⚠️ Windows detected — skipping Playwright & Crawl4AI "
+                "(subprocess not supported under uvicorn)"
+            )
+            self.playwright_scraper._disabled = True
+        else:
+            try:
+                await self.playwright_scraper.initialize()
+            except BaseException as e:
+                logger.warning(f"⚠️ Playwright not available: {e}")
+            try:
+                self.crawl4ai_scraper = Crawl4AIScraper(self.config)
+                await self.crawl4ai_scraper.initialize()
+            except ImportError:
+                self.crawl4ai_scraper = None
+                logger.warning("⚠️ Crawl4AI not installed")
+            except BaseException as e:
+                self.crawl4ai_scraper = None
+                logger.warning(f"⚠️ Crawl4AI not available: {e}")
 
         available_scrapers = ["httpx"]
         if self.playwright_scraper.available:
