@@ -89,9 +89,10 @@ class TestMiddlewareEnforcement:
         assert resp.status_code == 401
 
     @pytest.mark.asyncio
-    async def test_stats_requires_auth(self, client):
-        resp = await client.get("/stats")
-        assert resp.status_code == 401
+    async def test_stats_is_public(self, client):
+        """Stats endpoint is now public (in EXCLUDE_PREFIXES)."""
+        resp = await _db_request(client.get("/stats"))
+        assert resp.status_code != 401
 
     @pytest.mark.asyncio
     async def test_scrape_requires_auth(self, client):
@@ -338,8 +339,8 @@ class TestDashboardEndpoints:
 
     @pytest.mark.asyncio
     async def test_stats_partial_public(self, client):
-        """Stats partial is in the public exclude list."""
-        resp = await _db_request(client.get("/api/dashboard/stats"))
+        """Stats endpoint is in the public exclude list."""
+        resp = await _db_request(client.get("/stats"))
         assert resp.status_code != 401
 
 
