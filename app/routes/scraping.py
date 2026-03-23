@@ -127,7 +127,16 @@ async def scrape_with_progress(request: Request):
             )
             await orchestrator.initialize()
 
-            yield f"data: {json.dumps({'type': 'info', 'message': 'Pipeline ready. Loading sources...'})}\n\n"
+            scrapers = ["httpx"]
+            if orchestrator.scraping_engine.playwright_scraper.available:
+                scrapers.append("playwright")
+            if (
+                orchestrator.scraping_engine.crawl4ai_scraper
+                and orchestrator.scraping_engine.crawl4ai_scraper.available
+            ):
+                scrapers.append("crawl4ai")
+            scraper_list = ", ".join(scrapers)
+            yield f"data: {json.dumps({'type': 'info', 'message': 'Pipeline ready (scrapers: ' + scraper_list + '). Loading sources...'})}\n\n"
 
             # --- Get active sources from DB ---
             async with async_session() as session:

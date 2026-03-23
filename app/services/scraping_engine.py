@@ -338,13 +338,18 @@ class PlaywrightScraper:
         self._playwright = None
         self._browser = None
         self._initialized = False
+        self._disabled = False
         self._init_lock = asyncio.Lock()  # H-05: Prevent concurrent initialization
 
+    @property
+    def available(self) -> bool:
+        return self._initialized and not self._disabled
+
     async def initialize(self):
-        if self._initialized:
+        if self._initialized or self._disabled:
             return
         async with self._init_lock:  # H-05: Double-check locking
-            if self._initialized:
+            if self._initialized or self._disabled:
                 return
             try:
                 from playwright.async_api import async_playwright
@@ -361,7 +366,15 @@ class PlaywrightScraper:
                 self._initialized = True
                 logger.info("✅ Playwright browser initialized")
             except Exception as e:
+                self._disabled = True
                 logger.error(f"❌ Playwright initialization failed: {e}")
+                try:
+                    if self._playwright:
+                        await self._playwright.stop()
+                except Exception:
+                    pass
+                self._playwright = None
+                self._browser = None
                 raise
 
     async def scrape(
@@ -370,6 +383,13 @@ class PlaywrightScraper:
         wait_for: Optional[str] = None,
         extra_headers: Optional[Dict] = None,
     ) -> ScrapeResult:
+        if self._disabled:
+            return ScrapeResult(
+                url=url,
+                success=False,
+                error="Playwright not available on this platform",
+                crawler_used="playwright",
+            )
         start_time = time.time()
         await self.initialize()
         context = page = None
@@ -498,13 +518,18 @@ class Crawl4AIScraper:
         self.config = config
         self._crawler = None
         self._initialized = False
+        self._disabled = False
         self._init_lock = asyncio.Lock()  # H-05: Prevent concurrent initialization
 
+    @property
+    def available(self) -> bool:
+        return self._initialized and not self._disabled
+
     async def initialize(self):
-        if self._initialized:
+        if self._initialized or self._disabled:
             return
         async with self._init_lock:  # H-05: Double-check locking
-            if self._initialized:
+            if self._initialized or self._disabled:
                 return
             try:
                 from crawl4ai import AsyncWebCrawler
@@ -514,13 +539,22 @@ class Crawl4AIScraper:
                 self._initialized = True
                 logger.info("✅ Crawl4AI initialized")
             except ImportError:
+                self._disabled = True
                 logger.warning("⚠️ Crawl4AI not installed. Run: pip install crawl4ai")
                 raise
             except Exception as e:
+                self._disabled = True
                 logger.error(f"❌ Failed to initialize Crawl4AI: {e}")
                 raise
 
     async def scrape(self, url: str, bypass_cache: bool = False) -> ScrapeResult:
+        if self._disabled:
+            return ScrapeResult(
+                url=url,
+                success=False,
+                error="Crawl4AI not available on this platform",
+                crawler_used="crawl4ai",
+            )
         start_time = time.time()
         if not self._initialized:
             await self.initialize()
@@ -711,22 +745,36 @@ class DeepCrawler:
     def get_filter_stats(self) -> Dict[str, int]:
         return self._filter_stats.copy()
 
+    def _playwright_available(self) -> bool:
+        return hasattr(self.playwright, "available") and self.playwright.available
+
+    def _crawl4ai_available(self) -> bool:
+        return (
+            self.crawl4ai is not None
+            and hasattr(self.crawl4ai, "available")
+            and self.crawl4ai.available
+        )
+
     async def _smart_scrape(self, url: str, source: SourceConfig) -> ScrapeResult:
         domain = self._get_domain(url)
         if domain in self._domain_scraper_memory:
-            result = await self._scrape_with(
-                url, self._domain_scraper_memory[domain], source
-            )
-            if result.success:
-                return result
-            del self._domain_scraper_memory[domain]
+            remembered = self._domain_scraper_memory[domain]
+            if remembered == "playwright" and not self._playwright_available():
+                del self._domain_scraper_memory[domain]
+            elif remembered == "crawl4ai" and not self._crawl4ai_available():
+                del self._domain_scraper_memory[domain]
+            else:
+                result = await self._scrape_with(url, remembered, source)
+                if result.success:
+                    return result
+                del self._domain_scraper_memory[domain]
 
-        if source.crawler_type == CrawlerType.CRAWL4AI and self.crawl4ai:
+        if source.crawler_type == CrawlerType.CRAWL4AI and self._crawl4ai_available():
             result = await self._scrape_with(url, "crawl4ai", source)
             if result.success:
                 self._domain_scraper_memory[domain] = "crawl4ai"
                 return result
-        elif source.crawler_type == CrawlerType.PLAYWRIGHT:
+        elif source.crawler_type == CrawlerType.PLAYWRIGHT and self._playwright_available():
             result = await self._scrape_with(url, "playwright", source)
             if result.success:
                 self._domain_scraper_memory[domain] = "playwright"
@@ -748,28 +796,36 @@ class DeepCrawler:
             or self._looks_like_blocked(result)
             or not result.success
         ):
-            if self.crawl4ai:
+            if self._crawl4ai_available():
                 result = await self._scrape_with(url, "crawl4ai", source)
                 if result.success and not self._looks_like_blocked(result):
                     self._domain_scraper_memory[domain] = "crawl4ai"
                     return result
-            result = await self._scrape_with(url, "playwright", source)
-            if result.success:
-                self._domain_scraper_memory[domain] = "playwright"
-                return result
+            if self._playwright_available():
+                result = await self._scrape_with(url, "playwright", source)
+                if result.success:
+                    self._domain_scraper_memory[domain] = "playwright"
+                    return result
         return result
 
     async def _scrape_with(
         self, url: str, scraper: str, source: SourceConfig
     ) -> ScrapeResult:
         try:
-            if scraper == "crawl4ai" and self.crawl4ai:
+            if scraper == "crawl4ai" and self._crawl4ai_available():
                 return await self.crawl4ai.scrape(url)
-            elif scraper == "playwright":
+            elif scraper == "playwright" and self._playwright_available():
                 return await self.playwright.scrape(
                     url,
                     wait_for=source.wait_for_selector,
                     extra_headers=source.extra_headers,
+                )
+            elif scraper in ("crawl4ai", "playwright"):
+                return ScrapeResult(
+                    url=url,
+                    success=False,
+                    error=f"{scraper} not available",
+                    crawler_used=scraper,
                 )
             else:
                 return await self.http.scrape(url, extra_headers=source.extra_headers)
@@ -872,9 +928,20 @@ class ScrapingEngine:
             self.crawl4ai_scraper = Crawl4AIScraper(self.config)
             await self.crawl4ai_scraper.initialize()
         except ImportError:
+            self.crawl4ai_scraper = None
             logger.warning("⚠️ Crawl4AI not installed")
         except Exception as e:
+            self.crawl4ai_scraper = None
             logger.warning(f"⚠️ Crawl4AI not available: {e}")
+
+        available_scrapers = ["httpx"]
+        if self.playwright_scraper.available:
+            available_scrapers.append("playwright")
+        if self.crawl4ai_scraper and self.crawl4ai_scraper.available:
+            available_scrapers.append("crawl4ai")
+        else:
+            self.crawl4ai_scraper = None
+
         self.deep_crawler = DeepCrawler(
             self.http_scraper,
             self.playwright_scraper,
@@ -884,7 +951,10 @@ class ScrapingEngine:
         )
         await self._load_sources()
         self._initialized = True
-        logger.info(f"✅ Engine initialized with {len(self._sources)} sources")
+        logger.info(
+            f"✅ Engine initialized with {len(self._sources)} sources "
+            f"(scrapers: {', '.join(available_scrapers)})"
+        )
 
     async def _load_sources(self):
         sources_loaded = 0
