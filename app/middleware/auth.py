@@ -99,6 +99,9 @@ class APIKeyMiddleware:
             self._exclude_exact = self.EXCLUDE_EXACT | set(exclude_paths)
         else:
             self._exclude_exact = self.EXCLUDE_EXACT
+        self.exclude_exact = self._exclude_exact
+        self.exclude_prefixes = list(self.EXCLUDE_PREFIXES)
+        self.protected_prefixes = list(self.PROTECTED_PREFIXES)
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         # Only intercept HTTP requests
