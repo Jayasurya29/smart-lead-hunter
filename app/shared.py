@@ -112,11 +112,6 @@ def safe_error(e: Exception, fallback: str = "Operation failed") -> str:
 def require_ajax(request: Request):
     """Dependency that rejects non-AJAX requests to prevent CSRF.
 
-    FIX C-05: Added Origin/Referer validation on top of the header check.
-    The X-Requested-With header alone is insufficient because fetch() can
-    set custom headers on same-origin requests. We now also verify that
-    the Origin (or Referer) matches our known origins.
-
     Defense layers:
     1. CORS middleware blocks cross-origin preflight (first line of defense)
     2. SameSite=Lax cookie prevents cross-site cookie sending on POST
@@ -127,9 +122,15 @@ def require_ajax(request: Request):
     requested_with = request.headers.get("x-requested-with", "")
     content_type = request.headers.get("content-type", "")
     has_ajax_header = (
-        "xmlhttprequest" in requested_with.lower() or "application/json" in content_type
+        "xmlhttprequest" in requested_with.lower()
+        or "application/json" in content_type
+        or "application/merge-patch+json" in content_type
     )
     if not has_ajax_header:
+        logger.warning(
+            f"CSRF: missing AJAX header on {request.method} {request.url.path} "
+            f"(Content-Type: {content_type!r}, X-Requested-With: {requested_with!r})"
+        )
         raise HTTPException(
             status_code=403, detail="CSRF check failed: missing required header"
         )
@@ -153,20 +154,41 @@ def require_ajax(request: Request):
     # requests in some browsers omit it), allow through — the cookie SameSite
     # policy is the backstop.
     if origin and origin not in allowed_origins:
-        logger.warning(f"CSRF: rejected request from origin {origin}")
+        logger.warning(
+            f"CSRF: rejected {request.method} {request.url.path} "
+            f"from origin {origin!r} (allowed: {allowed_origins})"
+        )
         raise HTTPException(
-            status_code=403, detail="CSRF check failed: origin not allowed"
+            status_code=403,
+            detail=f"CSRF check failed: origin {origin!r} not allowed",
         )
 
     return True
 
 
 async def checked_json(request: Request, max_size: int = MAX_BODY_SIZE) -> dict:
-    """Parse JSON body with size limit to prevent DoS."""
+    """Parse JSON body with size limit to prevent DoS.
+
+    Returns an empty dict for empty bodies (common for POST triggers).
+    Raises HTTPException(400) for malformed or non-object JSON.
+    Raises HTTPException(413) for oversized bodies.
+    """
     body = await request.body()
     if len(body) > max_size:
         raise HTTPException(status_code=413, detail="Request body too large")
-    return json.loads(body)
+    if not body or body.strip() == b"":
+        return {}
+    try:
+        data = json.loads(body)
+    except (json.JSONDecodeError, ValueError):
+        raise HTTPException(
+            status_code=400, detail="Invalid JSON in request body"
+        )
+    if not isinstance(data, dict):
+        raise HTTPException(
+            status_code=400, detail="Request body must be a JSON object"
+        )
+    return data
 
 
 # -----------------------------------------------------------------------------

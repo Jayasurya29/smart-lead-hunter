@@ -79,7 +79,8 @@ export default function DiscoveryModal({ onClose }: Props) {
 
       onClose()
     } catch (err: any) {
-      addLog(`❌ Failed: ${err.message}`)
+      const detail = err.response?.data?.detail || err.response?.data?.message || err.message
+      addLog(`❌ Failed: ${detail}`)
       setStatus('error')
     }
   }

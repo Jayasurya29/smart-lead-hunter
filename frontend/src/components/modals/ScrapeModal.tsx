@@ -104,11 +104,25 @@ export default function ScrapeModal({ onClose }: Props) {
     setLogs([`Starting ${mode} scrape...`])
     try {
       const result = await triggerScrape(mode, selectedSources)
+
+      if (result?.status === 'error') {
+        addLog(`❌ ${result.message || 'Server returned an error'}`)
+        setStatus('error')
+        return
+      }
+
       const scrapeId = result?.scrape_id || result?.id
-      const url = `/api/dashboard/scrape/stream${scrapeId ? `?scrape_id=${scrapeId}` : ''}`
+      if (!scrapeId) {
+        addLog('❌ No scrape ID returned from server')
+        setStatus('error')
+        return
+      }
+
+      const url = `/api/dashboard/scrape/stream?scrape_id=${scrapeId}`
       connectSSE(url, 'scrape')
     } catch (err: any) {
-      addLog(`❌ Failed to start: ${err.message}`)
+      const detail = err.response?.data?.detail || err.response?.data?.message || err.message
+      addLog(`❌ Failed to start: ${detail}`)
       setStatus('error')
     }
   }
@@ -120,11 +134,25 @@ export default function ScrapeModal({ onClose }: Props) {
     setLogs([`Extracting from: ${extractUrl}`])
     try {
       const result = await triggerExtractUrl(extractUrl.trim())
+
+      if (result?.status === 'error') {
+        addLog(`❌ ${result.message || 'Server returned an error'}`)
+        setStatus('error')
+        return
+      }
+
       const extractId = result?.extract_id || result?.id
-      const url = `/api/dashboard/extract-url/stream${extractId ? `?extract_id=${extractId}` : ''}`
+      if (!extractId) {
+        addLog('❌ No extract ID returned from server')
+        setStatus('error')
+        return
+      }
+
+      const url = `/api/dashboard/extract-url/stream?extract_id=${extractId}`
       connectSSE(url, 'extract')
     } catch (err: any) {
-      addLog(`❌ Failed: ${err.message}`)
+      const detail = err.response?.data?.detail || err.response?.data?.message || err.message
+      addLog(`❌ Failed: ${detail}`)
       setStatus('error')
     }
   }

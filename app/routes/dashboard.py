@@ -5,7 +5,7 @@ import os
 from datetime import timedelta
 from typing import Optional
 
-from fastapi import APIRouter, Depends, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -90,7 +90,14 @@ async def dashboard_edit_lead(
     _csrf=Depends(require_ajax),
 ):
     """Edit lead fields from the detail panel"""
-    data = await checked_json(request)
+    try:
+        data = await checked_json(request)
+    except HTTPException:
+        raise
+    except Exception:
+        return JSONResponse(
+            content={"detail": "Invalid request body"}, status_code=400
+        )
 
     # ── Input validation (FIX M-13: uses shared constants from schemas.py) ──
     errors = []

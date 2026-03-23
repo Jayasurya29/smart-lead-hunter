@@ -78,7 +78,7 @@ class APIKeyMiddleware:
         "/api/dashboard/extract-url/stream",
         "/api/dashboard/discovery/stream",
         # Read-only public endpoints
-        "/api/dashboard/stats",
+        "/stats",
         "/api/dashboard/sources/list",
         "/api/auth/verify",
     )
@@ -111,6 +111,11 @@ class APIKeyMiddleware:
 
         request = Request(scope, receive)
         path = request.url.path
+
+        # ── CORS preflight — always pass through so CORSMiddleware can respond ──
+        if request.method == "OPTIONS":
+            await self.app(scope, receive, send)
+            return
 
         # ── Public paths — pass straight through ──
         if path in self._exclude_exact:

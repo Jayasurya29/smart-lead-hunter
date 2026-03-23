@@ -6,7 +6,7 @@ import logging
 import time
 import uuid
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from sqlalchemy import select
 
@@ -38,12 +38,7 @@ router = APIRouter()
 @router.post("/api/dashboard/scrape", tags=["Dashboard"])
 async def dashboard_trigger_scrape(request: Request, _csrf=Depends(require_ajax)):
     try:
-        # Parse request body (may be empty for backwards compat)
-        body = {}
-        try:
-            body = await checked_json(request)
-        except Exception:
-            pass
+        body = await checked_json(request)
 
         mode = body.get("mode", "full")
         source_ids = body.get("source_ids", [])
@@ -69,6 +64,8 @@ async def dashboard_trigger_scrape(request: Request, _csrf=Depends(require_ajax)
             "mode": mode,
             "source_count": len(source_ids) if source_ids else "all",
         }
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Dashboard: Failed to trigger scrape: {e}")
         return {
@@ -720,7 +717,6 @@ async def dashboard_extract_url(request: Request, _csrf=Depends(require_ajax)):
         if not url.startswith("http"):
             url = "https://" + url
 
-        # Store keyed by unique ID (Audit Fix #3 — race-safe)
         extract_id = str(uuid.uuid4())
         store_pending(_pending_extract_urls, extract_id, url)
 
@@ -732,6 +728,8 @@ async def dashboard_extract_url(request: Request, _csrf=Depends(require_ajax)):
             "url": url,
             "extract_id": extract_id,
         }
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Dashboard: Failed to trigger URL extract: {e}")
         return {"status": "error", "message": f"Failed: {safe_error(e)}"}
@@ -980,7 +978,6 @@ async def discovery_start(request: Request, _csrf=Depends(require_ajax)):
         extract_leads = body.get("extract_leads", True)
         dry_run = body.get("dry_run", False)
 
-        # Store keyed by unique ID (Audit Fix #3 — race-safe)
         discovery_id = str(uuid.uuid4())
         store_pending(
             _pending_discovery_configs,
@@ -1002,6 +999,8 @@ async def discovery_start(request: Request, _csrf=Depends(require_ajax)):
             "mode": mode,
             "discovery_id": discovery_id,
         }
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Dashboard: Failed to trigger discovery: {e}")
         return {"status": "error", "message": f"Failed: {safe_error(e)}"}
