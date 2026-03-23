@@ -18,6 +18,7 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.types import ASGIApp, Receive, Scope, Send
 
 from app.config import settings
 from app.logging_config import setup_logging
@@ -32,8 +33,24 @@ from app.routes.dashboard import router as dashboard_router
 from app.routes.scraping import router as scraping_router
 from app.routes.contacts import router as contacts_router
 from app.routes.auth import router as auth_router
+import sys
+
+if sys.platform == "win32":
+    import asyncio
+
+    asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
+
 
 logger = logging.getLogger(__name__)
+
+# SSE streaming paths — must bypass ALL BaseHTTPMiddleware wrapping
+_SSE_PATHS = frozenset(
+    {
+        "/api/dashboard/scrape/stream",
+        "/api/dashboard/extract-url/stream",
+        "/api/dashboard/discovery/stream",
+    }
+)
 
 
 # -----------------------------------------------------------------------------
@@ -55,10 +72,8 @@ async def lifespan(app: FastAPI):
 
     yield
 
-    # FIX H-06: Gracefully close shared HTTP clients and Redis connections
     logger.info("Shutting down Smart Lead Hunter...")
 
-    # Close Insightly shared httpx client
     try:
         from app.services.insightly import get_insightly_client
 
@@ -68,7 +83,6 @@ async def lifespan(app: FastAPI):
     except Exception:
         pass
 
-    # Close enrichment shared httpx client
     try:
         from app.services.contact_enrichment import _shared_client
 
@@ -78,7 +92,6 @@ async def lifespan(app: FastAPI):
     except Exception:
         pass
 
-    # Close Redis connections
     try:
         import app.shared as _shared
 
@@ -89,6 +102,121 @@ async def lifespan(app: FastAPI):
         logger.info("Redis connections closed")
     except Exception:
         pass
+
+
+# -----------------------------------------------------------------------------
+# Pure ASGI middlewares — safe for SSE / StreamingResponse
+# NOTE: BaseHTTPMiddleware buffers responses which cancels long-running streams.
+#       All middlewares here use raw ASGI __call__ instead.
+# -----------------------------------------------------------------------------
+
+
+class RequestIDMiddleware:
+    """Attach X-Request-ID to every non-SSE response."""
+
+    def __init__(self, app: ASGIApp) -> None:
+        self.app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        from starlette.requests import Request as _Req
+
+        path = _Req(scope).url.path
+        if path in _SSE_PATHS:
+            await self.app(scope, receive, send)
+            return
+
+        headers_dict = dict(scope.get("headers", []))
+        request_id = (
+            headers_dict.get(b"x-request-id", b"").decode() or str(uuid.uuid4())[:8]
+        )
+
+        async def send_with_header(message):
+            if message["type"] == "http.response.start":
+                headers = list(message.get("headers", []))
+                headers.append((b"x-request-id", request_id.encode()))
+                message = {**message, "headers": headers}
+            await send(message)
+
+        await self.app(scope, receive, send_with_header)
+
+
+_rate_limit_store: dict = defaultdict(lambda: {"count": 0, "reset": 0.0})
+_RATE_LIMIT_MAX = 60
+_RATE_LIMIT_WINDOW = 60.0
+_RATE_LIMIT_MAX_ENTRIES = 10000
+_rate_limit_last_cleanup = 0.0
+_RATE_LIMITED_PREFIXES = ("/api/", "/leads", "/sources", "/scrape")
+
+
+def _cleanup_rate_limit_store(now: float) -> None:
+    global _rate_limit_last_cleanup
+    if now - _rate_limit_last_cleanup < _RATE_LIMIT_WINDOW:
+        return
+    _rate_limit_last_cleanup = now
+    expired = [
+        ip
+        for ip, bucket in _rate_limit_store.items()
+        if now > bucket["reset"] + _RATE_LIMIT_WINDOW
+    ]
+    for ip in expired:
+        del _rate_limit_store[ip]
+    if len(_rate_limit_store) > _RATE_LIMIT_MAX_ENTRIES:
+        sorted_ips = sorted(
+            _rate_limit_store.keys(), key=lambda ip: _rate_limit_store[ip]["reset"]
+        )
+        for ip in sorted_ips[: len(_rate_limit_store) - _RATE_LIMIT_MAX_ENTRIES // 2]:
+            del _rate_limit_store[ip]
+
+
+class RateLimitMiddleware:
+    """Per-IP rate limiter. SSE paths are fully exempt."""
+
+    def __init__(self, app: ASGIApp) -> None:
+        self.app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        from starlette.requests import Request as _Req
+
+        request = _Req(scope, receive)
+        path = request.url.path
+
+        if path in _SSE_PATHS or not path.startswith(_RATE_LIMITED_PREFIXES):
+            await self.app(scope, receive, send)
+            return
+
+        forwarded = request.headers.get("X-Forwarded-For", "")
+        client_ip = (
+            forwarded.split(",")[0].strip()
+            if forwarded
+            else (request.client.host if request.client else "unknown")
+        )
+        now = time.monotonic()
+        _cleanup_rate_limit_store(now)
+
+        bucket = _rate_limit_store[client_ip]
+        if now > bucket["reset"]:
+            bucket["count"] = 0
+            bucket["reset"] = now + _RATE_LIMIT_WINDOW
+        bucket["count"] += 1
+
+        if bucket["count"] > _RATE_LIMIT_MAX:
+            resp = JSONResponse(
+                status_code=429,
+                content={"detail": "Too many requests. Please slow down."},
+                headers={"Retry-After": str(int(bucket["reset"] - now))},
+            )
+            await resp(scope, receive, send)
+            return
+
+        await self.app(scope, receive, send)
 
 
 # -----------------------------------------------------------------------------
@@ -113,100 +241,16 @@ app.add_middleware(
     allow_headers=["Content-Type", "Authorization", "X-Requested-With", "X-API-Key"],
 )
 
-# Auth
+# Pure ASGI middlewares (added in reverse — last added = outermost wrapper)
+app.add_middleware(RateLimitMiddleware)
+app.add_middleware(RequestIDMiddleware)
 app.add_middleware(APIKeyMiddleware)
-
-
-# ── L-06: Request ID middleware — adds X-Request-ID to every response ──
-# Enables tracing a single user action through scraping → extraction → CRM push.
-
-
-@app.middleware("http")
-async def request_id_middleware(request: Request, call_next):
-    """Attach a unique request ID to each request for log tracing."""
-    request_id = request.headers.get("X-Request-ID") or str(uuid.uuid4())[:8]
-    # Store on request state so route handlers can access it
-    request.state.request_id = request_id
-    response = await call_next(request)
-    response.headers["X-Request-ID"] = request_id
-    return response
-
-
-# Rate Limiter
-# ── H-03 NOTE: This is per-process memory. If you ever run uvicorn with
-# --workers 2+, each worker has its own store, effectively doubling the limit.
-# For single-worker (current setup) this is fine. For multi-worker, move to
-# Redis INCR/EXPIRE. Same applies to auth rate limiter in routes/auth.py.
-_rate_limit_store: dict = defaultdict(lambda: {"count": 0, "reset": 0.0})
-_RATE_LIMIT_MAX = 60
-_RATE_LIMIT_WINDOW = 60.0
-_RATE_LIMIT_MAX_ENTRIES = 10000
-_rate_limit_last_cleanup = 0.0
-
-
-def _cleanup_rate_limit_store(now: float) -> None:
-    """Evict expired rate limit entries."""
-    global _rate_limit_last_cleanup
-    if now - _rate_limit_last_cleanup < _RATE_LIMIT_WINDOW:
-        return
-    _rate_limit_last_cleanup = now
-
-    expired = [
-        ip
-        for ip, bucket in _rate_limit_store.items()
-        if now > bucket["reset"] + _RATE_LIMIT_WINDOW
-    ]
-    for ip in expired:
-        del _rate_limit_store[ip]
-
-    if len(_rate_limit_store) > _RATE_LIMIT_MAX_ENTRIES:
-        sorted_ips = sorted(
-            _rate_limit_store.keys(), key=lambda ip: _rate_limit_store[ip]["reset"]
-        )
-        for ip in sorted_ips[: len(_rate_limit_store) - _RATE_LIMIT_MAX_ENTRIES // 2]:
-            del _rate_limit_store[ip]
-
-
-@app.middleware("http")
-async def rate_limit_middleware(request: Request, call_next):
-    """Rate limit API requests per client IP."""
-    path = request.url.path
-
-    if not any(path.startswith(p) for p in ["/leads", "/sources", "/scrape", "/api"]):
-        return await call_next(request)
-
-    forwarded = request.headers.get("X-Forwarded-For", "")
-    if forwarded:
-        client_ip = forwarded.split(",")[0].strip()
-    else:
-        client_ip = request.client.host if request.client else "unknown"
-    now = time.monotonic()
-
-    _cleanup_rate_limit_store(now)
-
-    bucket = _rate_limit_store[client_ip]
-
-    if now > bucket["reset"]:
-        bucket["count"] = 0
-        bucket["reset"] = now + _RATE_LIMIT_WINDOW
-
-    bucket["count"] += 1
-
-    if bucket["count"] > _RATE_LIMIT_MAX:
-        return JSONResponse(
-            status_code=429,
-            content={"detail": "Too many requests. Please slow down."},
-            headers={"Retry-After": str(int(bucket["reset"] - now))},
-        )
-
-    response = await call_next(request)
-    return response
 
 
 # -----------------------------------------------------------------------------
 # Include Route Modules
 # -----------------------------------------------------------------------------
-app.include_router(auth_router)  # /auth/* — must be before other routes
+app.include_router(auth_router)
 app.include_router(health_router)
 app.include_router(leads_router)
 app.include_router(sources_router)
@@ -216,24 +260,17 @@ app.include_router(contacts_router)
 
 
 # -----------------------------------------------------------------------------
-# Production Frontend — serve React build from FastAPI (single port)
+# Production Frontend
 # -----------------------------------------------------------------------------
-# After `npm run build`, the dist/ folder is served here.
-# All API routes above take priority. Unknown paths get index.html (SPA routing).
-# In dev mode (Vite on :3000), this section is harmlessly skipped.
-# -----------------------------------------------------------------------------
-
 _FRONTEND_DIR = Path(__file__).resolve().parent.parent / "frontend" / "dist"
 
 if _FRONTEND_DIR.is_dir():
-    # Serve static assets (JS, CSS, images) from dist/assets/
     app.mount(
         "/assets",
         StaticFiles(directory=str(_FRONTEND_DIR / "assets")),
         name="frontend_assets",
     )
 
-    # Serve other static files at root (favicon, manifest, etc.)
     @app.get("/favicon.ico", include_in_schema=False)
     @app.get("/vite.svg", include_in_schema=False)
     async def frontend_static_files(request: Request):
@@ -242,10 +279,8 @@ if _FRONTEND_DIR.is_dir():
             return FileResponse(str(file_path))
         return FileResponse(str(_FRONTEND_DIR / "index.html"))
 
-    # SPA catch-all: any non-API path serves index.html so React Router works
     @app.get("/{full_path:path}", include_in_schema=False)
     async def serve_spa(full_path: str):
-        # Don't serve index.html for API/auth/health paths (those already handled above)
         file_path = _FRONTEND_DIR / full_path
         if file_path.is_file():
             return FileResponse(str(file_path))

@@ -107,7 +107,6 @@ export default function ScrapeModal({ onClose }: Props) {
       const scrapeId = result?.scrape_id || result?.id
       const url = `/api/dashboard/scrape/stream${scrapeId ? `?scrape_id=${scrapeId}` : ''}`
       connectSSE(url, 'scrape')
-      onClose()
     } catch (err: any) {
       addLog(`❌ Failed to start: ${err.message}`)
       setStatus('error')
@@ -124,7 +123,6 @@ export default function ScrapeModal({ onClose }: Props) {
       const extractId = result?.extract_id || result?.id
       const url = `/api/dashboard/extract-url/stream${extractId ? `?extract_id=${extractId}` : ''}`
       connectSSE(url, 'extract')
-      onClose()
     } catch (err: any) {
       addLog(`❌ Failed: ${err.message}`)
       setStatus('error')
