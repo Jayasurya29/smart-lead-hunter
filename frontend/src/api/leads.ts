@@ -1,4 +1,3 @@
-
 import api from './client'
 import type { Lead, LeadListResponse, DashboardStats, Contact, SourcesListResponse } from './types'
 
@@ -154,6 +153,16 @@ export async function triggerExtractUrl(url: string): Promise<any> {
 
 export async function triggerDiscovery(mode: string = 'full', extractLeads: boolean = true): Promise<any> {
   const { data } = await api.post('/api/dashboard/discovery/start', { mode, extract_leads: extractLeads })
+  return data
+}
+
+export async function cancelDiscovery(discoveryId: string): Promise<any> {
+  const { data } = await api.post('/api/dashboard/discovery/cancel', { discovery_id: discoveryId })
+  return data
+}
+
+export async function checkDiscoveryStatus(discoveryId: string): Promise<any> {
+  const { data } = await api.get(`/api/dashboard/discovery/status?discovery_id=${discoveryId}`)
   return data
 }
 

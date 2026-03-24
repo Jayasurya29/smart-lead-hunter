@@ -478,33 +478,60 @@ class DomainTester:
         )
         self._crawler = None
         self._crawl4ai_available = None
+        self._crawl4ai_loop = None  # Dedicated event loop for Crawl4AI thread
+        from concurrent.futures import ThreadPoolExecutor
+        self._executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="discovery-crawl4ai")
+
+    def _run_in_thread(self, fn, *args):
+        """Run a function in the dedicated Crawl4AI thread."""
+        import asyncio as _aio
+        loop = _aio.get_event_loop()
+        return loop.run_in_executor(self._executor, fn, *args)
+
+    def _sync_init_crawl4ai(self):
+        """Initialize Crawl4AI in dedicated thread with own ProactorEventLoop."""
+        import asyncio as _aio
+        import sys
+        if sys.platform == "win32":
+            _aio.set_event_loop_policy(_aio.WindowsProactorEventLoopPolicy())
+        self._crawl4ai_loop = _aio.new_event_loop()
+        _aio.set_event_loop(self._crawl4ai_loop)
+        from crawl4ai import AsyncWebCrawler
+        self._crawler = AsyncWebCrawler(verbose=False)
+        self._crawl4ai_loop.run_until_complete(self._crawler.start())
 
     async def _init_crawl4ai(self):
         if self._crawl4ai_available is not None:
             return self._crawl4ai_available
         try:
-            from crawl4ai import AsyncWebCrawler
-
-            self._crawler = AsyncWebCrawler(verbose=False)
-            await self._crawler.awarmup()
+            await self._run_in_thread(self._sync_init_crawl4ai)
             self._crawl4ai_available = True
             logger.info("  🌐 Crawl4AI ready for JS-heavy sites")
+        except ImportError:
+            logger.warning("  ⚠️ Crawl4AI not installed")
+            self._crawl4ai_available = False
         except Exception as e:
             logger.debug(f"Crawl4AI not available: {e}")
             self._crawl4ai_available = False
         return self._crawl4ai_available
 
-    async def _fetch_with_crawl4ai(self, url: str) -> Optional[str]:
-        if not self._crawl4ai_available:
-            if not await self._init_crawl4ai():
-                return None
+    def _sync_fetch_crawl4ai(self, url: str) -> Optional[str]:
+        """Fetch page with Crawl4AI in dedicated thread."""
         try:
-            result = await self._crawler.arun(url=url)
+            result = self._crawl4ai_loop.run_until_complete(
+                self._crawler.arun(url=url)
+            )
             if result and result.markdown:
                 return result.markdown
         except Exception as e:
             logger.debug(f"Crawl4AI failed for {url}: {e}")
         return None
+
+    async def _fetch_with_crawl4ai(self, url: str) -> Optional[str]:
+        if not self._crawl4ai_available:
+            if not await self._init_crawl4ai():
+                return None
+        return await self._run_in_thread(self._sync_fetch_crawl4ai, url)
 
     async def test(self, url: str, domain: str) -> dict:
         result = {
@@ -758,11 +785,21 @@ class DomainTester:
 
     async def close(self):
         await self.client.aclose()
-        if self._crawler:
+        if self._crawler and self._crawl4ai_loop:
+            def _sync_close():
+                try:
+                    self._crawl4ai_loop.run_until_complete(self._crawler.close())
+                except Exception:
+                    pass
+                try:
+                    self._crawl4ai_loop.close()
+                except Exception:
+                    pass
             try:
-                await self._crawler.aclose()
+                await self._run_in_thread(_sync_close)
             except Exception:
                 pass
+        self._executor.shutdown(wait=False)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -780,6 +817,7 @@ class DiscoveryLeadExtractor:
 
     def __init__(self):
         self.pipeline = None
+        self.domain_to_source_name: dict[str, str] = {}
 
     async def initialize(self):
         try:
@@ -934,6 +972,8 @@ class WebDiscoveryEngine:
                 pass
 
         await self.pipeline.initialize()
+        # Share domain→source name mapping with pipeline extractor
+        self.pipeline.domain_to_source_name = self.domain_to_source_name
 
         skippable = sum(1 for fd in self.failed_domains.values() if fd.should_skip())
         print(f"  📂 Loaded {len(self.known_domains)} known domains from database")
@@ -1295,7 +1335,7 @@ class WebDiscoveryEngine:
                 existing = await session.execute(
                     select(Source).where(Source.base_url.ilike(f"%{src['domain']}%"))
                 )
-                if existing.scalar_one_or_none():
+                if existing.scalars().first():
                     continue
 
                 homepage = src.get("homepage_url", f"https://{src['domain']}")

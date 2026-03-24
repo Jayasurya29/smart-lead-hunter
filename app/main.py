@@ -35,10 +35,10 @@ from app.routes.contacts import router as contacts_router
 from app.routes.auth import router as auth_router
 
 # NOTE: Do NOT set WindowsProactorEventLoopPolicy here.
-# The ProactorEventLoop uses IOCP which breaks SSE streaming under uvicorn —
-# connections get killed instantly during chunked responses. The default
-# SelectorEventLoop works fine for HTTP/SSE. Playwright/Crawl4AI subprocess
-# support is handled by skipping them on Windows in scraping_engine.py.
+# Uvicorn overrides the policy and creates its own SelectorEventLoop anyway.
+# Playwright/Crawl4AI need ProactorEventLoop for subprocesses — they work
+# in Celery workers and CLI (run_pipeline.py) but not under uvicorn.
+# Dashboard scraping uses httpx with gold URL fallback.
 
 
 logger = logging.getLogger(__name__)

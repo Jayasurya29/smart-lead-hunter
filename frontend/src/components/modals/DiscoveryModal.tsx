@@ -1,14 +1,18 @@
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect, useCallback } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { useBackgroundTask } from '@/hooks/useBackgroundTask'
-import { X, Radar, Loader2, CheckCircle2, AlertCircle } from 'lucide-react'
-import { triggerDiscovery } from '@/api/leads'
+import { X, Radar, Loader2, CheckCircle2, AlertCircle, Square, Minimize2 } from 'lucide-react'
+import { triggerDiscovery, cancelDiscovery } from '@/api/leads'
 import { cn } from '@/lib/utils'
 
 interface Props { onClose: () => void }
 
+type Status = 'idle' | 'running' | 'done' | 'error'
+
+const MAX_RETRIES = 5
+
 export default function DiscoveryModal({ onClose }: Props) {
-  const [status, setStatus] = useState<'idle' | 'running' | 'done' | 'error'>('idle')
+  const [status, setStatus] = useState<Status>('idle')
   const [logs, setLogs] = useState<string[]>([])
   const [mode, setMode] = useState<'full' | 'quick'>('full')
   const [extractLeads, setExtractLeads] = useState(true)
@@ -17,11 +21,117 @@ export default function DiscoveryModal({ onClose }: Props) {
   const qc = useQueryClient()
   const bg = useBackgroundTask()
 
-  useEffect(() => () => { esRef.current?.close() }, [])
-  useEffect(() => { if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight }, [logs])
+  // ── Refs to avoid stale closures in EventSource callbacks ──
+  const statusRef = useRef<Status>('idle')
+  const retryCountRef = useRef(0)
+  const retryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const closedRef = useRef(false)
+  const receivedDataRef = useRef(false)
+  const discoveryIdRef = useRef<string | null>(null)
 
-  function addLog(msg: string) {
+  useEffect(() => { statusRef.current = status }, [status])
+
+  useEffect(() => {
+    return () => {
+      closedRef.current = true
+      esRef.current?.close()
+      if (retryTimerRef.current) clearTimeout(retryTimerRef.current)
+    }
+  }, [])
+
+  useEffect(() => {
+    if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight
+  }, [logs])
+
+  const addLog = useCallback((msg: string) => {
     setLogs((prev) => [...prev, msg])
+  }, [])
+
+  /* ── SSE with retry ── */
+
+  function createSSE(path: string) {
+    if (esRef.current) {
+      esRef.current.close()
+      esRef.current = null
+    }
+
+    const es = new EventSource(path)
+    esRef.current = es
+
+    es.onopen = () => { retryCountRef.current = 0 }
+
+    es.onmessage = (e) => {
+      receivedDataRef.current = true
+      try {
+        const data = JSON.parse(e.data)
+        // Skip pings
+        if (data.type === 'ping') return
+        if (data.type === 'stats') return // Stats handled silently
+        if (data.message) {
+          addLog(data.message)
+          bg.addEvent()
+        }
+        if (data.type === 'complete' || data.done || data.status === 'complete') {
+          setStatus('done')
+          closedRef.current = true
+          es.close()
+          const newLeads = data.stats?.leads ?? data.stats?.sources ?? 0
+          const duration = data.duration_seconds ?? 0
+          bg.completeTask({
+            type: 'discovery',
+            message: 'Discovery complete',
+            newLeads,
+            duration,
+          })
+          qc.invalidateQueries({ queryKey: ['leads'] })
+          qc.invalidateQueries({ queryKey: ['stats'] })
+        }
+        if (data.type === 'error') {
+          addLog(`❌ ${data.message}`)
+          setStatus('error')
+          closedRef.current = true
+          es.close()
+          bg.failTask(data.message)
+        }
+      } catch {
+        if (e.data && e.data !== 'ping') addLog(e.data)
+      }
+    }
+
+    es.onerror = () => {
+      es.close()
+      esRef.current = null
+
+      if (closedRef.current || statusRef.current === 'done' || statusRef.current === 'error') {
+        return
+      }
+
+      retryCountRef.current++
+
+      if (retryCountRef.current > MAX_RETRIES) {
+        if (receivedDataRef.current) {
+          setStatus('done')
+          addLog('Stream ended — discovery may still be running on server.')
+          bg.completeTask({ type: 'discovery', message: 'Stream ended', newLeads: 0, duration: 0 })
+          qc.invalidateQueries({ queryKey: ['leads'] })
+          qc.invalidateQueries({ queryKey: ['stats'] })
+        } else {
+          setStatus('error')
+          addLog('❌ Lost connection to server after multiple retries.')
+          bg.failTask('Connection lost')
+        }
+        return
+      }
+
+      const delay = Math.min(1000 * Math.pow(2, retryCountRef.current - 1), 16000)
+      addLog(`Connection interrupted — retrying in ${Math.round(delay / 1000)}s (attempt ${retryCountRef.current}/${MAX_RETRIES})...`)
+
+      retryTimerRef.current = setTimeout(() => {
+        if (!closedRef.current && statusRef.current === 'running') {
+          createSSE(path)
+        }
+      }, delay)
+    }
   }
 
   async function handleStart() {
@@ -29,60 +139,76 @@ export default function DiscoveryModal({ onClose }: Props) {
     setLogs(['Starting source discovery...'])
     try {
       const result = await triggerDiscovery(mode, extractLeads)
+
+      if (result?.status === 'error') {
+        addLog(`❌ ${result.message || 'Server returned an error'}`)
+        setStatus('error')
+        return
+      }
+
       const discoveryId = result?.discovery_id || result?.id
-      const url = `/api/dashboard/discovery/stream${discoveryId ? `?discovery_id=${discoveryId}` : ''}`
+      if (!discoveryId) {
+        addLog('❌ No discovery ID returned from server')
+        setStatus('error')
+        return
+      }
 
-      const es = new EventSource(url)
-      esRef.current = es
+      discoveryIdRef.current = discoveryId
+      const url = `/api/dashboard/discovery/stream?discovery_id=${discoveryId}`
+      closedRef.current = false
+      receivedDataRef.current = false
+      retryCountRef.current = 0
       bg.startTask('discovery')
-
-      es.onmessage = (e) => {
-        try {
-          const data = JSON.parse(e.data)
-          if (data.message) {
-            addLog(data.message)
-            bg.addEvent()
-          }
-          if (data.type === 'complete' || data.done || data.status === 'complete') {
-            setStatus('done')
-            es.close()
-            const newLeads = data.stats?.leads_saved ?? data.stats?.new_sources ?? 0
-            const duration = data.duration_seconds ?? 0
-            bg.completeTask({
-              type: 'discovery',
-              message: 'Discovery complete',
-              newLeads,
-              duration,
-            })
-            qc.invalidateQueries({ queryKey: ['leads'] })
-            qc.invalidateQueries({ queryKey: ['stats'] })
-          }
-          if (data.type === 'error') {
-            addLog(`❌ ${data.message}`)
-            setStatus('error')
-            es.close()
-            bg.failTask(data.message)
-          }
-        } catch {
-          if (e.data && e.data !== 'ping') addLog(e.data)
-        }
-      }
-
-      es.onerror = () => {
-        es.close()
-        if (status === 'running') {
-          setStatus('done')
-          addLog('Stream ended.')
-          bg.completeTask({ type: 'discovery', message: 'Stream ended', newLeads: 0, duration: 0 })
-        }
-      }
-
-      onClose()
+      createSSE(url)
     } catch (err: any) {
       const detail = err.response?.data?.detail || err.response?.data?.message || err.message
       addLog(`❌ Failed: ${detail}`)
       setStatus('error')
     }
+  }
+
+  async function handleStop() {
+    const id = discoveryIdRef.current
+    if (!id) return
+
+    closedRef.current = true
+    esRef.current?.close()
+    if (retryTimerRef.current) clearTimeout(retryTimerRef.current)
+
+    try {
+      await cancelDiscovery(id)
+      addLog('⛔ Discovery cancelled.')
+    } catch {
+      addLog('⛔ Discovery stopped.')
+    }
+
+    setStatus('done')
+    bg.completeTask({
+      type: 'discovery',
+      message: 'Discovery cancelled by user',
+      newLeads: 0,
+      duration: 0,
+    })
+    qc.invalidateQueries({ queryKey: ['leads'] })
+    qc.invalidateQueries({ queryKey: ['stats'] })
+  }
+
+  function handleBackground() {
+    const id = discoveryIdRef.current
+    if (!id) return
+
+    // Close the EventSource — we'll poll instead
+    closedRef.current = true
+    esRef.current?.close()
+    if (retryTimerRef.current) clearTimeout(retryTimerRef.current)
+
+    addLog('Running in background — you\'ll be notified when done.')
+
+    // Start background polling (survives modal unmount)
+    bg.startBackgroundPoll(id)
+
+    // Close the modal
+    onClose()
   }
 
   return (
@@ -178,7 +304,10 @@ export default function DiscoveryModal({ onClose }: Props) {
                       log.includes('Error') || log.includes('❌') ? 'text-red-400' :
                       log.includes('✅') || log.includes('Added') || log.includes('Found') ? 'text-emerald-400' :
                       log.includes('🔍') || log.includes('Searching') ? 'text-violet-400' :
-                      log.includes('⚠') ? 'text-amber-400' : '',
+                      log.includes('⚠') ? 'text-amber-400' :
+                      log.includes('retrying') ? 'text-yellow-500' :
+                      log.includes('⛔') || log.includes('cancelled') ? 'text-orange-400' :
+                      log.includes('background') ? 'text-blue-400' : '',
                     )}
                   >
                     {log}
@@ -190,25 +319,46 @@ export default function DiscoveryModal({ onClose }: Props) {
         </div>
 
         {/* Footer */}
-        <div className="px-5 py-3 border-t border-stone-100 bg-stone-50/50 flex items-center justify-end gap-2">
-          {status === 'idle' && (
-            <>
-              <button onClick={onClose} className="px-3 py-1.5 text-[11px] font-semibold text-stone-500 hover:text-stone-700 transition">
-                Cancel
+        <div className="px-5 py-3 border-t border-stone-100 bg-stone-50/50 flex items-center justify-between">
+          <div>
+            {/* Left: Stop + Background buttons while running */}
+            {status === 'running' && (
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={handleStop}
+                  className="flex items-center gap-1.5 px-3 py-1.5 text-[11px] font-semibold text-red-600 border border-red-200 rounded-lg hover:bg-red-50 transition"
+                >
+                  <Square className="w-3 h-3" /> Stop
+                </button>
+                <button
+                  onClick={handleBackground}
+                  className="flex items-center gap-1.5 px-3 py-1.5 text-[11px] font-semibold text-blue-600 border border-blue-200 rounded-lg hover:bg-blue-50 transition"
+                >
+                  <Minimize2 className="w-3 h-3" /> Run in Background
+                </button>
+              </div>
+            )}
+          </div>
+          <div className="flex items-center gap-2">
+            {status === 'idle' && (
+              <>
+                <button onClick={onClose} className="px-3 py-1.5 text-[11px] font-semibold text-stone-500 hover:text-stone-700 transition">
+                  Cancel
+                </button>
+                <button
+                  onClick={handleStart}
+                  className="flex items-center gap-1.5 px-4 py-2 text-[11px] font-semibold bg-violet-600 text-white rounded-lg hover:bg-violet-700 transition"
+                >
+                  <Radar className="w-3 h-3" /> Start Discovery
+                </button>
+              </>
+            )}
+            {(status === 'done' || status === 'error') && (
+              <button onClick={onClose} className="px-4 py-1.5 text-[11px] font-semibold bg-navy-900 text-white rounded-lg hover:bg-navy-800 transition">
+                Close
               </button>
-              <button
-                onClick={handleStart}
-                className="flex items-center gap-1.5 px-4 py-2 text-[11px] font-semibold bg-violet-600 text-white rounded-lg hover:bg-violet-700 transition"
-              >
-                <Radar className="w-3 h-3" /> Start Discovery
-              </button>
-            </>
-          )}
-          {(status === 'done' || status === 'error') && (
-            <button onClick={onClose} className="px-4 py-1.5 text-[11px] font-semibold bg-navy-900 text-white rounded-lg hover:bg-navy-800 transition">
-              Close
-            </button>
-          )}
+            )}
+          </div>
         </div>
       </div>
     </div>

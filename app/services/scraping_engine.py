@@ -86,7 +86,7 @@ class ScrapingConfig:
     retry_delay_base: float = 2.0
     respect_robots_txt: bool = True
     cache_ttl_hours: int = 24
-    user_agent: str = "SmartLeadHunter/1.0 (Hotel Lead Discovery; contact@company.com)"
+    user_agent: str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
     rate_limits: Dict[str, int] = field(
         default_factory=lambda: {
             "default": 30,
@@ -268,10 +268,16 @@ class HTTPScraper:
                 follow_redirects=True,
                 headers={
                     "User-Agent": self.config.user_agent,
-                    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
                     "Accept-Language": "en-US,en;q=0.9",
                     "Accept-Encoding": "gzip, deflate, br",
                     "Connection": "keep-alive",
+                    "Sec-Fetch-Dest": "document",
+                    "Sec-Fetch-Mode": "navigate",
+                    "Sec-Fetch-Site": "none",
+                    "Sec-Fetch-User": "?1",
+                    "Upgrade-Insecure-Requests": "1",
+                    "Cache-Control": "max-age=0",
                 },
                 limits=httpx.Limits(max_connections=100, max_keepalive_connections=20),
             )
@@ -334,101 +340,117 @@ class HTTPScraper:
 
 
 class PlaywrightScraper:
+    """Playwright scraper using sync API in a dedicated background thread.
+
+    On Windows, uvicorn's event loop (SelectorEventLoop) cannot spawn
+    subprocesses. The async Playwright API fails with NotImplementedError.
+    Solution: use playwright.sync_api in a dedicated thread.
+
+    IMPORTANT: Playwright's sync API uses greenlets pinned to one thread.
+    All calls MUST run on the same thread. We use a single-thread
+    ThreadPoolExecutor for this.
+    """
+
     def __init__(self, config: ScrapingConfig):
         self.config = config
         self._playwright = None
         self._browser = None
         self._initialized = False
         self._disabled = False
-        self._init_lock = asyncio.Lock()  # H-05: Prevent concurrent initialization
+        self._init_lock = asyncio.Lock()
+        # Single-thread executor — all Playwright ops run here
+        from concurrent.futures import ThreadPoolExecutor
+
+        self._executor = ThreadPoolExecutor(
+            max_workers=1, thread_name_prefix="playwright"
+        )
 
     @property
     def available(self) -> bool:
         return self._initialized and not self._disabled
 
+    def _run_in_pw_thread(self, fn, *args):
+        """Run a function in the dedicated Playwright thread."""
+        loop = asyncio.get_event_loop()
+        return loop.run_in_executor(self._executor, fn, *args)
+
+    def _sync_initialize(self):
+        """Initialize Playwright (runs in dedicated thread)."""
+        from playwright.sync_api import sync_playwright
+
+        self._playwright = sync_playwright().start()
+        self._browser = self._playwright.chromium.launch(
+            headless=True,
+            args=[
+                "--disable-blink-features=AutomationControlled",
+                "--disable-dev-shm-usage",
+                "--no-sandbox",
+            ],
+        )
+
     async def initialize(self):
         if self._initialized or self._disabled:
             return
-        async with self._init_lock:  # H-05: Double-check locking
+        async with self._init_lock:
             if self._initialized or self._disabled:
                 return
             try:
-                from playwright.async_api import async_playwright
-
-                self._playwright = await async_playwright().start()
-                self._browser = await self._playwright.chromium.launch(
-                    headless=True,
-                    args=[
-                        "--disable-blink-features=AutomationControlled",
-                        "--disable-dev-shm-usage",
-                        "--no-sandbox",
-                    ],
-                )
+                await self._run_in_pw_thread(self._sync_initialize)
                 self._initialized = True
                 logger.info("✅ Playwright browser initialized")
             except BaseException as e:
-                # BaseException catches asyncio.CancelledError (Python 3.9+)
-                # which Playwright raises on Windows when subprocess_exec fails.
-                # except Exception misses it → kills the entire SSE pipeline.
                 self._disabled = True
                 logger.warning(f"⚠️ Playwright initialization failed: {e}")
                 try:
                     if self._playwright:
-                        await self._playwright.stop()
+                        self._playwright.stop()
                 except BaseException:
                     pass
                 self._playwright = None
                 self._browser = None
 
-    async def scrape(
+    def _sync_scrape(
         self,
         url: str,
         wait_for: Optional[str] = None,
         extra_headers: Optional[Dict] = None,
     ) -> ScrapeResult:
-        if self._disabled:
-            return ScrapeResult(
-                url=url,
-                success=False,
-                error="Playwright not available on this platform",
-                crawler_used="playwright",
-            )
+        """Run the actual Playwright scrape (runs in dedicated thread)."""
         start_time = time.time()
-        await self.initialize()
         context = page = None
         try:
-            context = await self._browser.new_context(
+            context = self._browser.new_context(
                 user_agent=self.config.user_agent,
                 viewport={"width": 1920, "height": 1080},
                 extra_http_headers=extra_headers or {},
             )
-            page = await context.new_page()
+            page = context.new_page()
             try:
-                response = await page.goto(
+                response = page.goto(
                     url,
                     wait_until="networkidle",
                     timeout=self.config.default_timeout * 1000,
                 )
             except Exception:
-                # Fallback for Wix/SPA sites that never reach networkidle
-                response = await page.goto(
+                response = page.goto(
                     url,
                     wait_until="domcontentloaded",
                     timeout=self.config.default_timeout * 1000,
                 )
-                await page.wait_for_timeout(5000)
-            # Auto-dismiss cookie consent banners
-            await self._dismiss_cookies(page)
+                page.wait_for_timeout(5000)
+            # Auto-dismiss cookie consent
+            self._sync_dismiss_cookies(page)
             if wait_for:
                 try:
-                    await page.wait_for_selector(wait_for, timeout=10000)
+                    page.wait_for_selector(wait_for, timeout=10000)
                 except Exception:
                     pass
-            await asyncio.sleep(1)
-            html = await page.content()
+            import time as _time
+
+            _time.sleep(1)
+            html = page.content()
             crawl_time = int((time.time() - start_time) * 1000)
-            # Use inner_text for visible-only content (respects CSS display/visibility)
-            text = await page.inner_text("body")
+            text = page.inner_text("body")
             soup = BeautifulSoup(html, "lxml")
             title = soup.title.string if soup.title else None
             links = []
@@ -460,19 +482,16 @@ class PlaywrightScraper:
             )
         finally:
             if page:
-                await page.close()
+                page.close()
             if context:
-                await context.close()
+                context.close()
 
-    async def _dismiss_cookies(self, page):
-        """Try to dismiss cookie consent banners using common button patterns."""
+    def _sync_dismiss_cookies(self, page):
+        """Try to dismiss cookie consent banners."""
         COOKIE_SELECTORS = [
-            # Cookiebot (very common)
             "#CybotCookiebotDialogBodyLevelButtonLevelOptinAllowAll",
             "#CybotCookiebotDialogBodyButtonAccept",
-            # OneTrust
             "#onetrust-accept-btn-handler",
-            # Generic text-based
             "button:has-text('Allow all')",
             "button:has-text('Accept all')",
             "button:has-text('Accept All')",
@@ -484,12 +503,10 @@ class PlaywrightScraper:
             "button:has-text('Agree')",
             "button:has-text('Allow All')",
             "button:has-text('Consent')",
-            # Container-scoped
             "[id*='cookie'] button:has-text('Accept')",
             "[id*='consent'] button:has-text('Accept')",
             "[class*='cookie'] button:has-text('Accept')",
             "[class*='consent'] button:has-text('Accept')",
-            # Attribute-based
             ".cookie-consent-accept",
             "[data-action='accept']",
             "[aria-label*='accept' i]",
@@ -498,70 +515,122 @@ class PlaywrightScraper:
             for selector in COOKIE_SELECTORS:
                 try:
                     btn = page.locator(selector).first
-                    if await btn.is_visible(timeout=2000):
-                        await btn.click()
+                    if btn.is_visible(timeout=2000):
+                        btn.click()
                         logger.info(f"\U0001f36a Cookie dismissed via: {selector}")
-                        await page.wait_for_timeout(2000)
+                        page.wait_for_timeout(2000)
                         return
                 except Exception:
                     continue
         except Exception:
-            pass  # Cookie dismissal is best-effort
+            pass
+
+    async def scrape(
+        self,
+        url: str,
+        wait_for: Optional[str] = None,
+        extra_headers: Optional[Dict] = None,
+    ) -> ScrapeResult:
+        if self._disabled:
+            return ScrapeResult(
+                url=url,
+                success=False,
+                error="Playwright not available on this platform",
+                crawler_used="playwright",
+            )
+        await self.initialize()
+        return await self._run_in_pw_thread(
+            self._sync_scrape, url, wait_for, extra_headers
+        )
 
     async def close(self):
-        if self._browser:
-            await self._browser.close()
-        if self._playwright:
-            await self._playwright.stop()
+        def _sync_close():
+            if self._browser:
+                try:
+                    self._browser.close()
+                except Exception:
+                    pass
+            if self._playwright:
+                try:
+                    self._playwright.stop()
+                except Exception:
+                    pass
+
+        try:
+            await self._run_in_pw_thread(_sync_close)
+        except BaseException:
+            pass
         self._initialized = False
+        self._executor.shutdown(wait=False)
 
 
 class Crawl4AIScraper:
+    """Crawl4AI scraper in a dedicated background thread.
+
+    Crawl4AI uses AsyncWebCrawler which internally launches Playwright.
+    On Windows/uvicorn, subprocess_exec fails. Solution: run Crawl4AI
+    in a dedicated thread with its own ProactorEventLoop.
+    """
+
     def __init__(self, config: ScrapingConfig):
         self.config = config
         self._crawler = None
         self._initialized = False
         self._disabled = False
-        self._init_lock = asyncio.Lock()  # H-05: Prevent concurrent initialization
+        self._init_lock = asyncio.Lock()
+        self._loop = None  # Dedicated event loop in the thread
+        from concurrent.futures import ThreadPoolExecutor
+
+        self._executor = ThreadPoolExecutor(
+            max_workers=1, thread_name_prefix="crawl4ai"
+        )
 
     @property
     def available(self) -> bool:
         return self._initialized and not self._disabled
 
+    def _run_in_thread(self, fn, *args):
+        """Run a function in the dedicated Crawl4AI thread."""
+        loop = asyncio.get_event_loop()
+        return loop.run_in_executor(self._executor, fn, *args)
+
+    def _sync_initialize(self):
+        """Initialize Crawl4AI with its own event loop in a dedicated thread."""
+        import asyncio as _aio
+
+        if sys.platform == "win32":
+            _aio.set_event_loop_policy(_aio.WindowsProactorEventLoopPolicy())
+        self._loop = _aio.new_event_loop()
+        _aio.set_event_loop(self._loop)
+        from crawl4ai import AsyncWebCrawler
+
+        self._crawler = AsyncWebCrawler(verbose=False)
+        self._loop.run_until_complete(self._crawler.start())
+
     async def initialize(self):
         if self._initialized or self._disabled:
             return
-        async with self._init_lock:  # H-05: Double-check locking
+        async with self._init_lock:
             if self._initialized or self._disabled:
                 return
             try:
-                from crawl4ai import AsyncWebCrawler
-
-                self._crawler = AsyncWebCrawler(verbose=False)
-                await self._crawler.start()
+                await self._run_in_thread(self._sync_initialize)
                 self._initialized = True
                 logger.info("✅ Crawl4AI initialized")
             except ImportError:
                 self._disabled = True
                 logger.warning("⚠️ Crawl4AI not installed. Run: pip install crawl4ai")
             except BaseException as e:
-                # BaseException catches asyncio.CancelledError (Python 3.9+)
                 self._disabled = True
                 logger.warning(f"⚠️ Failed to initialize Crawl4AI: {e}")
 
-    async def scrape(self, url: str, bypass_cache: bool = False) -> ScrapeResult:
-        if self._disabled:
-            return ScrapeResult(
-                url=url,
-                success=False,
-                error="Crawl4AI not available on this platform",
-                crawler_used="crawl4ai",
-            )
+    def _sync_scrape(self, url: str, bypass_cache: bool = False) -> ScrapeResult:
+        """Run Crawl4AI scrape in the dedicated thread."""
         start_time = time.time()
-        if not self._initialized:
-            await self.initialize()
         try:
-            result = await self._crawler.arun(url=url, bypass_cache=bypass_cache)
+            result = self._loop.run_until_complete(
+                self._crawler.arun(url=url, bypass_cache=bypass_cache)
+            )
             crawl_time = int((time.time() - start_time) * 1000)
             if result.success:
                 text = (
@@ -619,11 +688,38 @@ class Crawl4AIScraper:
                 crawler_used="crawl4ai",
             )
 
+    async def scrape(self, url: str, bypass_cache: bool = False) -> ScrapeResult:
+        if self._disabled:
+            return ScrapeResult(
+                url=url,
+                success=False,
+                error="Crawl4AI not available on this platform",
+                crawler_used="crawl4ai",
+            )
+        if not self._initialized:
+            await self.initialize()
+        return await self._run_in_thread(self._sync_scrape, url, bypass_cache)
+
     async def close(self):
-        if self._crawler:
-            await self._crawler.close()
-            self._crawler = None
+        def _sync_close():
+            if self._crawler and self._loop:
+                try:
+                    self._loop.run_until_complete(self._crawler.close())
+                except Exception:
+                    pass
+            if self._loop:
+                try:
+                    self._loop.close()
+                except Exception:
+                    pass
+
+        try:
+            await self._run_in_thread(_sync_close)
+        except BaseException:
+            pass
+        self._crawler = None
         self._initialized = False
+        self._executor.shutdown(wait=False)
 
 
 class DeepCrawler:
@@ -926,31 +1022,23 @@ class ScrapingEngine:
         logger.info("🚀 Initializing Scraping Engine V3...")
         await self.http_scraper.initialize()
 
-        # On Windows, Playwright and Crawl4AI both require subprocess_exec
-        # which is not supported by uvicorn's event loop. The call to
-        # async_playwright().start() HANGS forever (never returns) when
-        # the subprocess transport fails, causing uvicorn to cancel the
-        # entire SSE request via CancelledError. Skip them entirely.
-        if sys.platform == "win32":
-            logger.info(
-                "⚠️ Windows detected — skipping Playwright & Crawl4AI "
-                "(subprocess not supported under uvicorn)"
-            )
-            self.playwright_scraper._disabled = True
-        else:
-            try:
-                await self.playwright_scraper.initialize()
-            except BaseException as e:
-                logger.warning(f"⚠️ Playwright not available: {e}")
-            try:
-                self.crawl4ai_scraper = Crawl4AIScraper(self.config)
-                await self.crawl4ai_scraper.initialize()
-            except ImportError:
-                self.crawl4ai_scraper = None
-                logger.warning("⚠️ Crawl4AI not installed")
-            except BaseException as e:
-                self.crawl4ai_scraper = None
-                logger.warning(f"⚠️ Crawl4AI not available: {e}")
+        # Playwright now uses sync API in a background thread (asyncio.to_thread)
+        # so it works on all platforms including Windows/uvicorn.
+        try:
+            await self.playwright_scraper.initialize()
+        except BaseException as e:
+            logger.warning(f"⚠️ Playwright not available: {e}")
+
+        # Crawl4AI now runs in a dedicated thread with its own ProactorEventLoop
+        try:
+            self.crawl4ai_scraper = Crawl4AIScraper(self.config)
+            await self.crawl4ai_scraper.initialize()
+        except ImportError:
+            self.crawl4ai_scraper = None
+            logger.warning("⚠️ Crawl4AI not installed")
+        except BaseException as e:
+            self.crawl4ai_scraper = None
+            logger.warning(f"⚠️ Crawl4AI not available: {e}")
 
         available_scrapers = ["httpx"]
         if self.playwright_scraper.available:

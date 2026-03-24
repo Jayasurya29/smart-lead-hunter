@@ -13,17 +13,15 @@ from sqlalchemy import select
 
 from app.database import async_session
 from app.models import Source
+from app.services.orchestrator import LeadHunterOrchestrator
 from app.services.utils import local_now
 from app.config.intelligence_config import SKIP_URL_PATTERNS
-from app.services.orchestrator import LeadHunterOrchestrator
-
 from app.shared import (
     active_scrapes,
     scrape_cancellations,
     _scrape_lock,
     _pending_configs,
     _pending_extract_urls,
-    _pending_discovery_configs,
     store_pending,
     pop_pending,
     cleanup_stale_scrapes,
@@ -409,6 +407,85 @@ async def scrape_with_progress(request: Request):
                                 [source_name], deep=True, max_concurrent=3
                             )
                         )
+                        # If discovery got 0 SUCCESSFUL pages (e.g. base URL 403'd)
+                        # but gold URLs exist, fall back to gold mode so we don't
+                        # skip a source entirely just because rediscovery failed.
+                        _discovery_success = sum(
+                            sum(1 for r in pages if r.success)
+                            for pages in scrape_results.values()
+                        )
+                        if _discovery_success == 0 and active_gold:
+                            yield f"data: {json.dumps({'type': 'info', 'message': f'{source_name}: Rediscovery got 0 pages — falling back to {len(active_gold)} gold URLs'})}\n\n"
+                            scrape_results = {source_name: []}
+                            visited = set()
+                            for gold_url in active_gold:
+                                try:
+                                    await orchestrator.scraping_engine.rate_limiter.acquire(
+                                        gold_url
+                                    )
+                                    if await request.is_disconnected():
+                                        return
+                                    result = await orchestrator.scraping_engine.http_scraper.scrape(
+                                        gold_url
+                                    )
+                                    if result.success:
+                                        scrape_results[source_name].append(result)
+                                        visited.add(gold_url)
+                                        # Follow depth-1 links from gold pages
+                                        from bs4 import BeautifulSoup
+                                        from urllib.parse import urljoin, urlparse
+
+                                        soup = BeautifulSoup(result.html or "", "lxml")
+                                        gold_domain = urlparse(gold_url).netloc
+                                        links = set()
+                                        for a in soup.find_all("a", href=True):
+                                            full_url = urljoin(gold_url, a["href"])
+                                            if (
+                                                full_url not in visited
+                                                and urlparse(full_url).netloc
+                                                == gold_domain
+                                                and not any(
+                                                    skip in full_url.lower()
+                                                    for skip in SKIP_URL_PATTERNS
+                                                )
+                                            ):
+                                                links.add(full_url)
+                                        max_follow = (
+                                            scrape_settings.max_pages
+                                            if scrape_settings
+                                            else 15
+                                        )
+                                        for link_url in list(links)[:max_follow]:
+                                            try:
+                                                await orchestrator.scraping_engine.rate_limiter.acquire(
+                                                    link_url
+                                                )
+                                                link_result = await orchestrator.scraping_engine.http_scraper.scrape(
+                                                    link_url
+                                                )
+                                                if link_result.status_code in (
+                                                    429,
+                                                    403,
+                                                ):
+                                                    break
+                                                if link_result.success:
+                                                    scrape_results[source_name].append(
+                                                        link_result
+                                                    )
+                                                    visited.add(link_url)
+                                            except Exception:
+                                                pass
+                                    else:
+                                        logger.warning(
+                                            f"Gold URL {result.status_code or 'ERR'}: {gold_url[:80]}"
+                                        )
+                                except Exception as e:
+                                    logger.warning(
+                                        f"Gold fallback failed {gold_url[:50]}: {e}"
+                                    )
+                            logger.info(
+                                f"⚡ Gold fallback: {source_name} → {len(scrape_results[source_name])} pages from {len(active_gold)} gold URLs"
+                            )
                     source_pages = 0
                     # Log intelligence summary
                     if source.id in source_intel_map:
@@ -1021,6 +1098,12 @@ async def cancel_scrape(scrape_id: str, _csrf=Depends(require_ajax)):
 # ─────────────────────────────────────────────────────────────────────────────
 
 
+# Active discovery tasks — keyed by discovery_id.
+# POST launches the task + appends to message list, GET reads from list.
+# Retries reconnect and resume from where they left off (no lost messages).
+_active_discoveries: dict = {}  # discovery_id -> {"task": Task, "messages": list, "done": bool}
+
+
 @router.post("/api/dashboard/discovery/start", tags=["Dashboard"])
 async def discovery_start(request: Request, _csrf=Depends(require_ajax)):
     """Trigger a web discovery run from the dashboard"""
@@ -1031,15 +1114,128 @@ async def discovery_start(request: Request, _csrf=Depends(require_ajax)):
         dry_run = body.get("dry_run", False)
 
         discovery_id = str(uuid.uuid4())
-        store_pending(
-            _pending_discovery_configs,
-            discovery_id,
-            {
-                "mode": mode,
-                "extract_leads": extract_leads,
-                "dry_run": dry_run,
-            },
-        )
+
+        max_queries = 5 if mode == "quick" else None
+        start_time = local_now()
+
+        # Message list — task appends, SSE reader tracks position.
+        # Unlike a queue, messages are never consumed/lost on disconnect.
+        messages: list = []
+        done_flag = {"done": False}
+
+        async def run_discovery():
+            try:
+                import sys as _sys
+
+                _sys.path.insert(0, os.getcwd())
+                from scripts.discover_sources import WebDiscoveryEngine
+
+                eng = WebDiscoveryEngine(
+                    dry_run=dry_run,
+                    min_quality=35,
+                    sources_only=not extract_leads,
+                )
+                await eng.initialize()
+
+                import io
+                import contextlib
+
+                def _classify_msg_type(msg):
+                    if any(
+                        s in msg
+                        for s in ["\u2705", "\u2728", "Found", "Added", "QUALIFIED"]
+                    ):
+                        return "success"
+                    if any(s in msg for s in ["\u274c", "Error", "Failed"]):
+                        return "error"
+                    if any(
+                        s in msg for s in ["\u26a0\ufe0f", "Warning", "Skip", "\u26aa"]
+                    ):
+                        return "warning"
+                    if any(
+                        s in msg
+                        for s in [
+                            "\U0001f4e1",
+                            "\U0001f50d",
+                            "\U0001f9ea",
+                            "\U0001f916",
+                            "\U0001f4be",
+                            "Phase",
+                            "\u2550\u2550\u2550",
+                        ]
+                    ):
+                        return "phase"
+                    return "info"
+
+                class _ProgressWriter(io.TextIOBase):
+                    def write(self, text):
+                        msg = text.strip()
+                        if not msg:
+                            return len(text)
+                        messages.append(
+                            {"type": _classify_msg_type(msg), "message": msg}
+                        )
+                        try:
+                            messages.append(
+                                {
+                                    "type": "stats",
+                                    "queries": eng.stats.get("search_results", 0),
+                                    "domains": (
+                                        eng.stats.get("search_results", 0)
+                                        - eng.stats.get("already_known", 0)
+                                        - eng.stats.get("blacklisted", 0)
+                                    ),
+                                    "sources": len(eng.discovered),
+                                    "leads": len(eng.extracted_leads),
+                                }
+                            )
+                        except Exception:
+                            pass
+                        return len(text)
+
+                try:
+                    with contextlib.redirect_stdout(_ProgressWriter()):
+                        await eng.run(max_queries=max_queries)
+                finally:
+                    await eng.close()
+
+                elapsed = (local_now() - start_time).total_seconds()
+                messages.append(
+                    {
+                        "type": "complete",
+                        "message": f"\u2705 Discovery complete in {elapsed:.0f}s",
+                        "stats": {
+                            "queries": eng.stats.get("search_results", 0),
+                            "domains": (
+                                eng.stats.get("search_results", 0)
+                                - eng.stats.get("already_known", 0)
+                                - eng.stats.get("blacklisted", 0)
+                            ),
+                            "sources": len(eng.discovered),
+                            "leads": len(eng.extracted_leads),
+                        },
+                    }
+                )
+
+            except Exception as e:
+                logger.error(f"Discovery error: {e}", exc_info=True)
+                messages.append(
+                    {
+                        "type": "complete",
+                        "message": f"\u274c Discovery failed: {safe_error(e)}",
+                        "stats": {},
+                    }
+                )
+            finally:
+                done_flag["done"] = True
+
+        task = asyncio.create_task(run_discovery())
+        _active_discoveries[discovery_id] = {
+            "task": task,
+            "messages": messages,
+            "done_flag": done_flag,
+            "started": time.monotonic(),
+        }
 
         logger.info(
             f"Dashboard: Discovery triggered (mode={mode}, leads={extract_leads}, dry_run={dry_run})"
@@ -1059,177 +1255,66 @@ async def discovery_start(request: Request, _csrf=Depends(require_ajax)):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# ENDPOINT: Discovery SSE Stream (asyncio-based, matches v5 engine)
+# ENDPOINT: Discovery SSE Stream — reads from message list (retry-safe)
 # ─────────────────────────────────────────────────────────────────────────────
 
 
 @router.get("/api/dashboard/discovery/stream", tags=["Dashboard"])
 async def discovery_stream(request: Request):
-    """SSE endpoint for real-time web discovery progress."""
+    """SSE endpoint for real-time web discovery progress.
 
-    # Get config by discovery_id query param (Audit Fix #3 — race-safe)
+    Uses a message LIST (not queue) so retries replay all messages.
+    DuckDuckGo searches block the event loop for 5-10s at a time,
+    which kills SSE connections. On retry, we re-send everything
+    from position 0 so no messages are ever lost.
+    """
+
     discovery_id = request.query_params.get("discovery_id", "")
-    config = (
-        pop_pending(_pending_discovery_configs, discovery_id, {})
-        if discovery_id
-        else {}
-    )
+    discovery = _active_discoveries.get(discovery_id)
 
-    mode = config.get("mode", "full")
-    extract_leads = config.get("extract_leads", True)
-    dry_run = config.get("dry_run", False)
+    if not discovery:
+
+        async def no_discovery():
+            yield f"data: {json.dumps({'type': 'complete', 'message': 'No discovery running. Please start again.', 'stats': {}})}\n\n"
+
+        return StreamingResponse(no_discovery(), media_type="text/event-stream")
+
+    messages = discovery["messages"]
+    done_flag = discovery["done_flag"]
 
     async def event_generator():
+        cursor = 0
         try:
-            import sys
-            import os
-
-            sys.path.insert(0, os.getcwd())
-
-            yield f"data: {json.dumps({'type': 'phase', 'message': '🌐 Initializing Web Discovery Engine v5...'})}\n\n"
-
-            # v5 constructor: no use_ai param, uses IntelligentPipeline automatically
-            max_queries = 5 if mode == "quick" else None
-            start_time = local_now()
-
-            progress_queue = asyncio.Queue()
-
-            async def run_discovery():
-                try:
-                    from scripts.discover_sources import WebDiscoveryEngine
-
-                    eng = WebDiscoveryEngine(
-                        dry_run=dry_run,
-                        min_quality=35,
-                        sources_only=not extract_leads,
-                    )
-                    await eng.initialize()
-
-                    # Audit Fix M-09: Use contextlib.redirect_stdout instead of
-                    # monkey-patching builtins.print (global mutation).
-                    import io
-                    import contextlib
-
-                    def _classify_msg_type(msg):
-                        if any(
-                            s in msg
-                            for s in ["\u2705", "\u2728", "Found", "Added", "QUALIFIED"]
-                        ):
-                            return "success"
-                        if any(s in msg for s in ["\u274c", "Error", "Failed"]):
-                            return "error"
-                        if any(
-                            s in msg
-                            for s in ["\u26a0\ufe0f", "Warning", "Skip", "\u26aa"]
-                        ):
-                            return "warning"
-                        if any(
-                            s in msg
-                            for s in [
-                                "\U0001f4e1",
-                                "\U0001f50d",
-                                "\U0001f9ea",
-                                "\U0001f916",
-                                "\U0001f4be",
-                                "Phase",
-                                "\u2550\u2550\u2550",
-                            ]
-                        ):
-                            return "phase"
-                        return "info"
-
-                    class _ProgressWriter(io.TextIOBase):
-                        """Captures print() output and routes to SSE queue."""
-
-                        def write(self, text):
-                            msg = text.strip()
-                            if not msg:
-                                return len(text)
-                            progress_queue.put_nowait(
-                                {
-                                    "type": _classify_msg_type(msg),
-                                    "message": msg,
-                                }
-                            )
-                            try:
-                                progress_queue.put_nowait(
-                                    {
-                                        "type": "stats",
-                                        "queries": eng.stats.get("search_results", 0),
-                                        "domains": (
-                                            eng.stats.get("search_results", 0)
-                                            - eng.stats.get("already_known", 0)
-                                            - eng.stats.get("blacklisted", 0)
-                                        ),
-                                        "sources": len(eng.discovered),
-                                        "leads": len(eng.extracted_leads),
-                                    }
-                                )
-                            except Exception:
-                                pass
-                            return len(text)
-
-                    try:
-                        with contextlib.redirect_stdout(_ProgressWriter()):
-                            await eng.run(max_queries=max_queries)
-                    finally:
-                        await eng.close()
-
-                    # Final completion event with stats
-                    elapsed = (local_now() - start_time).total_seconds()
-                    progress_queue.put_nowait(
-                        {
-                            "type": "complete",
-                            "message": f"✅ Discovery complete in {elapsed:.0f}s",
-                            "stats": {
-                                "queries": eng.stats.get("search_results", 0),
-                                "domains": (
-                                    eng.stats.get("search_results", 0)
-                                    - eng.stats.get("already_known", 0)
-                                    - eng.stats.get("blacklisted", 0)
-                                ),
-                                "sources": len(eng.discovered),
-                                "leads": len(eng.extracted_leads),
-                            },
-                        }
-                    )
-
-                except Exception as e:
-                    logger.error(f"Discovery error: {e}", exc_info=True)
-                    progress_queue.put_nowait(
-                        {
-                            "type": "complete",
-                            "message": f"❌ Discovery failed: {safe_error(e)}",
-                            "stats": {},
-                        }
-                    )
-
-            # Run on the MAIN event loop (no threading — avoids AsyncEngine conflicts)
-            task = asyncio.create_task(run_discovery())
-
-            # Stream progress messages to frontend
             while True:
                 if await request.is_disconnected():
-                    task.cancel()
                     break
 
-                try:
-                    msg = progress_queue.get_nowait()
+                # Send any new messages since last cursor position
+                while cursor < len(messages):
+                    msg = messages[cursor]
+                    cursor += 1
                     yield f"data: {json.dumps(msg)}\n\n"
 
                     if msg.get("type") == "complete":
-                        break
-                except asyncio.QueueEmpty:
-                    await asyncio.sleep(0.3)
+                        _active_discoveries.pop(discovery_id, None)
+                        return
+
+                # No new messages — send ping to keep connection alive
+                yield f"data: {json.dumps({'type': 'ping'})}\n\n"
+
+                # If task is done and we've consumed all messages, we're done
+                if done_flag["done"] and cursor >= len(messages):
+                    _active_discoveries.pop(discovery_id, None)
+                    return
+
+                await asyncio.sleep(0.5)
 
         except BaseException as e:
             logger.error(f"Discovery stream error: {e}")
             try:
-                yield f"data: {json.dumps({'type': 'complete', 'message': f'❌ Stream error: {safe_error(e)}', 'stats': {}})}\n\n"
+                yield f"data: {json.dumps({'type': 'complete', 'message': f'Stream error: {safe_error(e)}', 'stats': {}})}\n\n"
             except BaseException:
                 pass
-
-    from starlette.responses import StreamingResponse
 
     return StreamingResponse(
         event_generator(),
@@ -1240,6 +1325,64 @@ async def discovery_stream(request: Request):
             "X-Accel-Buffering": "no",
         },
     )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# ENDPOINT: Discovery Cancel + Status
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+@router.post("/api/dashboard/discovery/cancel", tags=["Dashboard"])
+async def discovery_cancel(request: Request, _csrf=Depends(require_ajax)):
+    """Cancel a running discovery task."""
+    body = await checked_json(request)
+    discovery_id = body.get("discovery_id", "")
+    discovery = _active_discoveries.get(discovery_id)
+    if not discovery:
+        return {"status": "not_found", "message": "No discovery running with that ID"}
+
+    task = discovery.get("task")
+    if task and not task.done():
+        task.cancel()
+    messages = discovery.get("messages", [])
+    messages.append(
+        {
+            "type": "complete",
+            "message": "⛔ Discovery cancelled by user",
+            "stats": {},
+        }
+    )
+    logger.info(f"Discovery {discovery_id} cancelled by user")
+    return {"status": "cancelled", "message": "Discovery cancelled"}
+
+
+@router.get("/api/dashboard/discovery/status", tags=["Dashboard"])
+async def discovery_status(request: Request):
+    """Check if a discovery task is still running (for background polling)."""
+    discovery_id = request.query_params.get("discovery_id", "")
+    discovery = _active_discoveries.get(discovery_id)
+    if not discovery:
+        return {"running": False, "discovery_id": discovery_id}
+
+    messages = discovery.get("messages", [])
+    done = any(m.get("type") == "complete" for m in messages)
+    # Find last stats message
+    stats = {}
+    for m in reversed(messages):
+        if m.get("type") == "stats":
+            stats = m
+            break
+        if m.get("type") == "complete" and m.get("stats"):
+            stats = m.get("stats", {})
+            break
+
+    return {
+        "running": not done,
+        "done": done,
+        "discovery_id": discovery_id,
+        "message_count": len(messages),
+        "stats": stats,
+    }
 
 
 # ─────────────────────────────────────────────────────────────────────────────

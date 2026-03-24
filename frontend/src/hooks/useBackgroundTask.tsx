@@ -1,4 +1,5 @@
-import { createContext, useContext, useState, useCallback, ReactNode } from 'react'
+import { createContext, useContext, useState, useCallback, useRef, useEffect, ReactNode } from 'react'
+import { checkDiscoveryStatus } from '@/api/leads'
 
 /* ── Types ── */
 
@@ -22,6 +23,7 @@ interface BackgroundTaskState {
   completeTask: (summary: TaskSummary) => void
   failTask: (errorMsg: string) => void
   dismissToast: () => void
+  startBackgroundPoll: (discoveryId: string) => void
 }
 
 const BackgroundTaskContext = createContext<BackgroundTaskState | null>(null)
@@ -35,6 +37,14 @@ export function BackgroundTaskProvider({ children }: { children: ReactNode }) {
   const [status, setStatus] = useState<'idle' | 'running' | 'done' | 'error'>('idle')
   const [summary, setSummary] = useState<TaskSummary | null>(null)
   const [logs, setLogs] = useState<string[]>([])
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
+
+  // Clean up polling on unmount
+  useEffect(() => {
+    return () => {
+      if (pollRef.current) clearInterval(pollRef.current)
+    }
+  }, [])
 
   const startTask = useCallback((type: string) => {
     setIsRunning(true)
@@ -58,6 +68,10 @@ export function BackgroundTaskProvider({ children }: { children: ReactNode }) {
     setIsRunning(false)
     setStatus('done')
     setSummary(s)
+    if (pollRef.current) {
+      clearInterval(pollRef.current)
+      pollRef.current = null
+    }
   }, [])
 
   const failTask = useCallback((errorMsg: string) => {
@@ -69,6 +83,10 @@ export function BackgroundTaskProvider({ children }: { children: ReactNode }) {
       newLeads: 0,
       duration: 0,
     })
+    if (pollRef.current) {
+      clearInterval(pollRef.current)
+      pollRef.current = null
+    }
   }, [taskType])
 
   const dismissToast = useCallback(() => {
@@ -77,12 +95,41 @@ export function BackgroundTaskProvider({ children }: { children: ReactNode }) {
     setLogs([])
   }, [])
 
+  const startBackgroundPoll = useCallback((discoveryId: string) => {
+    // Clear any existing poll
+    if (pollRef.current) clearInterval(pollRef.current)
+
+    pollRef.current = setInterval(async () => {
+      try {
+        const result = await checkDiscoveryStatus(discoveryId)
+        if (result.done) {
+          const stats = result.stats || {}
+          setIsRunning(false)
+          setStatus('done')
+          setSummary({
+            type: 'discovery',
+            message: 'Discovery complete (background)',
+            newLeads: stats.leads ?? stats.sources ?? 0,
+            duration: 0,
+          })
+          if (pollRef.current) {
+            clearInterval(pollRef.current)
+            pollRef.current = null
+          }
+        }
+      } catch {
+        // Silently retry on network errors
+      }
+    }, 3000)
+  }, [])
+
   return (
     <BackgroundTaskContext.Provider
       value={{
         isRunning, taskType, eventCount, status,
         summary, logs,
         startTask, addEvent, addLog, completeTask, failTask, dismissToast,
+        startBackgroundPoll,
       }}
     >
       {children}
