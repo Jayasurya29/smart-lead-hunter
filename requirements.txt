@@ -34,7 +34,7 @@ alembic>=1.13.1,<2.0
 httpx>=0.25.2,<1.0
 
 # Crawl4AI - Smart crawler with caching & anti-detection (FALLBACK 1)
-crawl4ai>=0.3.0,<1.0
+crawl4ai>=0.8.0,<1.0
 
 # Playwright - Browser automation (FALLBACK 2 - for JS-heavy sites)
 playwright>=1.41.0,<2.0
