@@ -3,7 +3,9 @@
 export interface Lead {
   id: number
   hotel_name: string | null
+  name?: string | null
   brand: string | null
+  brand_name?: string | null
   brand_tier: string | null
   hotel_type: string | null
   hotel_website: string | null
@@ -32,6 +34,8 @@ export interface Lead {
   source_urls: string[] | null
   source_extractions: Record<string, any> | null
   score_breakdown: Record<string, any> | null
+  sources?: any
+  source_detail?: string | null
   insightly_id: number | null
   created_at: string
   updated_at: string | null

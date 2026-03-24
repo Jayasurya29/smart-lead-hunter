@@ -8,9 +8,8 @@ NOTE: enrich_lead() intentionally uses manual sessions because the enrichment
 """
 
 import logging
-import os
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -56,14 +55,10 @@ async def enrich_lead(lead_id: int, _csrf=Depends(require_ajax)):
 
     # Run enrichment (network calls — can take 10-30 seconds)
     try:
-        from app.services.contact_enrichment import ContactEnrichmentEngine
+        from app.services.contact_enrichment import enrich_lead_contacts
 
-        engine = ContactEnrichmentEngine(
-            serper_api_key=os.getenv("SERPER_API_KEY", ""),
-            apollo_api_key=os.getenv("APOLLO_API_KEY", ""),
-        )
-
-        enrichment_result = await engine.enrich_lead(
+        enrichment_result = await enrich_lead_contacts(
+            lead_id=lead_id,
             hotel_name=hotel_name,
             brand=brand,
             city=city,
@@ -120,7 +115,7 @@ async def enrich_lead(lead_id: int, _csrf=Depends(require_ajax)):
             if enrichment_result.developer and not lead.developer:
                 lead.developer = enrichment_result.developer
                 updated_fields.append("developer")
-            if enrichment_result.owner and not lead.owner:
+            if getattr(enrichment_result, "owner", None) and not lead.owner:
                 lead.owner = enrichment_result.owner
                 updated_fields.append("owner")
 
@@ -337,6 +332,80 @@ async def delete_contact(
         pass
     await db.commit()
     return {"status": "deleted", "contact_id": contact_id}
+
+
+@router.patch("/api/dashboard/leads/{lead_id}/contacts/{contact_id}")
+async def update_contact(
+    lead_id: int,
+    contact_id: int,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    _csrf=Depends(require_ajax),
+):
+    body = await request.json()
+    result = await db.execute(
+        select(LeadContact).where(
+            LeadContact.id == contact_id, LeadContact.lead_id == lead_id
+        )
+    )
+    contact = result.scalar_one_or_none()
+    if not contact:
+        raise HTTPException(status_code=404, detail="Contact not found")
+    allowed = {"name", "title", "email", "phone", "linkedin", "organization"}
+    for field, value in body.items():
+        if field in allowed:
+            setattr(contact, field, value)
+    contact.updated_at = local_now()
+    await db.commit()
+    return {"status": "updated", "contact_id": contact_id}
+
+
+@router.post("/api/dashboard/leads/{lead_id}/contacts/{contact_id}/toggle-scope")
+async def toggle_contact_scope(
+    lead_id: int,
+    contact_id: int,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    _csrf=Depends(require_ajax),
+):
+    body = await request.json()
+    new_scope = body.get("scope", "")
+    if new_scope not in ("hotel_specific", "chain_area", "chain_corporate"):
+        raise HTTPException(status_code=400, detail="Invalid scope")
+    result = await db.execute(
+        select(LeadContact).where(
+            LeadContact.id == contact_id, LeadContact.lead_id == lead_id
+        )
+    )
+    contact = result.scalar_one_or_none()
+    if not contact:
+        raise HTTPException(status_code=404, detail="Contact not found")
+    contact.scope = new_scope
+    # Rescore: hotel_specific gets +30, chain_area gets +12
+    if contact.tier in (
+        "TIER1_HSKP",
+        "TIER2_PURCH",
+        "TIER3_GM_OPS",
+        "TIER4_FB",
+        "TIER5_HR",
+    ):
+        if new_scope == "hotel_specific":
+            contact.score = 30
+            contact.confidence = "high"
+        elif new_scope == "chain_area":
+            contact.score = 12
+            contact.confidence = "medium"
+        else:
+            contact.score = 5
+            contact.confidence = "low"
+    contact.updated_at = local_now()
+    await db.flush()
+    try:
+        await rescore_lead(lead_id, db)
+    except Exception:
+        pass
+    await db.commit()
+    return {"status": "updated", "scope": new_scope, "score": contact.score}
 
 
 @router.post("/api/dashboard/leads/{lead_id}/contacts/{contact_id}/set-primary")

@@ -535,6 +535,11 @@ class SmartQueryBuilder:
             # Query 2: Hotel name + appointment news
             queries.append(f"{hotel_name} appoints OR hires OR names OR appointed")
 
+            # Query 2b: Hotel/brand official press releases
+            queries.append(
+                f'"{hotel_name}" "General Manager" OR "appointed" OR "announcement"'
+            )
+
             # Query 3: Brand/parent company + hotel name + staff
             parent = management_company or brand
             if parent:

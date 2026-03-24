@@ -125,6 +125,14 @@ export async function setPrimaryContact(leadId: number, contactId: number): Prom
   await api.post(`/api/dashboard/leads/${leadId}/contacts/${contactId}/set-primary`)
 }
 
+export async function updateContact(leadId: number, contactId: number, data: Record<string, string>): Promise<void> {
+  await api.patch(`/api/dashboard/leads/${leadId}/contacts/${contactId}`, data)
+}
+
+export async function toggleContactScope(leadId: number, contactId: number, scope: string): Promise<any> {
+  const { data } = await api.post(`/api/dashboard/leads/${leadId}/contacts/${contactId}/toggle-scope`, { scope })
+  return data
+}
 /* ════════════════════════════════════════
    SCRAPE
    ════════════════════════════════════════ */

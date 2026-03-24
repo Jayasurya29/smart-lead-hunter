@@ -1731,6 +1731,7 @@ TARGET HOTEL: {hotel_name}
 LOCATION: {location}
 BRAND: {brand}
 MANAGEMENT COMPANY: {management_company}
+{hotel_status}
 
 Below are contacts discovered during lead research. For EACH contact, determine:
 1) Their ACTUAL job title (not someone else mentioned in a post)
@@ -1822,10 +1823,18 @@ A different hotel name is definitive proof they do NOT work at the target.
 
 WHEN IN DOUBT about hotel connection:
 - If snippet/org mentions a DIFFERENT specific hotel → REJECT (not chain_area, REJECT)
-- If snippet/org mentions only the parent brand → chain_area
+- If snippet/org mentions only the parent brand → chain_area (NEVER reject these)
 - If snippet/org has NO hotel mentioned at all → chain_area (NOT hotel_specific)
 - Only assign hotel_specific when the TARGET hotel name or its unique location appears in the snippet
 - ALWAYS REJECT CEO, Investor, Sales, Construction regardless
+
+PRE-OPENING HOTEL RULE: If the hotel has NOT yet opened (see HOTEL STATUS above), contacts at the
+parent brand in the target city are EXPECTED — the property has no LinkedIn presence yet.
+- Parent brand + target city + operational title → chain_area (NEVER reject)
+- Parent brand + target city + no title but posts about the property → chain_area (NEVER reject)
+- A LinkedIn post about hiring/recruiting for a property in the target city is evidence of involvement
+- Do NOT reject contacts just because they lack a title — if they're at the parent brand in the
+  target city, keep them as chain_area and let the scoring system handle prioritization
 
 REMINDER: For LinkedIn POSTS (source_url contains /posts/), the poster OWN title is NOT in the post text.
 The post text describes OTHER people. The poster is typically a corporate executive sharing company news.
@@ -1865,6 +1874,7 @@ async def _verify_contacts_with_gemini(
     city: Optional[str] = None,
     state: Optional[str] = None,
     country: Optional[str] = None,
+    opening_date: Optional[str] = None,
 ) -> list[dict]:
     """
     AI verification layer: Gemini reads raw snippets to determine each contact
@@ -1890,12 +1900,27 @@ async def _verify_contacts_with_gemini(
         return contacts
 
     location = _build_location_string(city, state, country)
+    mode = _get_search_mode(opening_date)
+    if mode == "pre_opening":
+        hotel_status = (
+            "HOTEL STATUS: PRE-OPENING — This hotel has NOT yet opened. "
+            "Staff are being hired under the parent brand. "
+            "Parent brand + target city contacts should be chain_area, NOT rejected."
+        )
+    elif mode == "opening_soon":
+        hotel_status = (
+            "HOTEL STATUS: OPENING SOON — This hotel is opening within 6 months. "
+            "Some staff may still be listed under the parent brand."
+        )
+    else:
+        hotel_status = "HOTEL STATUS: OPEN — Standard verification rules apply."
 
     prompt = CONTACT_VERIFICATION_PROMPT.format(
         hotel_name=hotel_name,
         location=location,
         brand=brand or "Unknown",
         management_company=management_company or "Unknown",
+        hotel_status=hotel_status,
         contacts_json=json.dumps(contacts_for_verification, indent=2),
     )
 
@@ -2000,14 +2025,24 @@ async def _verify_contacts_with_gemini(
                         f"'{old_title}' -> '{verified_title}'"
                     )
                 match["title"] = verified_title
-            elif not is_linkedin_profile:
+            elif (
+                not is_linkedin_profile
+                and not match.get("_title_source") == "web_resolution"
+            ):
                 # Non-LinkedIn source — trust Gemini's correction (likely from LinkedIn data)
+                # BUT never override titles we resolved from press releases / official sources
                 if old_lower != verified_title.lower().strip():
                     logger.info(
                         f"Gemini title correction (non-LinkedIn source): {v.get('name')}: "
                         f"'{old_title}' -> '{verified_title}'"
                     )
                 match["title"] = verified_title
+            elif match.get("_title_source") == "web_resolution":
+                if old_lower != verified_title.lower().strip():
+                    logger.info(
+                        f"Gemini title change BLOCKED (web-resolved): {v.get('name')}: "
+                        f"kept '{old_title}' (Gemini wanted '{verified_title}')"
+                    )
             elif old_lower != verified_title.lower().strip():
                 logger.info(
                     f"Gemini title change BLOCKED: {v.get('name')}: "
@@ -2159,6 +2194,59 @@ async def enrich_lead_contacts(
         result.errors.append(f"LinkedIn snippets failed: {str(e)}")
         logger.error(f"Layer 2 error: {e}")
 
+    # ═══════════════════════════════════════════════════════════════
+    # TITLE RESOLUTION — search for contacts with missing titles
+    # ═══════════════════════════════════════════════════════════════
+    untitled = [c for c in result.contacts if not c.get("title", "").strip()]
+    if untitled:
+        logger.info(f"Title resolution: {len(untitled)} contacts missing titles")
+        for contact in untitled:
+            name = contact.get("name", "").strip()
+            if not name:
+                continue
+            try:
+                query = f'"{name}" "{hotel_name}"'
+                search_results = await _search_web(query, max_results=3)
+                for sr in search_results:
+                    snippet = (
+                        sr.get("snippet", "") + " " + sr.get("title", "")
+                    ).lower()
+                    # Check for direct role mentions
+                    role_keywords = [
+                        "general manager",
+                        "regional vice president",
+                        "vp and general manager",
+                        "regional vp",
+                        "director of operations",
+                        "director of housekeeping",
+                        "executive housekeeper",
+                        "director of rooms",
+                        "director of purchasing",
+                        "executive chef",
+                        "hotel manager",
+                        "resort manager",
+                        "director of food and beverage",
+                        "director of human resources",
+                        "director of people and culture",
+                        "purchasing manager",
+                    ]
+                    for role in role_keywords:
+                        if role in snippet and name.split()[0].lower() in snippet:
+                            # Capitalize properly
+                            resolved_title = role.title()
+                            contact["title"] = resolved_title
+                            contact["_title_source"] = "web_resolution"
+                            logger.info(
+                                f"Title resolved: {name} → {resolved_title} (from web search)"
+                            )
+                            break
+                    if contact.get("_title_source"):
+                        break
+                if not contact.get("_title_source"):
+                    logger.debug(f"Title not resolved for {name}")
+            except Exception as e:
+                logger.debug(f"Title resolution failed for {name}: {e}")
+
     # ═══════════════════════════════════════════════════════════
     # GEMINI AI VERIFICATION — fix false positives before scoring
     # ═══════════════════════════════════════════════════════════
@@ -2173,6 +2261,7 @@ async def enrich_lead_contacts(
                 city=city,
                 state=state,
                 country=country,
+                opening_date=opening_date,
             )
             # Remove rejected contacts
             result.contacts = [

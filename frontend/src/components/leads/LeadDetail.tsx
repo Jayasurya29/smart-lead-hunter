@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useLead, useContacts, useApproveLead, useRejectLead, useRestoreLead, useDeleteLead, useEnrichLead } from '@/hooks/useLeads'
-import { editLead, saveContact, setPrimaryContact } from '@/api/leads'
+import { editLead, saveContact, setPrimaryContact, deleteContact, updateContact, toggleContactScope } from '@/api/leads'
 import { useQueryClient } from '@tanstack/react-query'
 import type { Lead, Contact } from '@/api/types'
 import {
@@ -11,7 +11,7 @@ import {
   X, MapPin, Calendar, Building2, Layers, Globe, ExternalLink,
   User, Mail, Phone, Linkedin, Star, Bookmark, BookmarkCheck,
   Loader2, CheckCircle2, XCircle, Undo2, Trash2, Search, Save,
-  Link2,
+  Link2, Pencil, Check,
 } from 'lucide-react'
 
 /** Safely render any value — prevents empty object {} crashing React */
@@ -288,13 +288,16 @@ function OverviewTab({ lead, contactList, onEnrich, enriching }: {
 
 
 /* ═══════════════════════════════════════════════════
-   CONTACTS TAB
+   CONTACTS TAB — with edit, delete, clean layout
    ═══════════════════════════════════════════════════ */
 
 function ContactsTab({ contacts, loading, leadId, onEnrich, enriching }: {
   contacts: Contact[]; loading: boolean; leadId: number; onEnrich: () => void; enriching: boolean
 }) {
   const qc = useQueryClient()
+  const [editingId, setEditingId] = useState<number | null>(null)
+  const [editForm, setEditForm] = useState<Record<string, string>>({})
+  const [deleting, setDeleting] = useState<number | null>(null)
 
   if (loading) {
     return <div className="space-y-2">{Array.from({ length: 3 }).map((_, i) => <div key={i} className="skeleton h-24 rounded-lg" />)}</div>
@@ -326,128 +329,264 @@ function ContactsTab({ contacts, loading, leadId, onEnrich, enriching }: {
     qc.invalidateQueries({ queryKey: ['contacts', leadId] })
   }
 
+  async function handleToggleScope(contactId: number, currentScope: string) {
+    const cycle = ['hotel_specific', 'chain_area', 'chain_corporate']
+    const idx = cycle.indexOf(currentScope)
+    const next = cycle[(idx + 1) % cycle.length]
+    await toggleContactScope(leadId, contactId, next)
+    qc.invalidateQueries({ queryKey: ['contacts', leadId] })
+    qc.invalidateQueries({ queryKey: ['lead', leadId] })
+  }
+
+  async function handleDelete(contactId: number) {
+    setDeleting(contactId)
+    try {
+      await deleteContact(leadId, contactId)
+      qc.invalidateQueries({ queryKey: ['contacts', leadId] })
+      qc.invalidateQueries({ queryKey: ['lead', leadId] })
+    } catch { /* ignore */ }
+    setDeleting(null)
+  }
+
+  function startEdit(c: Contact) {
+    setEditingId(c.id)
+    setEditForm({
+      name: c.name || '',
+      title: c.title || '',
+      organization: c.organization || '',
+      email: c.email || '',
+      phone: c.phone || '',
+      linkedin: c.linkedin || '',
+    })
+  }
+
+  async function saveEdit() {
+    if (!editingId) return
+    try {
+      await updateContact(leadId, editingId, editForm)
+      qc.invalidateQueries({ queryKey: ['contacts', leadId] })
+    } catch { /* ignore */ }
+    setEditingId(null)
+    setEditForm({})
+  }
+
+  function cancelEdit() {
+    setEditingId(null)
+    setEditForm({})
+  }
+
+  function handleEditKey(e: React.KeyboardEvent) {
+    if (e.key === 'Enter') saveEdit()
+    if (e.key === 'Escape') cancelEdit()
+  }
+
   return (
     <div className="space-y-2.5 animate-fadeIn">
       {contacts.map((c) => (
         <div
           key={c.id}
           className={cn(
-            'rounded-lg border p-4 transition',
+            'rounded-lg border p-4 transition relative group',
             c.is_primary
               ? 'border-navy-200 bg-navy-50/30'
               : 'border-stone-100 hover:border-stone-200',
           )}
         >
+          {/* Top-right action icons — visible on hover */}
+          <div className="absolute top-3 right-3 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition">
+            {editingId !== c.id && (
+              <button
+                onClick={() => startEdit(c)}
+                className="p-1.5 text-stone-400 hover:text-navy-600 hover:bg-stone-100 rounded-md transition"
+                title="Edit contact"
+              >
+                <Pencil className="w-3 h-3" />
+              </button>
+            )}
+            <button
+              onClick={() => handleDelete(c.id)}
+              disabled={deleting === c.id}
+              className="p-1.5 text-stone-400 hover:text-red-600 hover:bg-red-50 rounded-md transition disabled:opacity-50"
+              title="Delete contact"
+            >
+              {deleting === c.id ? <Loader2 className="w-3 h-3 animate-spin" /> : <Trash2 className="w-3 h-3" />}
+            </button>
+          </div>
+
           <div className="flex items-start gap-3">
             {/* Avatar */}
             <div className={cn(
-              'w-9 h-9 rounded-full flex items-center justify-center flex-shrink-0 text-sm font-bold',
+              'w-9 h-9 rounded-full flex items-center justify-center flex-shrink-0 text-sm font-bold mt-0.5',
               c.is_primary ? 'bg-navy-600 text-white' : 'bg-stone-200 text-stone-600',
             )}>
               {(c.name || '?')[0].toUpperCase()}
             </div>
 
-            <div className="flex-1 min-w-0">
-              {/* Name + Score/Confidence */}
-              <div className="flex items-center gap-2">
-                <span className="text-sm font-semibold text-navy-900">{c.name}</span>
-                {c.is_primary && <Star className="w-3.5 h-3.5 text-gold-500 fill-gold-500" />}
-                {c.score > 0 && (
-                  <div className="flex flex-col items-end ml-auto">
-                    <span className="text-sm font-bold text-navy-900">{c.score}</span>
-                    {c.confidence && (
-                      <span className={cn(
-                        'text-2xs font-bold uppercase',
-                        c.confidence === 'high' ? 'text-emerald-600' :
-                        c.confidence === 'medium' ? 'text-gold-600' : 'text-stone-400',
-                      )}>
-                        {c.confidence}
+            <div className="flex-1 min-w-0 pr-16">
+              {editingId === c.id ? (
+                /* ── EDIT MODE ── */
+                <div className="space-y-2" onKeyDown={handleEditKey}>
+                  <div className="grid grid-cols-2 gap-2">
+                    <input
+                      value={editForm.name || ''}
+                      onChange={(e) => setEditForm(f => ({ ...f, name: e.target.value }))}
+                      placeholder="Name"
+                      className="col-span-2 h-8 px-2.5 text-sm text-navy-900 bg-white border border-stone-200 rounded-md outline-none focus:border-navy-400 focus:ring-1 focus:ring-navy-200"
+                      autoFocus
+                    />
+                    <input
+                      value={editForm.title || ''}
+                      onChange={(e) => setEditForm(f => ({ ...f, title: e.target.value }))}
+                      placeholder="Title / Role"
+                      className="col-span-2 h-8 px-2.5 text-sm text-navy-900 bg-white border border-stone-200 rounded-md outline-none focus:border-navy-400 focus:ring-1 focus:ring-navy-200"
+                    />
+                    <input
+                      value={editForm.organization || ''}
+                      onChange={(e) => setEditForm(f => ({ ...f, organization: e.target.value }))}
+                      placeholder="Organization"
+                      className="col-span-2 h-8 px-2.5 text-sm text-navy-900 bg-white border border-stone-200 rounded-md outline-none focus:border-navy-400 focus:ring-1 focus:ring-navy-200"
+                    />
+                    <input
+                      value={editForm.email || ''}
+                      onChange={(e) => setEditForm(f => ({ ...f, email: e.target.value }))}
+                      placeholder="Email"
+                      className="h-8 px-2.5 text-xs text-navy-900 bg-white border border-stone-200 rounded-md outline-none focus:border-navy-400 focus:ring-1 focus:ring-navy-200"
+                    />
+                    <input
+                      value={editForm.phone || ''}
+                      onChange={(e) => setEditForm(f => ({ ...f, phone: e.target.value }))}
+                      placeholder="Phone"
+                      className="h-8 px-2.5 text-xs text-navy-900 bg-white border border-stone-200 rounded-md outline-none focus:border-navy-400 focus:ring-1 focus:ring-navy-200"
+                    />
+                    <input
+                      value={editForm.linkedin || ''}
+                      onChange={(e) => setEditForm(f => ({ ...f, linkedin: e.target.value }))}
+                      placeholder="LinkedIn URL"
+                      className="col-span-2 h-8 px-2.5 text-xs text-navy-900 bg-white border border-stone-200 rounded-md outline-none focus:border-navy-400 focus:ring-1 focus:ring-navy-200"
+                    />
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button onClick={saveEdit} className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold bg-navy-900 text-white rounded-md hover:bg-navy-800 transition">
+                      <Check className="w-3 h-3" /> Save
+                    </button>
+                    <button onClick={cancelEdit} className="px-3 py-1.5 text-xs font-medium text-stone-500 hover:text-stone-700 transition">
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                /* ── VIEW MODE ── */
+                <>
+                  {/* Row 1: Name + Primary star + Score */}
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm font-semibold text-navy-900">{c.name}</span>
+                    {c.is_primary && <Star className="w-3.5 h-3.5 text-gold-500 fill-gold-500" />}
+                    {c.score > 0 && (
+                      <div className="flex flex-col items-end ml-auto">
+                        <span className="text-sm font-bold text-navy-900">{c.score}</span>
+                        {c.confidence && (
+                          <span className={cn(
+                            'text-2xs font-bold uppercase',
+                            c.confidence === 'high' ? 'text-emerald-600' :
+                            c.confidence === 'medium' ? 'text-gold-600' : 'text-stone-400',
+                          )}>
+                            {c.confidence}
+                          </span>
+                        )}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Row 2: Title */}
+                  {c.title && <p className="text-xs text-stone-500 mt-0.5">{c.title}</p>}
+
+                  {/* Row 3: Organization */}
+                  {c.organization && <p className="text-xs text-stone-400">{c.organization}</p>}
+
+                  {/* Row 4: Contact links */}
+                  <div className="flex items-center gap-3 mt-2 flex-wrap">
+                    {c.linkedin && (
+                      <a href={c.linkedin} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium text-blue-700 bg-blue-50 rounded-md hover:bg-blue-100 transition">
+                        <Linkedin className="w-3.5 h-3.5" /> LinkedIn
+                      </a>
+                    )}
+                    {c.email && (
+                      <a href={`mailto:${c.email}`} className="flex items-center gap-1.5 text-xs text-navy-600 hover:underline">
+                        <Mail className="w-3.5 h-3.5" /> {c.email}
+                      </a>
+                    )}
+                    {c.phone && (
+                      <a href={`tel:${c.phone}`} className="flex items-center gap-1.5 text-xs text-navy-600 hover:underline">
+                        <Phone className="w-3.5 h-3.5" /> {c.phone}
+                      </a>
+                    )}
+                  </div>
+
+                  {/* Row 5: Scope badge + evidence */}
+                  {(c.scope || c.source_detail) && (
+                    <div className="flex items-center gap-2 mt-2.5 flex-wrap">
+                      {c.scope && (
+                        <button
+                          onClick={() => handleToggleScope(c.id, c.scope || 'chain_area')}
+                          title="Click to cycle scope"
+                          className={cn(
+                            'text-2xs font-bold px-2 py-0.5 rounded-full uppercase flex-shrink-0 cursor-pointer transition hover:ring-2 hover:ring-offset-1',
+                            c.scope === 'hotel_specific' ? 'bg-emerald-50 text-emerald-600 hover:ring-emerald-300' :
+                            c.scope === 'chain_area' ? 'bg-amber-50 text-amber-600 hover:ring-amber-300' :
+                            'bg-stone-100 text-stone-500 hover:ring-stone-300',
+                          )}
+                        >
+                          {c.scope === 'hotel_specific' ? 'Hotel Specific' : c.scope === 'chain_area' ? 'Chain/Area' : c.scope.replace(/_/g, ' ')}
+                        </button>
+                      )}
+                      {c.source_detail && typeof c.source_detail === 'string' && (
+                        <span className="text-xs text-stone-500">{c.source_detail}</span>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Row 6: Evidence link */}
+                  {c.evidence_url && typeof c.evidence_url === 'string' && (
+                    <a
+                      href={c.evidence_url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="flex items-center gap-1.5 mt-1.5 text-xs text-blue-600 hover:underline"
+                    >
+                      <ExternalLink className="w-3 h-3" /> View Evidence
+                    </a>
+                  )}
+
+                  {/* Row 7: Action buttons */}
+                  <div className="flex items-center gap-2 mt-2.5">
+                    <button
+                      onClick={() => handleSave(c.id)}
+                      className={cn(
+                        'inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium rounded-md border transition',
+                        c.is_saved
+                          ? 'border-navy-200 bg-navy-50 text-navy-700'
+                          : 'border-stone-200 text-stone-500 hover:bg-stone-50',
+                      )}
+                    >
+                      {c.is_saved ? <BookmarkCheck className="w-3 h-3" /> : <Bookmark className="w-3 h-3" />}
+                      {c.is_saved ? 'Saved' : 'Save'}
+                    </button>
+                    {!c.is_primary && (
+                      <button
+                        onClick={() => handleSetPrimary(c.id)}
+                        className="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium rounded-md border border-stone-200 text-stone-500 hover:bg-stone-50 transition"
+                      >
+                        <Star className="w-3 h-3" /> Set Primary
+                      </button>
+                    )}
+                    {c.is_primary && (
+                      <span className="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-semibold rounded-md bg-gold-50 text-gold-600 border border-gold-200">
+                        <Star className="w-3 h-3 fill-gold-500" /> Primary
                       </span>
                     )}
                   </div>
-                )}
-              </div>
-              {/* Title */}
-              {c.title && <p className="text-xs text-stone-500 mt-0.5">{c.title}</p>}
-              {/* Organization */}
-              {c.organization && <p className="text-xs text-stone-400 mt-0.5">{c.organization}</p>}
-
-              {/* Contact links */}
-              <div className="flex items-center gap-3 mt-2 flex-wrap">
-                {c.linkedin && (
-                  <a href={c.linkedin} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium text-blue-700 bg-blue-50 rounded-md hover:bg-blue-100 transition">
-                    <Linkedin className="w-3.5 h-3.5" /> LinkedIn
-                  </a>
-                )}
-                {c.email && (
-                  <a href={`mailto:${c.email}`} className="flex items-center gap-1.5 text-xs text-navy-600 hover:underline">
-                    <Mail className="w-3.5 h-3.5" /> {c.email}
-                  </a>
-                )}
-                {c.phone && (
-                  <a href={`tel:${c.phone}`} className="flex items-center gap-1.5 text-xs text-navy-600 hover:underline">
-                    <Phone className="w-3.5 h-3.5" /> {c.phone}
-                  </a>
-                )}
-              </div>
-
-              {/* Scope + Source detail */}
-              {(c.scope || c.source_detail) && (
-                <div className="flex items-start gap-2 mt-2.5 flex-wrap">
-                  {c.scope && (
-                    <span className={cn(
-                      'text-2xs font-bold px-2 py-0.5 rounded-full uppercase flex-shrink-0',
-                      c.scope === 'hotel_specific' ? 'bg-emerald-50 text-emerald-600' : 'bg-stone-100 text-stone-500',
-                    )}>
-                      {c.scope === 'hotel_specific' ? 'Hotel Specific' : c.scope === 'chain_area' ? 'Chain/Area' : c.scope.replace(/_/g, ' ')}
-                    </span>
-                  )}
-                  {c.source_detail && typeof c.source_detail === 'string' && (
-                    <span className="text-xs text-stone-500">{c.source_detail}</span>
-                  )}
-                </div>
+                </>
               )}
-
-              {/* Evidence URL */}
-              {c.evidence_url && typeof c.evidence_url === 'string' && (
-                <a
-                  href={c.evidence_url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="flex items-center gap-1.5 mt-1.5 text-xs text-blue-600 hover:underline"
-                >
-                  <ExternalLink className="w-3 h-3" /> View Evidence
-                </a>
-              )}
-
-              {/* Actions */}
-              <div className="flex items-center gap-2 mt-2.5">
-                <button
-                  onClick={() => handleSave(c.id)}
-                  className={cn(
-                    'inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium rounded-md border transition',
-                    c.is_saved
-                      ? 'border-navy-200 bg-navy-50 text-navy-700'
-                      : 'border-stone-200 text-stone-500 hover:bg-stone-50',
-                  )}
-                >
-                  {c.is_saved ? <BookmarkCheck className="w-3 h-3" /> : <Bookmark className="w-3 h-3" />}
-                  {c.is_saved ? 'Saved' : 'Save'}
-                </button>
-                {!c.is_primary && (
-                  <button
-                    onClick={() => handleSetPrimary(c.id)}
-                    className="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium rounded-md border border-stone-200 text-stone-500 hover:bg-stone-50 transition"
-                  >
-                    <Star className="w-3 h-3" /> Set Primary
-                  </button>
-                )}
-                {c.is_primary && (
-                  <span className="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-semibold rounded-md bg-gold-50 text-gold-600 border border-gold-200">
-                    <Star className="w-3 h-3 fill-gold-500" /> Primary
-                  </span>
-                )}
-              </div>
             </div>
           </div>
         </div>
@@ -584,7 +723,7 @@ function SourcesTab({ lead }: { lead: Lead }) {
       : typeof lead.sources === 'string'
         ? lead.sources.split(',').map((s) => s.trim()).filter(Boolean)
         : []
-    arr.forEach((u) => {
+    arr.forEach((u: any) => {
       if (u && !sourceList.includes(u)) sourceList.push(u)
     })
   }
