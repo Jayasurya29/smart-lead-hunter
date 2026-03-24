@@ -51,6 +51,7 @@ jobs:
 
       - name: Install dependencies
         run: |
+          pip install crawl4ai --no-deps
           pip install -r requirements.txt
           pip install pytest pytest-asyncio pytest-cov ruff pip-audit
 
