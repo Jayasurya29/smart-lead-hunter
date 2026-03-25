@@ -86,11 +86,10 @@ export default function FilterBar({ filters, onChange }: Props) {
         value={filters.timeline} onChange={(v) => set('timeline', v)} placeholder="Timeline"
         isActive={!!filters.timeline}
         options={[
-          { value: 'hot',    label: 'Hot (6-12mo)' },
           { value: 'urgent', label: 'Urgent (3-6mo)' },
+          { value: 'hot',    label: 'Hot (6-12mo)' },
           { value: 'warm',   label: 'Warm (12-18mo)' },
           { value: 'cool',   label: 'Cool (18mo+)' },
-          { value: 'late',   label: 'Late (0-3mo)' },
           { value: 'tbd',    label: 'TBD' },
         ]}
       />

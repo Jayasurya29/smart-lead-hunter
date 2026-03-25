@@ -7,12 +7,14 @@ import {
 
 interface Props {
   onFilter?: (action: { tab?: string; timeline?: string }) => void
+  activeTab?: string
+  activeTimeline?: string
 }
 
 const STATS_CONFIG = [
   { key: 'new_leads',       label: 'Pipeline',  icon: Building2,      bg: 'bg-navy-50',    text: 'text-navy-600',    accent: 'border-navy-100',    action: { tab: 'pipeline' } },
-  { key: 'hot_leads',       label: 'Hot',        icon: Flame,          bg: 'bg-coral-50',   text: 'text-coral-500',   accent: 'border-coral-100',   action: { tab: 'pipeline', timeline: 'hot' } },
   { key: 'urgent_leads',    label: 'Urgent',     icon: Zap,            bg: 'bg-gold-50',    text: 'text-gold-600',    accent: 'border-gold-100',    action: { tab: 'pipeline', timeline: 'urgent' } },
+  { key: 'hot_leads',       label: 'Hot',        icon: Flame,          bg: 'bg-coral-50',   text: 'text-coral-500',   accent: 'border-coral-100',   action: { tab: 'pipeline', timeline: 'hot' } },
   { key: 'warm_leads',      label: 'Warm',       icon: ThermometerSun, bg: 'bg-gold-50',    text: 'text-gold-500',    accent: 'border-gold-100',    action: { tab: 'pipeline', timeline: 'warm' } },
   { key: 'cool_leads',      label: 'Cool',       icon: Snowflake,      bg: 'bg-sky-50',     text: 'text-sky-600',     accent: 'border-sky-100',     action: { tab: 'pipeline', timeline: 'cool' } },
   { key: 'total_leads',     label: 'Total',      icon: Globe,          bg: 'bg-stone-100',  text: 'text-stone-500',   accent: 'border-stone-200',   action: { tab: 'pipeline' } },
@@ -20,7 +22,7 @@ const STATS_CONFIG = [
   { key: 'leads_this_week', label: 'This Week',  icon: CalendarPlus,   bg: 'bg-violet-50',  text: 'text-violet-600',  accent: 'border-violet-100',  action: { tab: 'pipeline' } },
 ] as const
 
-export default function StatsCards({ onFilter }: Props) {
+export default function StatsCards({ onFilter, activeTab, activeTimeline }: Props) {
   const { data: stats, isLoading } = useStats()
 
   if (isLoading || !stats) {
@@ -43,8 +45,11 @@ export default function StatsCards({ onFilter }: Props) {
             key={cfg.key}
             onClick={() => onFilter?.(cfg.action)}
             className={cn(
-              'stat-card bg-white rounded-lg border px-3 py-2.5 flex items-center gap-2.5 cursor-pointer animate-slideUp select-none',
+              'stat-card rounded-lg border px-3 py-2.5 flex items-center gap-2.5 cursor-pointer animate-slideUp select-none',
               cfg.accent,
+              (activeTab === cfg.action.tab && activeTimeline === ((cfg.action as any).timeline || ''))
+                ? `${cfg.bg} ring-2 ring-navy-400 shadow-md`
+                : 'bg-white hover:shadow-sm',
             )}
             style={{ animationDelay: `${i * 0.04}s`, animationFillMode: 'both' }}
           >

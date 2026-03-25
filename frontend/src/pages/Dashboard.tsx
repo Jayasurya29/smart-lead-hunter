@@ -6,13 +6,13 @@ import LeadTable from '@/components/leads/LeadTable'
 import LeadDetail from '@/components/leads/LeadDetail'
 import FilterBar, { DEFAULT_FILTERS, type Filters } from '@/components/leads/FilterBar'
 import { cn } from '@/lib/utils'
-import { Inbox, CheckCircle2, XCircle, Trash2, Search, X } from 'lucide-react'
+import { Inbox, CheckCircle2, XCircle, Clock, Search, X } from 'lucide-react'
 
 const TABS: { key: LeadTab; label: string; icon: React.ElementType }[] = [
   { key: 'pipeline', label: 'Pipeline', icon: Inbox },
   { key: 'approved', label: 'Approved', icon: CheckCircle2 },
   { key: 'rejected', label: 'Rejected', icon: XCircle },
-  { key: 'deleted',  label: 'Deleted',  icon: Trash2 },
+  { key: 'expired',  label: 'Expired',  icon: Clock },
 ]
 
 export default function Dashboard() {
@@ -62,7 +62,7 @@ export default function Dashboard() {
   return (
     <div className="h-full flex flex-col">
       <div className="px-4 pt-3 pb-2 flex-shrink-0">
-        <StatsCards onFilter={handleStatClick} />
+        <StatsCards onFilter={handleStatClick} activeTab={tab} activeTimeline={filters.timeline} />
       </div>
 
       <div className="px-4 pb-2 flex-shrink-0 space-y-2.5">

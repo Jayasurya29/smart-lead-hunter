@@ -247,7 +247,9 @@ async def rescore_all_leads(session: AsyncSession) -> Dict:
     from app.models.potential_lead import PotentialLead
 
     result = await session.execute(
-        select(PotentialLead.id).where(PotentialLead.status != "deleted")
+        select(PotentialLead.id).where(
+            PotentialLead.status.notin_(["deleted", "expired", "rejected"])
+        )
     )
     lead_ids = [row[0] for row in result.all()]
 

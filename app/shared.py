@@ -181,9 +181,7 @@ async def checked_json(request: Request, max_size: int = MAX_BODY_SIZE) -> dict:
     try:
         data = json.loads(body)
     except (json.JSONDecodeError, ValueError):
-        raise HTTPException(
-            status_code=400, detail="Invalid JSON in request body"
-        )
+        raise HTTPException(status_code=400, detail="Invalid JSON in request body")
     if not isinstance(data, dict):
         raise HTTPException(
             status_code=400, detail="Request body must be a JSON object"
@@ -441,8 +439,8 @@ async def get_dashboard_stats(db: AsyncSession) -> dict:
             func.sum(case((PotentialLead.created_at >= week_start, 1), else_=0)).label(
                 "this_week"
             ),
-            func.sum(case((PotentialLead.status == "deleted", 1), else_=0)).label(
-                "deleted"
+            func.sum(case((PotentialLead.status == "expired", 1), else_=0)).label(
+                "expired"
             ),
         )
     )
@@ -471,7 +469,7 @@ async def get_dashboard_stats(db: AsyncSession) -> dict:
         "cool_leads": lr.cool or 0,
         "leads_today": lr.today or 0,
         "leads_this_week": lr.this_week or 0,
-        "deleted_leads": lr.deleted or 0,
+        "expired_leads": lr.expired or 0,
         "total_sources": sr.total or 0,
         "active_sources": sr.active or 0,
         "healthy_sources": sr.healthy or 0,

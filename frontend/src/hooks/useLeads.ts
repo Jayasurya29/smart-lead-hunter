@@ -9,7 +9,7 @@ const STATUS_MAP: Record<LeadTab, string> = {
   pipeline: 'new',
   approved: 'approved',
   rejected: 'rejected',
-  deleted:  'deleted',
+  expired:  'expired',
 }
 
 export function useLeads(

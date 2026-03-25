@@ -17,6 +17,7 @@ export interface Lead {
   opening_year: number | null
   room_count: number | null
   lead_score: number | null
+  timeline_label: string | null
   status: string
   management_company: string | null
   developer: string | null
@@ -66,7 +67,7 @@ export interface DashboardStats {
   healthy_sources: number
   leads_today: number
   leads_this_week: number
-  deleted_leads: number
+  expired_leads: number
 }
 
 /* ── Contacts ── */
@@ -126,4 +127,4 @@ export interface AuthResponse {
 
 /* ── Shared ── */
 
-export type LeadTab = 'pipeline' | 'approved' | 'rejected' | 'deleted'
+export type LeadTab = 'pipeline' | 'approved' | 'rejected' | 'expired'

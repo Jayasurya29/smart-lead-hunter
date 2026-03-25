@@ -50,49 +50,19 @@ export function getScoreRing(score: number | null | undefined): string {
 /* ── Timeline ── */
 
 export function getTimelineLabel(lead: {
-  opening_date?: string | null
-  opening_year?: number | string | null
+  timeline_label?: string | null
 }): string {
-  const now = new Date()
-  const currentYear = now.getFullYear()
-  const currentMonth = now.getMonth() + 1
-
-  // Try to extract year (and optional month) from opening_date string
-  const raw = lead.opening_date || ''
-  const match = raw.match(/(\d{4})[-/]?(\d{1,2})?/)
-
-  let parsedYear: number | null = null
-  let parsedMonth: number | null = null
-
-  if (match) {
-    parsedYear = Number(match[1])
-    parsedMonth = match[2] ? Number(match[2]) : null
+  const label = (lead.timeline_label || 'TBD').toUpperCase()
+  const MAP: Record<string, string> = {
+    'URGENT': 'Urgent',
+    'HOT': 'Hot',
+    'WARM': 'Warm',
+    'COOL': 'Cool',
+    'LATE': 'Late',
+    'EXPIRED': 'Expired',
+    'TBD': 'TBD',
   }
-
-  // Also check opening_year field as fallback
-  if (!parsedYear && lead.opening_year) {
-    parsedYear = Number(lead.opening_year)
-  }
-
-  // If we have month-level precision, calculate months away
-  if (parsedYear && parsedMonth) {
-    const monthsAway = (parsedYear - currentYear) * 12 + (parsedMonth - currentMonth)
-    if (monthsAway <= 3) return 'Late'
-    if (monthsAway <= 6) return 'Urgent'
-    if (monthsAway <= 12) return 'Hot'
-    if (monthsAway <= 18) return 'Warm'
-    return 'Cool'
-  }
-
-  // Year-only: use whatever year we found
-  if (parsedYear) {
-    if (parsedYear < currentYear) return 'Late'
-    if (parsedYear === currentYear) return 'Hot'
-    if (parsedYear === currentYear + 1) return 'Warm'
-    return 'Cool'
-  }
-
-  return 'TBD'
+  return MAP[label] || 'TBD'
 }
 
 export function getTimelineColor(label: string): string {

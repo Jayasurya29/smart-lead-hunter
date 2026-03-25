@@ -24,7 +24,7 @@ function safe(val: any): string {
 
 interface Props {
   leadId: number
-  tab: 'pipeline' | 'approved' | 'rejected' | 'deleted'
+  tab: 'pipeline' | 'approved' | 'rejected' | 'expired'
   onClose: () => void
 }
 

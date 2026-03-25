@@ -117,6 +117,18 @@ _SEASON_MONTHS = {
     "autumn": 11,
     # "winter" = Q1 of that year (Jan/Feb), NOT Q4
     "winter": 2,
+    # Compound seasons (checked first due to dict ordering)
+    "early summer": 6,
+    "late summer": 9,
+    "early spring": 4,
+    "late spring": 5,
+    "early fall": 9,
+    "late fall": 11,
+    "early winter": 1,
+    "late winter": 3,
+    "mid summer": 7,
+    "mid spring": 4,
+    "mid fall": 10,
     # Vague qualifiers
     "early": 3,
     "mid": 6,
@@ -140,8 +152,8 @@ def parse_month_from_text(text: str, default: int = 6) -> int:
         if name in text_lower:
             return num
 
-    # Try quarter/season keywords
-    for keyword, month in _SEASON_MONTHS.items():
+    # Try quarter/season keywords (longest first so "early summer" beats "summer")
+    for keyword, month in sorted(_SEASON_MONTHS.items(), key=lambda x: -len(x[0])):
         if keyword in text_lower:
             return month
 
@@ -205,7 +217,7 @@ def get_timeline_label(opening_date: str) -> str:
     if months < 0:
         return "EXPIRED"
     elif months <= 3:
-        return "LATE"
+        return "EXPIRED"
     elif months <= 6:
         return "URGENT"
     elif months <= 12:

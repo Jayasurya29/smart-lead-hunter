@@ -30,7 +30,7 @@ VALID_STATUSES = {
     "new",
     "approved",
     "rejected",
-    "deleted",
+    "expired",
     "claimed",
     "pending",
     "pushed",
@@ -284,6 +284,7 @@ class LeadResponse(LeadBase):
     id: int
     lead_score: Optional[int] = None
     score_breakdown: Optional[dict] = None
+    timeline_label: Optional[str] = None
     status: str
     source_url: Optional[str] = None
     source_site: Optional[str] = None
@@ -474,4 +475,4 @@ class StatsResponse(BaseModel):
     healthy_sources: int
     leads_today: int
     leads_this_week: int
-    deleted_leads: int = 0
+    expired_leads: int = 0

@@ -484,13 +484,36 @@ def daily_health_check(self) -> Dict[str, Any]:
                 intel.save()
                 source.source_intelligence = source.source_intelligence
 
+            # Recalculate timeline labels & auto-expire LATE leads
+            from app.services.utils import get_timeline_label
+
+            active_leads = await session.execute(
+                select(PotentialLead).where(PotentialLead.status == "new")
+            )
+            timeline_updated = 0
+            timeline_expired = 0
+            for lead in active_leads.scalars().all():
+                new_label = get_timeline_label(lead.opening_date)
+                if new_label != lead.timeline_label:
+                    lead.timeline_label = new_label
+                    if new_label == "EXPIRED":
+                        lead.status = "expired"
+                        timeline_expired += 1
+                    timeline_updated += 1
+            results["timeline_updated"] = timeline_updated
+            results["timeline_expired"] = timeline_expired
+            if timeline_updated:
+                logger.info(
+                    f"  Timeline: {timeline_updated} updated, {timeline_expired} expired"
+                )
+
             # Rescore stale leads
             week_ago = local_now() - timedelta(days=7)
             stale = await session.execute(
                 select(PotentialLead.id)
                 .where(
                     and_(
-                        PotentialLead.status != "deleted",
+                        PotentialLead.status.notin_(["deleted", "expired", "rejected"]),
                         or_(
                             PotentialLead.updated_at < week_ago,
                             PotentialLead.updated_at.is_(None),
