@@ -92,6 +92,7 @@ class TestLeadResponseSchema:
         lead = MagicMock()
         lead.id = 1
         lead.hotel_name = "Test Hotel"
+        lead.timeline_label = "HOT"
         lead.status = "new"
         lead.lead_score = 75
         lead.city = "Miami"
