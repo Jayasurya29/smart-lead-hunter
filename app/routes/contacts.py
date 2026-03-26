@@ -11,9 +11,8 @@ import logging
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse
-from sqlalchemy import select, update
+from sqlalchemy import case, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
-
 from app.database import get_db, async_session
 from app.models import PotentialLead
 from app.models.lead_contact import LeadContact
@@ -258,9 +257,14 @@ async def list_contacts(lead_id: int, db: AsyncSession = Depends(get_db)):
         select(LeadContact)
         .where(LeadContact.lead_id == lead_id)
         .order_by(
-            LeadContact.is_saved.desc(),
             LeadContact.is_primary.desc(),
+            case(
+                (LeadContact.scope == "hotel_specific", 0),
+                (LeadContact.scope == "chain_area", 1),
+                else_=2,
+            ),
             LeadContact.score.desc(),
+            LeadContact.is_saved.desc(),
         )
     )
     return [c.to_dict() for c in result.scalars().all()]
@@ -351,13 +355,42 @@ async def update_contact(
     contact = result.scalar_one_or_none()
     if not contact:
         raise HTTPException(status_code=404, detail="Contact not found")
-    allowed = {"name", "title", "email", "phone", "linkedin", "organization"}
+    allowed = {
+        "name",
+        "title",
+        "email",
+        "phone",
+        "linkedin",
+        "organization",
+        "evidence_url",
+    }
     for field, value in body.items():
         if field in allowed:
             setattr(contact, field, value)
+    # Rescore contact based on updated title/scope
+    from app.config.sap_title_classifier import title_classifier
+
+    if contact.title:
+        classification = title_classifier.classify(contact.title)
+        scope = contact.scope or "unknown"
+        if scope == "hotel_specific":
+            contact.score = 30 if classification.tier.value <= 5 else 8
+            contact.confidence = "high"
+        elif scope == "chain_area":
+            contact.score = 12 if classification.tier.value <= 5 else 5
+            contact.confidence = "medium"
+        else:
+            contact.score = 5
+            contact.confidence = "low"
+        contact.tier = classification.tier.name
     contact.updated_at = local_now()
+    await db.flush()
+    try:
+        await rescore_lead(lead_id, db)
+    except Exception:
+        pass
     await db.commit()
-    return {"status": "updated", "contact_id": contact_id}
+    return {"status": "updated", "contact_id": contact_id, "score": contact.score}
 
 
 @router.post("/api/dashboard/leads/{lead_id}/contacts/{contact_id}/toggle-scope")
@@ -406,6 +439,82 @@ async def toggle_contact_scope(
         pass
     await db.commit()
     return {"status": "updated", "scope": new_scope, "score": contact.score}
+
+
+@router.post("/api/dashboard/leads/{lead_id}/contacts/add")
+async def add_contact(
+    lead_id: int,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    _csrf=Depends(require_ajax),
+):
+    """Manually add a contact to a lead."""
+    body = await request.json()
+    name = (body.get("name") or "").strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="Contact name is required")
+
+    # Check lead exists
+    lead_result = await db.execute(
+        select(PotentialLead).where(PotentialLead.id == lead_id)
+    )
+    lead = lead_result.scalar_one_or_none()
+    if not lead:
+        raise HTTPException(status_code=404, detail="Lead not found")
+
+    # Score the contact
+    from app.config.sap_title_classifier import title_classifier
+
+    title = (body.get("title") or "").strip()
+    scope = body.get("scope", "hotel_specific")
+    score = 5
+    confidence = "low"
+    tier_name = "UNKNOWN"
+    if title:
+        classification = title_classifier.classify(title)
+        tier_name = classification.tier.name
+        if scope == "hotel_specific":
+            score = 30 if classification.tier.value <= 5 else 8
+            confidence = "high"
+        elif scope == "chain_area":
+            score = 12 if classification.tier.value <= 5 else 5
+            confidence = "medium"
+
+    contact = LeadContact(
+        lead_id=lead_id,
+        name=name,
+        title=title or None,
+        email=(body.get("email") or "").strip() or None,
+        phone=(body.get("phone") or "").strip() or None,
+        linkedin=(body.get("linkedin") or "").strip() or None,
+        organization=(body.get("organization") or "").strip() or None,
+        scope=scope,
+        confidence=confidence,
+        tier=tier_name,
+        score=score,
+        is_primary=False,
+        is_saved=True,
+        found_via="manual",
+        source_detail="Manually added",
+        evidence_url=(body.get("evidence_url") or "").strip() or None,
+        last_enriched_at=local_now(),
+    )
+    db.add(contact)
+
+    # Update lead primary contact if none exists
+    if not lead.contact_name:
+        lead.contact_name = name
+        lead.contact_title = title or None
+        lead.contact_email = (body.get("email") or "").strip() or None
+        lead.contact_phone = (body.get("phone") or "").strip() or None
+
+    await db.flush()
+    try:
+        await rescore_lead(lead_id, db)
+    except Exception:
+        pass
+    await db.commit()
+    return {"status": "created", "contact_id": contact.id, "score": score}
 
 
 @router.post("/api/dashboard/leads/{lead_id}/contacts/{contact_id}/set-primary")

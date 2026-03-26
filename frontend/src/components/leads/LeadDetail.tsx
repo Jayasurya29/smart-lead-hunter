@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useLead, useContacts, useApproveLead, useRejectLead, useRestoreLead, useDeleteLead, useEnrichLead } from '@/hooks/useLeads'
-import { editLead, saveContact, setPrimaryContact, deleteContact, updateContact, toggleContactScope } from '@/api/leads'
+import { editLead, saveContact, setPrimaryContact, deleteContact, updateContact, toggleContactScope, addContact } from '@/api/leads'
 import { useQueryClient } from '@tanstack/react-query'
 import type { Lead, Contact } from '@/api/types'
 import {
@@ -38,7 +38,6 @@ export default function LeadDetail({ leadId, tab, onClose }: Props) {
   const approveMut = useApproveLead()
   const rejectMut  = useRejectLead()
   const restoreMut = useRestoreLead()
-  const deleteMut  = useDeleteLead()
   const enrichMut  = useEnrichLead()
 
   const isNew      = tab === 'pipeline'
@@ -131,43 +130,53 @@ export default function LeadDetail({ leadId, tab, onClose }: Props) {
           {isNew && (
             <>
               <button
-                onClick={() => approveMut.mutate(leadId)}
+                onClick={() => {
+                  if (window.confirm(`Approve "${lead.hotel_name}" and push to Insightly CRM?`)) {
+                    approveMut.mutate(leadId)
+                  }
+                }}
                 disabled={approveMut.isPending}
                 className="flex items-center gap-1.5 px-4 py-2 text-xs font-semibold rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 transition disabled:opacity-50"
               >
                 {approveMut.isPending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <CheckCircle2 className="w-3.5 h-3.5" />}
                 Approve
               </button>
+
               <button
-                onClick={() => rejectMut.mutate({ id: leadId })}
+                onClick={() => {
+                  if (window.confirm(`Reject "${lead.hotel_name}"? It will be moved to the Rejected tab.`)) {
+                    rejectMut.mutate({ id: leadId })
+                  }
+                }}
                 disabled={rejectMut.isPending}
                 className="flex items-center gap-1.5 px-4 py-2 text-xs font-semibold rounded-lg border border-stone-200 text-stone-600 hover:bg-stone-50 transition disabled:opacity-50"
               >
                 {rejectMut.isPending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <XCircle className="w-3.5 h-3.5" />}
                 Reject
               </button>
-              <button
-                onClick={() => { deleteMut.mutate(leadId); onClose() }}
-                disabled={deleteMut.isPending}
-                className="flex items-center gap-1.5 px-3 py-2 text-xs font-medium rounded-lg border border-stone-200 text-stone-400 hover:bg-stone-50 transition disabled:opacity-50 ml-auto"
-              >
-                <Trash2 className="w-3.5 h-3.5" />
-              </button>
             </>
           )}
           {isApproved && (
             <button
-              onClick={() => rejectMut.mutate({ id: leadId })}
-              disabled={rejectMut.isPending}
-              className="flex items-center gap-1.5 px-4 py-2 text-xs font-semibold rounded-lg border border-red-200 text-red-600 hover:bg-red-50 transition disabled:opacity-50"
+              onClick={() => {
+                if (window.confirm(`Move "${lead.hotel_name}" back to pipeline?\n\nThis will delete the lead from Insightly CRM.`)) {
+                  restoreMut.mutate(leadId)
+                }
+              }}
+              disabled={restoreMut.isPending}
+              className="flex items-center gap-1.5 px-4 py-2 text-xs font-semibold rounded-lg border border-amber-200 text-amber-600 hover:bg-amber-50 transition disabled:opacity-50"
             >
-              {rejectMut.isPending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <XCircle className="w-3.5 h-3.5" />}
-              Reject
+              {restoreMut.isPending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Undo2 className="w-3.5 h-3.5" />}
+              Back to Pipeline
             </button>
           )}
           {isRejected && (
             <button
-              onClick={() => restoreMut.mutate(leadId)}
+              onClick={() => {
+                if (window.confirm(`Restore "${lead.hotel_name}" back to the pipeline?`)) {
+                  restoreMut.mutate(leadId)
+                }
+              }}
               disabled={restoreMut.isPending}
               className="flex items-center gap-1.5 px-4 py-2 text-xs font-semibold rounded-lg border border-blue-200 text-blue-600 hover:bg-blue-50 transition disabled:opacity-50"
             >
@@ -298,6 +307,9 @@ function ContactsTab({ contacts, loading, leadId, onEnrich, enriching }: {
   const [editingId, setEditingId] = useState<number | null>(null)
   const [editForm, setEditForm] = useState<Record<string, string>>({})
   const [deleting, setDeleting] = useState<number | null>(null)
+  const [showAdd, setShowAdd] = useState(false)
+  const [addForm, setAddForm] = useState<Record<string, string>>({ scope: 'hotel_specific' })
+  const [adding, setAdding] = useState(false)
 
   if (loading) {
     return <div className="space-y-2">{Array.from({ length: 3 }).map((_, i) => <div key={i} className="skeleton h-24 rounded-lg" />)}</div>
@@ -357,6 +369,7 @@ function ContactsTab({ contacts, loading, leadId, onEnrich, enriching }: {
       email: c.email || '',
       phone: c.phone || '',
       linkedin: c.linkedin || '',
+      evidence_url: c.evidence_url || '',
     })
   }
 
@@ -462,6 +475,12 @@ function ContactsTab({ contacts, loading, leadId, onEnrich, enriching }: {
                       value={editForm.linkedin || ''}
                       onChange={(e) => setEditForm(f => ({ ...f, linkedin: e.target.value }))}
                       placeholder="LinkedIn URL"
+                      className="col-span-2 h-8 px-2.5 text-xs text-navy-900 bg-white border border-stone-200 rounded-md outline-none focus:border-navy-400 focus:ring-1 focus:ring-navy-200"
+                    />
+                    <input
+                      value={editForm.evidence_url || ''}
+                      onChange={(e) => setEditForm(f => ({ ...f, evidence_url: e.target.value }))}
+                      placeholder="Evidence URL"
                       className="col-span-2 h-8 px-2.5 text-xs text-navy-900 bg-white border border-stone-200 rounded-md outline-none focus:border-navy-400 focus:ring-1 focus:ring-navy-200"
                     />
                   </div>
@@ -592,13 +611,65 @@ function ContactsTab({ contacts, loading, leadId, onEnrich, enriching }: {
         </div>
       ))}
 
-      <button
-        onClick={onEnrich}
-        disabled={enriching}
-        className="w-full mt-2 py-2.5 text-xs font-semibold text-stone-500 hover:text-navy-700 hover:bg-stone-50 rounded-lg border border-dashed border-stone-200 transition disabled:opacity-50"
-      >
-        {enriching ? 'Searching...' : 'Re-run Enrichment'}
-      </button>
+      {/* Add Contact Form */}
+      {showAdd ? (
+        <div className="mt-2 p-4 rounded-lg border border-navy-200 bg-navy-50/30 space-y-2">
+          <p className="text-xs font-bold text-navy-900">Add Contact Manually</p>
+          <div className="grid grid-cols-2 gap-2">
+            <input value={addForm.name || ''} onChange={(e) => setAddForm(f => ({ ...f, name: e.target.value }))} placeholder="Name *" className="col-span-2 h-8 px-2.5 text-sm bg-white border border-stone-200 rounded-md outline-none focus:border-navy-400" autoFocus />
+            <input value={addForm.title || ''} onChange={(e) => setAddForm(f => ({ ...f, title: e.target.value }))} placeholder="Title / Role" className="col-span-2 h-8 px-2.5 text-sm bg-white border border-stone-200 rounded-md outline-none focus:border-navy-400" />
+            <input value={addForm.organization || ''} onChange={(e) => setAddForm(f => ({ ...f, organization: e.target.value }))} placeholder="Organization" className="col-span-2 h-8 px-2.5 text-sm bg-white border border-stone-200 rounded-md outline-none focus:border-navy-400" />
+            <input value={addForm.email || ''} onChange={(e) => setAddForm(f => ({ ...f, email: e.target.value }))} placeholder="Email" className="h-8 px-2.5 text-xs bg-white border border-stone-200 rounded-md outline-none focus:border-navy-400" />
+            <input value={addForm.phone || ''} onChange={(e) => setAddForm(f => ({ ...f, phone: e.target.value }))} placeholder="Phone" className="h-8 px-2.5 text-xs bg-white border border-stone-200 rounded-md outline-none focus:border-navy-400" />
+            <input value={addForm.linkedin || ''} onChange={(e) => setAddForm(f => ({ ...f, linkedin: e.target.value }))} placeholder="LinkedIn URL" className="col-span-2 h-8 px-2.5 text-xs bg-white border border-stone-200 rounded-md outline-none focus:border-navy-400" />
+            <input value={addForm.evidence_url || ''} onChange={(e) => setAddForm(f => ({ ...f, evidence_url: e.target.value }))} placeholder="Evidence URL" className="col-span-2 h-8 px-2.5 text-xs bg-white border border-stone-200 rounded-md outline-none focus:border-navy-400" />
+            <select value={addForm.scope || 'hotel_specific'} onChange={(e) => setAddForm(f => ({ ...f, scope: e.target.value }))} className="col-span-2 h-8 px-2.5 text-xs bg-white border border-stone-200 rounded-md outline-none focus:border-navy-400">
+              <option value="hotel_specific">Hotel Specific</option>
+              <option value="chain_area">Chain / Area</option>
+              <option value="chain_corporate">Chain Corporate</option>
+            </select>
+          </div>
+          <div className="flex items-center gap-2 pt-1">
+            <button
+              onClick={async () => {
+                if (!addForm.name?.trim()) return
+                setAdding(true)
+                try {
+                  await addContact(leadId, addForm)
+                  qc.invalidateQueries({ queryKey: ['contacts', leadId] })
+                  qc.invalidateQueries({ queryKey: ['lead', leadId] })
+                  setAddForm({ scope: 'hotel_specific' })
+                  setShowAdd(false)
+                } catch { /* ignore */ }
+                setAdding(false)
+              }}
+              disabled={adding || !addForm.name?.trim()}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold bg-navy-900 text-white rounded-md hover:bg-navy-800 transition disabled:opacity-50"
+            >
+              {adding ? <Loader2 className="w-3 h-3 animate-spin" /> : <Check className="w-3 h-3" />} Add Contact
+            </button>
+            <button onClick={() => { setShowAdd(false); setAddForm({ scope: 'hotel_specific' }) }} className="px-3 py-1.5 text-xs font-medium text-stone-500 hover:text-stone-700 transition">
+              Cancel
+            </button>
+          </div>
+        </div>
+      ) : (
+        <div className="flex gap-2 mt-2">
+          <button
+            onClick={() => setShowAdd(true)}
+            className="flex-1 py-2.5 text-xs font-semibold text-navy-600 hover:text-navy-800 hover:bg-navy-50 rounded-lg border border-dashed border-navy-200 transition"
+          >
+            + Add Contact
+          </button>
+          <button
+            onClick={onEnrich}
+            disabled={enriching}
+            className="flex-1 py-2.5 text-xs font-semibold text-stone-500 hover:text-navy-700 hover:bg-stone-50 rounded-lg border border-dashed border-stone-200 transition disabled:opacity-50"
+          >
+            {enriching ? 'Searching...' : 'Re-run Enrichment'}
+          </button>
+        </div>
+      )}
     </div>
   )
 }

@@ -125,6 +125,11 @@ export async function setPrimaryContact(leadId: number, contactId: number): Prom
   await api.post(`/api/dashboard/leads/${leadId}/contacts/${contactId}/set-primary`)
 }
 
+export async function addContact(leadId: number, data: Record<string, string>): Promise<any> {
+  const { data: result } = await api.post(`/api/dashboard/leads/${leadId}/contacts/add`, data)
+  return result
+}
+
 export async function updateContact(leadId: number, contactId: number, data: Record<string, string>): Promise<void> {
   await api.patch(`/api/dashboard/leads/${leadId}/contacts/${contactId}`, data)
 }

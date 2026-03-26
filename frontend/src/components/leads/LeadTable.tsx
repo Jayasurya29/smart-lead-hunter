@@ -4,9 +4,9 @@ import {
   cn, getScoreColor, getScoreRing, getTimelineLabel, getTimelineColor,
   getTierShort, getTierColor, formatLocation, formatOpening, relativeDate,
 } from '@/lib/utils'
-import { useApproveLead, useRejectLead, useRestoreLead, useDeleteLead } from '@/hooks/useLeads'
+import { useApproveLead, useRejectLead, useRestoreLead } from '@/hooks/useLeads'
 import {
-  CheckCircle2, XCircle, Undo2, Trash2,
+  CheckCircle2, XCircle, Undo2,
   ChevronLeft, ChevronRight, ChevronUp, ChevronDown, ChevronsUpDown,
 } from 'lucide-react'
 
@@ -46,7 +46,6 @@ const COLUMNS: ColDef[] = [
 
 function getNextSort(col: ColDef, current: string): string {
   if (!col.sortAsc || !col.sortDesc) return current
-  // Default first click = desc (highest score, newest, etc.)
   if (current === col.sortDesc) return col.sortAsc
   if (current === col.sortAsc) return col.sortDesc
   return col.sortDesc
@@ -144,7 +143,6 @@ export default function LeadTable({
   const approveMut = useApproveLead()
   const rejectMut  = useRejectLead()
   const restoreMut = useRestoreLead()
-  const deleteMut  = useDeleteLead()
 
   const isNew      = tab === 'pipeline'
   const isApproved = tab === 'approved'
@@ -167,7 +165,7 @@ export default function LeadTable({
     return (
       <div className="flex flex-col items-center justify-center py-20 text-stone-400">
         <div className="text-4xl mb-3">
-          {isNew ? '📭' : isApproved ? '✅' : isRejected ? '🚫' : '🗑️'}
+          {isNew ? '📭' : isApproved ? '✅' : isRejected ? '🚫' : '⏱️'}
         </div>
         <p className="text-sm font-medium">No leads in {tab}</p>
         <p className="text-xs mt-1">
@@ -267,24 +265,21 @@ export default function LeadTable({
                     <div className="row-actions flex items-center gap-0.5 justify-end">
                       {isNew && (
                         <>
-                          <ActionBtn onClick={(e) => { e.stopPropagation(); approveMut.mutate(lead.id) }} color="emerald" title="Approve" pending={approveMut.isPending}>
+                          <ActionBtn onClick={(e) => { e.stopPropagation(); if (window.confirm(`Approve "${lead.hotel_name || lead.name}" and push to Insightly CRM?`)) approveMut.mutate(lead.id) }} color="emerald" title="Approve" pending={approveMut.isPending}>
                             <CheckCircle2 className="w-4 h-4" />
                           </ActionBtn>
-                          <ActionBtn onClick={(e) => { e.stopPropagation(); rejectMut.mutate({ id: lead.id }) }} color="red" title="Reject" pending={rejectMut.isPending}>
+                          <ActionBtn onClick={(e) => { e.stopPropagation(); if (window.confirm(`Reject "${lead.hotel_name || lead.name}"?`)) rejectMut.mutate({ id: lead.id }) }} color="red" title="Reject" pending={rejectMut.isPending}>
                             <XCircle className="w-4 h-4" />
-                          </ActionBtn>
-                          <ActionBtn onClick={(e) => { e.stopPropagation(); deleteMut.mutate(lead.id) }} color="gray" title="Delete" pending={deleteMut.isPending}>
-                            <Trash2 className="w-4 h-4" />
                           </ActionBtn>
                         </>
                       )}
                       {isApproved && (
-                        <ActionBtn onClick={(e) => { e.stopPropagation(); rejectMut.mutate({ id: lead.id }) }} color="red" title="Reject" pending={rejectMut.isPending}>
-                          <XCircle className="w-4 h-4" />
+                        <ActionBtn onClick={(e) => { e.stopPropagation(); if (window.confirm(`Move "${lead.hotel_name || lead.name}" back to pipeline? This will delete from Insightly.`)) restoreMut.mutate(lead.id) }} color="amber" title="Back to Pipeline" pending={restoreMut.isPending}>
+                          <Undo2 className="w-4 h-4" />
                         </ActionBtn>
                       )}
                       {isRejected && (
-                        <ActionBtn onClick={(e) => { e.stopPropagation(); restoreMut.mutate(lead.id) }} color="blue" title="Restore" pending={restoreMut.isPending}>
+                        <ActionBtn onClick={(e) => { e.stopPropagation(); if (window.confirm(`Restore "${lead.hotel_name || lead.name}" back to pipeline?`)) restoreMut.mutate(lead.id) }} color="blue" title="Restore" pending={restoreMut.isPending}>
                           <Undo2 className="w-4 h-4" />
                         </ActionBtn>
                       )}
@@ -362,6 +357,7 @@ function ActionBtn({ onClick, color, title, children, pending }: {
     emerald: 'hover:bg-emerald-50 text-emerald-500 hover:text-emerald-700',
     red:     'hover:bg-red-50 text-red-400 hover:text-red-600',
     blue:    'hover:bg-blue-50 text-blue-500 hover:text-blue-700',
+    amber:   'hover:bg-amber-50 text-amber-500 hover:text-amber-700',
     gray:    'hover:bg-stone-100 text-stone-400 hover:text-stone-600',
   }
   return (
