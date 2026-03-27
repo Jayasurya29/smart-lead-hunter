@@ -367,6 +367,19 @@ async def update_contact(
     for field, value in body.items():
         if field in allowed:
             setattr(contact, field, value)
+    # Sync primary contact changes back to lead record
+    if contact.is_primary:
+        lead_result = await db.execute(
+            select(PotentialLead).where(PotentialLead.id == lead_id)
+        )
+        lead = lead_result.scalar_one_or_none()
+        if lead:
+            lead.contact_name = contact.name
+            lead.contact_title = contact.title
+            lead.contact_email = contact.email
+            lead.contact_phone = contact.phone
+            lead.updated_at = local_now()
+
     # Rescore contact based on updated title/scope
     from app.config.sap_title_classifier import title_classifier
 
