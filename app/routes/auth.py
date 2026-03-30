@@ -562,6 +562,72 @@ async def resend_code(
     )
 
 
+# ── GET /auth/users — Admin: list all users ─────────────────────────────────
+
+
+@router.get("/users")
+async def list_users(
+    current_user: dict = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    result = await db.execute(select(User).order_by(User.created_at.asc()))
+    return [u.to_dict() for u in result.scalars().all()]
+
+
+# ── PATCH /auth/users/{user_id} — Admin: update role/active ─────────────────
+
+
+@router.patch("/users/{user_id}")
+async def update_user(
+    user_id: int,
+    request: Request,
+    current_user: dict = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    if user_id == current_user["id"]:
+        raise HTTPException(status_code=400, detail="Cannot modify your own account")
+
+    result = await db.execute(select(User).where(User.id == user_id))
+    user = result.scalar_one_or_none()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    body = await request.json()
+    if "role" in body and body["role"] in VALID_ROLES:
+        user.role = body["role"]
+    if "is_active" in body:
+        user.is_active = bool(body["is_active"])
+
+    user.updated_at = datetime.now(timezone.utc)
+    await db.commit()
+    return user.to_dict()
+
+
+# ── DELETE /auth/users/{user_id} — Admin: deactivate user ───────────────────
+
+
+@router.delete("/users/{user_id}")
+async def deactivate_user(
+    user_id: int,
+    current_user: dict = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    if user_id == current_user["id"]:
+        raise HTTPException(
+            status_code=400, detail="Cannot deactivate your own account"
+        )
+
+    result = await db.execute(select(User).where(User.id == user_id))
+    user = result.scalar_one_or_none()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    user.is_active = False
+    user.updated_at = datetime.now(timezone.utc)
+    await db.commit()
+    return {"status": "deactivated", "user_id": user_id}
+
+
 # ── POST /auth/logout ─────────────────────────────────────────────────────────
 
 

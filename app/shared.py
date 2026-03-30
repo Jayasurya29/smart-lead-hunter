@@ -397,7 +397,7 @@ async def get_dashboard_stats(db: AsyncSession) -> dict:
                 case(
                     (
                         (PotentialLead.timeline_label == "HOT")
-                        & PotentialLead.status.in_(["new", "approved"]),
+                        & (PotentialLead.status == "new"),
                         1,
                     ),
                     else_=0,
@@ -407,7 +407,7 @@ async def get_dashboard_stats(db: AsyncSession) -> dict:
                 case(
                     (
                         (PotentialLead.timeline_label == "URGENT")
-                        & PotentialLead.status.in_(["new", "approved"]),
+                        & (PotentialLead.status == "new"),
                         1,
                     ),
                     else_=0,
@@ -417,7 +417,7 @@ async def get_dashboard_stats(db: AsyncSession) -> dict:
                 case(
                     (
                         (PotentialLead.timeline_label == "WARM")
-                        & PotentialLead.status.in_(["new", "approved"]),
+                        & (PotentialLead.status == "new"),
                         1,
                     ),
                     else_=0,
@@ -427,7 +427,7 @@ async def get_dashboard_stats(db: AsyncSession) -> dict:
                 case(
                     (
                         (PotentialLead.timeline_label == "COOL")
-                        & PotentialLead.status.in_(["new", "approved"]),
+                        & (PotentialLead.status == "new"),
                         1,
                     ),
                     else_=0,
