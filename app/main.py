@@ -33,6 +33,7 @@ from app.routes.dashboard import router as dashboard_router
 from app.routes.scraping import router as scraping_router
 from app.routes.contacts import router as contacts_router
 from app.routes.auth import router as auth_router
+from app.routes.existing_hotels import router as existing_hotels_router
 
 # NOTE: Do NOT set WindowsProactorEventLoopPolicy here.
 # Uvicorn overrides the policy and creates its own SelectorEventLoop anyway.
@@ -257,6 +258,7 @@ app.include_router(sources_router)
 app.include_router(dashboard_router)
 app.include_router(scraping_router)
 app.include_router(contacts_router)
+app.include_router(existing_hotels_router)
 
 
 # -----------------------------------------------------------------------------

@@ -9,6 +9,7 @@ from app.models.failed_domain import FailedDomain
 from app.models.user import User, PendingRegistration
 from app.models.audit_log import AuditLog
 from app.models.lead_contact import LeadContact
+from app.models.existing_hotel import ExistingHotel
 
 __all__ = [
     "PotentialLead",
@@ -19,4 +20,5 @@ __all__ = [
     "PendingRegistration",
     "AuditLog",
     "LeadContact",
+    "ExistingHotel",
 ]

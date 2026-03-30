@@ -20,7 +20,7 @@ interface NavItem {
 const NAV_ITEMS: NavItem[] = [
   { to: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
   { to: '/users',     label: 'Users',     icon: Users },
-  { to: '/map',       label: 'Map',       icon: Map,  disabled: true },
+  { to: '/map',       label: 'Map',       icon: Map },
   { to: '/outreach',  label: 'Outreach',  icon: Mail, disabled: true },
 ]
 

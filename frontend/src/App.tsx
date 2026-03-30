@@ -8,6 +8,7 @@ import RegisterPage from '@/pages/Register'
 import Dashboard from '@/pages/Dashboard'
 import { Loader2 } from 'lucide-react'
 import UsersPage from '@/pages/Users'
+import MapPage from '@/pages/MapPage'
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { isAuthenticated, isLoading } = useAuth()
@@ -65,10 +66,7 @@ export default function AppRouter() {
             path="/map"
             element={
               <ProtectedRoute>
-                <div className="p-8 text-center text-gray-400">
-                  <p className="text-lg font-medium mb-2">Map View</p>
-                  <p className="text-sm">Coming soon — hotel locations with MapLibre GL</p>
-                </div>
+                <MapPage />
               </ProtectedRoute>
             }
           />
