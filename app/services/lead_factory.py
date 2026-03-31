@@ -18,11 +18,32 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.potential_lead import PotentialLead
-from app.services.utils import normalize_hotel_name, local_now, get_timeline_label
+from app.services.utils import (
+    normalize_hotel_name,
+    normalize_state,
+    local_now,
+    get_timeline_label,
+)
 from app.services.scorer import calculate_lead_score
 from app.config.intelligence_config import SCORE_HOT_THRESHOLD, SCORE_WARM_THRESHOLD
 
 logger = logging.getLogger(__name__)
+
+
+# Brand suffixes to strip for fuzzy dedup
+_BRAND_SUFFIXES = re.compile(
+    r",?\s*(?:An?\s+)?(?:Autograph|Curio|Luxury|Tribute|Tapestry|Unbound)\s+Collection.*$"
+    r"|,?\s*(?:A\s+)?(?:Viceroy|Auberge|Ritz-Carlton|Four Seasons|Six Senses)\s+(?:Resort|Collection|Hotel|Estate).*$"
+    r"|\s*[-\u2013\u2014]\s*(?:Adults?\s+Only|All[- ]Inclusive).*$"
+    r"|,?\s*(?:by\s+)?(?:Hilton|Hyatt|Marriott|IHG).*$"
+    r"|\s+(?:Resort|Hotel|Residences?|Spa|Inn|Lodge|Suites?|&\s+(?:Resort|Spa|Residences?))+\s*$",
+    re.IGNORECASE,
+)
+
+
+def _strip_brand_suffix(name: str) -> str:
+    """Strip brand/collection suffixes for fuzzy dedup matching."""
+    return _BRAND_SUFFIXES.sub("", name).strip().lower()
 
 
 def extract_year(date_str: Optional[str]) -> Optional[int]:
@@ -45,6 +66,19 @@ _JUNK_PATTERNS = [
     re.compile(r"hotel pipeline", re.IGNORECASE),
     re.compile(r"hotel forecast", re.IGNORECASE),
     re.compile(r"new openings for 20\d{2}", re.IGNORECASE),
+    # Unnamed/generic projects
+    re.compile(r"^new \d+-key ", re.IGNORECASE),
+    re.compile(r"^unnamed\b", re.IGNORECASE),
+    re.compile(r"\(unnamed\)", re.IGNORECASE),
+    re.compile(r"^untitled hotel", re.IGNORECASE),
+    re.compile(r"resort \(unnamed\)", re.IGNORECASE),
+    re.compile(r"^proposed\s", re.IGNORECASE),
+    # Non-hotel venues
+    re.compile(r"\bcamps?\b", re.IGNORECASE),
+    re.compile(r"\bglamping\b", re.IGNORECASE),
+    re.compile(r"\bcampground\b", re.IGNORECASE),
+    re.compile(r"\btreehouse\b", re.IGNORECASE),
+    re.compile(r"\btiny\s+house\b", re.IGNORECASE),
 ]
 
 
@@ -69,6 +103,20 @@ def prepare_lead(
         if pattern.search(hotel_name):
             return None, f"Article title, not a hotel: {hotel_name}", {}
 
+    # 0. CLEAN VAGUE DATES
+    opening_date = (lead_dict.get("opening_date") or "").strip()
+    vague_dates = [
+        "coming soon",
+        "tbd",
+        "tba",
+        "unknown",
+        "announced",
+        "not announced",
+        "n/a",
+    ]
+    if opening_date.lower() in vague_dates:
+        lead_dict["opening_date"] = None
+
     # 1. NORMALIZE
     normalized = normalize_hotel_name(hotel_name)
 
@@ -76,7 +124,7 @@ def prepare_lead(
     score_result = calculate_lead_score(
         hotel_name=hotel_name,
         city=lead_dict.get("city"),
-        state=lead_dict.get("state"),
+        state=normalize_state(lead_dict.get("state") or ""),
         country=lead_dict.get("country", "USA"),
         opening_date=lead_dict.get("opening_date"),
         room_count=lead_dict.get("room_count"),
@@ -136,7 +184,9 @@ def prepare_lead(
         or "manual",
         lead_score=final_score,
         score_breakdown=score_result.get("breakdown", {}),
-        status="new",
+        status="expired"
+        if get_timeline_label(lead_dict.get("opening_date") or "") == "EXPIRED"
+        else "new",
         raw_data=lead_dict.get("raw_data"),
         scraped_at=local_now(),
         created_at=local_now(),
@@ -273,8 +323,58 @@ async def save_lead_to_db(
         return {
             "status": "enriched" if enriched else "duplicate",
             "id": existing.id,
-            "reason": "Already exists",
+            "reason": "Already exists (exact match)",
         }
+
+    # FUZZY DEDUP — strip brand suffixes, compare core names in same city
+    core_name = _strip_brand_suffix(hotel_name)
+    if core_name and len(core_name) > 3:
+        city = (lead_dict.get("city") or "").strip().lower()
+
+        # Get all leads in same city+state for fuzzy comparison
+        fuzzy_query = select(PotentialLead).where(
+            PotentialLead.status.notin_(["expired", "rejected"])
+        )
+        if city:
+            fuzzy_query = fuzzy_query.where(PotentialLead.city.ilike(f"%{city}%"))
+
+        fuzzy_result = await session.execute(fuzzy_query)
+        candidates = fuzzy_result.scalars().all()
+
+        for candidate in candidates:
+            candidate_core = _strip_brand_suffix(candidate.hotel_name or "")
+            if not candidate_core:
+                continue
+
+            # Check if core names match or one contains the other
+            is_match = False
+            if core_name == candidate_core:
+                is_match = True
+            elif len(core_name) > 5 and len(candidate_core) > 5:
+                if core_name in candidate_core or candidate_core in core_name:
+                    is_match = True
+                else:
+                    # Word overlap check
+                    words_a = set(core_name.split())
+                    words_b = set(candidate_core.split())
+                    common = {w for w in (words_a & words_b) if len(w) > 2}
+                    min_words = min(len(words_a), len(words_b))
+                    if min_words > 0 and len(common) >= max(2, min_words * 0.6):
+                        is_match = True
+
+            if is_match:
+                enriched = enrich_existing_lead(candidate, lead_dict)
+                if enriched:
+                    logger.info(
+                        f"   🔄 Fuzzy match: '{hotel_name}' → '{candidate.hotel_name}'"
+                    )
+                if commit:
+                    await session.commit()
+                return {
+                    "status": "enriched" if enriched else "duplicate",
+                    "id": candidate.id,
+                    "reason": f"Fuzzy match: {candidate.hotel_name}",
+                }
 
     # PREPARE NEW LEAD (normalize + score + filter + build)
     lead, skip_reason, score_result = prepare_lead(lead_dict)

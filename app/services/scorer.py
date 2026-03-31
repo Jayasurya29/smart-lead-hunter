@@ -655,9 +655,36 @@ TIER5_SKIP = [
     # ── V2.1 additions ──
     "dazzler select",  # Wyndham budget
     "dazzler",
+    "dazzler",
     "universal studios",  # Theme park, not hotel target
+    # Additional budget/non-target brands
+    "graduate",
+    "graduate hotel",
+    "aviator suites",
+    "aspen suites",
+    "microtel",
+    "la quinta",
+    "days inn",
+    "super 8",
+    "red roof",
+    "econo lodge",
+    "travelodge",
+    "quality inn",
+    "comfort inn",
+    "comfort suites",
+    "sleep inn",
+    "rodeway",
+    "americas best",
+    "baymont",
+    "country inn",
+    "wingate",
+    "candlewood",
+    "staybridge",
+    "extended stay",
+    "wyndham garden",
+    "best western",
+    "motel 6",
 ]
-
 
 if __name__ == "__main__":
     # Quick stats
