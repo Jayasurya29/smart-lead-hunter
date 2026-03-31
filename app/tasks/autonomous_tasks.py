@@ -240,7 +240,22 @@ def smart_scrape(self) -> Dict[str, Any]:
                             ).scalar_one_or_none()
                             if src_obj:
                                 src_obj.source_intelligence = dict(src_intel._data)
-                                src_obj.last_scraped_at = local_now()
+                                leads_saved = len(lead_dicts) if lead_dicts else 0
+                                if leads_saved > 0:
+                                    src_obj.record_success(leads_saved)
+                                else:
+                                    src_obj.total_scrapes = (
+                                        src_obj.total_scrapes or 0
+                                    ) + 1
+                                    src_obj.last_scraped_at = local_now()
+                                # Sync gold URL count from intelligence
+                                intel_data = src_intel._data or {}
+                                gold_count = len(intel_data.get("gold_patterns", []))
+                                if gold_count > 0 and not src_obj.gold_urls:
+                                    src_obj.gold_urls = {
+                                        p: {"source": "intelligence"}
+                                        for p in intel_data.get("gold_patterns", [])
+                                    }
                                 await intel_session.commit()
                     except Exception as ie:
                         logger.warning(f"Intel save failed: {ie}")

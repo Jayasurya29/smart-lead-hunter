@@ -122,6 +122,7 @@ class Source(Base):
         self.last_scraped_at = local_now()
         self.last_success_at = local_now()
         self.leads_found = (self.leads_found or 0) + leads_count
+        self.total_scrapes = (self.total_scrapes or 0) + 1
         self.consecutive_failures = 0
         self.health_status = "healthy"
         self._update_success_rate(True)
@@ -129,8 +130,8 @@ class Source(Base):
     def record_failure(self):
         """Record a failed scrape"""
         self.last_scraped_at = local_now()
+        self.total_scrapes = (self.total_scrapes or 0) + 1
         self.consecutive_failures = (self.consecutive_failures or 0) + 1
-        self._update_success_rate(False)
 
         # Update health status based on consecutive failures
         if self.consecutive_failures >= 10:
