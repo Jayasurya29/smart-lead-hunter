@@ -5,7 +5,7 @@ import { useQueryClient } from '@tanstack/react-query'
 import type { Lead, Contact } from '@/api/types'
 import {
   cn, formatDate, getScoreColor, getScoreRing, getTimelineLabel, getTimelineColor,
-  getTierLabel, getTierColor, getTierShort, formatLocation, formatOpening,
+  getTierLabel, getTierColor, formatLocation, formatOpening,
 } from '@/lib/utils'
 import {
   X, MapPin, Calendar, Building2, Layers, Globe, ExternalLink,
@@ -88,7 +88,7 @@ export default function LeadDetail({ leadId, tab, onClose }: Props) {
         <div className="flex items-center gap-2 mt-2 flex-wrap">
           {lead.brand_tier && (
             <span className={cn('inline-flex px-2 py-0.5 rounded text-xs font-bold', getTierColor(lead.brand_tier))}>
-              {getTierShort(lead.brand_tier)} — {getTierLabel(lead.brand_tier)}
+              {getTierLabel(lead.brand_tier)}
             </span>
           )}
           <span className={cn('inline-flex px-2 py-0.5 rounded text-xs font-bold', getTimelineColor(timeline))}>

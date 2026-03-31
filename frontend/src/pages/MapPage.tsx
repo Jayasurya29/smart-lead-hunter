@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import api from '@/api/client'
 import {
-  cn, getTierShort, getTierColor, getTierLabel,
+  cn, getTierColor, getTierLabel,
 } from '@/lib/utils'
 import {
   Building2, MapPin, Users, Eye, Search, X, ChevronLeft, ChevronRight,
@@ -366,7 +366,7 @@ function HotelTable({ hotels, total, page, totalPages, selectedId, onSelect, onP
                 <td className="px-3 py-2.5">
                   {hotel.brand_tier ? (
                     <span className={cn('inline-flex px-2 py-0.5 rounded text-2xs font-bold', getTierColor(hotel.brand_tier))}>
-                      {getTierShort(hotel.brand_tier)}
+                      {getTierLabel(hotel.brand_tier)}
                     </span>
                   ) : (
                     <span className="text-xs text-stone-300">—</span>
@@ -500,7 +500,7 @@ function HotelDetail({ hotelId, onClose }: { hotelId: number; onClose: () => voi
         <div className="flex items-center gap-2 mt-2 flex-wrap">
           {hotel.brand_tier && (
             <span className={cn('inline-flex px-2 py-0.5 rounded text-xs font-bold', getTierColor(hotel.brand_tier))}>
-              {getTierShort(hotel.brand_tier)} — {getTierLabel(hotel.brand_tier)}
+              {getTierLabel(hotel.brand_tier)} — {getTierLabel(hotel.brand_tier)}
             </span>
           )}
           {hotel.chain && (

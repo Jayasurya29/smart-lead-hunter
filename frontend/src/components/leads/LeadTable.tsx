@@ -2,7 +2,7 @@ import { useMemo } from 'react'
 import type { Lead, LeadTab } from '@/api/types'
 import {
   cn, getScoreColor, getScoreRing, getTimelineLabel, getTimelineColor,
-  getTierShort, getTierColor, formatLocation, formatOpening, relativeDate,
+  getTierLabel, getTierColor, formatLocation, formatOpening, relativeDate,
 } from '@/lib/utils'
 import { useApproveLead, useRejectLead, useRestoreLead } from '@/hooks/useLeads'
 import {
@@ -234,7 +234,7 @@ export default function LeadTable({
                   <td className="px-3 py-2.5">
                     {lead.brand_tier ? (
                       <span className={cn('inline-flex px-2 py-0.5 rounded text-2xs font-bold', getTierColor(lead.brand_tier))}>
-                        {getTierShort(lead.brand_tier)}
+                        {getTierLabel(lead.brand_tier)}
                       </span>
                     ) : (
                       <span className="text-xs text-stone-300">—</span>
