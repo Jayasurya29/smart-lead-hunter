@@ -294,6 +294,18 @@ async def scrape_with_progress(request: Request):
                                 result = await orchestrator.scraping_engine.http_scraper.scrape(
                                     gold_url
                                 )
+                                # Playwright fallback for 403 on JS-heavy sources
+                                if (
+                                    result.status_code in (403, 429)
+                                    and source.use_playwright
+                                    and orchestrator.scraping_engine.playwright_scraper.available
+                                ):
+                                    logger.info(
+                                        f"Playwright fallback for {source_name}: {gold_url[:60]}"
+                                    )
+                                    result = await orchestrator.scraping_engine.playwright_scraper.scrape(
+                                        gold_url
+                                    )
                                 # Record response to intelligence
                                 if scrape_settings and source.id in source_intel_map:
                                     src_intel = source_intel_map[source.id]
@@ -428,6 +440,18 @@ async def scrape_with_progress(request: Request):
                                     result = await orchestrator.scraping_engine.http_scraper.scrape(
                                         gold_url
                                     )
+                                    # Playwright fallback for 403
+                                    if (
+                                        result.status_code in (403, 429)
+                                        and source.use_playwright
+                                        and orchestrator.scraping_engine.playwright_scraper.available
+                                    ):
+                                        logger.info(
+                                            f"Playwright fallback for {source_name}: {gold_url[:60]}"
+                                        )
+                                        result = await orchestrator.scraping_engine.playwright_scraper.scrape(
+                                            gold_url
+                                        )
                                     if result.success:
                                         scrape_results[source_name].append(result)
                                         visited.add(gold_url)
@@ -1392,3 +1416,159 @@ async def discovery_status(request: Request):
 
 # Prevent duplicate enrichment runs for the same lead (Audit Fix M-09)
 _enrichment_locks: dict[int, asyncio.Lock] = {}
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# ENDPOINT: Trigger Celery tasks from dashboard
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+@router.post("/api/tasks/trigger", tags=["Tasks"])
+async def trigger_task(request: Request, _csrf=Depends(require_ajax)):
+    """Trigger a Celery task manually from the Sources dashboard."""
+    from app.tasks.celery_app import celery_app
+
+    body = await request.json()
+    task_name = body.get("task")
+
+    allowed = ["smart_scrape", "auto_enrich", "weekly_discovery", "daily_health_check"]
+    if task_name not in allowed:
+        raise HTTPException(status_code=400, detail=f"Unknown task: {task_name}")
+
+    result = celery_app.send_task(task_name)
+    return {"status": "triggered", "task": task_name, "task_id": result.id}
+
+
+@router.get("/api/tasks/active", tags=["Tasks"])
+async def active_tasks():
+    """Check active Celery tasks."""
+    from app.tasks.celery_app import celery_app
+
+    inspector = celery_app.control.inspect()
+    active = inspector.active() or {}
+    reserved = inspector.reserved() or {}
+
+    tasks = []
+    for worker, task_list in active.items():
+        for t in task_list:
+            tasks.append(
+                {
+                    "id": t.get("id"),
+                    "name": t.get("name"),
+                    "worker": worker,
+                    "status": "running",
+                }
+            )
+    for worker, task_list in reserved.items():
+        for t in task_list:
+            tasks.append(
+                {
+                    "id": t.get("id"),
+                    "name": t.get("name"),
+                    "worker": worker,
+                    "status": "queued",
+                }
+            )
+
+    return {"tasks": tasks, "count": len(tasks)}
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# ENDPOINT: Smart Fill — enrich lead data (opening date, tier, rooms)
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+@router.post("/api/leads/{lead_id}/smart-fill", tags=["Leads"])
+async def smart_fill_lead(lead_id: int, request: Request, _csrf=Depends(require_ajax)):
+    """Fill missing lead data using web search + Gemini."""
+    from app.models.potential_lead import PotentialLead
+    from app.services.lead_data_enrichment import enrich_lead_data
+    from app.services.utils import get_timeline_label
+    from app.services.scorer import calculate_lead_score
+
+    body = await request.json()
+    mode = body.get("mode", "smart")
+
+    async with async_session() as session:
+        result = await session.execute(
+            select(PotentialLead).where(PotentialLead.id == lead_id)
+        )
+        lead = result.scalar_one_or_none()
+        if not lead:
+            raise HTTPException(status_code=404, detail="Lead not found")
+
+        enriched = await enrich_lead_data(
+            hotel_name=lead.hotel_name,
+            city=lead.city or "",
+            state=lead.state or "",
+            brand=lead.brand or "",
+            current_opening_date=lead.opening_date or "",
+            current_brand_tier=lead.brand_tier or "",
+            current_room_count=lead.room_count or 0,
+            mode=mode,
+        )
+
+        if not enriched.get("changes"):
+            return {"status": "no_data", "message": "No new data found", "changes": []}
+
+        # Auto-expire if hotel already opened
+        if enriched.get("already_opened"):
+            lead.status = "expired"
+            lead.opening_date = enriched.get("opened_date", lead.opening_date)
+            lead.timeline_label = "EXPIRED"
+            await session.commit()
+            return {
+                "status": "expired",
+                "message": f"Hotel already opened ({enriched.get('opened_date', 'date unknown')}). Moved to Expired.",
+                "changes": ["status"],
+            }
+
+        if "opening_date" in enriched:
+            lead.opening_date = enriched["opening_date"]
+            lead.timeline_label = get_timeline_label(enriched["opening_date"])
+        if "brand_tier" in enriched:
+            lead.brand_tier = enriched["brand_tier"]
+        if "room_count" in enriched:
+            lead.room_count = enriched["room_count"]
+        if "brand" in enriched:
+            lead.brand = enriched["brand"]
+        if "description" in enriched:
+            if mode == "full" or not lead.description:
+                lead.description = enriched["description"]
+
+        score_result = calculate_lead_score(
+            hotel_name=lead.hotel_name,
+            city=lead.city,
+            state=lead.state,
+            country=lead.country,
+            opening_date=lead.opening_date,
+            room_count=lead.room_count,
+            contact_name=lead.contact_name,
+            contact_email=lead.contact_email,
+            contact_phone=lead.contact_phone,
+            brand=lead.brand,
+        )
+        if score_result.get("should_save", True):
+            lead.lead_score = score_result["total_score"]
+
+        await session.commit()
+
+        return {
+            "status": "enriched",
+            "changes": enriched.get("changes", []),
+            "confidence": enriched.get("confidence", "unknown"),
+            "data": {
+                k: v
+                for k, v in enriched.items()
+                if k not in ("changes", "confidence", "source_url")
+            },
+        }
+
+
+@router.post("/api/leads/batch-smart-fill", tags=["Leads"])
+async def batch_smart_fill_endpoint(_csrf=Depends(require_ajax)):
+    """Batch smart fill for all leads missing data."""
+    from app.services.lead_data_enrichment import batch_smart_fill
+
+    result = await batch_smart_fill(limit=10)
+    return result

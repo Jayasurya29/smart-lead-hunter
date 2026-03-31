@@ -422,8 +422,15 @@ class PlaywrightScraper:
             context = self._browser.new_context(
                 user_agent=self.config.user_agent,
                 viewport={"width": 1920, "height": 1080},
+                locale="en-US",
                 extra_http_headers=extra_headers or {},
             )
+            # Stealth: hide automation flags from anti-bot detection
+            context.add_init_script("""
+                Object.defineProperty(navigator, 'webdriver', {get: () => undefined});
+                Object.defineProperty(navigator, 'languages', {get: () => ['en-US', 'en']});
+                Object.defineProperty(navigator, 'plugins', {get: () => [1, 2, 3, 4, 5]});
+            """)
             page = context.new_page()
             try:
                 response = page.goto(

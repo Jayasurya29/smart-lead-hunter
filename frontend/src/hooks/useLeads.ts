@@ -1,4 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import api from '@/api/client'
 import {
   fetchLeads, fetchLead, fetchStats, fetchContacts,
   approveLead, rejectLead, restoreLead, deleteLead, enrichLead,
@@ -104,6 +105,20 @@ export function useDeleteLead() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['leads'] })
       qc.invalidateQueries({ queryKey: ['stats'] })
+    },
+  })
+}
+
+export function useSmartFill() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async ({ id, mode = 'smart' }: { id: number; mode?: 'smart' | 'full' }) => {
+      const { data } = await api.post(`/api/leads/${id}/smart-fill`, { mode })
+      return data
+    },
+    onSuccess: (_data, vars) => {
+      qc.invalidateQueries({ queryKey: ['lead', vars.id] })
+      qc.invalidateQueries({ queryKey: ['leads'] })
     },
   })
 }

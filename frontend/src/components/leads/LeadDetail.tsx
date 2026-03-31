@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { useLead, useContacts, useApproveLead, useRejectLead, useRestoreLead, useDeleteLead, useEnrichLead } from '@/hooks/useLeads'
+import { useLead, useContacts, useApproveLead, useRejectLead, useRestoreLead, useDeleteLead, useEnrichLead, useSmartFill } from '@/hooks/useLeads'
 import { editLead, saveContact, setPrimaryContact, deleteContact, updateContact, toggleContactScope, addContact } from '@/api/leads'
 import { useQueryClient } from '@tanstack/react-query'
 import type { Lead, Contact } from '@/api/types'
@@ -11,7 +11,7 @@ import {
   X, MapPin, Calendar, Building2, Layers, Globe, ExternalLink,
   User, Mail, Phone, Linkedin, Star, Bookmark, BookmarkCheck,
   Loader2, CheckCircle2, XCircle, Undo2, Trash2, Search, Save,
-  Link2, Pencil, Check,
+  Link2, Pencil, Check,Zap, RefreshCw,
 } from 'lucide-react'
 
 /** Safely render any value — prevents empty object {} crashing React */
@@ -39,6 +39,7 @@ export default function LeadDetail({ leadId, tab, onClose }: Props) {
   const rejectMut  = useRejectLead()
   const restoreMut = useRestoreLead()
   const enrichMut  = useEnrichLead()
+  const smartFillMut = useSmartFill()
 
   const isNew      = tab === 'pipeline'
   const isApproved = tab === 'approved'
@@ -118,7 +119,7 @@ export default function LeadDetail({ leadId, tab, onClose }: Props) {
 
       {/* ═══ TAB CONTENT — scrollable ═══ */}
       <div className="flex-1 overflow-y-auto p-5">
-        {activeTab === 'overview'  && <OverviewTab lead={lead} contactList={contactList} onEnrich={() => enrichMut.mutate(leadId)} enriching={enrichMut.isPending} />}
+        {activeTab === 'overview'  && <OverviewTab lead={lead} contactList={contactList} onEnrich={() => enrichMut.mutate(leadId)} enriching={enrichMut.isPending} onSmartFill={(mode: 'smart' | 'full') => smartFillMut.mutate({ id: leadId, mode })} smartFilling={smartFillMut.isPending} smartFillResult={smartFillMut.data} />}
         {activeTab === 'contacts'  && <ContactsTab contacts={contactList} loading={contactsLoading} leadId={leadId} onEnrich={() => enrichMut.mutate(leadId)} enriching={enrichMut.isPending} />}
         {activeTab === 'edit'      && <EditTab lead={lead} leadId={leadId} />}
         {activeTab === 'sources'   && <SourcesTab lead={lead} />}
@@ -194,9 +195,9 @@ export default function LeadDetail({ leadId, tab, onClose }: Props) {
 /* ═══════════════════════════════════════════════════
    OVERVIEW TAB
    ═══════════════════════════════════════════════════ */
-
-function OverviewTab({ lead, contactList, onEnrich, enriching }: {
+function OverviewTab({ lead, contactList, onEnrich, enriching, onSmartFill, smartFilling, smartFillResult }: {
   lead: Lead; contactList: Contact[]; onEnrich: () => void; enriching: boolean
+  onSmartFill: (mode: 'smart' | 'full') => void; smartFilling: boolean; smartFillResult?: { status: string; changes?: string[]; confidence?: string }
 }) {
   return (
     <div className="space-y-6 animate-fadeIn">
@@ -212,6 +213,50 @@ function OverviewTab({ lead, contactList, onEnrich, enriching }: {
           {lead.owner             && <Field icon={User}      label="Owner"       value={lead.owner} />}
         </div>
       </Section>
+
+      {/* Smart Fill */}
+        <div className="space-y-1.5">
+          {(!lead.brand_tier || lead.brand_tier === 'unknown' || !lead.opening_date || !lead.room_count) && (
+            <button
+              onClick={() => onSmartFill('smart')}
+              disabled={smartFilling}
+              className={cn(
+                'w-full text-left rounded-lg p-3.5 border transition disabled:opacity-60',
+                smartFillResult?.status === 'enriched' ? 'bg-emerald-50 border-emerald-200'
+                  : smartFillResult?.status === 'no_data' ? 'bg-stone-50 border-stone-200'
+                  : 'bg-violet-50 border-violet-200 hover:border-violet-300',
+              )}
+            >
+              <div className="flex items-center gap-2.5">
+                {smartFilling ? <Loader2 className="w-5 h-5 text-violet-600 animate-spin" />
+                  : smartFillResult?.status === 'enriched' ? <CheckCircle2 className="w-5 h-5 text-emerald-600" />
+                  : <Zap className="w-5 h-5 text-violet-600" />}
+                <div>
+                  <p className={cn('text-sm font-semibold', smartFillResult?.status === 'enriched' ? 'text-emerald-700' : 'text-violet-700')}>
+                    {smartFilling ? 'Searching the web...'
+                      : smartFillResult?.status === 'enriched' ? `Found: ${smartFillResult.changes?.join(', ')}`
+                      : smartFillResult?.status === 'no_data' ? 'No new data found'
+                      : 'Smart Fill Missing Data'}
+                  </p>
+                  <p className="text-xs text-stone-500">
+                    {smartFillResult?.status === 'enriched' ? `Confidence: ${smartFillResult.confidence}`
+                      : `AI searches for ${[!lead.opening_date && 'opening date', (!lead.brand_tier || lead.brand_tier === 'unknown') && 'tier', !lead.room_count && 'room count'].filter(Boolean).join(', ')}`}
+                  </p>
+                </div>
+              </div>
+            </button>
+          )}
+          <button
+            onClick={() => onSmartFill('full')}
+            disabled={smartFilling}
+            className="w-full text-left rounded-lg px-3.5 py-2 border border-dashed border-stone-200 hover:border-violet-300 hover:bg-violet-50/50 transition disabled:opacity-60"
+          >
+            <div className="flex items-center gap-2.5">
+              <RefreshCw className="w-4 h-4 text-stone-400" />
+              <p className="text-xs font-medium text-stone-400">Full Refresh — search for latest updates</p>
+            </div>
+          </button>
+        </div>
 
       {/* Website */}
       {lead.hotel_website && typeof lead.hotel_website === 'string' && (

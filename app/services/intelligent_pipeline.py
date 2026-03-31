@@ -787,6 +787,7 @@ WHAT COUNTS AS RELEVANT:
 
 WHAT IS NOT RELEVANT:
 ❌ Hotels that already opened ({current_year - 1} or earlier) — unless announcing a new phase
+❌ Hotels mentioned only as BACKGROUND or COMPARISON (e.g. "similar to the Ritz-Carlton Turtle Bay which opened last year")
 ❌ International hotels (Europe, Asia, Middle East, Africa) with no US/Caribbean connection
 ❌ Executive appointments, promotions, or leadership changes (UNLESS tied to a new property)
 ❌ Hotel reviews, travel guides, or "best hotels" lists
@@ -1107,7 +1108,7 @@ Extract information about NEW HOTEL OPENINGS from this article.
 {source_hint}
 
 RULES:
-1. Only extract NEW hotels being announced (not existing hotels)
+1. Only extract hotels with a FUTURE opening/debut date ({current_year} or later)
 2. Leave fields empty if not clearly stated
 3. For opening_date use format "Month YYYY" or "Q1 {current_year}" or "{current_year}"
 4. key_insights is REQUIRED - include staffing numbers, amenities, investment
@@ -1117,6 +1118,13 @@ RULES:
    - "Hotel X and Hotel Y, set to open in Turks & Caicos" then "...slated for 2028" (shared date)
    - If a date like "2027" or "2028" appears near a hotel name within 2-3 sentences, assign it
 6. NEVER leave opening_date empty if ANY year or timeframe is mentioned near the hotel name in the article. Search the ENTIRE article for dates associated with each hotel before giving up
+7. CRITICAL — DO NOT EXTRACT hotels mentioned only as historical references, comparisons, or background context. Examples of what NOT to extract:
+   - "Similar to the Ritz-Carlton Turtle Bay which was converted in 2024..." (past event, background)
+   - "Marriott also operates The Westin Maui..." (existing hotel, not new)
+   - "Following the success of Hotel X which opened last year..." (already opened)
+   Only extract hotels that are THE SUBJECT of the article with a FUTURE opening/debut date.
+8. BRAND CONVERSIONS: For existing hotels being rebranded (e.g. resort converting to St. Regis), the opening_date is when it will DEBUT under the NEW brand, NOT when the original hotel was built. Mark opening_status as "conversion" for these.
+9. ALREADY OPENED CHECK: If the article says a hotel "opened", "debuted", "welcomed first guests", "is now open", or "launched" in {current_year - 1} or earlier, DO NOT extract it. It is not a new lead.
 
 KEY INSIGHTS TO CAPTURE (critical for uniform sales!):
 - Staff hiring numbers (e.g., "hiring 300 employees" = big order!)
