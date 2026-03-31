@@ -21,6 +21,7 @@ const NAV_ITEMS: NavItem[] = [
   { to: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
   { to: '/users',     label: 'Users',     icon: Users },
   { to: '/map',       label: 'Map',       icon: Map },
+  { to: '/sources',   label: 'Sources',   icon: Radar },
   { to: '/outreach',  label: 'Outreach',  icon: Mail, disabled: true },
 ]
 
