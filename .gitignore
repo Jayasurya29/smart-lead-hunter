@@ -85,3 +85,5 @@ frontend/.env.local
 
 data/learnings/
 enrichment_log.txt
+
+slh_master_import.csv

@@ -3,7 +3,7 @@ import { Link, useLocation } from 'react-router-dom'
 import { useAuth } from '@/hooks/useAuth'
 import { BackgroundTaskProvider, useBackgroundTask } from '@/hooks/useBackgroundTask'
 import {
-  LayoutDashboard, Map, Mail, Users, LogOut, Play, Radar,
+  LayoutDashboard, Map, Mail, Users, LogOut, Play, Radar, Building2,
   CheckCircle2, AlertCircle, X, ChevronDown, ChevronUp,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
@@ -19,6 +19,7 @@ interface NavItem {
 
 const NAV_ITEMS: NavItem[] = [
   { to: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
+  { to: '/clients',   label: 'Clients',   icon: Building2 },
   { to: '/users',     label: 'Users',     icon: Users },
   { to: '/map',       label: 'Map',       icon: Map },
   { to: '/sources',   label: 'Sources',   icon: Radar },

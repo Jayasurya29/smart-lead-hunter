@@ -10,6 +10,7 @@ import { Loader2 } from 'lucide-react'
 import UsersPage from '@/pages/Users'
 import MapPage from '@/pages/MapPage'
 import SourcesPage from '@/pages/SourcesPage'
+import ClientIntelligence from '@/pages/ClientIntelligence'
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { isAuthenticated, isLoading } = useAuth()
@@ -76,6 +77,14 @@ export default function AppRouter() {
             element={
               <ProtectedRoute>
                 <SourcesPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/clients"
+            element={
+              <ProtectedRoute>
+                <ClientIntelligence />
               </ProtectedRoute>
             }
           />
