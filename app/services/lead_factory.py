@@ -320,6 +320,13 @@ async def save_lead_to_db(
             logger.info(f"   🔄 Enriched: {hotel_name}")
         if commit:
             await session.commit()
+            # Recalculate revenue after enrichment
+            try:
+                from app.services.revenue_updater import update_lead_revenue
+
+                await update_lead_revenue(existing.id)
+            except Exception:
+                pass
         return {
             "status": "enriched" if enriched else "duplicate",
             "id": existing.id,
@@ -397,6 +404,14 @@ async def save_lead_to_db(
         else "🔵 COOL"
     )
     logger.info(f"   {quality} [{lead.lead_score}] {hotel_name}")
+
+    # Auto-calculate revenue potential
+    try:
+        from app.services.revenue_updater import update_lead_revenue
+
+        await update_lead_revenue(lead.id)
+    except Exception as e:
+        logger.warning(f"Revenue calc failed for {hotel_name}: {e}")
 
     return {"status": "saved", "id": lead.id, "reason": None}
 

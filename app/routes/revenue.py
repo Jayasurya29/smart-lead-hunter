@@ -258,6 +258,31 @@ async def quick_estimate(
 
 
 # ─── Helper Functions ────────────────────────────────────────────────────────
+@router.post("/bulk-update")
+async def bulk_update():
+    """Recalculate revenue for all leads missing it."""
+    from app.services.revenue_updater import bulk_update_revenue
+
+    result = await bulk_update_revenue()
+    return result
+
+
+@router.post("/bulk-update/force")
+async def bulk_update_force():
+    """Recalculate revenue for ALL leads."""
+    from app.services.revenue_updater import bulk_update_revenue
+
+    result = await bulk_update_revenue(force=True)
+    return result
+
+
+@router.post("/update/{lead_id}")
+async def update_single(lead_id: int):
+    """Recalculate revenue for a single lead."""
+    from app.services.revenue_updater import update_lead_revenue
+
+    opening, annual = await update_lead_revenue(lead_id)
+    return {"lead_id": lead_id, "revenue_opening": opening, "revenue_annual": annual}
 
 
 def _resolve_lead_location(lead) -> str:

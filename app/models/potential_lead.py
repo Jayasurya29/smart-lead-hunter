@@ -4,6 +4,7 @@ Potential Lead model - stores scraped leads before pushing to Insightly
 
 from sqlalchemy import (
     Column,
+    Float,
     String,
     Integer,
     DateTime,
@@ -61,6 +62,8 @@ class PotentialLead(Base):
         String(10)
     )  # HOT, URGENT, WARM, COOL, LATE, EXPIRED, TBD (computed on save/rescore)
     room_count = Column(Integer)
+    revenue_opening = Column(Float)  # Pre-calculated: new opening JA addressable
+    revenue_annual = Column(Float)  # Pre-calculated: annual recurring JA addressable
     description = Column(Text)
 
     # Key Insights - IMPORTANT for sales team!
