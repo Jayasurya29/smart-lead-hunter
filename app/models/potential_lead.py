@@ -163,6 +163,8 @@ class PotentialLead(Base):
             "lead_score": self.lead_score,
             "score_breakdown": self.score_breakdown,
             "estimated_revenue": self.estimated_revenue,
+            "revenue_opening": self.revenue_opening,
+            "revenue_annual": self.revenue_annual,
             # Source
             "source_url": self.source_url,
             "source_site": self.source_site,

@@ -37,6 +37,8 @@ export interface Lead {
   score_breakdown: Record<string, any> | null
   sources?: any
   source_detail?: string | null
+  revenue_opening: number | null
+  revenue_annual: number | null
   insightly_id: number | null
   created_at: string
   updated_at: string | null

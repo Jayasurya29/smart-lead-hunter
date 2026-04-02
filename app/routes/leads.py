@@ -172,6 +172,8 @@ async def list_leads(
         # Original keys
         "newest": PotentialLead.created_at.desc().nullslast(),
         "oldest": PotentialLead.created_at.asc().nullslast(),
+        "revenue_high": PotentialLead.revenue_opening.desc().nullslast(),
+        "revenue_low": PotentialLead.revenue_opening.asc().nullslast(),
         "score_desc": PotentialLead.lead_score.desc().nullslast(),
         "score_asc": PotentialLead.lead_score.asc().nullslast(),
         "name_asc": PotentialLead.hotel_name.asc().nullslast(),

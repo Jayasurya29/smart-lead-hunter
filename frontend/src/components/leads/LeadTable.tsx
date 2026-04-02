@@ -41,6 +41,7 @@ const COLUMNS: ColDef[] = [
   { key: 'time',     label: 'Time',     sortAsc: 'time_asc',      sortDesc: 'time_desc',     width: 'w-16' },
   { key: 'location', label: 'Location', sortAsc: 'location_az',   sortDesc: 'location_za' },
   { key: 'opening',  label: 'Opening',  sortAsc: 'opening_soon',  sortDesc: 'opening_late',  width: 'w-28' },
+  { key: 'revenue',  label: 'Potential',  sortAsc: 'revenue_low',  sortDesc: 'revenue_high',  width: 'w-24' },
   { key: 'added',    label: 'Added',    sortAsc: 'oldest',        sortDesc: 'newest',        width: 'w-20' },
 ]
 
@@ -110,6 +111,11 @@ function sortLeads(leads: Lead[], sort: string): Lead[] {
         return formatLocation(a).localeCompare(formatLocation(b))
       case 'location_za':
         return formatLocation(b).localeCompare(formatLocation(a))
+
+      case 'revenue_high':
+          return (b.revenue_opening ?? 0) - (a.revenue_opening ?? 0)
+      case 'revenue_low':
+          return (a.revenue_opening ?? 0) - (b.revenue_opening ?? 0)
 
       case 'opening_soon': {
         const oa = a.opening_date || String(a.opening_year || 'zzzz')
@@ -255,6 +261,18 @@ export default function LeadTable({
 
                   <td className="px-3 py-2.5">
                     <span className="text-sm font-medium text-navy-800">{formatOpening(lead)}</span>
+                  </td>
+
+                  <td className="px-3 py-2.5">
+                      {lead.revenue_opening ? (
+                        <span className="text-sm font-bold text-emerald-700">
+                          ${lead.revenue_opening >= 1000000
+                            ? `${(lead.revenue_opening / 1000000).toFixed(1)}M`
+                            : `${Math.round(lead.revenue_opening / 1000)}K`}
+                        </span>
+                      ) : (
+                        <span className="text-xs text-stone-300">—</span>
+                      )}
                   </td>
 
                   <td className="px-3 py-2.5">
