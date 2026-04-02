@@ -129,6 +129,8 @@ class LeadBase(BaseModel):
     country: Optional[str] = "USA"
     opening_date: Optional[str] = None
     room_count: Optional[int] = None
+    revenue_opening: Optional[float] = None
+    revenue_annual: Optional[float] = None
     hotel_type: Optional[str] = None
     brand: Optional[str] = None
     brand_tier: Optional[str] = None
