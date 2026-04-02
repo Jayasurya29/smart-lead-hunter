@@ -79,6 +79,10 @@ export default defineConfig({
         target: 'http://localhost:8000',
         changeOrigin: true,
       },
+      '/revenue': {
+        target: 'http://localhost:8000',
+        changeOrigin: true,
+      },
     },
   },
 })

@@ -37,6 +37,9 @@ from app.routes.existing_hotels import router as existing_hotels_router
 
 from app.routes.sap import router as sap_router
 
+from app.routes.revenue import router as revenue_router
+
+
 # NOTE: Do NOT set WindowsProactorEventLoopPolicy here.
 # Uvicorn overrides the policy and creates its own SelectorEventLoop anyway.
 # Playwright/Crawl4AI need ProactorEventLoop for subprocesses — they work
@@ -262,6 +265,7 @@ app.include_router(scraping_router)
 app.include_router(contacts_router)
 app.include_router(existing_hotels_router)
 app.include_router(sap_router)
+app.include_router(revenue_router)
 
 
 # -----------------------------------------------------------------------------

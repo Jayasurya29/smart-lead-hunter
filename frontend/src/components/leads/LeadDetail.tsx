@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { useLead, useContacts, useApproveLead, useRejectLead, useRestoreLead, useDeleteLead, useEnrichLead, useSmartFill } from '@/hooks/useLeads'
+import RevenuePotential from './RevenuePotential'
 import { editLead, saveContact, setPrimaryContact, deleteContact, updateContact, toggleContactScope, addContact } from '@/api/leads'
 import { useQueryClient } from '@tanstack/react-query'
 import type { Lead, Contact } from '@/api/types'
@@ -11,7 +12,7 @@ import {
   X, MapPin, Calendar, Building2, Layers, Globe, ExternalLink,
   User, Mail, Phone, Linkedin, Star, Bookmark, BookmarkCheck,
   Loader2, CheckCircle2, XCircle, Undo2, Trash2, Search, Save,
-  Link2, Pencil, Check,Zap, RefreshCw,
+  Link2, Pencil, Check, Zap, RefreshCw,
 } from 'lucide-react'
 
 /** Safely render any value — prevents empty object {} crashing React */
@@ -62,7 +63,7 @@ export default function LeadDetail({ leadId, tab, onClose }: Props) {
 
   return (
     <div className="h-full flex flex-col bg-white animate-slideIn">
-      {/* ═══ HEADER — name, score, badges ═══ */}
+      {/* ═══ HEADER — name, score, badges, smart fill ═══ */}
       <div className="px-5 pt-5 pb-3 flex-shrink-0 border-b border-slate-100 bg-gradient-to-b from-slate-50/50 to-white">
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0 flex-1">
@@ -86,15 +87,44 @@ export default function LeadDetail({ leadId, tab, onClose }: Props) {
           </div>
         </div>
 
-        <div className="flex items-center gap-2 mt-2 flex-wrap">
-          {lead.brand_tier && (
-            <span className={cn('inline-flex px-2 py-0.5 rounded text-xs font-bold', getTierColor(lead.brand_tier))}>
-              {getTierLabel(lead.brand_tier)}
+        <div className="flex items-center justify-between mt-2">
+          <div className="flex items-center gap-2 flex-wrap">
+            {lead.brand_tier && (
+              <span className={cn('inline-flex px-2 py-0.5 rounded text-xs font-bold', getTierColor(lead.brand_tier))}>
+                {getTierLabel(lead.brand_tier)}
+              </span>
+            )}
+            <span className={cn('inline-flex px-2 py-0.5 rounded text-xs font-bold', getTimelineColor(timeline))}>
+              {timeline}
             </span>
-          )}
-          <span className={cn('inline-flex px-2 py-0.5 rounded text-xs font-bold', getTimelineColor(timeline))}>
-            {timeline}
-          </span>
+          </div>
+
+          {/* Smart Fill + Full Refresh — top right */}
+          <div className="flex items-center gap-1.5 flex-shrink-0">
+            {(!lead.brand_tier || lead.brand_tier === 'unknown' || !lead.opening_date || !lead.room_count) && (
+              <button
+                onClick={() => smartFillMut.mutate({ id: leadId, mode: 'smart' })}
+                disabled={smartFillMut.isPending}
+                className={cn(
+                  'flex items-center gap-1 px-2 py-1 text-[10px] font-semibold rounded transition disabled:opacity-60',
+                  smartFillMut.data?.status === 'enriched'
+                    ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                    : 'bg-violet-50 text-violet-700 border border-violet-200 hover:bg-violet-100',
+                )}
+              >
+                {smartFillMut.isPending ? <Loader2 className="w-3 h-3 animate-spin" /> : <Zap className="w-3 h-3" />}
+                {smartFillMut.isPending ? '...' : smartFillMut.data?.status === 'enriched' ? 'Filled' : 'Smart Fill'}
+              </button>
+            )}
+            <button
+              onClick={() => smartFillMut.mutate({ id: leadId, mode: 'full' })}
+              disabled={smartFillMut.isPending}
+              className="flex items-center gap-1 px-2 py-1 text-[10px] font-medium text-stone-400 hover:text-violet-600 rounded border border-dashed border-stone-200 hover:border-violet-300 hover:bg-violet-50 transition disabled:opacity-60"
+            >
+              <RefreshCw className="w-3 h-3" />
+              Refresh
+            </button>
+          </div>
         </div>
       </div>
 
@@ -119,7 +149,7 @@ export default function LeadDetail({ leadId, tab, onClose }: Props) {
 
       {/* ═══ TAB CONTENT — scrollable ═══ */}
       <div className="flex-1 overflow-y-auto p-5">
-        {activeTab === 'overview'  && <OverviewTab lead={lead} contactList={contactList} onEnrich={() => enrichMut.mutate(leadId)} enriching={enrichMut.isPending} onSmartFill={(mode: 'smart' | 'full') => smartFillMut.mutate({ id: leadId, mode })} smartFilling={smartFillMut.isPending} smartFillResult={smartFillMut.data} />}
+        {activeTab === 'overview'  && <OverviewTab lead={lead} leadId={leadId} contactList={contactList} onEnrich={() => enrichMut.mutate(leadId)} enriching={enrichMut.isPending} onSmartFill={(mode: 'smart' | 'full') => smartFillMut.mutate({ id: leadId, mode })} smartFilling={smartFillMut.isPending} smartFillResult={smartFillMut.data} />}
         {activeTab === 'contacts'  && <ContactsTab contacts={contactList} loading={contactsLoading} leadId={leadId} onEnrich={() => enrichMut.mutate(leadId)} enriching={enrichMut.isPending} />}
         {activeTab === 'edit'      && <EditTab lead={lead} leadId={leadId} />}
         {activeTab === 'sources'   && <SourcesTab lead={lead} />}
@@ -193,15 +223,16 @@ export default function LeadDetail({ leadId, tab, onClose }: Props) {
 
 
 /* ═══════════════════════════════════════════════════
-   OVERVIEW TAB
+   OVERVIEW TAB — Details on top, Revenue below
    ═══════════════════════════════════════════════════ */
-function OverviewTab({ lead, contactList, onEnrich, enriching, onSmartFill, smartFilling, smartFillResult }: {
-  lead: Lead; contactList: Contact[]; onEnrich: () => void; enriching: boolean
+function OverviewTab({ lead, leadId, contactList, onEnrich, enriching, onSmartFill, smartFilling, smartFillResult }: {
+  lead: Lead; leadId: number; contactList: Contact[]; onEnrich: () => void; enriching: boolean
   onSmartFill: (mode: 'smart' | 'full') => void; smartFilling: boolean; smartFillResult?: { status: string; changes?: string[]; confidence?: string }
 }) {
+
   return (
-    <div className="space-y-6 animate-fadeIn">
-      {/* Details */}
+    <div className="space-y-5 animate-fadeIn">
+      {/* ── Details + Smart Fill ── */}
       <Section title="Details">
         <div className="grid grid-cols-2 gap-4">
           <Field icon={Calendar}  label="Opening"    value={formatOpening(lead)} />
@@ -214,51 +245,10 @@ function OverviewTab({ lead, contactList, onEnrich, enriching, onSmartFill, smar
         </div>
       </Section>
 
-      {/* Smart Fill */}
-        <div className="space-y-1.5">
-          {(!lead.brand_tier || lead.brand_tier === 'unknown' || !lead.opening_date || !lead.room_count) && (
-            <button
-              onClick={() => onSmartFill('smart')}
-              disabled={smartFilling}
-              className={cn(
-                'w-full text-left rounded-lg p-3.5 border transition disabled:opacity-60',
-                smartFillResult?.status === 'enriched' ? 'bg-emerald-50 border-emerald-200'
-                  : smartFillResult?.status === 'no_data' ? 'bg-stone-50 border-stone-200'
-                  : 'bg-violet-50 border-violet-200 hover:border-violet-300',
-              )}
-            >
-              <div className="flex items-center gap-2.5">
-                {smartFilling ? <Loader2 className="w-5 h-5 text-violet-600 animate-spin" />
-                  : smartFillResult?.status === 'enriched' ? <CheckCircle2 className="w-5 h-5 text-emerald-600" />
-                  : <Zap className="w-5 h-5 text-violet-600" />}
-                <div>
-                  <p className={cn('text-sm font-semibold', smartFillResult?.status === 'enriched' ? 'text-emerald-700' : 'text-violet-700')}>
-                    {smartFilling ? 'Searching the web...'
-                      : smartFillResult?.status === 'enriched' ? `Found: ${smartFillResult.changes?.join(', ')}`
-                      : smartFillResult?.status === 'no_data' ? 'No new data found'
-                      : 'Smart Fill Missing Data'}
-                  </p>
-                  <p className="text-xs text-stone-500">
-                    {smartFillResult?.status === 'enriched' ? `Confidence: ${smartFillResult.confidence}`
-                      : `AI searches for ${[!lead.opening_date && 'opening date', (!lead.brand_tier || lead.brand_tier === 'unknown') && 'tier', !lead.room_count && 'room count'].filter(Boolean).join(', ')}`}
-                  </p>
-                </div>
-              </div>
-            </button>
-          )}
-          <button
-            onClick={() => onSmartFill('full')}
-            disabled={smartFilling}
-            className="w-full text-left rounded-lg px-3.5 py-2 border border-dashed border-stone-200 hover:border-violet-300 hover:bg-violet-50/50 transition disabled:opacity-60"
-          >
-            <div className="flex items-center gap-2.5">
-              <RefreshCw className="w-4 h-4 text-stone-400" />
-              <p className="text-xs font-medium text-stone-400">Full Refresh — search for latest updates</p>
-            </div>
-          </button>
-        </div>
+      {/* ── Revenue Potential ── */}
+      <RevenuePotential leadId={leadId} />
 
-      {/* Website */}
+      {/* ── Website ── */}
       {lead.hotel_website && typeof lead.hotel_website === 'string' && (
         <Section title="Website">
           <a
@@ -273,7 +263,7 @@ function OverviewTab({ lead, contactList, onEnrich, enriching, onSmartFill, smar
         </Section>
       )}
 
-      {/* Primary Contact */}
+      {/* ── Primary Contact ── */}
       <Section title="Primary Contact">
         {contactList.length > 0 ? (
           <div className="bg-slate-50 rounded-lg p-3.5 border border-slate-200/80">
@@ -311,14 +301,14 @@ function OverviewTab({ lead, contactList, onEnrich, enriching, onSmartFill, smar
         )}
       </Section>
 
-      {/* Key Insights — AI bullet points */}
+      {/* ── Key Insights ── */}
       {lead.source_extractions && typeof lead.source_extractions === 'object' && Object.keys(lead.source_extractions).length > 0 && (
         <Section title={`Key Insights (${Object.keys(lead.source_extractions).length} sources)`}>
           <KeyInsights extractions={lead.source_extractions as Record<string, any>} />
         </Section>
       )}
 
-      {/* Metadata */}
+      {/* ── Metadata ── */}
       <Section title="Metadata">
         <div className="space-y-2 text-sm">
           {[
