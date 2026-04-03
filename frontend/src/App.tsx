@@ -8,7 +8,7 @@ import RegisterPage from '@/pages/Register'
 import Dashboard from '@/pages/Dashboard'
 import { Loader2 } from 'lucide-react'
 import UsersPage from '@/pages/Users'
-import MapPage from '@/pages/MapPage'
+import ExistingHotels from '@/pages/ExistingHotels'
 import SourcesPage from '@/pages/SourcesPage'
 import ClientIntelligence from '@/pages/ClientIntelligence'
 
@@ -65,10 +65,21 @@ export default function AppRouter() {
             }
           />
           <Route
+            path="/existing-hotels"
+            element={
+              <ProtectedRoute>
+                <ExistingHotels />
+              </ProtectedRoute>
+            }
+          />
+          <Route
             path="/map"
             element={
               <ProtectedRoute>
-                <MapPage />
+                <div className="p-8 text-center text-stone-400">
+                  <p className="text-lg font-medium mb-2">Hotel Map</p>
+                  <p className="text-sm">Coming soon — all hotels on one interactive map</p>
+                </div>
               </ProtectedRoute>
             }
           />

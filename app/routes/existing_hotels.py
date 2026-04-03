@@ -301,6 +301,10 @@ async def update_existing_hotel(
         "sap_bp_code",
         "client_notes",
         "status",
+        "rejection_reason",
+        "lead_score",
+        "revenue_opening",
+        "revenue_annual",
     }
     for field, value in body.items():
         if field in allowed:
@@ -344,6 +348,110 @@ async def create_existing_hotel(
         status="active",
     )
     db.add(hotel)
+    await db.commit()
+    return hotel.to_dict()
+
+
+# ── POST /api/existing-hotels/{id}/approve — Push to Insightly ──
+
+
+@router.post("/{hotel_id}/approve")
+async def approve_existing_hotel(
+    hotel_id: int,
+    db: AsyncSession = Depends(get_db),
+    _csrf=Depends(require_ajax),
+):
+    result = await db.execute(select(ExistingHotel).where(ExistingHotel.id == hotel_id))
+    hotel = result.scalar_one_or_none()
+    if not hotel:
+        raise HTTPException(status_code=404, detail="Hotel not found")
+
+    # Push to Insightly
+    try:
+        from app.services.insightly import get_insightly_client
+
+        crm = get_insightly_client()
+        insightly_lead = await crm.create_lead(
+            {
+                "FIRST_NAME": hotel.gm_name.split()[0]
+                if hotel.gm_name and " " in hotel.gm_name
+                else (hotel.gm_name or "Hotel"),
+                "LAST_NAME": hotel.gm_name.split()[-1]
+                if hotel.gm_name and " " in hotel.gm_name
+                else hotel.name[:50],
+                "ORGANISATION_NAME": hotel.name,
+                "TITLE": hotel.gm_title or "",
+                "EMAIL": hotel.gm_email or "",
+                "PHONE": hotel.gm_phone or hotel.phone or "",
+                "LEAD_SOURCE_ID": 3859952,  # Smart Lead Hunter
+                "CUSTOMFIELDS": [
+                    {"FIELD_NAME": "SLH_Lead_ID__c", "FIELD_VALUE": f"EH-{hotel.id}"},
+                    {"FIELD_NAME": "SLH_Type__c", "FIELD_VALUE": "Existing Hotel"},
+                ],
+            }
+        )
+        hotel.insightly_id = insightly_lead.get("LEAD_ID")
+    except Exception as e:
+        logger.error(f"Insightly push failed for existing hotel {hotel_id}: {e}")
+
+    hotel.status = "approved"
+    await db.commit()
+    return hotel.to_dict()
+
+
+# ── POST /api/existing-hotels/{id}/reject ──
+
+
+@router.post("/{hotel_id}/reject")
+async def reject_existing_hotel(
+    hotel_id: int,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    _csrf=Depends(require_ajax),
+):
+    body = (
+        await request.json()
+        if request.headers.get("content-type") == "application/json"
+        else {}
+    )
+    result = await db.execute(select(ExistingHotel).where(ExistingHotel.id == hotel_id))
+    hotel = result.scalar_one_or_none()
+    if not hotel:
+        raise HTTPException(status_code=404, detail="Hotel not found")
+
+    hotel.status = "rejected"
+    hotel.rejection_reason = body.get("reason", "")
+    await db.commit()
+    return hotel.to_dict()
+
+
+# ── POST /api/existing-hotels/{id}/restore ──
+
+
+@router.post("/{hotel_id}/restore")
+async def restore_existing_hotel(
+    hotel_id: int,
+    db: AsyncSession = Depends(get_db),
+    _csrf=Depends(require_ajax),
+):
+    result = await db.execute(select(ExistingHotel).where(ExistingHotel.id == hotel_id))
+    hotel = result.scalar_one_or_none()
+    if not hotel:
+        raise HTTPException(status_code=404, detail="Hotel not found")
+
+    # If approved + in Insightly, delete from CRM
+    if hotel.status == "approved" and hotel.insightly_id:
+        try:
+            from app.services.insightly import get_insightly_client
+
+            crm = get_insightly_client()
+            await crm.delete_lead(hotel.insightly_id)
+            hotel.insightly_id = None
+        except Exception as e:
+            logger.error(f"Insightly delete failed for existing hotel {hotel_id}: {e}")
+
+    hotel.status = "new"
+    hotel.rejection_reason = None
     await db.commit()
     return hotel.to_dict()
 

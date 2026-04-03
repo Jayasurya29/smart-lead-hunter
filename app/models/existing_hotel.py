@@ -66,7 +66,15 @@ class ExistingHotel(Base):
     )  # sap_import, google_places, chain_directory, manual
     source_url = Column(String(500))
     last_verified_at = Column(DateTime(timezone=True))
-    status = Column(String(20), default="active")  # active, closed, unknown
+
+    status = Column(String(20), default="new")  # new, approved, rejected
+
+    # Pipeline fields
+    lead_score = Column(Integer)
+    revenue_opening = Column(Float)
+    revenue_annual = Column(Float)
+    insightly_id = Column(Integer)
+    rejection_reason = Column(Text)
 
     # Atlist integration
     atlist_marker_id = Column(String(100))
@@ -117,6 +125,11 @@ class ExistingHotel(Base):
             "source_url": self.source_url,
             "status": self.status,
             "pushed_to_map": self.pushed_to_map,
+            "lead_score": self.lead_score,
+            "revenue_opening": self.revenue_opening,
+            "revenue_annual": self.revenue_annual,
+            "insightly_id": self.insightly_id,
+            "rejection_reason": self.rejection_reason,
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
         }
