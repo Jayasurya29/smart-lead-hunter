@@ -1,10 +1,11 @@
-import { useMemo } from 'react'
+import { useMemo, useState } from 'react'
 import type { Lead, LeadTab } from '@/api/types'
 import {
   cn, getScoreColor, getScoreRing, getTimelineLabel, getTimelineColor,
   getTierLabel, getTierColor, formatLocation, formatOpening, relativeDate,
 } from '@/lib/utils'
 import { useApproveLead, useRejectLead, useRestoreLead } from '@/hooks/useLeads'
+import ConfirmDialog from '../ui/ConfirmDialog'
 import {
   CheckCircle2, XCircle, Undo2,
   ChevronLeft, ChevronRight, ChevronUp, ChevronDown, ChevronsUpDown,
@@ -113,9 +114,9 @@ function sortLeads(leads: Lead[], sort: string): Lead[] {
         return formatLocation(b).localeCompare(formatLocation(a))
 
       case 'revenue_high':
-          return (b.revenue_opening ?? 0) - (a.revenue_opening ?? 0)
+        return (b.revenue_opening ?? 0) - (a.revenue_opening ?? 0)
       case 'revenue_low':
-          return (a.revenue_opening ?? 0) - (b.revenue_opening ?? 0)
+        return (a.revenue_opening ?? 0) - (b.revenue_opening ?? 0)
 
       case 'opening_soon': {
         const oa = a.opening_date || String(a.opening_year || 'zzzz')
@@ -154,8 +155,20 @@ export default function LeadTable({
   const isApproved = tab === 'approved'
   const isRejected = tab === 'rejected'
 
+  // Confirm dialog state
+  const [confirmTarget, setConfirmTarget] = useState<{ action: 'approve' | 'reject' | 'restore'; lead: Lead } | null>(null)
+
   // Client-side sort
   const sortedLeads = useMemo(() => sortLeads(leads, currentSort), [leads, currentSort])
+
+  function handleConfirm() {
+    if (!confirmTarget) return
+    const { action, lead } = confirmTarget
+    if (action === 'approve') approveMut.mutate(lead.id)
+    if (action === 'reject') rejectMut.mutate({ id: lead.id })
+    if (action === 'restore') restoreMut.mutate(lead.id)
+    setConfirmTarget(null)
+  }
 
   if (isLoading) {
     return (
@@ -171,7 +184,7 @@ export default function LeadTable({
     return (
       <div className="flex flex-col items-center justify-center py-20 text-stone-400">
         <div className="text-4xl mb-3">
-          {isNew ? '📭' : isApproved ? '✅' : isRejected ? '🚫' : '⏱️'}
+          {isNew ? '🔍' : isApproved ? '✅' : isRejected ? '🚫' : '⏱️'}
         </div>
         <p className="text-sm font-medium">No leads in {tab}</p>
         <p className="text-xs mt-1">
@@ -180,6 +193,9 @@ export default function LeadTable({
       </div>
     )
   }
+
+  const confirmLead = confirmTarget?.lead
+  const confirmAction = confirmTarget?.action
 
   return (
     <div className="flex flex-col h-full">
@@ -264,15 +280,15 @@ export default function LeadTable({
                   </td>
 
                   <td className="px-3 py-2.5">
-                      {lead.revenue_opening ? (
-                        <span className="text-sm font-bold text-emerald-700">
-                          ${lead.revenue_opening >= 1000000
-                            ? `${(lead.revenue_opening / 1000000).toFixed(1)}M`
-                            : `${Math.round(lead.revenue_opening / 1000)}K`}
-                        </span>
-                      ) : (
-                        <span className="text-xs text-stone-300">—</span>
-                      )}
+                    {lead.revenue_opening ? (
+                      <span className="text-sm font-bold text-emerald-700">
+                        ${lead.revenue_opening >= 1000000
+                          ? `${(lead.revenue_opening / 1000000).toFixed(1)}M`
+                          : `${Math.round(lead.revenue_opening / 1000)}K`}
+                      </span>
+                    ) : (
+                      <span className="text-xs text-stone-300">—</span>
+                    )}
                   </td>
 
                   <td className="px-3 py-2.5">
@@ -283,21 +299,21 @@ export default function LeadTable({
                     <div className="row-actions flex items-center gap-0.5 justify-end">
                       {isNew && (
                         <>
-                          <ActionBtn onClick={(e) => { e.stopPropagation(); if (window.confirm(`Approve "${lead.hotel_name || lead.name}" and push to Insightly CRM?`)) approveMut.mutate(lead.id) }} color="emerald" title="Approve" pending={approveMut.isPending}>
+                          <ActionBtn onClick={(e) => { e.stopPropagation(); setConfirmTarget({ action: 'approve', lead }) }} color="emerald" title="Approve" pending={approveMut.isPending}>
                             <CheckCircle2 className="w-4 h-4" />
                           </ActionBtn>
-                          <ActionBtn onClick={(e) => { e.stopPropagation(); if (window.confirm(`Reject "${lead.hotel_name || lead.name}"?`)) rejectMut.mutate({ id: lead.id }) }} color="red" title="Reject" pending={rejectMut.isPending}>
+                          <ActionBtn onClick={(e) => { e.stopPropagation(); setConfirmTarget({ action: 'reject', lead }) }} color="red" title="Reject" pending={rejectMut.isPending}>
                             <XCircle className="w-4 h-4" />
                           </ActionBtn>
                         </>
                       )}
                       {isApproved && (
-                        <ActionBtn onClick={(e) => { e.stopPropagation(); if (window.confirm(`Move "${lead.hotel_name || lead.name}" back to pipeline? This will delete from Insightly.`)) restoreMut.mutate(lead.id) }} color="amber" title="Back to Pipeline" pending={restoreMut.isPending}>
+                        <ActionBtn onClick={(e) => { e.stopPropagation(); setConfirmTarget({ action: 'restore', lead }) }} color="amber" title="Back to Pipeline" pending={restoreMut.isPending}>
                           <Undo2 className="w-4 h-4" />
                         </ActionBtn>
                       )}
                       {isRejected && (
-                        <ActionBtn onClick={(e) => { e.stopPropagation(); if (window.confirm(`Restore "${lead.hotel_name || lead.name}" back to pipeline?`)) restoreMut.mutate(lead.id) }} color="blue" title="Restore" pending={restoreMut.isPending}>
+                        <ActionBtn onClick={(e) => { e.stopPropagation(); setConfirmTarget({ action: 'restore', lead }) }} color="blue" title="Restore" pending={restoreMut.isPending}>
                           <Undo2 className="w-4 h-4" />
                         </ActionBtn>
                       )}
@@ -360,6 +376,40 @@ export default function LeadTable({
           </div>
         </div>
       )}
+
+      {/* ── Confirm Dialog ── */}
+      <ConfirmDialog
+        open={confirmAction === 'approve'}
+        variant="approve"
+        title="Approve Lead"
+        message={`Push "${confirmLead?.hotel_name || confirmLead?.name}" to Insightly CRM? The sales team will be able to work this lead.`}
+        confirmLabel="Approve & Push"
+        pending={approveMut.isPending}
+        onConfirm={handleConfirm}
+        onCancel={() => setConfirmTarget(null)}
+      />
+      <ConfirmDialog
+        open={confirmAction === 'reject'}
+        variant="reject"
+        title="Reject Lead"
+        message={`Move "${confirmLead?.hotel_name || confirmLead?.name}" to the Rejected tab? You can restore it later if needed.`}
+        confirmLabel="Reject"
+        pending={rejectMut.isPending}
+        onConfirm={handleConfirm}
+        onCancel={() => setConfirmTarget(null)}
+      />
+      <ConfirmDialog
+        open={confirmAction === 'restore'}
+        variant="restore"
+        title={isApproved ? 'Back to Pipeline' : 'Restore Lead'}
+        message={isApproved
+          ? `Move "${confirmLead?.hotel_name || confirmLead?.name}" back to the pipeline? This will delete the lead from Insightly CRM.`
+          : `Restore "${confirmLead?.hotel_name || confirmLead?.name}" back to the pipeline?`}
+        confirmLabel={isApproved ? 'Remove from CRM' : 'Restore'}
+        pending={restoreMut.isPending}
+        onConfirm={handleConfirm}
+        onCancel={() => setConfirmTarget(null)}
+      />
     </div>
   )
 }

@@ -68,6 +68,9 @@ _JUNK_PATTERNS = [
     re.compile(r"new openings for 20\d{2}", re.IGNORECASE),
     # Unnamed/generic projects
     re.compile(r"^new \d+-key ", re.IGNORECASE),
+    re.compile(r"^multiple\s+(new\s+)?hotels?", re.IGNORECASE),
+    re.compile(r"^several\s+(new\s+)?hotels?", re.IGNORECASE),
+    re.compile(r"^various\s+(new\s+)?hotels?", re.IGNORECASE),
     re.compile(r"^unnamed\b", re.IGNORECASE),
     re.compile(r"\(unnamed\)", re.IGNORECASE),
     re.compile(r"^untitled hotel", re.IGNORECASE),

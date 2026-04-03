@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useLead, useContacts, useApproveLead, useRejectLead, useRestoreLead, useDeleteLead, useEnrichLead, useSmartFill } from '@/hooks/useLeads'
 import RevenuePotential from './RevenuePotential'
+import ConfirmDialog from '../ui/ConfirmDialog'
 import { editLead, saveContact, setPrimaryContact, deleteContact, updateContact, toggleContactScope, addContact } from '@/api/leads'
 import { useQueryClient } from '@tanstack/react-query'
 import type { Lead, Contact } from '@/api/types'
@@ -35,6 +36,7 @@ export default function LeadDetail({ leadId, tab, onClose }: Props) {
   const { data: lead, isLoading } = useLead(leadId)
   const { data: contacts, isLoading: contactsLoading } = useContacts(leadId)
   const [activeTab, setActiveTab] = useState<DetailTab>('overview')
+  const [confirmAction, setConfirmAction] = useState<'approve' | 'reject' | 'restore' | null>(null)
 
   const approveMut = useApproveLead()
   const rejectMut  = useRejectLead()
@@ -63,7 +65,7 @@ export default function LeadDetail({ leadId, tab, onClose }: Props) {
 
   return (
     <div className="h-full flex flex-col bg-white animate-slideIn">
-      {/* ═══ HEADER — name, score, badges, smart fill ═══ */}
+      {/* ═══ HEADER — name, score, badges ═══ */}
       <div className="px-5 pt-5 pb-3 flex-shrink-0 border-b border-slate-100 bg-gradient-to-b from-slate-50/50 to-white">
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0 flex-1">
@@ -87,44 +89,15 @@ export default function LeadDetail({ leadId, tab, onClose }: Props) {
           </div>
         </div>
 
-        <div className="flex items-center justify-between mt-2">
-          <div className="flex items-center gap-2 flex-wrap">
-            {lead.brand_tier && (
-              <span className={cn('inline-flex px-2 py-0.5 rounded text-xs font-bold', getTierColor(lead.brand_tier))}>
-                {getTierLabel(lead.brand_tier)}
-              </span>
-            )}
-            <span className={cn('inline-flex px-2 py-0.5 rounded text-xs font-bold', getTimelineColor(timeline))}>
-              {timeline}
+        <div className="flex items-center gap-2 mt-2 flex-wrap">
+          {lead.brand_tier && (
+            <span className={cn('inline-flex px-2 py-0.5 rounded text-xs font-bold', getTierColor(lead.brand_tier))}>
+              {getTierLabel(lead.brand_tier)}
             </span>
-          </div>
-
-          {/* Smart Fill + Full Refresh — top right */}
-          <div className="flex items-center gap-1.5 flex-shrink-0">
-            {(!lead.brand_tier || lead.brand_tier === 'unknown' || !lead.opening_date || !lead.room_count) && (
-              <button
-                onClick={() => smartFillMut.mutate({ id: leadId, mode: 'smart' })}
-                disabled={smartFillMut.isPending}
-                className={cn(
-                  'flex items-center gap-1 px-2 py-1 text-[10px] font-semibold rounded transition disabled:opacity-60',
-                  smartFillMut.data?.status === 'enriched'
-                    ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
-                    : 'bg-violet-50 text-violet-700 border border-violet-200 hover:bg-violet-100',
-                )}
-              >
-                {smartFillMut.isPending ? <Loader2 className="w-3 h-3 animate-spin" /> : <Zap className="w-3 h-3" />}
-                {smartFillMut.isPending ? '...' : smartFillMut.data?.status === 'enriched' ? 'Filled' : 'Smart Fill'}
-              </button>
-            )}
-            <button
-              onClick={() => smartFillMut.mutate({ id: leadId, mode: 'full' })}
-              disabled={smartFillMut.isPending}
-              className="flex items-center gap-1 px-2 py-1 text-[10px] font-medium text-stone-400 hover:text-violet-600 rounded border border-dashed border-stone-200 hover:border-violet-300 hover:bg-violet-50 transition disabled:opacity-60"
-            >
-              <RefreshCw className="w-3 h-3" />
-              Refresh
-            </button>
-          </div>
+          )}
+          <span className={cn('inline-flex px-2 py-0.5 rounded text-xs font-bold', getTimelineColor(timeline))}>
+            {timeline}
+          </span>
         </div>
       </div>
 
@@ -155,30 +128,21 @@ export default function LeadDetail({ leadId, tab, onClose }: Props) {
         {activeTab === 'sources'   && <SourcesTab lead={lead} />}
       </div>
 
-      {/* ═══ STICKY ACTION BAR — always visible at bottom ═══ */}
+      {/* ═══ STICKY ACTION BAR ═══ */}
       <div className="px-5 py-3 border-t border-slate-100 bg-slate-50/50 flex-shrink-0">
         <div className="flex items-center gap-2">
           {isNew && (
             <>
               <button
-                onClick={() => {
-                  if (window.confirm(`Approve "${lead.hotel_name}" and push to Insightly CRM?`)) {
-                    approveMut.mutate(leadId)
-                  }
-                }}
+                onClick={() => setConfirmAction('approve')}
                 disabled={approveMut.isPending}
                 className="flex items-center gap-1.5 px-4 py-2 text-xs font-semibold rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 transition disabled:opacity-50"
               >
                 {approveMut.isPending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <CheckCircle2 className="w-3.5 h-3.5" />}
                 Approve
               </button>
-
               <button
-                onClick={() => {
-                  if (window.confirm(`Reject "${lead.hotel_name}"? It will be moved to the Rejected tab.`)) {
-                    rejectMut.mutate({ id: leadId })
-                  }
-                }}
+                onClick={() => setConfirmAction('reject')}
                 disabled={rejectMut.isPending}
                 className="flex items-center gap-1.5 px-4 py-2 text-xs font-semibold rounded-lg border border-stone-200 text-stone-600 hover:bg-stone-50 transition disabled:opacity-50"
               >
@@ -189,11 +153,7 @@ export default function LeadDetail({ leadId, tab, onClose }: Props) {
           )}
           {isApproved && (
             <button
-              onClick={() => {
-                if (window.confirm(`Move "${lead.hotel_name}" back to pipeline?\n\nThis will delete the lead from Insightly CRM.`)) {
-                  restoreMut.mutate(leadId)
-                }
-              }}
+              onClick={() => setConfirmAction('restore')}
               disabled={restoreMut.isPending}
               className="flex items-center gap-1.5 px-4 py-2 text-xs font-semibold rounded-lg border border-amber-200 text-amber-600 hover:bg-amber-50 transition disabled:opacity-50"
             >
@@ -203,11 +163,7 @@ export default function LeadDetail({ leadId, tab, onClose }: Props) {
           )}
           {isRejected && (
             <button
-              onClick={() => {
-                if (window.confirm(`Restore "${lead.hotel_name}" back to the pipeline?`)) {
-                  restoreMut.mutate(leadId)
-                }
-              }}
+              onClick={() => setConfirmAction('restore')}
               disabled={restoreMut.isPending}
               className="flex items-center gap-1.5 px-4 py-2 text-xs font-semibold rounded-lg border border-blue-200 text-blue-600 hover:bg-blue-50 transition disabled:opacity-50"
             >
@@ -217,6 +173,40 @@ export default function LeadDetail({ leadId, tab, onClose }: Props) {
           )}
         </div>
       </div>
+
+      {/* ═══ CONFIRM DIALOGS ═══ */}
+      <ConfirmDialog
+        open={confirmAction === 'approve'}
+        variant="approve"
+        title="Approve Lead"
+        message={`Push "${lead.hotel_name}" to Insightly CRM? The sales team will be able to work this lead.`}
+        confirmLabel="Approve & Push"
+        pending={approveMut.isPending}
+        onConfirm={() => { approveMut.mutate(leadId); setConfirmAction(null) }}
+        onCancel={() => setConfirmAction(null)}
+      />
+      <ConfirmDialog
+        open={confirmAction === 'reject'}
+        variant="reject"
+        title="Reject Lead"
+        message={`Move "${lead.hotel_name}" to the Rejected tab? You can restore it later if needed.`}
+        confirmLabel="Reject"
+        pending={rejectMut.isPending}
+        onConfirm={() => { rejectMut.mutate({ id: leadId }); setConfirmAction(null) }}
+        onCancel={() => setConfirmAction(null)}
+      />
+      <ConfirmDialog
+        open={confirmAction === 'restore'}
+        variant="restore"
+        title={isApproved ? 'Back to Pipeline' : 'Restore Lead'}
+        message={isApproved
+          ? `Move "${lead.hotel_name}" back to the pipeline? This will delete the lead from Insightly CRM.`
+          : `Restore "${lead.hotel_name}" back to the pipeline?`}
+        confirmLabel={isApproved ? 'Remove from CRM' : 'Restore'}
+        pending={restoreMut.isPending}
+        onConfirm={() => { restoreMut.mutate(leadId); setConfirmAction(null) }}
+        onCancel={() => setConfirmAction(null)}
+      />
     </div>
   )
 }
@@ -229,6 +219,7 @@ function OverviewTab({ lead, leadId, contactList, onEnrich, enriching, onSmartFi
   lead: Lead; leadId: number; contactList: Contact[]; onEnrich: () => void; enriching: boolean
   onSmartFill: (mode: 'smart' | 'full') => void; smartFilling: boolean; smartFillResult?: { status: string; changes?: string[]; confidence?: string }
 }) {
+  const hasMissing = !lead.brand_tier || lead.brand_tier === 'unknown' || !lead.opening_date || !lead.room_count
 
   return (
     <div className="space-y-5 animate-fadeIn">
@@ -242,6 +233,45 @@ function OverviewTab({ lead, leadId, contactList, onEnrich, enriching, onSmartFi
           {lead.management_company && <Field icon={Building2} label="Mgmt Co."   value={lead.management_company} />}
           {lead.developer         && <Field icon={Building2} label="Developer"   value={lead.developer} />}
           {lead.owner             && <Field icon={User}      label="Owner"       value={lead.owner} />}
+        </div>
+
+        {/* Smart Fill + Full Refresh — compact action row */}
+        <div className="flex items-center gap-2 mt-3 pt-3 border-t border-stone-100">
+          {hasMissing && (
+            <button
+              onClick={() => onSmartFill('smart')}
+              disabled={smartFilling}
+              className={cn(
+                'flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-md transition disabled:opacity-60',
+                smartFillResult?.status === 'enriched'
+                  ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                  : smartFillResult?.status === 'no_data'
+                    ? 'bg-stone-50 text-stone-500 border border-stone-200'
+                    : 'bg-violet-50 text-violet-700 border border-violet-200 hover:bg-violet-100',
+              )}
+            >
+              {smartFilling ? <Loader2 className="w-3 h-3 animate-spin" />
+                : smartFillResult?.status === 'enriched' ? <CheckCircle2 className="w-3 h-3" />
+                : <Zap className="w-3 h-3" />}
+              {smartFilling ? 'Searching...'
+                : smartFillResult?.status === 'enriched' ? `Found: ${smartFillResult.changes?.join(', ')}`
+                : smartFillResult?.status === 'no_data' ? 'No data found'
+                : 'Smart Fill'}
+            </button>
+          )}
+          <button
+            onClick={() => onSmartFill('full')}
+            disabled={smartFilling}
+            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-stone-400 hover:text-violet-600 hover:bg-violet-50 rounded-md border border-dashed border-stone-200 hover:border-violet-300 transition disabled:opacity-60"
+          >
+            <RefreshCw className="w-3 h-3" />
+            Full Refresh
+          </button>
+          {smartFillResult?.status === 'enriched' && smartFillResult.confidence && (
+            <span className="text-[10px] text-stone-400 ml-auto">
+              Confidence: {smartFillResult.confidence}
+            </span>
+          )}
         </div>
       </Section>
 
