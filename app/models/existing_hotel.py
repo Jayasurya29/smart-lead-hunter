@@ -68,6 +68,7 @@ class ExistingHotel(Base):
     last_verified_at = Column(DateTime(timezone=True))
 
     status = Column(String(20), default="new")  # new, approved, rejected
+    zone = Column(String(50))  # South Florida, Orlando, Tampa Bay, etc.
 
     # Pipeline fields
     lead_score = Column(Integer)
@@ -124,6 +125,7 @@ class ExistingHotel(Base):
             "data_source": self.data_source,
             "source_url": self.source_url,
             "status": self.status,
+            "zone": self.zone,
             "pushed_to_map": self.pushed_to_map,
             "lead_score": self.lead_score,
             "revenue_opening": self.revenue_opening,

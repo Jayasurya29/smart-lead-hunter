@@ -32,9 +32,10 @@ async def list_existing_hotels(
     city: Optional[str] = None,
     brand_tier: Optional[str] = None,
     chain: Optional[str] = None,
-    is_client: Optional[str] = None,  # "true", "false", or None for all
+    is_client: Optional[str] = None,
     status: Optional[str] = None,
     has_contact: Optional[str] = None,
+    zone: Optional[str] = None,
     sort: str = "name_az",
     db: AsyncSession = Depends(get_db),
 ):
@@ -85,6 +86,10 @@ async def list_existing_hotels(
         query = query.where(ExistingHotel.status == status)
         count_query = count_query.where(ExistingHotel.status == status)
 
+    if zone:
+        query = query.where(ExistingHotel.zone == zone)
+        count_query = count_query.where(ExistingHotel.zone == zone)
+
     if has_contact == "true":
         query = query.where(ExistingHotel.gm_name.isnot(None))
         count_query = count_query.where(ExistingHotel.gm_name.isnot(None))
@@ -101,6 +106,8 @@ async def list_existing_hotels(
         "state_az": ExistingHotel.state.asc(),
         "newest": ExistingHotel.created_at.desc(),
         "oldest": ExistingHotel.created_at.asc(),
+        "revenue_high": ExistingHotel.revenue_annual.desc().nullslast(),
+        "revenue_low": ExistingHotel.revenue_annual.asc().nullslast(),
     }
     order = sort_map.get(sort, ExistingHotel.name.asc())
     query = query.order_by(order)
@@ -178,6 +185,18 @@ async def existing_hotels_stats(db: AsyncSession = Depends(get_db)):
     )
     top_states = [{"state": row[0], "count": row[1]} for row in state_result.fetchall()]
 
+    # Zone breakdown
+    zone_result = await db.execute(
+        select(
+            ExistingHotel.zone,
+            func.count(ExistingHotel.id),
+        )
+        .where(ExistingHotel.zone.isnot(None))
+        .group_by(ExistingHotel.zone)
+        .order_by(func.count(ExistingHotel.id).desc())
+    )
+    zones = [{"zone": row[0], "count": row[1]} for row in zone_result.fetchall()]
+
     return {
         "total": r.total or 0,
         "clients": r.clients or 0,
@@ -188,6 +207,7 @@ async def existing_hotels_stats(db: AsyncSession = Depends(get_db)):
         "on_map": r.on_map or 0,
         "tiers": tiers,
         "top_states": top_states,
+        "zones": zones,
     }
 
 
@@ -301,6 +321,7 @@ async def update_existing_hotel(
         "sap_bp_code",
         "client_notes",
         "status",
+        "zone",
         "rejection_reason",
         "lead_score",
         "revenue_opening",
@@ -345,7 +366,7 @@ async def create_existing_hotel(
         website=body.get("website"),
         is_client=body.get("is_client", False),
         data_source="manual",
-        status="active",
+        status="new",
     )
     db.add(hotel)
     await db.commit()
@@ -383,7 +404,7 @@ async def approve_existing_hotel(
                 "TITLE": hotel.gm_title or "",
                 "EMAIL": hotel.gm_email or "",
                 "PHONE": hotel.gm_phone or hotel.phone or "",
-                "LEAD_SOURCE_ID": 3859952,  # Smart Lead Hunter
+                "LEAD_SOURCE_ID": 3859952,
                 "CUSTOMFIELDS": [
                     {"FIELD_NAME": "SLH_Lead_ID__c", "FIELD_VALUE": f"EH-{hotel.id}"},
                     {"FIELD_NAME": "SLH_Type__c", "FIELD_VALUE": "Existing Hotel"},
@@ -467,7 +488,7 @@ async def export_csv(
 ):
     """Export hotels as CSV for Atlist upload."""
     body = await request.json()
-    is_client = body.get("is_client")  # "true", "false", None
+    is_client = body.get("is_client")
 
     query = select(ExistingHotel).where(ExistingHotel.latitude.isnot(None))
 
@@ -479,7 +500,6 @@ async def export_csv(
     result = await db.execute(query)
     hotels = result.scalars().all()
 
-    # Build CSV rows for Atlist format
     rows = []
     for h in hotels:
         tier_label = (h.brand_tier or "").replace("_", " ").title()

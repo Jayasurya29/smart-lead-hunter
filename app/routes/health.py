@@ -59,24 +59,34 @@ async def health_check(db: AsyncSession = Depends(get_db)):
     except Exception as e:
         components["database"] = f"unhealthy: {safe_error(e)}"
 
-    # 2. Gemini API
+    # 2. Gemini API (Vertex AI)
     try:
         import httpx
-
-        gemini_key = (
-            settings.gemini_api_key if hasattr(settings, "gemini_api_key") else None
+        from app.services.gemini_client import (
+            get_gemini_url,
+            get_gemini_headers,
+            is_vertex_ai,
         )
-        if not gemini_key:
-            components["gemini"] = "not configured"
+
+        url = get_gemini_url("gemini-2.5-flash")
+        headers = get_gemini_headers()
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            resp = await client.post(
+                url,
+                json={
+                    "contents": [{"role": "user", "parts": [{"text": "ping"}]}],
+                    "generationConfig": {
+                        "maxOutputTokens": 5,
+                        "thinkingConfig": {"thinkingBudget": 0},
+                    },
+                },
+                headers=headers,
+            )
+        if resp.status_code == 200:
+            mode = "Vertex AI" if is_vertex_ai() else "Direct API"
+            components["gemini"] = f"healthy ({mode})"
         else:
-            gemini_model = getattr(settings, "gemini_model", "gemini-2.5-flash")
-            url = f"https://generativelanguage.googleapis.com/v1beta/models/{gemini_model}?key={gemini_key}"
-            async with httpx.AsyncClient(timeout=5.0) as client:
-                resp = await client.get(url)
-            if resp.status_code == 200:
-                components["gemini"] = "healthy"
-            else:
-                components["gemini"] = f"error: HTTP {resp.status_code}"
+            components["gemini"] = f"error: HTTP {resp.status_code}"
     except Exception as e:
         components["gemini"] = f"unhealthy: {safe_error(e)}"
 

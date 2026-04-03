@@ -25,6 +25,7 @@ import os
 import re
 from datetime import date
 from typing import Optional
+from app.services.gemini_client import get_gemini_url, get_gemini_headers
 
 import httpx
 from dotenv import load_dotenv
@@ -88,20 +89,11 @@ async def _call_gemini(
     Returns parsed JSON response or None on failure.
     Retries on 429 (rate limit), 500, 503 (server errors).
     """
-    api_key = os.getenv("GEMINI_API_KEY")
-    if not api_key:
-        logger.error("GEMINI_API_KEY not set")
-        return None
-
     if not model:
         model = get_enrichment_gemini_model()
-
-    url = (
-        f"https://generativelanguage.googleapis.com/v1beta/models/{model}"
-        f":generateContent?key={api_key}"
-    )
+    url = get_gemini_url(model)
     payload = {
-        "contents": [{"parts": [{"text": prompt}]}],
+        "contents": [{"role": "user", "parts": [{"text": prompt}]}],
         "generationConfig": {"temperature": 0.1},
     }
 
@@ -110,7 +102,9 @@ async def _call_gemini(
 
     for attempt in range(_GEMINI_RETRY_ATTEMPTS):
         try:
-            resp = await client.post(url, json=payload, timeout=timeout)
+            resp = await client.post(
+                url, json=payload, headers=get_gemini_headers(), timeout=timeout
+            )
 
             if resp.status_code == 200:
                 data = resp.json()

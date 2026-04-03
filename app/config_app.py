@@ -29,11 +29,15 @@ class Settings(BaseSettings):
     # -------------------------------------------------------------------------
     # AI EXTRACTION - FREE STACK
     # -------------------------------------------------------------------------
-
-    # Google Gemini (PRIMARY - $300 free credits, best quality)
-    # Get your key at: https://aistudio.google.com/apikey
-    gemini_api_key: Optional[str] = None
+    ai_provider: str = "vertex_ai"  # vertex_ai | openai | anthropic | ollama
+    # AI / Vertex AI (uses $300 Google Cloud credits)
+    vertex_project_id: str = "gen-lang-client-0283518101"
+    vertex_location: str = "us-central1"
+    vertex_key_path: str = "vertex-key.json"
     gemini_model: str = "gemini-2.5-flash"
+    gemini_model_lite: str = "gemini-2.5-flash-lite"
+    # Legacy — disabled, kept for fallback reference only
+    gemini_api_key: Optional[str] = None
 
     # Ollama (BACKUP - runs locally, unlimited)
     ollama_url: str = "http://localhost:11434"

@@ -30,7 +30,9 @@ from app.services.utils import get_timeline_label
 
 logger = logging.getLogger(__name__)
 
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_PLACES_API_KEY")
+GEMINI_API_KEY = (
+    "vertex-ai"  # Auth handled by gemini_client.py (Vertex AI $300 credits)
+)
 SERPER_API_KEY = os.getenv("SERPER_API_KEY")
 
 
@@ -64,23 +66,24 @@ async def _search_web(query: str, max_results: int = 5) -> list[dict]:
 
 
 async def _call_gemini(prompt: str, temperature: float = 0.1) -> Optional[str]:
-    """Call Gemini API for extraction."""
-    if not GEMINI_API_KEY:
-        logger.error("GEMINI_API_KEY not set")
-        return None
+    """Call Gemini API via Vertex AI ($300 credits)."""
+    from app.services.gemini_client import get_gemini_url, get_gemini_headers
 
-    url = (
-        f"https://generativelanguage.googleapis.com/v1beta/models/"
-        f"gemini-2.5-flash:generateContent?key={GEMINI_API_KEY}"
-    )
+    url = get_gemini_url("gemini-2.5-flash")
+    headers = get_gemini_headers()
 
     try:
         async with httpx.AsyncClient(timeout=30) as client:
             resp = await client.post(
                 url,
+                headers=headers,
                 json={
-                    "contents": [{"parts": [{"text": prompt}]}],
-                    "generationConfig": {"temperature": temperature},
+                    "contents": [{"role": "user", "parts": [{"text": prompt}]}],
+                    "generationConfig": {
+                        "temperature": temperature,
+                        "maxOutputTokens": 8192,
+                        "thinkingConfig": {"thinkingBudget": 0},
+                    },
                 },
             )
             if resp.status_code != 200:

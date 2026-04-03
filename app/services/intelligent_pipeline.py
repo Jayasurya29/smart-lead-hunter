@@ -37,6 +37,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
 from enum import Enum
+from app.services.gemini_client import get_gemini_url, get_gemini_headers
 
 import httpx
 
@@ -192,7 +193,7 @@ class PipelineConfig:
 
     def __post_init__(self):
         if not self.gemini_api_key:
-            self.gemini_api_key = os.getenv("GEMINI_API_KEY", "")
+            self.gemini_api_key = "vertex-ai"  # Auth handled by gemini_client.py
         if not self.redis_url:
             self.redis_url = os.getenv("REDIS_URL", "redis://localhost:6379/0")
 
@@ -866,11 +867,14 @@ Respond in JSON:
                     await asyncio.sleep(self.config.min_delay_seconds - elapsed)
 
                 response = await self._client.post(
-                    f"https://generativelanguage.googleapis.com/v1beta/models/{self.config.classifier_model}:generateContent",
-                    headers={"x-goog-api-key": self.api_key},
+                    get_gemini_url(self.config.classifier_model),
+                    headers=get_gemini_headers(),
                     json={
                         "contents": [
-                            {"parts": [{"text": self._build_prompt(truncated)}]}
+                            {
+                                "role": "user",
+                                "parts": [{"text": self._build_prompt(truncated)}],
+                            }
                         ],
                         "generationConfig": {
                             "temperature": 0.1,
@@ -1292,18 +1296,19 @@ Return [] if no new hotels found."""
                     await asyncio.sleep(self.config.min_delay_seconds - elapsed)
 
                 response = await self._client.post(
-                    f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent",
-                    headers={"x-goog-api-key": self.api_key},
+                    get_gemini_url(model),
+                    headers=get_gemini_headers(),
                     json={
                         "contents": [
                             {
+                                "role": "user",
                                 "parts": [
                                     {
                                         "text": self._build_prompt(
                                             truncated, url, source_name
                                         )
                                     }
-                                ]
+                                ],
                             }
                         ],
                         "generationConfig": {

@@ -48,6 +48,7 @@ interface Hotel {
   revenue_annual: number | null
   insightly_id: number | null
   rejection_reason: string | null
+  zone: string | null
   created_at: string | null
   updated_at: string | null
 }
@@ -62,6 +63,7 @@ interface HotelStats {
   on_map: number
   tiers: Record<string, number>
   top_states: { state: string; count: number }[]
+  zones: { zone: string; count: number }[]
 }
 
 interface Filters {
@@ -69,6 +71,7 @@ interface Filters {
   state: string
   brand_tier: string
   is_client: string
+  zone: string
   sort: string
 }
 
@@ -79,6 +82,7 @@ const DEFAULT_FILTERS: Filters = {
   state: '',
   brand_tier: '',
   is_client: '',
+  zone: '',
   sort: 'name_az',
 }
 
@@ -123,13 +127,18 @@ export default function ExistingHotels() {
       if (filters.state) params.state = filters.state
       if (filters.brand_tier) params.brand_tier = filters.brand_tier
       if (filters.is_client) params.is_client = filters.is_client
+      if (filters.zone) params.zone = filters.zone
       const { data } = await api.get('/api/existing-hotels', { params })
       return data as { hotels: Hotel[]; total: number; page: number; pages: number }
     },
   })
 
   function handleFilterChange(key: string, value: string) {
-    setFilters(prev => ({ ...prev, [key]: value }))
+    if (key === 'state') {
+      setFilters(prev => ({ ...prev, state: value, zone: '' }))
+    } else {
+      setFilters(prev => ({ ...prev, [key]: value }))
+    }
     setPage(1)
   }
 
@@ -267,6 +276,15 @@ export default function ExistingHotels() {
             <option value="tier4_upscale">T4 — Upscale</option>
           </select>
 
+          {filters.state && filters.state.toLowerCase().includes('florida') && (
+            <select value={filters.zone} onChange={(e) => handleFilterChange('zone', e.target.value)} className="h-9 px-3 text-sm bg-white border border-stone-200 rounded-lg outline-none focus:border-navy-400">
+              <option value="">All Zones</option>
+              {(stats?.zones || []).filter(z => !['Out of State', 'Unknown', 'Junk'].includes(z.zone)).map(z => (
+                <option key={z.zone} value={z.zone}>{z.zone} ({z.count})</option>
+              ))}
+            </select>
+          )}
+
           <select value={filters.is_client} onChange={(e) => handleFilterChange('is_client', e.target.value)} className="h-9 px-3 text-sm bg-white border border-stone-200 rounded-lg outline-none focus:border-navy-400">
             <option value="">All Hotels</option>
             <option value="true">Clients Only</option>
@@ -380,6 +398,7 @@ function HotelTable({ hotels, total, page, totalPages, tab, selectedId, onSelect
               <th className="px-3 py-2.5 text-left text-[11px] font-bold text-slate-400 uppercase tracking-wider">Hotel</th>
               <th className="px-3 py-2.5 text-left text-[11px] font-bold text-slate-400 uppercase tracking-wider w-16">Tier</th>
               <th className="px-3 py-2.5 text-left text-[11px] font-bold text-slate-400 uppercase tracking-wider">Location</th>
+              <th className="px-3 py-2.5 text-left text-[11px] font-bold text-slate-400 uppercase tracking-wider w-28">Zone</th>
               <th className="px-3 py-2.5 text-left text-[11px] font-bold text-slate-400 uppercase tracking-wider w-16">Rooms</th>
               <th className="px-3 py-2.5 text-left text-[11px] font-bold text-slate-400 uppercase tracking-wider w-24">Potential</th>
               <th className="px-3 py-2.5 text-left text-[11px] font-bold text-slate-400 uppercase tracking-wider w-20">Type</th>
@@ -414,6 +433,13 @@ function HotelTable({ hotels, total, page, totalPages, tab, selectedId, onSelect
                   <span className="text-sm text-navy-800 font-medium truncate block max-w-[200px]">
                     {[hotel.city, hotel.state].filter(Boolean).join(', ') || '—'}
                   </span>
+                </td>
+                <td className="px-3 py-2.5">
+                  {hotel.zone ? (
+                    <span className="text-xs text-stone-500 font-medium">{hotel.zone}</span>
+                  ) : (
+                    <span className="text-xs text-stone-300">—</span>
+                  )}
                 </td>
                 <td className="px-3 py-2.5">
                   <span className="text-sm text-navy-800 font-medium">{hotel.room_count || '—'}</span>
@@ -624,6 +650,7 @@ function HotelDetail({ hotelId, tab, onClose }: { hotelId: number; tab: Pipeline
             <Field icon={Building2} label="Rooms" value={hotel.room_count ? `${hotel.room_count} rooms` : '—'} />
             {hotel.address && <Field icon={MapPin} label="Address" value={hotel.address} />}
             {hotel.property_type && <Field icon={Building2} label="Type" value={hotel.property_type} />}
+            {hotel.zone && <Field icon={MapPin} label="Zone" value={hotel.zone} />}
           </div>
         </Section>
 
