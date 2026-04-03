@@ -2048,11 +2048,12 @@ async def main():
     print("=" * 60)
 
     config = PipelineConfig()
+    from app.services.ai_client import is_vertex_ai, get_provider
 
-    if config.gemini_api_key:
-        print("✅ Gemini API key found")
+    if is_vertex_ai():
+        print(f"✅ AI ready: {get_provider()}")
     else:
-        print("❌ No GEMINI_API_KEY in environment")
+        print("❌ Vertex AI not configured. Place vertex-key.json in project root.")
         return
 
     pipeline = IntelligentPipeline(config)

@@ -1,11 +1,20 @@
+"""
+Enrich existing hotels with room counts via AI.
+Uses whatever provider is configured in .env (Vertex AI by default).
+
+Usage:
+    python enrich_rooms.py "South Florida"
+    python enrich_rooms.py "Orlando"
+    python enrich_rooms.py  # defaults to South Florida
+"""
 import asyncio
 import sys
 import re
 import httpx
 from app.database import async_session
-from app.config import settings
 from sqlalchemy import select, update
 from app.models.existing_hotel import ExistingHotel
+from app.services.ai_client import get_ai_url, get_ai_headers, get_provider
 from app.services.revenue_calculator import (
     calculate_new_opening, calculate_annual_recurring, detect_tier_from_brand,
 )
@@ -17,20 +26,23 @@ TIER_MAP = {
     'tier4_upscale': 'upscale',
 }
 
-GEMINI_URL = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={settings.gemini_api_key}"
-
 
 async def get_room_count(client, hotel_name, city, state):
     prompt = f"How many guest rooms does {hotel_name} in {city}, {state} have? Reply ONLY a number, nothing else."
     try:
-        resp = await client.post(GEMINI_URL, json={
-            "contents": [{"parts": [{"text": prompt}]}],
-            "generationConfig": {
-                "temperature": 0.0,
-                "maxOutputTokens": 500,
-                "thinkingConfig": {"thinkingBudget": 0},
+        resp = await client.post(
+            get_ai_url(),
+            headers=get_ai_headers(),
+            json={
+                "contents": [{"role": "user", "parts": [{"text": prompt}]}],
+                "generationConfig": {
+                    "temperature": 0.0,
+                    "maxOutputTokens": 500,
+                    "thinkingConfig": {"thinkingBudget": 0},
+                },
             },
-        }, timeout=30)
+            timeout=30,
+        )
         data = resp.json()
         text = data["candidates"][0]["content"]["parts"][0]["text"].strip()
         numbers = re.findall(r'\d+', text)
@@ -59,6 +71,8 @@ async def run(zone_name):
 
     print(f"Zone: {zone_name}")
     print(f"Hotels to enrich: {len(hotels)}")
+    print(f"Using: {get_provider()}")
+    print()
     if not hotels:
         print("Nothing to enrich!")
         return
@@ -111,7 +125,7 @@ async def run(zone_name):
                 print(f"  [{i}/{len(hotels)}] {h.name:<55}   ??? (no data)")
                 failed += 1
 
-            await asyncio.sleep(0.5)
+            await asyncio.sleep(0.3)
 
     print(f"\nDone: {enriched} enriched, {failed} no data, {len(hotels)} total")
 

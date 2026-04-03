@@ -1388,7 +1388,7 @@ class WebDiscoveryEngine:
             from app.services.orchestrator import LeadHunterOrchestrator
 
             orchestrator = LeadHunterOrchestrator(
-                gemini_api_key=os.getenv("GEMINI_API_KEY"),
+                gemini_api_key="vertex-ai",
                 save_to_database=True,
             )
             await orchestrator.initialize()

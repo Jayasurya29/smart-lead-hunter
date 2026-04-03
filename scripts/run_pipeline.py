@@ -58,24 +58,25 @@ async def check_status():
 
     checks = {}
 
-    # 1. Gemini API
-    api_key = os.getenv("GEMINI_API_KEY", "")
-    if api_key:
-        try:
+    # 1. Gemini API (Vertex AI)
+    try:
+        from app.services.ai_client import get_ai_url, get_ai_headers, is_vertex_ai
+        if is_vertex_ai():
             async with httpx.AsyncClient(timeout=10) as client:
                 resp = await client.post(
-                    f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent?key={api_key}",
-                    json={"contents": [{"parts": [{"text": "Say OK"}]}],
-                          "generationConfig": {"maxOutputTokens": 5}},
+                    get_ai_url(),
+                    headers=get_ai_headers(),
+                    json={"contents": [{"role": "user", "parts": [{"text": "Say OK"}]}],
+                          "generationConfig": {"maxOutputTokens": 5, "thinkingConfig": {"thinkingBudget": 0}}},
                 )
                 if resp.status_code == 200:
-                    checks["Gemini API"] = ("✅", "Connected")
+                    checks["Gemini API"] = ("✅", "Connected (Vertex AI)")
                 else:
                     checks["Gemini API"] = ("❌", f"HTTP {resp.status_code}")
-        except Exception as e:
-            checks["Gemini API"] = ("❌", str(e)[:60])
-    else:
-        checks["Gemini API"] = ("❌", "GEMINI_API_KEY not set in .env")
+        else:
+            checks["Gemini API"] = ("❌", "Vertex AI not configured")
+    except Exception as e:
+        checks["Gemini API"] = ("❌", str(e)[:60])
 
     # 2. Redis
     redis_url = os.getenv("REDIS_URL", "redis://localhost:6379/0")

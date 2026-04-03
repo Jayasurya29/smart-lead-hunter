@@ -427,7 +427,6 @@ class LeadHunterOrchestrator:
 async def main():
     """Main entry point"""
     import argparse
-    import os
 
     try:
         from dotenv import load_dotenv
@@ -454,7 +453,7 @@ async def main():
 """)
 
     orchestrator = LeadHunterOrchestrator(
-        gemini_api_key=os.getenv("GEMINI_API_KEY"),
+        gemini_api_key="vertex-ai",
         output_dir=args.output,
         save_to_database=not args.no_save,
     )
