@@ -234,6 +234,8 @@ async def map_data(
         ExistingHotel.is_client,
         ExistingHotel.room_count,
         ExistingHotel.phone,
+        ExistingHotel.zone,
+        ExistingHotel.revenue_annual,
     ).where(ExistingHotel.latitude.isnot(None))
 
     if is_client == "true":
@@ -263,6 +265,8 @@ async def map_data(
             "is_client": r[8],
             "room_count": r[9],
             "phone": r[10],
+            "zone": r[11],
+            "revenue_annual": r[12],
         }
         for r in rows
     ]

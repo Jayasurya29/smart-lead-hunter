@@ -11,6 +11,7 @@ import UsersPage from '@/pages/Users'
 import ExistingHotels from '@/pages/ExistingHotels'
 import SourcesPage from '@/pages/SourcesPage'
 import ClientIntelligence from '@/pages/ClientIntelligence'
+import MapPage from '@/pages/MapPage'
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { isAuthenticated, isLoading } = useAuth()
@@ -76,10 +77,7 @@ export default function AppRouter() {
             path="/map"
             element={
               <ProtectedRoute>
-                <div className="p-8 text-center text-stone-400">
-                  <p className="text-lg font-medium mb-2">Hotel Map</p>
-                  <p className="text-sm">Coming soon — all hotels on one interactive map</p>
-                </div>
+                <MapPage />
               </ProtectedRoute>
             }
           />
