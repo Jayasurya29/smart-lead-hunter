@@ -4,7 +4,7 @@ import { useAuth } from '@/hooks/useAuth'
 import { BackgroundTaskProvider, useBackgroundTask } from '@/hooks/useBackgroundTask'
 import {
   LayoutDashboard, Map, Mail, Users, LogOut, Play, Radar, Building2, Hotel,
-  CheckCircle2, AlertCircle, X, ChevronDown, ChevronUp,
+  CheckCircle2, AlertCircle, X, ChevronDown, ChevronUp, Shield,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import ScrapeModal from '@/components/modals/ScrapeModal'
@@ -23,6 +23,7 @@ const NAV_ITEMS: NavItem[] = [
   { to: '/clients',          label: 'Clients',          icon: Users },
   { to: '/map',              label: 'Map',              icon: Map },
   { to: '/sources',          label: 'Sources',          icon: Radar },
+  { to: '/users',            label: 'Team',             icon: Shield },
   { to: '/outreach',         label: 'Outreach',         icon: Mail, disabled: true },
 ]
 
