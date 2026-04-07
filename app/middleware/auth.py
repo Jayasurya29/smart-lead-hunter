@@ -81,6 +81,8 @@ class APIKeyMiddleware:
         "/stats",
         "/api/dashboard/sources/list",
         "/api/auth/verify",
+        # Hotel discovery (admin tool, no CSRF needed)
+        "/api/existing-hotels/discover",
     )
 
     # Only these prefixes require auth

@@ -1,9 +1,13 @@
 """
-Existing Hotels API — Phase 2
-==============================
+Existing Hotels API
+====================
 CRUD + filtering for the existing hotels prospecting database.
+
+Discovery endpoints have been migrated to use app.services.pipeline (Geoapify).
+The old hotel_discovery.py and chain_discovery.py modules are deleted.
 """
 
+import asyncio
 import logging
 from typing import Optional
 
@@ -20,9 +24,9 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/existing-hotels", tags=["Existing Hotels"])
 
 
-# ── GET /api/existing-hotels — List with filtering + pagination ──
-
-
+# ════════════════════════════════════════════════════════════════
+# LIST + FILTER
+# ════════════════════════════════════════════════════════════════
 @router.get("")
 async def list_existing_hotels(
     page: int = Query(1, ge=1),
@@ -43,7 +47,6 @@ async def list_existing_hotels(
     query = select(ExistingHotel)
     count_query = select(func.count(ExistingHotel.id))
 
-    # Filters
     if search:
         safe = escape_like(search)
         search_filter = or_(
@@ -97,7 +100,6 @@ async def list_existing_hotels(
         query = query.where(ExistingHotel.gm_name.is_(None))
         count_query = count_query.where(ExistingHotel.gm_name.is_(None))
 
-    # Sorting
     sort_map = {
         "name_az": ExistingHotel.name.asc(),
         "name_za": ExistingHotel.name.desc(),
@@ -112,7 +114,6 @@ async def list_existing_hotels(
     order = sort_map.get(sort, ExistingHotel.name.asc())
     query = query.order_by(order)
 
-    # Pagination
     total = (await db.execute(count_query)).scalar() or 0
     pages = (total + per_page - 1) // per_page if total > 0 else 1
     offset = (page - 1) * per_page
@@ -130,9 +131,9 @@ async def list_existing_hotels(
     }
 
 
-# ── GET /api/existing-hotels/stats — Dashboard stats ──
-
-
+# ════════════════════════════════════════════════════════════════
+# STATS
+# ════════════════════════════════════════════════════════════════
 @router.get("/stats")
 async def existing_hotels_stats(db: AsyncSession = Depends(get_db)):
     """Get stats for the existing hotels database."""
@@ -161,31 +162,147 @@ async def existing_hotels_stats(db: AsyncSession = Depends(get_db)):
     )
     r = result.one()
 
-    # Tier breakdown
     tier_result = await db.execute(
-        select(
-            ExistingHotel.brand_tier,
-            func.count(ExistingHotel.id),
-        )
+        select(ExistingHotel.brand_tier, func.count(ExistingHotel.id))
         .where(ExistingHotel.brand_tier.isnot(None))
         .group_by(ExistingHotel.brand_tier)
     )
     tiers = {row[0]: row[1] for row in tier_result.fetchall()}
 
-    # Top states
+    # All states/regions — merge full registry (US + Caribbean) with DB counts
+    # so even empty regions appear in the dropdown for discovery
+    from app.services.zones_registry import ZONES as REGISTRY_ZONES
+
     state_result = await db.execute(
-        select(
-            ExistingHotel.state,
-            func.count(ExistingHotel.id),
-        )
+        select(ExistingHotel.state, func.count(ExistingHotel.id))
         .where(ExistingHotel.state.isnot(None))
         .group_by(ExistingHotel.state)
-        .order_by(func.count(ExistingHotel.id).desc())
-        .limit(10)
     )
-    top_states = [{"state": row[0], "count": row[1]} for row in state_result.fetchall()]
+    db_state_counts = {row[0]: row[1] for row in state_result.fetchall()}
 
-    # Zone breakdown
+    # Get one representative zone per state code → state display name
+    REGION_NAMES = {
+        # US states
+        "AL": "Alabama",
+        "AK": "Alaska",
+        "AZ": "Arizona",
+        "AR": "Arkansas",
+        "CA": "California",
+        "CO": "Colorado",
+        "CT": "Connecticut",
+        "DE": "Delaware",
+        "DC": "District of Columbia",
+        "FL": "Florida",
+        "GA": "Georgia",
+        "HI": "Hawaii",
+        "ID": "Idaho",
+        "IL": "Illinois",
+        "IN": "Indiana",
+        "IA": "Iowa",
+        "KS": "Kansas",
+        "KY": "Kentucky",
+        "LA": "Louisiana",
+        "ME": "Maine",
+        "MD": "Maryland",
+        "MA": "Massachusetts",
+        "MI": "Michigan",
+        "MN": "Minnesota",
+        "MS": "Mississippi",
+        "MO": "Missouri",
+        "MT": "Montana",
+        "NE": "Nebraska",
+        "NV": "Nevada",
+        "NH": "New Hampshire",
+        "NJ": "New Jersey",
+        "NM": "New Mexico",
+        "NY": "New York",
+        "NC": "North Carolina",
+        "ND": "North Dakota",
+        "OH": "Ohio",
+        "OK": "Oklahoma",
+        "OR": "Oregon",
+        "PA": "Pennsylvania",
+        "RI": "Rhode Island",
+        "SC": "South Carolina",
+        "SD": "South Dakota",
+        "TN": "Tennessee",
+        "TX": "Texas",
+        "UT": "Utah",
+        "VT": "Vermont",
+        "VA": "Virginia",
+        "WA": "Washington",
+        "WV": "West Virginia",
+        "WI": "Wisconsin",
+        "WY": "Wyoming",
+        # Caribbean (note: KY here is Kentucky, but Cayman zones have key prefix ky_)
+        # We resolve by walking the registry instead of hardcoding region names
+    }
+    # Build region list from registry — handles both US states and Caribbean countries
+    seen_states = set()
+    all_regions = []
+    for z in REGISTRY_ZONES.values():
+        if z.state in seen_states:
+            continue
+        seen_states.add(z.state)
+        # For Caribbean (ISO country codes), use the zone name as the region name
+        # because there's only one zone per Caribbean country
+        # For US states (state codes), use the official state name from REGION_NAMES
+        is_caribbean = z.key.startswith(
+            (
+                "bs_",
+                "jm_",
+                "do_",
+                "pr_",
+                "ky_",
+                "tc_",
+                "bm_",
+                "vi_",
+                "vg_",
+                "bb_",
+                "aw_",
+                "cw_",
+                "lc_",
+                "ag_",
+                "ai_",
+                "kn_",
+                "sx_",
+                "gd_",
+                "dm_",
+                "tt_",
+                "vc_",
+            )
+        )
+        region_name = z.name if is_caribbean else REGION_NAMES.get(z.state, z.state)
+        all_regions.append(
+            {
+                "state": region_name,
+                "code": z.state,
+                "count": db_state_counts.get(region_name, 0),
+                "is_caribbean": is_caribbean,
+            }
+        )
+
+    # Include any orphan DB states not in the registry
+    seen_names = {r["state"] for r in all_regions}
+    for db_name, count in db_state_counts.items():
+        if db_name not in seen_names:
+            all_regions.append(
+                {
+                    "state": db_name,
+                    "code": None,
+                    "count": count,
+                    "is_caribbean": False,
+                }
+            )
+
+    # Sort: count desc, then name asc
+    all_regions.sort(key=lambda r: (-r["count"], r["state"]))
+    top_states = all_regions
+
+    # Zone breakdown — merge DB counts with the full 126-zone registry
+    # so empty zones still appear in the dropdown
+    from app.services.zones_registry import ZONES as REGISTRY_ZONES
+
     zone_result = await db.execute(
         select(
             ExistingHotel.zone,
@@ -193,9 +310,39 @@ async def existing_hotels_stats(db: AsyncSession = Depends(get_db)):
         )
         .where(ExistingHotel.zone.isnot(None))
         .group_by(ExistingHotel.zone)
-        .order_by(func.count(ExistingHotel.id).desc())
     )
-    zones = [{"zone": row[0], "count": row[1]} for row in zone_result.fetchall()]
+    db_counts = {row[0]: row[1] for row in zone_result.fetchall()}
+
+    # Build the full list: every registry zone + any orphaned zones in DB
+    zones = []
+    seen_names = set()
+    for z in REGISTRY_ZONES.values():
+        zones.append(
+            {
+                "zone": z.name,
+                "key": z.key,
+                "state": z.state,
+                "priority": z.priority,
+                "count": db_counts.get(z.name, 0),
+            }
+        )
+        seen_names.add(z.name)
+
+    # Include any zone in DB that doesn't match the registry (legacy/orphaned data)
+    for db_name, count in db_counts.items():
+        if db_name not in seen_names:
+            zones.append(
+                {
+                    "zone": db_name,
+                    "key": None,
+                    "state": None,
+                    "priority": None,
+                    "count": count,
+                }
+            )
+
+    # Sort: count desc, then name asc (so populated zones float to top per state)
+    zones.sort(key=lambda z: (-z["count"], z["zone"]))
 
     return {
         "total": r.total or 0,
@@ -211,9 +358,9 @@ async def existing_hotels_stats(db: AsyncSession = Depends(get_db)):
     }
 
 
-# ── GET /api/existing-hotels/map-data — Geocoded hotels for map ──
-
-
+# ════════════════════════════════════════════════════════════════
+# MAP DATA
+# ════════════════════════════════════════════════════════════════
 @router.get("/map-data")
 async def map_data(
     is_client: Optional[str] = None,
@@ -221,7 +368,7 @@ async def map_data(
     state: Optional[str] = None,
     db: AsyncSession = Depends(get_db),
 ):
-    """Get geocoded hotels for map display. Returns minimal data for performance."""
+    """Get geocoded hotels for map display."""
     query = select(
         ExistingHotel.id,
         ExistingHotel.name,
@@ -272,9 +419,87 @@ async def map_data(
     ]
 
 
-# ── GET /api/existing-hotels/{id} — Single hotel detail ──
+# ════════════════════════════════════════════════════════════════
+# DISCOVERY ENDPOINTS (powered by pipeline.py + Geoapify)
+# ════════════════════════════════════════════════════════════════
+@router.get("/discover/zones")
+async def list_discovery_zones(
+    state: Optional[str] = Query(
+        None, description="Optional 2-letter state filter (e.g. FL)"
+    ),
+):
+    """
+    List available discovery zones.
+    Pass ?state=FL to filter to one state, or omit for all 126 national zones.
+    """
+    from app.services.pipeline import get_zones_for_api
+
+    return {"zones": get_zones_for_api(state=state)}
 
 
+@router.post("/discover/{zone_key}")
+async def run_zone_discovery(zone_key: str):
+    """
+    Discover hotels in a specific zone via Geoapify pipeline.
+    Workflow: Geoapify → tier filter → match against DB → insert NEW leads.
+    """
+    from app.services.pipeline import run_zone_for_api
+    from app.services.zones_registry import ZONES
+
+    if zone_key not in ZONES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unknown zone: {zone_key}",
+        )
+
+    try:
+        result = await asyncio.to_thread(run_zone_for_api, zone_key, True)
+        return result
+    except Exception as e:
+        logger.error(f"Discovery failed for zone {zone_key}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Discovery failed: {str(e)[:200]}")
+
+
+@router.post("/discover/state/{state_code}")
+async def run_state_discovery(state_code: str):
+    """
+    Discover hotels across all zones in a state.
+    Example: POST /api/existing-hotels/discover/state/FL
+    """
+    from app.services.pipeline import run_state_for_api
+    from app.services.zones_registry import zones_by_state
+
+    state_code = state_code.upper()
+    if not zones_by_state(state_code):
+        raise HTTPException(status_code=400, detail=f"No zones for state: {state_code}")
+
+    try:
+        result = await asyncio.to_thread(run_state_for_api, state_code, True)
+        return result
+    except Exception as e:
+        logger.error(f"State discovery failed for {state_code}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Discovery failed: {str(e)[:200]}")
+
+
+@router.post("/discover/all")
+async def run_all_discovery():
+    """
+    Backwards-compat endpoint: runs all Florida zones.
+    For other states, use POST /discover/state/{state_code}
+    """
+    from app.services.pipeline import run_state_for_api
+
+    try:
+        result = await asyncio.to_thread(run_state_for_api, "FL", True)
+        return result
+    except Exception as e:
+        logger.error(f"Full FL discovery failed: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Discovery failed: {str(e)[:200]}")
+
+
+# ════════════════════════════════════════════════════════════════
+# DETAIL / EDIT / CREATE
+# ════════════════════════════════════════════════════════════════
 @router.get("/{hotel_id}")
 async def get_existing_hotel(hotel_id: int, db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(ExistingHotel).where(ExistingHotel.id == hotel_id))
@@ -282,9 +507,6 @@ async def get_existing_hotel(hotel_id: int, db: AsyncSession = Depends(get_db)):
     if not hotel:
         raise HTTPException(status_code=404, detail="Hotel not found")
     return hotel.to_dict()
-
-
-# ── PATCH /api/existing-hotels/{id} — Edit hotel ──
 
 
 @router.patch("/{hotel_id}")
@@ -339,9 +561,6 @@ async def update_existing_hotel(
     return hotel.to_dict()
 
 
-# ── POST /api/existing-hotels — Create manually ──
-
-
 @router.post("")
 async def create_existing_hotel(
     request: Request,
@@ -377,9 +596,9 @@ async def create_existing_hotel(
     return hotel.to_dict()
 
 
-# ── POST /api/existing-hotels/{id}/approve — Push to Insightly ──
-
-
+# ════════════════════════════════════════════════════════════════
+# APPROVE / REJECT / RESTORE
+# ════════════════════════════════════════════════════════════════
 @router.post("/{hotel_id}/approve")
 async def approve_existing_hotel(
     hotel_id: int,
@@ -391,7 +610,6 @@ async def approve_existing_hotel(
     if not hotel:
         raise HTTPException(status_code=404, detail="Hotel not found")
 
-    # Push to Insightly
     try:
         from app.services.insightly import get_insightly_client
 
@@ -424,9 +642,6 @@ async def approve_existing_hotel(
     return hotel.to_dict()
 
 
-# ── POST /api/existing-hotels/{id}/reject ──
-
-
 @router.post("/{hotel_id}/reject")
 async def reject_existing_hotel(
     hotel_id: int,
@@ -450,9 +665,6 @@ async def reject_existing_hotel(
     return hotel.to_dict()
 
 
-# ── POST /api/existing-hotels/{id}/restore ──
-
-
 @router.post("/{hotel_id}/restore")
 async def restore_existing_hotel(
     hotel_id: int,
@@ -464,7 +676,6 @@ async def restore_existing_hotel(
     if not hotel:
         raise HTTPException(status_code=404, detail="Hotel not found")
 
-    # If approved + in Insightly, delete from CRM
     if hotel.status == "approved" and hotel.insightly_id:
         try:
             from app.services.insightly import get_insightly_client
@@ -481,9 +692,9 @@ async def restore_existing_hotel(
     return hotel.to_dict()
 
 
-# ── POST /api/existing-hotels/export-csv — Export for Atlist ──
-
-
+# ════════════════════════════════════════════════════════════════
+# EXPORT CSV
+# ════════════════════════════════════════════════════════════════
 @router.post("/export-csv")
 async def export_csv(
     request: Request,

@@ -1,0 +1,2 @@
+source,source_id,zone_key,name,brand,latitude,longitude,address,city,state,postcode,country,phone,website,stars_osm,brand_tier,tier_num,tier_label,matched_db_id,matched_db_name,match_score,match_distance_m,client_brand_hint,classification
+geoapify,51d4e1512fc0fa52c0598a25e8e4459f3740f00102f901cbc3181c0000000092031353616e64616c7320456d6572616c6420426179,bs_bahamas,Sandals Emerald Bay,,23.6221603,-75.91798,Sandals Emerald Bay,Exuma,,,Bahamas,,https://www.sandals.com/main/emerald/em-home/,,tier4_upscale,4,Upscale,,,,,False,NEW

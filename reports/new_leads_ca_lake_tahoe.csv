@@ -1,0 +1,1 @@
+source,source_id,zone_key,name,brand,latitude,longitude,address,city,state,postcode,country,phone,website,categories,osm_stars,osm_tourism,osm_luxury,osm_building,brand_tier,tier_num,tier_label,classification_method,matched_db_id,matched_db_name,match_score,match_distance_m,client_brand_hint,classification

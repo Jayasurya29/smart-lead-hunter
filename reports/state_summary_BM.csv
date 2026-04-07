@@ -1,0 +1,2 @@
+zone_key,zone_name,state,priority,raw,filtered,existing,client,prospect,new,client_brand_hints,inserted,skipped
+bm_bermuda,Bermuda,BM,high,32,5,1,0,0,5,2,5,0

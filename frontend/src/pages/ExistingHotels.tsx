@@ -63,7 +63,7 @@ interface HotelStats {
   on_map: number
   tiers: Record<string, number>
   top_states: { state: string; count: number }[]
-  zones: { zone: string; count: number }[]
+  zones: { zone: string; key?: string | null; state?: string | null; priority?: string | null; count: number }[]
 }
 
 interface Filters {
@@ -76,6 +76,30 @@ interface Filters {
 }
 
 type PipelineTab = 'pipeline' | 'approved' | 'rejected'
+
+// Map full region names → 2-letter codes (US states + Caribbean countries)
+const STATE_NAME_TO_CODE: Record<string, string> = {
+  // US states
+  "Alabama":"AL","Alaska":"AK","Arizona":"AZ","Arkansas":"AR","California":"CA",
+  "Colorado":"CO","Connecticut":"CT","Delaware":"DE","District of Columbia":"DC",
+  "Florida":"FL","Georgia":"GA","Hawaii":"HI","Idaho":"ID","Illinois":"IL",
+  "Indiana":"IN","Iowa":"IA","Kansas":"KS","Kentucky":"KY","Louisiana":"LA",
+  "Maine":"ME","Maryland":"MD","Massachusetts":"MA","Michigan":"MI","Minnesota":"MN",
+  "Mississippi":"MS","Missouri":"MO","Montana":"MT","Nebraska":"NE","Nevada":"NV",
+  "New Hampshire":"NH","New Jersey":"NJ","New Mexico":"NM","New York":"NY",
+  "North Carolina":"NC","North Dakota":"ND","Ohio":"OH","Oklahoma":"OK","Oregon":"OR",
+  "Pennsylvania":"PA","Rhode Island":"RI","South Carolina":"SC","South Dakota":"SD",
+  "Tennessee":"TN","Texas":"TX","Utah":"UT","Vermont":"VT","Virginia":"VA",
+  "Washington":"WA","West Virginia":"WV","Wisconsin":"WI","Wyoming":"WY",
+  // Caribbean countries (matching zones added to zones_registry.py)
+  "Bahamas":"BS","Jamaica":"JM","Dominican Republic":"DO","Puerto Rico":"PR",
+  "Cayman Islands":"CY","Turks and Caicos":"TC","Bermuda":"BM",
+  "US Virgin Islands":"VI","British Virgin Islands":"VG","Barbados":"BB",
+  "Aruba":"AW","Curaçao":"CW","Saint Lucia":"LC","Antigua and Barbuda":"AG",
+  "Anguilla":"AI","St. Kitts and Nevis":"KN","St. Martin / Sint Maarten":"SX",
+  "Grenada":"GD","Dominica":"DM","Trinidad and Tobago":"TT",
+  "St. Vincent & Grenadines":"VC",
+}
 
 const DEFAULT_FILTERS: Filters = {
   search: '',
@@ -276,14 +300,21 @@ export default function ExistingHotels() {
             <option value="tier4_upscale">T4 — Upscale</option>
           </select>
 
-          {filters.state && filters.state.toLowerCase().includes('florida') && (
-            <select value={filters.zone} onChange={(e) => handleFilterChange('zone', e.target.value)} className="h-9 px-3 text-sm bg-white border border-stone-200 rounded-lg outline-none focus:border-navy-400">
-              <option value="">All Zones</option>
-              {(stats?.zones || []).filter(z => !['Out of State', 'Unknown', 'Junk'].includes(z.zone)).map(z => (
+          <select value={filters.zone} onChange={(e) => handleFilterChange('zone', e.target.value)} className="h-9 px-3 text-sm bg-white border border-stone-200 rounded-lg outline-none focus:border-navy-400">
+            <option value="">All Zones</option>
+            {(stats?.zones || [])
+              .filter(z => !['Out of State', 'Unknown', 'Junk'].includes(z.zone))
+              .filter(z => {
+                // No state selected → show every zone
+                if (!filters.state) return true
+                // State selected → only zones in that state
+                const selectedCode = STATE_NAME_TO_CODE[filters.state] || filters.state
+                return z.state === selectedCode
+              })
+              .map(z => (
                 <option key={z.zone} value={z.zone}>{z.zone} ({z.count})</option>
               ))}
-            </select>
-          )}
+          </select>
 
           <select value={filters.is_client} onChange={(e) => handleFilterChange('is_client', e.target.value)} className="h-9 px-3 text-sm bg-white border border-stone-200 rounded-lg outline-none focus:border-navy-400">
             <option value="">All Hotels</option>
