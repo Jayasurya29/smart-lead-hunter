@@ -528,7 +528,17 @@ def step_report(zone: Zone, classified: List[dict]) -> None:
         print("      ✗ Nothing to write")
         return
 
-    fieldnames = list(classified[0].keys())
+    # Build a complete fieldname set from ALL rows so Gemini-only fields
+    # (gemini_confidence, gemini_reasoning) don't get dropped just because
+    # the first row was rule-classified.
+    seen_fields = []
+    seen_set = set()
+    for row in classified:
+        for k in row.keys():
+            if k not in seen_set:
+                seen_set.add(k)
+                seen_fields.append(k)
+    fieldnames = seen_fields
     full_path = REPORTS_DIR / f"match_report_{zone.key}.csv"
     new_path = REPORTS_DIR / f"new_leads_{zone.key}.csv"
 

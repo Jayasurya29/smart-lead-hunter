@@ -34,8 +34,8 @@ logger = logging.getLogger(__name__)
 # ════════════════════════════════════════════════════════════════
 BATCH_SIZE = 20
 MAX_RETRIES = 4
-RATE_LIMIT_SLEEP = 4.0  # Vertex quotas are tight; ~15 req/min
-DEFAULT_CONFIDENCE_THRESHOLD = 0.65
+RATE_LIMIT_SLEEP = 8.0  # Vertex quotas are tight; ~15 req/min
+DEFAULT_CONFIDENCE_THRESHOLD = 0.75
 
 KEEP_TIERS = {
     "tier1_ultra_luxury",
@@ -67,28 +67,49 @@ PROMPT_TEMPLATE = """You are a hotel industry expert classifying properties for 
 
 For each hotel below, classify into ONE of these tiers based on STR (Smith Travel Research) brand-tier conventions and your knowledge of the property:
 
-- tier1_ultra_luxury: Aman, Four Seasons, Belmond, Mandarin Oriental, Ritz-Carlton Reserve, The Setai, The Carlyle. ADR $600+
+- tier1_ultra_luxury: Aman, Four Seasons, Belmond, Mandarin Oriental, Ritz-Carlton Reserve, The Setai, The Carlyle (NYC ONLY). ADR $600+
 - tier2_luxury: Ritz-Carlton, St. Regis, Waldorf Astoria, Conrad, Park Hyatt, Fairmont, Edition, Auberge, W Hotels, Bulgari. ADR $350-600
 - tier3_upper_upscale: JW Marriott, Westin, Sheraton, Hyatt Regency, InterContinental, Renaissance, Kimpton, Hotel Indigo, Andaz, Hard Rock Hotel. ADR $200-400
 - tier4_upscale: Hilton, Marriott, DoubleTree, Embassy Suites, Crowne Plaza, Sonesta, Wyndham Grand, Margaritaville. ADR $130-250
-- tier5_budget: Hampton Inn, Holiday Inn Express, Motel 6, Super 8, Days Inn, Best Western, Comfort Inn, Quality Inn. ADR under $130
+- tier5_budget: Hampton Inn, Holiday Inn Express, Motel 6, Super 8, Days Inn, Best Western, Comfort Inn, Quality Inn, Howard Johnson, Days Hotel, TownePlace Suites, Chase Suite, Larkspur Landing, Heritage Inn. ADR under $130
 - unknown: cannot determine — genuinely unfamiliar or ambiguous
 
-For UNBRANDED independent properties, judge by name + location + your industry knowledge:
-- "Casa del Mar" in Santa Monica → tier2_luxury (known luxury beachfront)
-- "Shutters on the Beach" in Santa Monica → tier2_luxury
-- "Terranea Resort" in Rancho Palos Verdes → tier3_upper_upscale
-- "Petit Ermitage" in West Hollywood → tier3_upper_upscale (boutique)
-- "Sunset Motel" → tier5_budget
-- "Joe's Roadside Inn" rural → tier5_budget
-- "The Inn at Spanish Bay" Pebble Beach → tier2_luxury
-- Anything you genuinely don't recognize → unknown
+CRITICAL ANTI-FALSE-POSITIVE RULES — read these before every classification:
 
-IMPORTANT:
-- Use confidence 0.85+ when you actually know the property
-- Use confidence 0.65-0.84 when judging by name patterns + location
-- Use confidence below 0.65 (or just say "unknown") when uncertain
-- DO NOT guess. Unknown is acceptable.
+1. DO NOT default to upscale just because a property is in San Francisco, NYC, or another major city. Most "Hotel ___" names in expensive cities are actually budget SROs, residential hotels, or economy properties.
+
+2. The following property types are NEVER tier3 or tier4 — classify as tier5_budget or unknown:
+   - Extended-stay properties (Larkspur Landing, TownePlace Suites, Chase Suite, Studios Inn, Residence Inn — except Marriott Residence Inn which is tier4)
+   - Old SF residential hotels and SROs ("Bay Hotel", "Coast Hotel", "Post Hotel", "Hotel Embassy", "Carriage Inn", "Bijou", "Adante", "Andrews", "Cornell Hotel de France", "Hayes Valley Inn", "Taylor Hotel", "COVA")
+   - Highway motels ("Marin Lodge", "Pacific Inn", "Corporate Inn", "Heritage Inn", "Marina Inn", "Park Pointe")
+   - Howard Johnson, Days Hotel/Inn, Travelodge — ALWAYS tier5_budget regardless of city
+   - "Hotel" + generic geographic word ("Bay Hotel", "Coast Hotel", "Marina Hotel") in a major city = almost always SRO/budget
+
+3. The following are NOT hotels at all — classify as unknown:
+   - Timeshares (anything with "Vacation Club", "WorldMark", "Wyndham Canterbury", "Marriott Vacation Club", "Nob Hill Inn" which is a timeshare)
+   - Military or government lodging ("Navy Lodge", "NASA", "Exchange Lodge", "VOQ", "BOQ", "Air Force Inn")
+   - Hostels, B&Bs with under 10 rooms, vacation rentals
+   - Wedding venues, convention centers, restaurants with "Hotel" in the name historically
+
+4. For unbranded independent properties, judge by name + location + your industry knowledge:
+   - "Casa del Mar" in Santa Monica → tier2_luxury (known luxury beachfront)
+   - "Shutters on the Beach" in Santa Monica → tier2_luxury
+   - "Terranea Resort" in Rancho Palos Verdes → tier3_upper_upscale
+   - "Petit Ermitage" in West Hollywood → tier3_upper_upscale (boutique)
+   - "The Inn at Spanish Bay" Pebble Beach → tier2_luxury
+   - "Sunset Motel" → tier5_budget
+   - "Joe's Roadside Inn" rural → tier5_budget
+   - Anything you genuinely don't recognize → unknown (NOT a guess at upper_upscale)
+
+5. Same name in different cities is NOT the same property. "Carlyle Hotel" in Campbell CA is NOT The Carlyle in NYC. Always weight the city heavily.
+
+CONFIDENCE CALIBRATION (strict):
+- 0.90+: You actually know this exact property by name AND location
+- 0.75-0.89: Strong name+location signal pointing to a known boutique or chain
+- 0.65-0.74: Educated guess from name pattern only — DO NOT use this range for tier1/tier2
+- Below 0.65 or "unknown": You're guessing. Just say unknown.
+
+DO NOT GUESS UPWARD. False positives waste sales-team time. When in doubt, choose unknown or tier5_budget — never tier3.
 
 Return ONLY a JSON array — no markdown fences, no preamble, no commentary:
 [
@@ -100,7 +121,6 @@ Return ONLY a JSON array — no markdown fences, no preamble, no commentary:
 Hotels to classify:
 {hotels_block}
 """
-
 
 # ════════════════════════════════════════════════════════════════
 # VERTEX AI CLIENT (modern google-genai SDK)
@@ -208,7 +228,7 @@ def _classify_batch(batch: List[dict]) -> Dict[str, Tuple[str, float, str]]:
     config = types.GenerateContentConfig(
         temperature=0.1,
         response_mime_type="application/json",
-        max_output_tokens=4096,
+        max_output_tokens=8192,
     )
 
     last_error: Optional[Exception] = None
@@ -307,27 +327,42 @@ def classify_unknowns(
     confidence_threshold: float = DEFAULT_CONFIDENCE_THRESHOLD,
 ) -> Dict[str, Tuple[str, float, str]]:
     """
-    Classify a list of unknown hotels using Gemini via Vertex AI.
-
-    Args:
-        hotels: list of hotel dicts (need source_id, name, city, state, brand)
-        confidence_threshold: min confidence to keep a classification
-
-    Returns:
-        {source_id: (tier_db_name, confidence, reasoning)}
-        Only entries that meet the confidence threshold AND classify as
-        4★+ are returned. Budget and unknown classifications are excluded.
+    ...
     """
     if not hotels:
         return {}
 
-    print(f"      → Classifying {len(hotels)} unknowns with Gemini Flash...")
-    num_batches = (len(hotels) + BATCH_SIZE - 1) // BATCH_SIZE
+    # Dedupe by normalized name — classify each unique name once, fan out results.
+    # "Holiday Inn Express Foster City" and "Holiday Inn Express San Mateo" are
+    # the same classification problem; no point spending credits twice.
+    def _norm(h: dict) -> str:
+        import re
+
+        name = (h.get("name") or "").lower()
+        # Strip city/location suffixes after dash, comma, "at", "by"
+        name = re.split(r"\s+[-–—]\s+|,| at | by ", name)[0]
+        # Collapse whitespace and strip non-alphanumerics
+        name = re.sub(r"[^a-z0-9 ]", "", name)
+        return re.sub(r"\s+", " ", name).strip()
+
+    groups: Dict[str, List[dict]] = {}
+    for h in hotels:
+        groups.setdefault(_norm(h), []).append(h)
+
+    representatives = [grp[0] for grp in groups.values()]
+    print(
+        f"      → Deduped {len(hotels)} unknowns to {len(representatives)} unique names"
+    )
+    print(f"      → Classifying {len(representatives)} unknowns with Gemini Flash...")
+
+    # Run classification on representatives only, then fan out to all members
+    rep_hotels = representatives
+    num_batches = (len(rep_hotels) + BATCH_SIZE - 1) // BATCH_SIZE
 
     raw_results: Dict[str, Tuple[str, float, str]] = {}
 
-    for i in range(0, len(hotels), BATCH_SIZE):
-        batch = hotels[i : i + BATCH_SIZE]
+    for i in range(0, len(rep_hotels), BATCH_SIZE):
+        batch = rep_hotels[i : i + BATCH_SIZE]
         batch_num = i // BATCH_SIZE + 1
         print(
             f"        batch {batch_num}/{num_batches} ({len(batch)} hotels)... ",
@@ -348,21 +383,31 @@ def classify_unknowns(
         if batch_num < num_batches:
             time.sleep(RATE_LIMIT_SLEEP)
 
-    # Filter to keepers only
+    # Filter to keepers only, then fan results from each representative
+    # back to every duplicate that shared its normalized name.
     filtered: Dict[str, Tuple[str, float, str]] = {}
     counts = {"kept": 0, "low_conf": 0, "budget": 0, "unknown": 0}
 
-    for sid, (tier, conf, reasoning) in raw_results.items():
+    for rep in representatives:
+        rep_sid = rep.get("source_id", "")
+        if rep_sid not in raw_results:
+            continue
+        tier, conf, reasoning = raw_results[rep_sid]
+
+        # All hotels (including the rep itself) that share this normalized name
+        group_members = groups[_norm(rep)]
+
         if tier in KEEP_TIERS:
             if conf >= confidence_threshold:
-                filtered[sid] = (tier, conf, reasoning)
-                counts["kept"] += 1
+                for member in group_members:
+                    filtered[member["source_id"]] = (tier, conf, reasoning)
+                    counts["kept"] += 1
             else:
-                counts["low_conf"] += 1
+                counts["low_conf"] += len(group_members)
         elif tier in ("tier5_budget", "tier5_skip"):
-            counts["budget"] += 1
+            counts["budget"] += len(group_members)
         else:
-            counts["unknown"] += 1
+            counts["unknown"] += len(group_members)
 
     print("      Gemini results:")
     print(f"        kept (≥{confidence_threshold}):       {counts['kept']}")

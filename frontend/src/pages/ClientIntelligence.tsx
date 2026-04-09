@@ -1,9 +1,9 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import {
   Building2, TrendingUp, AlertTriangle,
   Search, ChevronUp, ChevronDown, ChevronLeft, ChevronRight,
-  Upload, DollarSign, Activity, X,
+  Upload, DollarSign, Activity, X, CheckCircle2, XCircle, Loader2,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useSAPClients, useSAPFilters, useSAPSummary } from '@/hooks/useSAP'
@@ -41,6 +41,14 @@ const TYPE_CONFIG: Record<string, { label: string; icon: string }> = {
   unknown:    { label: 'Unknown',    icon: '❓' },
 }
 
+// ── Toast Type ──
+
+type ToastState = {
+  variant: 'success' | 'error' | 'loading'
+  title: string
+  message?: string
+} | null
+
 // ── Stat Card ──
 
 function StatCard({
@@ -66,6 +74,68 @@ function StatCard({
   )
 }
 
+// ── Toast Component ──
+
+function Toast({ toast, onClose }: { toast: ToastState; onClose: () => void }) {
+  useEffect(() => {
+    if (!toast || toast.variant === 'loading') return
+    const t = setTimeout(onClose, 5000)
+    return () => clearTimeout(t)
+  }, [toast, onClose])
+
+  if (!toast) return null
+
+  const config = {
+    success: {
+      icon: CheckCircle2,
+      iconColor: 'text-emerald-600',
+      iconBg: 'bg-emerald-50',
+      border: 'border-emerald-200',
+    },
+    error: {
+      icon: XCircle,
+      iconColor: 'text-red-600',
+      iconBg: 'bg-red-50',
+      border: 'border-red-200',
+    },
+    loading: {
+      icon: Loader2,
+      iconColor: 'text-navy-600',
+      iconBg: 'bg-navy-50',
+      border: 'border-navy-200',
+    },
+  }[toast.variant]
+
+  const Icon = config.icon
+
+  return (
+    <div className="fixed bottom-5 right-5 z-50 animate-slideUp">
+      <div className={cn(
+        'flex items-start gap-3 bg-white rounded-xl border shadow-lg px-4 py-3.5 min-w-[320px] max-w-[420px]',
+        config.border,
+      )}>
+        <div className={cn('w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0', config.iconBg)}>
+          <Icon className={cn('w-5 h-5', config.iconColor, toast.variant === 'loading' && 'animate-spin')} />
+        </div>
+        <div className="flex-1 min-w-0 pt-0.5">
+          <p className="text-sm font-bold text-navy-900 leading-snug">{toast.title}</p>
+          {toast.message && (
+            <p className="text-xs text-stone-500 mt-0.5 leading-relaxed">{toast.message}</p>
+          )}
+        </div>
+        {toast.variant !== 'loading' && (
+          <button
+            onClick={onClose}
+            className="p-1 -mr-1 -mt-0.5 text-stone-400 hover:text-stone-600 rounded hover:bg-stone-50 transition flex-shrink-0"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        )}
+      </div>
+    </div>
+  )
+}
+
 // ── Main Page ──
 
 export default function ClientIntelligence() {
@@ -83,6 +153,7 @@ export default function ClientIntelligence() {
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc')
   const [page, setPage] = useState(1)
   const [importing, setImporting] = useState(false)
+  const [toast, setToast] = useState<ToastState>(null)
 
   const params: SAPClientParams = {
     page,
@@ -102,7 +173,6 @@ export default function ClientIntelligence() {
   const { data: filters } = useSAPFilters()
   const { data: summary } = useSAPSummary()
 
-  // Safe destructure — everything defaults to empty/zero
   const clients = data?.clients ?? []
   const totalPages = data?.total_pages ?? 1
   const total = data?.total ?? 0
@@ -134,19 +204,43 @@ export default function ClientIntelligence() {
   const handleImport = async () => {
     const input = document.createElement('input')
     input.type = 'file'
-    input.accept = '.csv'
+    input.accept = '.csv,.xlsx,.xls'
     input.onchange = async (e) => {
       const file = (e.target as HTMLInputElement).files?.[0]
       if (!file) return
       setImporting(true)
+      setToast({
+        variant: 'loading',
+        title: 'Importing SAP data...',
+        message: file.name,
+      })
       try {
         const result = await importSAPCSV(file)
-        alert(`Imported ${result.processed} clients (${result.errors} errors)`)
+        const created = result.created ?? 0
+        const updated = result.updated ?? 0
+        const errors = result.errors ?? 0
+        const processed = result.processed ?? 0
+
+        const parts: string[] = []
+        if (created > 0) parts.push(`${created} new`)
+        if (updated > 0) parts.push(`${updated} updated`)
+        if (errors > 0) parts.push(`${errors} errors`)
+        const message = parts.length > 0 ? parts.join(' · ') : 'All up to date'
+
+        setToast({
+          variant: errors > 0 ? 'error' : 'success',
+          title: `Imported ${processed} clients`,
+          message,
+        })
         queryClient.invalidateQueries({ queryKey: ['sap-clients'] })
         queryClient.invalidateQueries({ queryKey: ['sap-summary'] })
         queryClient.invalidateQueries({ queryKey: ['sap-filters'] })
       } catch (err: any) {
-        alert(`Import failed: ${err.response?.data?.detail || err.message}`)
+        setToast({
+          variant: 'error',
+          title: 'Import failed',
+          message: err.response?.data?.detail || err.message || 'Unknown error',
+        })
       } finally {
         setImporting(false)
       }
@@ -395,6 +489,9 @@ export default function ClientIntelligence() {
           </div>
         </div>
       )}
+
+      {/* ═══ TOAST ═══ */}
+      <Toast toast={toast} onClose={() => setToast(null)} />
     </div>
   )
 }

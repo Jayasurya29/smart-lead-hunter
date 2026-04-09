@@ -438,7 +438,7 @@ async def list_discovery_zones(
 
 
 @router.post("/discover/{zone_key}")
-async def run_zone_discovery(zone_key: str):
+async def run_zone_discovery(zone_key: str, enrich: bool = True):
     """
     Discover hotels in a specific zone via Geoapify pipeline.
     Workflow: Geoapify → tier filter → match against DB → insert NEW leads.
@@ -453,7 +453,7 @@ async def run_zone_discovery(zone_key: str):
         )
 
     try:
-        result = await asyncio.to_thread(run_zone_for_api, zone_key, True)
+        result = await asyncio.to_thread(run_zone_for_api, zone_key, True, enrich)
         return result
     except Exception as e:
         logger.error(f"Discovery failed for zone {zone_key}: {e}", exc_info=True)
@@ -461,7 +461,7 @@ async def run_zone_discovery(zone_key: str):
 
 
 @router.post("/discover/state/{state_code}")
-async def run_state_discovery(state_code: str):
+async def run_state_discovery(state_code: str, enrich: bool = True):
     """
     Discover hotels across all zones in a state.
     Example: POST /api/existing-hotels/discover/state/FL
@@ -474,7 +474,7 @@ async def run_state_discovery(state_code: str):
         raise HTTPException(status_code=400, detail=f"No zones for state: {state_code}")
 
     try:
-        result = await asyncio.to_thread(run_state_for_api, state_code, True)
+        result = await asyncio.to_thread(run_state_for_api, state_code, True, enrich)
         return result
     except Exception as e:
         logger.error(f"State discovery failed for {state_code}: {e}", exc_info=True)

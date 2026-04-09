@@ -1,7 +1,8 @@
 """
-SMART LEAD HUNTER — SAP CSV Import Service
-============================================
-Parses SAP Business One CSV exports and upserts into sap_clients table.
+SMART LEAD HUNTER — SAP CSV/XLSX Import Service
+================================================
+Parses SAP Business One CSV or XLSX exports and upserts into sap_clients table.
+Headers are matched case-insensitively (CUSTOMER_CODE = customer_code).
 """
 
 import csv
@@ -9,10 +10,10 @@ import logging
 import re
 import uuid
 from datetime import datetime
-from io import StringIO
+from io import BytesIO, StringIO
 from typing import Optional
 
-from sqlalchemy import select, func, case
+from sqlalchemy import case, func, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from app.database import async_session
@@ -139,9 +140,9 @@ def _normalize_name(name: str) -> str:
 
 
 def _parse_float(value: str) -> float:
-    if not value or not value.strip():
+    if not value or not str(value).strip():
         return 0.0
-    cleaned = value.strip().replace('"', "").replace(",", "")
+    cleaned = str(value).strip().replace('"', "").replace(",", "")
     try:
         return float(cleaned)
     except (ValueError, TypeError):
@@ -149,9 +150,9 @@ def _parse_float(value: str) -> float:
 
 
 def _parse_int(value: str) -> Optional[int]:
-    if not value or not value.strip():
+    if not value or not str(value).strip():
         return None
-    cleaned = value.strip().replace('"', "").replace(",", "")
+    cleaned = str(value).strip().replace('"', "").replace(",", "")
     try:
         return int(float(cleaned))
     except (ValueError, TypeError):
@@ -189,7 +190,8 @@ def _parse_row(row: dict, column_map: dict, batch_id: str) -> dict:
     mapped = {}
 
     for csv_col, model_field in column_map.items():
-        value = row.get(csv_col, "").strip() if row.get(csv_col) else ""
+        raw = row.get(csv_col, "")
+        value = str(raw).strip() if raw is not None else ""
         mapped[model_field] = value
 
     # Parse numeric fields
@@ -221,38 +223,124 @@ def _parse_row(row: dict, column_map: dict, batch_id: str) -> dict:
     return mapped
 
 
+# ─── XLSX helpers ────────────────────────────────────────────────────────────
+
+
+def _worksheet_to_csv_string(ws, wb) -> str:
+    """Convert an openpyxl worksheet to a CSV string. Handles datetimes."""
+    buf = StringIO()
+    w = csv.writer(buf)
+    for row in ws.iter_rows(values_only=True):
+        cleaned = []
+        for v in row:
+            if v is None:
+                cleaned.append("")
+            elif hasattr(v, "strftime"):
+                cleaned.append(v.strftime("%m/%d/%y"))
+            else:
+                cleaned.append(str(v))
+        w.writerow(cleaned)
+    wb.close()
+    return buf.getvalue()
+
+
+def _xlsx_path_to_csv_string(path: str) -> str:
+    """Read .xlsx from disk and return as CSV string."""
+    import openpyxl
+
+    wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
+    ws = wb.active
+    return _worksheet_to_csv_string(ws, wb)
+
+
+def _xlsx_bytes_to_csv_string(data: bytes) -> str:
+    """Read .xlsx from bytes and return as CSV string."""
+    import openpyxl
+
+    wb = openpyxl.load_workbook(BytesIO(data), read_only=True, data_only=True)
+    ws = wb.active
+    return _worksheet_to_csv_string(ws, wb)
+
+
+# ─── Main import function ────────────────────────────────────────────────────
+
+
 async def import_sap_csv(
     file_content: str = "",
     file_path: str = "",
+    file_bytes: bytes = b"",
+    filename: str = "",
     column_map: Optional[dict] = None,
 ) -> dict:
     """
-    Import SAP CSV data into sap_clients table.
+    Import SAP CSV/XLSX data into sap_clients table.
     Uses upsert (INSERT ON CONFLICT UPDATE) keyed on customer_code.
+
+    Accepts:
+      - file_content: CSV text string
+      - file_path:    path to .csv or .xlsx file
+      - file_bytes + filename: raw bytes from upload (auto-detects .xlsx)
+    Headers are matched case-insensitively.
     """
     if not column_map:
         column_map = DEFAULT_COLUMN_MAP
 
     batch_id = f"sap_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:6]}"
 
-    # Read CSV
+    # ─── Load content (auto-detect format) ───────────────────────────────
+    content = ""
+
     if file_path:
-        with open(file_path, "r", encoding="utf-8-sig") as f:
-            content = f.read()
+        suffix = file_path.lower().split(".")[-1]
+        if suffix in ("xlsx", "xls"):
+            content = _xlsx_path_to_csv_string(file_path)
+        else:
+            with open(file_path, "r", encoding="utf-8-sig") as f:
+                content = f.read()
+
+    elif file_bytes:
+        suffix = (filename or "").lower().split(".")[-1]
+        if suffix in ("xlsx", "xls"):
+            content = _xlsx_bytes_to_csv_string(file_bytes)
+        else:
+            content = file_bytes.decode("utf-8-sig")
+
     elif file_content:
         content = file_content
+
     else:
-        return {"error": "No file content or path provided"}
+        return {"error": "No file content, path, or bytes provided"}
+
+    if not content.strip():
+        return {"error": "File is empty"}
 
     reader = csv.DictReader(StringIO(content))
 
-    # Validate headers
-    csv_headers = set(reader.fieldnames or [])
+    # ─── Case-insensitive header matching ────────────────────────────────
+    original_headers = reader.fieldnames or []
+    headers_lower_to_orig = {h.lower().strip(): h for h in original_headers if h}
+
+    csv_headers_lower = set(headers_lower_to_orig.keys())
     expected_headers = set(column_map.keys())
-    missing = expected_headers - csv_headers
+    missing = expected_headers - csv_headers_lower
     if missing:
         logger.warning(f"Missing CSV columns: {missing}")
-        column_map = {k: v for k, v in column_map.items() if k in csv_headers}
+
+    # Remap column_map keys to actual header names from the file
+    effective_column_map = {
+        headers_lower_to_orig[k]: v
+        for k, v in column_map.items()
+        if k in headers_lower_to_orig
+    }
+
+    if not effective_column_map:
+        return {
+            "error": (
+                f"No recognized columns found. "
+                f"Expected one of: {sorted(expected_headers)}. "
+                f"File had: {original_headers}"
+            )
+        }
 
     stats = {"created": 0, "updated": 0, "skipped": 0, "errors": 0, "total": 0}
     rows_to_upsert = []
@@ -260,7 +348,7 @@ async def import_sap_csv(
     for row in reader:
         stats["total"] += 1
         try:
-            parsed = _parse_row(row, column_map, batch_id)
+            parsed = _parse_row(row, effective_column_map, batch_id)
             if not parsed.get("customer_code"):
                 stats["skipped"] += 1
                 continue
@@ -272,7 +360,7 @@ async def import_sap_csv(
     if not rows_to_upsert:
         return {**stats, "batch_id": batch_id, "error": "No valid rows to import"}
 
-    # Batch upsert
+    # ─── Batch upsert ─────────────────────────────────────────────────────
     async with async_session() as session:
         try:
             for row_data in rows_to_upsert:
@@ -293,7 +381,6 @@ async def import_sap_csv(
 
             await session.commit()
 
-            # Count records from this batch
             count_result = await session.execute(
                 select(func.count(SAPClient.id)).where(
                     SAPClient.import_batch == batch_id
@@ -318,6 +405,9 @@ async def import_sap_csv(
             return {**stats, "batch_id": batch_id, "error": str(e)}
 
     return {**stats, "batch_id": batch_id}
+
+
+# ─── Summary stats ───────────────────────────────────────────────────────────
 
 
 async def get_import_summary() -> dict:

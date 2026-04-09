@@ -2,8 +2,9 @@
 SMART LEAD HUNTER — SAP Client Intelligence API Routes
 ========================================================
 Add to main.py:
-    from app.routes.sap import router as sap_router
+    from app.routes.sap import router as sap_router, legacy_router as sap_legacy_router
     app.include_router(sap_router)
+    app.include_router(sap_legacy_router)
 """
 
 import logging
@@ -11,11 +12,11 @@ from typing import Optional
 
 from fastapi import APIRouter, File, HTTPException, Query, UploadFile
 from fastapi.responses import JSONResponse
-from sqlalchemy import func, select, desc, asc, or_
+from sqlalchemy import asc, desc, func, or_, select
 
 from app.database import async_session
 from app.models.sap_client import SAPClient
-from app.services.sap_import import import_sap_csv, get_import_summary
+from app.services.sap_import import get_import_summary, import_sap_csv
 
 logger = logging.getLogger(__name__)
 
@@ -27,17 +28,34 @@ router = APIRouter(prefix="/api/sap", tags=["sap"])
 
 @router.post("/import")
 async def upload_sap_csv(file: UploadFile = File(...)):
-    """Upload and import a SAP Business One CSV export."""
-    if not file.filename.endswith((".csv", ".CSV")):
-        raise HTTPException(status_code=400, detail="Only CSV files accepted")
+    """Upload and import a SAP Business One CSV or XLSX export."""
+    fname = (file.filename or "").lower()
+    if not fname.endswith((".csv", ".xlsx", ".xls")):
+        raise HTTPException(
+            status_code=400,
+            detail="Only .csv, .xlsx, or .xls files accepted",
+        )
 
     try:
-        content = await file.read()
-        decoded = content.decode("utf-8-sig")
+        raw_bytes = await file.read()
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Error reading file: {e}")
 
-    result = await import_sap_csv(file_content=decoded)
+    if not raw_bytes:
+        raise HTTPException(status_code=400, detail="File is empty")
+
+    # XLSX → pass bytes; CSV → decode then pass content
+    if fname.endswith((".xlsx", ".xls")):
+        result = await import_sap_csv(
+            file_bytes=raw_bytes,
+            filename=file.filename,
+        )
+    else:
+        try:
+            decoded = raw_bytes.decode("utf-8-sig")
+        except Exception as e:
+            raise HTTPException(status_code=400, detail=f"CSV decode error: {e}")
+        result = await import_sap_csv(file_content=decoded)
 
     if result.get("error") and result.get("processed", 0) == 0:
         raise HTTPException(status_code=400, detail=result["error"])
@@ -75,7 +93,6 @@ async def list_clients(
         query = select(SAPClient)
         count_query = select(func.count(SAPClient.id))
 
-        # ─── Filters ─────────────────────────────────────────
         filters = []
 
         if search:
@@ -121,7 +138,6 @@ async def list_clients(
             query = query.where(f)
             count_query = count_query.where(f)
 
-        # ─── Sorting ─────────────────────────────────────────
         allowed_sort_fields = {
             "customer_name": SAPClient.customer_name,
             "revenue_lifetime": SAPClient.revenue_lifetime,
@@ -137,7 +153,6 @@ async def list_clients(
         order_fn = desc if sort_dir == "desc" else asc
         query = query.order_by(order_fn(sort_col))
 
-        # ─── Pagination ──────────────────────────────────────
         total_result = await session.execute(count_query)
         total = total_result.scalar()
 
@@ -375,3 +390,20 @@ async def get_filter_options():
                 "customer_types": [r[0] for r in types],
             }
         )
+
+
+# ─── Legacy alias routes (for frontend calling /sap/* without /api prefix) ───
+
+legacy_router = APIRouter(prefix="/sap", tags=["sap-legacy"])
+
+
+@legacy_router.post("/import")
+async def upload_sap_csv_legacy(file: UploadFile = File(...)):
+    """Legacy alias for /api/sap/import (used by frontend)."""
+    return await upload_sap_csv(file)
+
+
+@legacy_router.get("/import/summary")
+async def import_summary_legacy():
+    """Legacy alias for /api/sap/import/summary."""
+    return await import_summary()
