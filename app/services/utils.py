@@ -196,8 +196,10 @@ _SEASON_MONTHS = {
     # Vague qualifiers
     "early": 3,
     "mid": 6,
-    "late": 10,
-    "end": 10,
+    # "late 2026" / "end of 2026" = Q4, not October.
+    # October alone is "mid-fall". "Late" in a year context means Nov/Dec.
+    "late": 12,
+    "end": 12,
 }
 
 

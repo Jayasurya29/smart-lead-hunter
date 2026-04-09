@@ -162,6 +162,9 @@ class EnrichmentResult:
 
     def __init__(self):
         self.contacts: list[dict] = []
+        self.fallback_contacts: list[
+            dict
+        ] = []  # rescued rejects for zero-contact cases
         self.management_company: Optional[str] = None
         self.developer: Optional[str] = None
         self.opening_update: Optional[str] = None
@@ -551,26 +554,17 @@ async def _search_duckduckgo(query: str, max_results: int = 3) -> list[dict]:
 
 
 async def _search_web(query: str, max_results: int = 5) -> list[dict]:
-    """Unified search: runs BOTH Serper (Google) and DDG concurrently, merges + deduplicates."""
+    """Unified search: Serper (Google) only. DDG removed — endpoints are dead and were
+    blocking every query for ~20s waiting on timeouts."""
     all_results = []
     seen_urls = set()
 
-    # ── Run both search engines concurrently ──
-    serper_coro = _search_serper(query, max_results=max_results)
-    ddg_coro = _search_duckduckgo(query, max_results=max_results)
-    serper_results, ddg_results = await asyncio.gather(
-        serper_coro, ddg_coro, return_exceptions=True
-    )
-
-    # Handle exceptions from gather
-    if isinstance(serper_results, Exception):
-        logger.warning(f"Serper failed in gather: {serper_results}")
+    try:
+        serper_results = await _search_serper(query, max_results=max_results)
+    except Exception as e:
+        logger.warning(f"Serper failed: {e}")
         serper_results = []
-    if isinstance(ddg_results, Exception):
-        logger.warning(f"DDG failed in gather: {ddg_results}")
-        ddg_results = []
 
-    # ── Serper (Google) first — better LinkedIn coverage ──
     if serper_results:
         logger.info(f"Google (Serper): {len(serper_results)} results for: {query[:60]}")
         for r in serper_results:
@@ -578,20 +572,7 @@ async def _search_web(query: str, max_results: int = 5) -> list[dict]:
             if url_key not in seen_urls:
                 seen_urls.add(url_key)
                 all_results.append(r)
-
-    # ── DDG second — catches different results ──
-    if ddg_results:
-        new_count = 0
-        for r in ddg_results:
-            url_key = r["url"].rstrip("/").lower()
-            if url_key not in seen_urls:
-                seen_urls.add(url_key)
-                all_results.append(r)
-                new_count += 1
-        if new_count:
-            logger.info(f"DDG added {new_count} unique results for: {query[:60]}")
-
-    if not all_results:
+    else:
         logger.info(f"No search results for: {query[:60]}")
 
     return all_results
@@ -845,6 +826,12 @@ async def _layer_web_search(
                 logger.info(
                     f"Filtered out: {name} (corporate title: {contact.get('title')})"
                 )
+                # Stash as fallback — if enrichment ends with zero contacts,
+                # a corporate/founder contact at a small brand is better than nothing.
+                contact["_fallback_reason"] = f"corporate_title: {contact.get('title')}"
+                contact["source"] = url
+                contact["source_type"] = "press_release"
+                result.fallback_contacts.append(contact)
                 continue
 
             if _is_irrelevant_org(contact.get("organization", "")):
@@ -1797,6 +1784,37 @@ BRAND-ONLY ORG RULE: If a contact's organization is ONLY a brand name or parent 
 property name or city, they MUST be set to "chain_area" — NEVER "hotel_specific".
 This applies even if they hold an operational title like Director of Housekeeping.
 
+MANAGEMENT COMPANY RULE (CRITICAL — READ CAREFULLY):
+Hotel operational staff are FREQUENTLY employed by a third-party management company rather than
+by the hotel brand directly. The management company is the LEGAL EMPLOYER, but the person still
+works at the target hotel. Common management companies include: Aimbridge Hospitality, Highgate,
+Crescent Hotels, Davidson Hospitality, HEI Hotels, Concord Hospitality, Pyramid Hotel Group,
+Interstate Hotels, Extell Hospitality Services, Palladium Hotel Group, Hyatt Hotels Corporation
+(when managing non-Hyatt brands), and many others. These names usually contain words like
+"Hospitality", "Hotels", "Hotel Group", "Hotel Management", or "Hospitality Services".
+
+The MANAGEMENT COMPANY for this lead is: {management_company}
+
+RULES:
+- If a contact's organization matches the MANAGEMENT COMPANY above (or is clearly a hotel
+  management company by name), and their TITLE or LinkedIn headline mentions the target hotel
+  or its specific location → KEEP as hotel_specific with high confidence.
+- A management company employer is NOT grounds for rejection. Do NOT reject Andrew Carey types
+  who say "General Manager - Canopy by Hilton at Deer Valley" employed by "Extell Hospitality
+  Services" — that is the textbook case of a real GM at the target hotel.
+- Only reject management-company employees if their title is corporate/regional (VP, Regional
+  Director, Area Manager, Corporate ___) OR if they work at a clearly different property.
+
+TITLE-CONTAINS-HOTEL RULE (OVERRIDES OTHER CHECKS):
+If a contact's job title, LinkedIn headline, or raw_snippet explicitly contains the target hotel
+name "{hotel_name}" (or its distinctive location keywords), they are CONFIRMED at the target
+hotel — KEEP as hotel_specific with high confidence, regardless of what the organization field
+says. Examples that MUST be kept:
+- title: "General Manager - Canopy by Hilton at Deer Valley", org: "Extell Hospitality Services"
+  → KEEP (title names target hotel)
+- title: "Director of Housekeeping", raw_snippet: "...joins The Nora Hotel as Director..."
+  → KEEP (snippet names target hotel)
+
 Check raw_snippet and organization carefully - the target hotel name or its specific city/location
 must appear in their actual profile/snippet (not just in the search query that found them).
 If you cannot confirm the SPECIFIC hotel, set corrected_scope to "chain_area" not "hotel_specific".
@@ -2199,8 +2217,49 @@ async def enrich_lead_contacts(
             if not name:
                 continue
             try:
-                query = f'"{name}" "{hotel_name}"'
-                search_results = await _search_web(query, max_results=3)
+                # Build a tiered set of queries — start strict, then loosen.
+                # Strict full-name + full-hotel often returns ZERO results when
+                # the DB hotel name has suffixes (e.g. "East Village") that don't
+                # appear on the actual LinkedIn profile.
+                queries = [f'"{name}" "{hotel_name}"']
+
+                # Loose fallback 1: name + brand (no quotes on hotel)
+                # e.g. "Andrew Carey" Canopy Deer Valley
+                hotel_words = [w for w in hotel_name.split() if len(w) > 2]
+                # Drop common suffix words that often differ between sources
+                drop_words = {
+                    "east",
+                    "west",
+                    "north",
+                    "south",
+                    "village",
+                    "downtown",
+                    "uptown",
+                    "the",
+                    "and",
+                    "at",
+                    "by",
+                    "of",
+                    "resort",
+                    "hotel",
+                    "hotels",
+                }
+                core_words = [w for w in hotel_words if w.lower() not in drop_words]
+                if core_words:
+                    loose = " ".join(core_words[:4])
+                    queries.append(f'"{name}" {loose}')
+
+                # Loose fallback 2: name + linkedin (catches profile pages directly)
+                queries.append(
+                    f'"{name}" linkedin {core_words[0] if core_words else ""}'.strip()
+                )
+
+                search_results = []
+                for q in queries:
+                    search_results = await _search_web(q, max_results=3)
+                    if search_results:
+                        break
+
                 for sr in search_results:
                     snippet = (
                         sr.get("snippet", "") + " " + sr.get("title", "")
@@ -2245,8 +2304,74 @@ async def enrich_lead_contacts(
     # GEMINI AI VERIFICATION — fix false positives before scoring
     # ═══════════════════════════════════════════════════════════
 
+    # PRE-GEMINI PROTECTION: deterministically mark contacts whose title or
+    # raw snippet literally proves they work at the target hotel. These will
+    # survive even if Gemini votes to reject them — Gemini sometimes loses
+    # the hotel context after title resolution overwrites the original headline.
+    def _title_proves_hotel(contact: dict, hotel: str) -> bool:
+        if not hotel:
+            return False
+        hotel_lower = hotel.lower()
+        haystacks = [
+            (contact.get("title") or "").lower(),
+            (contact.get("_raw_snippet") or "").lower(),
+            (contact.get("_raw_title") or "").lower(),
+            (contact.get("organization") or "").lower(),
+        ]
+        # Direct substring of full hotel name
+        if any(hotel_lower in h for h in haystacks):
+            return True
+        # Word overlap (drop common filler)
+        _filler = {
+            "the",
+            "and",
+            "at",
+            "by",
+            "of",
+            "in",
+            "on",
+            "for",
+            "east",
+            "west",
+            "north",
+            "south",
+            "village",
+            "downtown",
+            "uptown",
+            "resort",
+            "hotel",
+            "hotels",
+            "a",
+            "an",
+        }
+        hotel_core = {
+            w
+            for w in hotel_lower.replace(",", " ").split()
+            if len(w) > 2 and w not in _filler
+        }
+        if not hotel_core or len(hotel_core) < 2:
+            return False
+        for h in haystacks:
+            words = set(h.replace(",", " ").replace("-", " ").split())
+            if len(hotel_core & words) >= 2:
+                return True
+        return False
+
+    for c in result.contacts:
+        if _title_proves_hotel(c, hotel_name):
+            c["_protected_title_match"] = True
+            logger.info(
+                f"PROTECTED: {c.get('name')} — title/snippet proves hotel link, "
+                f"immune to Gemini rejection"
+            )
+
     if result.contacts:
         try:
+            # Keep a reference to the pre-verify list. _verify_contacts_with_gemini
+            # mutates contacts in place (setting _gemini_rejected on rejected ones)
+            # but RETURNS only the non-rejected subset. We need the original list
+            # to find protected contacts that Gemini tried to reject.
+            contacts_before_verify = result.contacts
             result.contacts = await _verify_contacts_with_gemini(
                 contacts=result.contacts,
                 hotel_name=hotel_name,
@@ -2257,10 +2382,51 @@ async def enrich_lead_contacts(
                 country=country,
                 opening_date=opening_date,
             )
-            # Remove rejected contacts
-            result.contacts = [
-                c for c in result.contacts if not c.get("_gemini_rejected", False)
-            ]
+            # Restore protected contacts that Gemini tried to reject.
+            # These are in contacts_before_verify with _gemini_rejected=True but
+            # are NOT in the returned list because _verify drops rejects.
+            restored_names = {
+                c.get("name", "").lower().strip() for c in result.contacts
+            }
+            for c in contacts_before_verify:
+                if (
+                    c.get("_protected_title_match")
+                    and c.get("_gemini_rejected")
+                    and c.get("name", "").lower().strip() not in restored_names
+                ):
+                    logger.info(
+                        f"OVERRIDE: keeping {c.get('name')} despite Gemini reject "
+                        f"({c.get('_gemini_rejection_reason')}) — title proves hotel"
+                    )
+                    c["_gemini_rejected"] = False
+                    c["scope"] = "hotel_specific"
+                    c["confidence"] = "high"
+                    result.contacts.append(c)
+                elif c.get("_gemini_rejected"):
+                    # Stash corporate/C-suite rejects as fallback. At small
+                    # independent brands these are often the only real contacts.
+                    reason = (c.get("_gemini_rejection_reason") or "").lower()
+                    is_corporate_reject = any(
+                        kw in reason
+                        for kw in (
+                            "c-suite",
+                            "corporate",
+                            "regional",
+                            "vp",
+                            "vice president",
+                            "ceo",
+                            "coo",
+                            "cfo",
+                            "president",
+                            "founder",
+                            "chairman",
+                        )
+                    )
+                    if is_corporate_reject and c.get("name"):
+                        c["_fallback_reason"] = (
+                            f"gemini_corporate: {c.get('_gemini_rejection_reason')}"
+                        )
+                        result.fallback_contacts.append(c)
         except Exception as e:
             result.errors.append(f"Gemini verification failed: {str(e)}")
             logger.error(f"Gemini verification error: {e}")
@@ -2437,6 +2603,45 @@ async def enrich_lead_contacts(
         "chain_corporate": 2,
         "unknown": 3,
     }
+    # ── LAST-RESORT FALLBACK ──
+    # If all real contacts got filtered out but we have stashed corporate/C-suite
+    # contacts from the press releases, rescue the best one. At small independent
+    # brands (Trailborn, Mosaic-type collections, founder-led startups) the COO or
+    # Co-CEO is often the actual operational decision-maker for uniform/supply buys.
+    if not result.contacts and result.fallback_contacts:
+        # Dedupe by name (same person can appear in multiple articles)
+        seen = set()
+        unique_fallbacks = []
+        for c in result.fallback_contacts:
+            key = (
+                c.get("name", "").lower().strip(),
+                c.get("title", "").lower().strip(),
+            )
+            if key not in seen and key[0]:
+                seen.add(key)
+                unique_fallbacks.append(c)
+
+        if unique_fallbacks:
+            # Pick the most-mentioned fallback (most article appearances = most
+            # prominent person associated with the brand) — otherwise first.
+            name_counts = {}
+            for c in result.fallback_contacts:
+                n = c.get("name", "").lower().strip()
+                name_counts[n] = name_counts.get(n, 0) + 1
+            unique_fallbacks.sort(
+                key=lambda c: -name_counts.get(c.get("name", "").lower().strip(), 0)
+            )
+            best = unique_fallbacks[0]
+            best["scope"] = "chain_corporate"
+            best["confidence"] = "low"
+            best["_is_fallback"] = True
+            logger.info(
+                f"FALLBACK PROMOTED: {best.get('name')} ({best.get('title')}) — "
+                f"zero property-level contacts found, using most-mentioned "
+                f"corporate contact. Reason: {best.get('_fallback_reason')}"
+            )
+            result.contacts.append(best)
+
     result.contacts.sort(
         key=lambda c: (
             scope_rank.get(c.get("scope", c.get("_validation_scope", "unknown")), 3),

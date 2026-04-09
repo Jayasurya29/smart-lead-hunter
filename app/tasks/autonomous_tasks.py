@@ -606,3 +606,61 @@ def rescore_all_leads_task(self) -> Dict[str, Any]:
             return await rescore_all_leads(session)
 
     return run_async(_rescore())
+
+
+@celery_app.task(bind=True, base=BaseTask, name="recompute_timeline_labels")
+def recompute_timeline_labels(self) -> Dict[str, Any]:
+    """Recompute timeline_label on every active lead based on today's date.
+
+    Runs daily at 9:30 AM (see beat_schedule in celery_app.py). Fixes the stale
+    label problem: timeline_label is stored as a column and was previously only
+    refreshed inside daily_health_check, which is scoped to status='new' and
+    gated on several other maintenance steps. This task is single-purpose so it
+    always runs cleanly regardless of upstream failures.
+    """
+    from app.services.utils import get_timeline_label
+
+    logger.info("Recompute Timeline Labels: starting...")
+
+    async def _recompute():
+        results = {
+            "leads_checked": 0,
+            "labels_updated": 0,
+            "newly_expired": 0,
+            "by_label": {},
+        }
+        async with async_session() as session:
+            # Cover every active-ish status. Don't touch rejected/deleted.
+            leads_q = await session.execute(
+                select(PotentialLead).where(
+                    PotentialLead.status.notin_(["deleted", "rejected"])
+                )
+            )
+            for lead in leads_q.scalars().all():
+                results["leads_checked"] += 1
+                new_label = get_timeline_label(lead.opening_date)
+                if new_label != lead.timeline_label:
+                    old_label = lead.timeline_label
+                    lead.timeline_label = new_label
+                    results["labels_updated"] += 1
+                    # Auto-expire leads that crossed into EXPIRED today
+                    if new_label == "EXPIRED" and lead.status not in ("expired",):
+                        lead.status = "expired"
+                        results["newly_expired"] += 1
+                    key = f"{old_label or 'NONE'}->{new_label}"
+                    results["by_label"][key] = results["by_label"].get(key, 0) + 1
+            await session.commit()
+
+        logger.info(
+            f"Recompute Timeline Labels: checked={results['leads_checked']}, "
+            f"updated={results['labels_updated']}, "
+            f"newly_expired={results['newly_expired']}"
+        )
+        if results["by_label"]:
+            for transition, count in sorted(
+                results["by_label"].items(), key=lambda x: -x[1]
+            ):
+                logger.info(f"    {transition}: {count}")
+        return results
+
+    return run_async(_recompute())

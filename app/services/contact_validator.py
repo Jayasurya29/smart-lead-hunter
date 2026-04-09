@@ -142,9 +142,60 @@ class ContactValidator:
         # Respect pre-existing scope from Gemini verification if hotel_specific
         pre_scope = contact.get("scope", "")
         gemini_confirmed = pre_scope == "hotel_specific"
-        if gemini_confirmed:
+
+        # DETERMINISTIC OVERRIDE: if the contact's TITLE literally contains the
+        # target hotel name (or 2+ distinguishing words from it), they are confirmed
+        # at the target hotel regardless of what the org field says. This catches
+        # cases like "General Manager - Canopy by Hilton at Deer Valley" employed
+        # by "Extell Hospitality Services" — the management company is the legal
+        # employer but the title proves where they actually work.
+        title_confirms_hotel = False
+        if title and hotel_name:
+            title_lower = title.lower()
+            hotel_lower_full = hotel_name.lower()
+            # Direct substring match
+            if hotel_lower_full in title_lower:
+                title_confirms_hotel = True
+            else:
+                # Word-overlap match (drop common filler)
+                _filler = {
+                    "the",
+                    "and",
+                    "at",
+                    "by",
+                    "of",
+                    "in",
+                    "on",
+                    "for",
+                    "east",
+                    "west",
+                    "north",
+                    "south",
+                    "village",
+                    "downtown",
+                    "uptown",
+                    "resort",
+                    "hotel",
+                    "hotels",
+                    "a",
+                    "an",
+                }
+                hotel_core = {
+                    w
+                    for w in hotel_lower_full.replace(",", " ").split()
+                    if len(w) > 2 and w not in _filler
+                }
+                title_words = set(
+                    title_lower.replace(",", " ").replace("-", " ").split()
+                )
+                if hotel_core and len(hotel_core & title_words) >= 2:
+                    title_confirms_hotel = True
+
+        if gemini_confirmed or title_confirms_hotel:
             org_bonus = 15
             scope_tag = "hotel_specific"
+            if title_confirms_hotel and not gemini_confirmed:
+                score.flags.append("title_names_hotel")
         else:
             org_bonus, scope_tag = self._check_org_match(
                 org=org,

@@ -65,6 +65,13 @@ celery_app.conf.update(
         # AUTONOMOUS BRAIN — Business Hours Only (9:30a-4:30p ET)
         # Mon-Fri only. App is shutdown outside these hours.
         # ======================================================
+        # Recompute timeline labels: 9:30 AM every day (incl. weekends)
+        # Dates advance on weekends too — labels must always be fresh.
+        "recompute-timeline-labels": {
+            "task": "recompute_timeline_labels",
+            "schedule": crontab(hour=9, minute=30),
+            "options": {"queue": "maintenance"},
+        },
         # Startup health check: 9:35 AM Mon-Fri
         # Cleanup overnight gaps, rescore stale leads
         "startup-health-check": {
