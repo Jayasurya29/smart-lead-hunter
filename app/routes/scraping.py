@@ -1217,10 +1217,48 @@ async def discovery_start(request: Request, _csrf=Depends(require_ajax)):
                             pass
                         return len(text)
 
+                # Pipeline code (app.services.intelligent_pipeline, etc.) uses
+                # Python's logging module instead of print(), so redirect_stdout
+                # alone misses all Phase 4 activity and the dashboard freezes
+                # at the last print()-based line (usually "[18/388]"). This
+                # handler captures logger output too and forwards it to the
+                # SSE message list so the dashboard stays live during
+                # classification + extraction.
+                import logging as _logging
+
+                class _DashboardLogHandler(_logging.Handler):
+                    def emit(self, record):
+                        try:
+                            msg = self.format(record)
+                            # Strip the boilerplate "2026-04-10 12:34:56 | INFO | ..."
+                            # prefix — the dashboard UI doesn't need it.
+                            if " | " in msg:
+                                msg = msg.split(" | ", 3)[-1]
+                            msg = msg.strip()
+                            if not msg:
+                                return
+                            messages.append(
+                                {"type": _classify_msg_type(msg), "message": msg}
+                            )
+                        except Exception:
+                            pass  # Never let logging break discovery
+
+                dashboard_handler = _DashboardLogHandler()
+                dashboard_handler.setLevel(_logging.INFO)
+                dashboard_handler.setFormatter(_logging.Formatter("%(message)s"))
+
+                # Attach to the loggers the pipeline/discovery code writes to.
+                # We attach to the root logger so any sub-module logging during
+                # discovery gets captured without us having to enumerate modules.
+                root_logger = _logging.getLogger()
+                root_logger.addHandler(dashboard_handler)
+
                 try:
                     with contextlib.redirect_stdout(_ProgressWriter()):
                         await eng.run(max_queries=max_queries)
                 finally:
+                    # Always detach the handler so it doesn't leak between runs
+                    root_logger.removeHandler(dashboard_handler)
                     await eng.close()
 
                 elapsed = (local_now() - start_time).total_seconds()

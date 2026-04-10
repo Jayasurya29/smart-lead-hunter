@@ -18,6 +18,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.potential_lead import PotentialLead
+
 from app.services.utils import (
     normalize_hotel_name,
     normalize_state,

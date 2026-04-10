@@ -62,7 +62,7 @@ def _get_config() -> dict:
                 settings, "vertex_project_id", os.getenv("VERTEX_PROJECT_ID", "")
             ),
             "vertex_location": getattr(
-                settings, "vertex_location", os.getenv("VERTEX_LOCATION", "us-central1")
+                settings, "vertex_location", os.getenv("VERTEX_LOCATION", "global")
             ),
             "vertex_key_path": getattr(
                 settings,
@@ -90,7 +90,7 @@ def _get_config() -> dict:
             "model": os.getenv("AI_MODEL", "gemini-2.5-flash"),
             "model_lite": os.getenv("AI_MODEL_LITE", "gemini-2.5-flash-lite"),
             "vertex_project_id": os.getenv("VERTEX_PROJECT_ID", ""),
-            "vertex_location": os.getenv("VERTEX_LOCATION", "us-central1"),
+            "vertex_location": os.getenv("VERTEX_LOCATION", "global"),
             "vertex_key_path": os.getenv("VERTEX_KEY_PATH", "vertex-key.json"),
             "openai_api_key": os.getenv("OPENAI_API_KEY", ""),
             "openai_base_url": os.getenv(
@@ -191,8 +191,15 @@ def get_ai_url(model: str = None) -> str:
             )
         project = config["vertex_project_id"]
         location = config["vertex_location"]
+        # Gemini 2.5 models are served from the "global" endpoint on Vertex AI,
+        # which uses a different hostname (no region prefix).
+        host = (
+            "aiplatform.googleapis.com"
+            if location == "global"
+            else f"{location}-aiplatform.googleapis.com"
+        )
         return (
-            f"https://{location}-aiplatform.googleapis.com/v1/"
+            f"https://{host}/v1/"
             f"projects/{project}/locations/{location}/"
             f"publishers/google/models/{model}:generateContent"
         )

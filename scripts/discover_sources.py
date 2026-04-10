@@ -538,6 +538,9 @@ class DomainTester:
             "url": url,
             "domain": domain,
             "reachable": False,
+            "failure_category": None,      # dns / ssl / timeout / connection / http / unknown
+            "failure_detail": None,        # exact exception or status code
+            "http_status": None,
             "has_hotel_content": False,
             "signals": [],
             "signal_count": 0,
@@ -556,18 +559,59 @@ class DomainTester:
             "unique_hotel_articles": 0,
         }
 
-        # Step 1: Fetch URL
+        # Step 1: Fetch URL with categorized error handling
         page_content = ""
         try:
             resp = await self.client.get(url)
+            result["http_status"] = resp.status_code
             if resp.status_code != 200:
+                # HTTP-level failure: site is reachable but returned non-200
+                result["failure_category"] = "http"
+                result["failure_detail"] = f"HTTP {resp.status_code}"
+                logger.info(f"[HTTP] {domain}: returned {resp.status_code}")
                 return result
             result["reachable"] = True
             page_content = resp.text
-        except Exception as e:
-            logger.debug(f"Cannot reach {domain}: {e}")
+        except httpx.ConnectError as e:
+            # Covers DNS failures + connection refused
+            err_str = str(e).lower()
+            if (
+                "getaddrinfo" in err_str
+                or "name or service not known" in err_str
+                or "nodename nor servname" in err_str
+                or "temporary failure in name resolution" in err_str
+                or "[errno 11001]" in err_str    # Windows DNS
+                or "[errno 11002]" in err_str    # Windows DNS
+            ):
+                result["failure_category"] = "dns"
+                result["failure_detail"] = f"DNS resolution failed: {e}"
+                logger.info(f"[DNS]  {domain}: domain does not resolve — {e}")
+            else:
+                result["failure_category"] = "connection"
+                result["failure_detail"] = f"Connection refused/reset: {e}"
+                logger.info(f"[CONN] {domain}: {e}")
             return result
-
+        except (httpx.ConnectTimeout, httpx.ReadTimeout, httpx.PoolTimeout) as e:
+            result["failure_category"] = "timeout"
+            result["failure_detail"] = f"Timeout: {type(e).__name__}"
+            logger.info(f"[TIME] {domain}: timeout ({type(e).__name__})")
+            return result
+        except (httpx.ConnectError,) as e:  # defensive, already caught above
+            result["failure_category"] = "connection"
+            result["failure_detail"] = str(e)
+            logger.info(f"[CONN] {domain}: {e}")
+            return result
+        except Exception as e:
+            err_str = str(e).lower()
+            if "ssl" in err_str or "certificate" in err_str or "tls" in err_str:
+                result["failure_category"] = "ssl"
+                result["failure_detail"] = f"SSL/TLS error: {e}"
+                logger.info(f"[SSL]  {domain}: {e}")
+            else:
+                result["failure_category"] = "unknown"
+                result["failure_detail"] = f"{type(e).__name__}: {e}"
+                logger.warning(f"[UNK]  {domain}: {type(e).__name__}: {e}")
+            return result
         result["page_html"] = page_content
 
         # Step 2: Clean text
@@ -1087,9 +1131,35 @@ class WebDiscoveryEngine:
             test_result = await self.tester.test(url, domain)
 
             if not test_result["reachable"]:
-                print("❌ Unreachable")
+                category = test_result.get("failure_category") or "unknown"
+                detail = test_result.get("failure_detail") or "no detail"
+
+                # Human-readable per-category failure label
+                icons = {
+                    "dns":        ("💀 DNS FAIL (dead domain)", "dns_permanent"),
+                    "ssl":        ("🔒 SSL/TLS error",          "ssl"),
+                    "timeout":    ("⏱️  Timeout",                "timeout"),
+                    "connection": ("🚫 Connection refused",     "connection"),
+                    "http":       (f"⚠️  {detail}",              "http"),
+                    "unknown":    (f"❓ Unknown: {detail[:60]}", "unknown"),
+                }
+                label, reason_code = icons.get(category, icons["unknown"])
+                print(f"❌ {label}")
+
+                # Stat bucket — keep old 'unreachable' key working for back-compat
                 self.stats["unreachable"] += 1
-                await self._record_domain_failure(domain, "unreachable")
+                self.stats.setdefault("failures_by_category", {})
+                self.stats["failures_by_category"][category] = (
+                    self.stats["failures_by_category"].get(category, 0) + 1
+                )
+
+                # DNS failures = dead domain. Permanent blacklist, never retry.
+                # Everything else uses the existing exponential backoff.
+                await self._record_domain_failure(
+                    domain,
+                    reason=f"{reason_code}: {detail[:200]}",
+                    permanent=(category == "dns"),
+                )
                 continue
 
             await self._clear_domain_failure(domain)
@@ -1280,8 +1350,20 @@ class WebDiscoveryEngine:
         self._save_log(qualified_sources, qualified_articles)
 
     # ─── Domain failure tracking ─────────────────────────────────────────────
+    async def _record_domain_failure(
+        self,
+        domain: str,
+        reason: str = "unreachable",
+        permanent: bool = False,
+    ):
+        """Record a domain failure.
 
-    async def _record_domain_failure(self, domain: str, reason: str = "unreachable"):
+        Args:
+            domain: failing domain
+            reason: categorized reason string (e.g. "dns_permanent: ...")
+            permanent: if True (e.g. DNS resolution failure), sets retry_after
+                far in the future so the domain is effectively blacklisted.
+        """
         if self.dry_run:
             return
         try:
@@ -1290,23 +1372,32 @@ class WebDiscoveryEngine:
                     select(FailedDomain).where(FailedDomain.domain == domain)
                 )
                 fd = result.scalar_one_or_none()
+                now = datetime.now(timezone.utc)
+
                 if fd:
                     fd.record_failure(reason=reason)
+                    if permanent:
+                        # Override the exponential backoff — this is dead.
+                        fd.retry_after = now + timedelta(days=3650)  # ~10 years
                 else:
-                    now = datetime.now(timezone.utc)
+                    retry_after = (
+                        now + timedelta(days=3650) if permanent
+                        else now + timedelta(days=7)
+                    )
                     fd = FailedDomain(
                         domain=domain,
                         reason=reason,
                         fail_count=1,
                         first_failed=now,
                         last_failed=now,
-                        retry_after=now + timedelta(days=7),
+                        retry_after=retry_after,
                     )
                     session.add(fd)
+
                 await session.commit()
                 self.failed_domains[domain] = fd
         except Exception as e:
-            logger.debug(f"Failed to record domain failure for {domain}: {e}")
+            logger.warning(f"Failed to record domain failure for {domain}: {e}")
 
     async def _clear_domain_failure(self, domain: str):
         if domain not in self.failed_domains:
@@ -1430,6 +1521,10 @@ class WebDiscoveryEngine:
         )
         print(f"  Tested           : {tested}")
         print(f"  Unreachable      : {self.stats['unreachable']}")
+        cat_breakdown = self.stats.get("failures_by_category", {})
+        if cat_breakdown:
+            for cat, count in sorted(cat_breakdown.items(), key=lambda x: -x[1]):
+                print(f"    └ {cat:12s}: {count}")
         print(f"  Low signals      : {self.stats['low_signals']}")
         print(f"  Low quality      : {self.stats['low_quality']}")
         print("  ───────────────────────────────────")

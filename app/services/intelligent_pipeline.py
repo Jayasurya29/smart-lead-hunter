@@ -302,6 +302,7 @@ class ExtractedLead:
     location_type: str = ""
     opening_year: Optional[int] = None
     skip_reason: str = ""
+    route_to: str = ""  # "existing_hotels" for expired-but-valid US/Caribbean leads
 
     # Priority (from LeadPriorityCalculator)
     lead_priority: str = ""  # HOT, WARM, DEVELOPING, COLD, MISSED
@@ -352,6 +353,8 @@ class ExtractedLead:
             "brand_tier": self.brand_tier,
             "location_type": self.location_type,
             "opening_year": self.opening_year,
+            "route_to": self.route_to,
+            "skip_reason": self.skip_reason,
             "lead_priority": self.lead_priority,
             "lead_priority_reason": self.lead_priority_reason,
             "months_to_opening": self.months_to_opening,
@@ -886,11 +889,20 @@ Respond in JSON:
                 )
                 self._last_call = time.time()
 
-                # Retryable errors
+                # Retryable errors — exponential backoff WITH jitter.
+                # Without jitter, all parallel workers that hit 429 simultaneously
+                # also retry simultaneously, creating a thundering herd that
+                # re-triggers 429. Random jitter spreads retries across a window
+                # so Vertex's shared pool can drain between attempts.
                 if response.status_code in (429, 503):
-                    wait = (2**attempt) * 2
+                    import random
+
+                    base = (2**attempt) * 2  # 2s, 4s, 8s
+                    jitter = random.uniform(0, base)  # 0-2s, 0-4s, 0-8s added
+                    wait = base + jitter
                     logger.warning(
-                        f"Classifier {response.status_code}, retry {attempt + 1}/{max_retries} in {wait}s"
+                        f"Classifier {response.status_code}, retry "
+                        f"{attempt + 1}/{max_retries} in {wait:.1f}s"
                     )
                     await asyncio.sleep(wait)
                     continue
@@ -1111,24 +1123,30 @@ class LeadExtractor:
 Extract information about NEW HOTEL OPENINGS from this article.
 {source_hint}
 
+TODAY'S DATE: {datetime.now().strftime("%B %d, %Y")}
+
 RULES:
-1. Only extract hotels with a FUTURE opening/debut date ({current_year} or later)
+1. Only extract hotels whose opening date is STRICTLY IN THE FUTURE relative to TODAY'S DATE above. A hotel that already opened last week, last month, or earlier this year is NOT a lead — skip it.
 2. Leave fields empty if not clearly stated
-3. For opening_date use format "Month YYYY" or "Q1 {current_year}" or "{current_year}"
+3. For opening_date use format "Month YYYY" (e.g. "September 2026"), "Q3 2026", "Late 2026", or "2027". NEVER just write "{current_year}" alone if the article does not specify a month or quarter — that is ambiguous and will be misinterpreted. If the article only says the year, write "Late {current_year}" or the next year instead.
 4. key_insights is REQUIRED - include staffing numbers, amenities, investment
-5. MULTI-HOTEL ARTICLES: When an article mentions multiple hotels, carefully match EACH hotel to ITS OWN opening date. Dates may appear in different paragraphs or sentences than the hotel name - read the full context around each mention. Common patterns:
+5. MULTI-HOTEL ARTICLES: When an article mentions multiple hotels (e.g. a listicle like "26 Most Anticipated Openings"), carefully match EACH hotel to ITS OWN opening date stated in its own paragraph. Do NOT copy the article publication date or the article's headline year onto every hotel. Dates may appear in different paragraphs or sentences than the hotel name — read the full context around each mention. Common patterns:
    - "Hotel X... set to open in 2028" (date in same sentence)
    - "Hotel X in Location." Then later: "...expected to debut in 2028" (date in nearby paragraph)
    - "Hotel X and Hotel Y, set to open in Turks & Caicos" then "...slated for 2028" (shared date)
    - If a date like "2027" or "2028" appears near a hotel name within 2-3 sentences, assign it
-6. NEVER leave opening_date empty if ANY year or timeframe is mentioned near the hotel name in the article. Search the ENTIRE article for dates associated with each hotel before giving up
-7. CRITICAL — DO NOT EXTRACT hotels mentioned only as historical references, comparisons, or background context. Examples of what NOT to extract:
+6. NEVER leave opening_date empty if ANY year or timeframe is mentioned near the hotel name in the article. Search the ENTIRE article for dates associated with each hotel before giving up.
+7. ARTICLE DATE vs. OPENING DATE — CRITICAL: The publication date of the article (often shown at the top of the page, in a byline, or in URL slugs like "/2026/04/") is NOT the hotel's opening date. Do NOT use article publish dates, dateline dates, or "posted on" timestamps as opening_date for any hotel. Only use dates that are explicitly tied to the hotel's debut, opening, launch, groundbreaking, or construction completion in the article body.
+8. CRITICAL — DO NOT EXTRACT hotels mentioned only as historical references, comparisons, or background context. Examples of what NOT to extract:
    - "Similar to the Ritz-Carlton Turtle Bay which was converted in 2024..." (past event, background)
    - "Marriott also operates The Westin Maui..." (existing hotel, not new)
    - "Following the success of Hotel X which opened last year..." (already opened)
    Only extract hotels that are THE SUBJECT of the article with a FUTURE opening/debut date.
-8. BRAND CONVERSIONS: For existing hotels being rebranded (e.g. resort converting to St. Regis), the opening_date is when it will DEBUT under the NEW brand, NOT when the original hotel was built. Mark opening_status as "conversion" for these.
-9. ALREADY OPENED CHECK: If the article says a hotel "opened", "debuted", "welcomed first guests", "is now open", or "launched" in {current_year - 1} or earlier, DO NOT extract it. It is not a new lead.
+9. BRAND CONVERSIONS: For existing hotels being rebranded (e.g. resort converting to St. Regis), the opening_date is when it will DEBUT under the NEW brand, NOT when the original hotel was built. Mark opening_status as "conversion" for these.
+10. ALREADY OPENED CHECK: If the article uses past-tense language like "opened", "debuted", "welcomed first guests", "is now open", "officially opened", "has opened", or "launched" with a date at or before TODAY'S DATE shown above, DO NOT extract it. It is not a new lead, it is already in operation.
+11. NAMED HOTELS ONLY: Only extract hotels that have a REAL, specific name stated in the article (e.g. "JW Marriott Austin", "The Vineta Palm Beach", "Kimpton Ashbel"). DO NOT extract vague descriptive references like "a 170-room boutique hotel", "a new luxury resort", "an upscale property", or "an Omni-branded hotel" if no specific hotel name is given. Descriptive phrases are planning rumors, not lead-worthy hotels — skip them entirely. The hotel_name field must contain an actual proper noun brand/property name, never a descriptive phrase in parentheses.
+12. BRAND FIELD DISCIPLINE: The "brand" field must contain a REAL HOTEL BRAND, not a parent company, theme-park operator, or generic descriptor. Examples of valid brands: "Marriott", "JW Marriott", "Ritz-Carlton", "Hilton", "Waldorf Astoria", "Hyatt", "Park Hyatt", "Andaz", "Four Seasons", "Rosewood", "Aman", "Kimpton", "1 Hotel", "Montage", "Pendry", "Autograph Collection", "Curio Collection", "Tribute Portfolio", "The Unbound Collection by Hyatt", "Disney's Grand Floridian Resort" (full property name acts as brand for Disney resorts). INVALID brand values — leave empty instead: "Disney" (that's a company, not a brand — Disney's hotel brands are full resort names like "Disney's Polynesian Village Resort"), "Universal", "Six Flags", "The Walt Disney Company", "Marriott International" (that's the parent — use "Marriott" or the specific sub-brand like "Westin" or "W Hotels"), "Hilton Worldwide" (use "Hilton" or specific sub-brand like "Conrad", "DoubleTree"), or any generic phrase like "luxury", "boutique", "new", "upscale". If the article only mentions a parent company and not a specific hotel brand, leave "brand" empty — do not guess.
+13. HOTEL NAME CONSISTENCY: When multiple articles describe the same hotel, use the most complete and specific name available. If an article refers to a hotel as both "The Lakeshore Lodge" in one sentence and "Disney's Lakeshore Lodge" in another, extract it as "Disney's Lakeshore Lodge" (the more specific form). Always prefer the fullest official name — this helps downstream deduplication merge records correctly across sources.
 
 KEY INSIGHTS TO CAPTURE (critical for uniform sales!):
 - Staff hiring numbers (e.g., "hiring 300 employees" = big order!)
@@ -1342,18 +1360,29 @@ Return [] if no new hotels found."""
                 )
                 self._last_call = time.time()
 
-                # Retryable status codes
+                # Retryable status codes — with jitter to avoid thundering herd.
+                # See classifier retry block for detailed rationale.
                 if response.status_code == 429:
-                    wait = (2**attempt) * 2  # 2s, 4s, 8s
+                    import random
+
+                    base = (2**attempt) * 2  # 2s, 4s, 8s
+                    jitter = random.uniform(0, base)  # 0-2s, 0-4s, 0-8s added
+                    wait = base + jitter
                     logger.warning(
-                        f"Rate limited (429), retry {attempt + 1}/{max_retries} in {wait}s"
+                        f"Rate limited (429), retry "
+                        f"{attempt + 1}/{max_retries} in {wait:.1f}s"
                     )
                     await asyncio.sleep(wait)
                     continue
                 elif response.status_code == 503:
-                    wait = (2**attempt) * 3  # 3s, 6s, 12s
+                    import random
+
+                    base = (2**attempt) * 3  # 3s, 6s, 12s
+                    jitter = random.uniform(0, base)  # 0-3s, 0-6s, 0-12s added
+                    wait = base + jitter
                     logger.warning(
-                        f"Service unavailable (503), retry {attempt + 1}/{max_retries} in {wait}s"
+                        f"Service unavailable (503), retry "
+                        f"{attempt + 1}/{max_retries} in {wait:.1f}s"
                     )
                     await asyncio.sleep(wait)
                     continue
@@ -1564,6 +1593,98 @@ class LeadValidator:
                 "name_is_brand_or_city", f"Name is just brand/city: '{name}'"
             )
 
+        # Reject descriptive / anonymous hotel "names" — these are planning
+        # rumors, not real leads. A real hotel name is a proper noun; if the
+        # extractor returns something like "a 170-room boutique hotel" or
+        # "Boutique hotel (planned adjacent to ...)", drop it.
+        descriptive_markers = [
+            "planned",
+            "proposed",
+            "unnamed",
+            "unbranded",
+            "tbd",
+            "to be announced",
+            "to be determined",
+            "boutique hotel",  # generic, not a name
+            "luxury hotel",
+            "luxury resort",
+            "upscale hotel",
+            "new hotel",
+        ]
+        # Flag if name is generic OR starts with a lowercase article (a/an/the + generic)
+        name_stripped = name_lower.strip()
+        if any(marker in name_stripped for marker in descriptive_markers):
+            # Allow if it also contains a proper noun brand (Marriott, Hilton, etc.)
+            real_brand_keywords = [
+                "marriott",
+                "hilton",
+                "hyatt",
+                "ihg",
+                "four seasons",
+                "ritz",
+                "st. regis",
+                "w hotel",
+                "kimpton",
+                "westin",
+                "sheraton",
+                "renaissance",
+                "autograph",
+                "edition",
+                "rosewood",
+                "aman",
+                "six senses",
+                "mandarin",
+                "peninsula",
+                "sofitel",
+                "fairmont",
+                "raffles",
+                "conrad",
+                "waldorf",
+                "intercontinental",
+                "regent",
+                "park hyatt",
+                "grand hyatt",
+                "andaz",
+                "thompson",
+                "1 hotel",
+                "nobu",
+                "faena",
+                "delano",
+                "mondrian",
+                "public",
+                "soho house",
+                "ace hotel",
+                "standard",
+                "line hotel",
+                "proper",
+                "pendry",
+                "montage",
+                "auberge",
+                "oetker",
+                "belmond",
+                "como",
+                "cheval blanc",
+                "bulgari",
+                "armani",
+                "versace",
+            ]
+            if not any(kw in name_stripped for kw in real_brand_keywords):
+                return self._reject(
+                    "name_is_descriptive",
+                    f"Name is descriptive/anonymous, not a real hotel name: '{name}'",
+                )
+
+        # Reject names containing parentheses with descriptive phrases
+        # e.g. "Boutique hotel (planned adjacent to Union West Development)"
+        if "(" in name and any(
+            word in name_lower
+            for word in ["planned", "proposed", "adjacent", "near", "next to"]
+        ):
+            return self._reject(
+                "name_has_descriptive_parenthetical",
+                f"Name contains descriptive parenthetical: '{name}'",
+            )
+
         return (True, "")
 
     def validate_batch(self, leads: List[ExtractedLead]) -> List[ExtractedLead]:
@@ -1626,6 +1747,9 @@ class LeadQualifier:
         lead.brand_tier = result.get("brand_tier", "")
         lead.location_type = result.get("location_type", "")
         lead.opening_year = result.get("opening_year")
+        # Preserve routing decision from scorer (e.g. "existing_hotels" for
+        # expired leads in valid US/Caribbean locations).
+        lead.route_to = result.get("route_to", "")
 
         if not result["should_save"]:
             lead.skip_reason = result.get("skip_reason", "")
@@ -1667,20 +1791,42 @@ class LeadQualifier:
         return lead
 
     def qualify_batch(self, leads: List[ExtractedLead]) -> List[ExtractedLead]:
-        """Qualify multiple leads, filtering out disqualified ones"""
+        """Qualify multiple leads.
+
+        Returns three categories merged into the output list:
+        1. Qualified leads (score > 0) → normal sales pipeline
+        2. Routed leads (score == 0 but route_to == 'existing_hotels') →
+           pass through to lead_factory so they can be saved as existing hotels
+        3. Truly dropped leads (score == 0 and no route_to) → international,
+           budget, or other hard filters — these are discarded.
+        """
         qualified = []
+        routed_to_existing = 0
         skipped = 0
 
         for lead in leads:
             qualified_lead = self.qualify(lead)
             if qualified_lead.qualification_score > 0:
                 qualified.append(qualified_lead)
+            elif qualified_lead.route_to == "existing_hotels":
+                # Let expired-but-valid leads flow through. lead_factory.py
+                # will see route_to and funnel them into existing_hotels.
+                qualified.append(qualified_lead)
+                routed_to_existing += 1
+                logger.debug(
+                    f"   🏨 Routing to existing: {lead.hotel_name} "
+                    f"({qualified_lead.skip_reason})"
+                )
             else:
                 skipped += 1
                 logger.debug(
                     f"⏭️ Skipped: {lead.hotel_name} - {qualified_lead.skip_reason}"
                 )
 
+        if routed_to_existing > 0:
+            logger.info(
+                f"   🏨 Routing {routed_to_existing} expired leads to existing_hotels"
+            )
         if skipped > 0:
             logger.info(
                 f"   🚫 Filtered out {skipped} leads (budget/international/old)"

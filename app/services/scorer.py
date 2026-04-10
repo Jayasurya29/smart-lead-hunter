@@ -1835,11 +1835,22 @@ def calculate_lead_score(
     timing_points, timing_tier, opening_year = get_timing_score(opening_date)
     result["opening_year"] = opening_year
     result["breakdown"]["timing"] = {"points": timing_points, "tier": timing_tier}
-    # Reject expired leads (past openings, already opened)
+    # Expired leads (past openings, already opened) — don't save as a "potential lead",
+    # but if the hotel is in a US/Caribbean target location, route it to existing_hotels
+    # so the sales team can still prospect it (replacement cycles, new hires, etc.).
     if timing_points == 0 and opening_year:
         result["should_save"] = False
         result["skip_reason"] = f"Expired opening ({opening_year}): {hotel_name}"
         result["breakdown"]["timing"]["skip"] = True
+        # Flag for downstream routing. lead_factory will read this.
+        # Only route if the location scoring already determined this is a valid
+        # US/Caribbean target (location_points > 0 means it passed the international filter).
+        if location_points > 0:
+            result["route_to"] = "existing_hotels"
+            result["route_reason"] = (
+                f"Already opened ({opening_year}) — routed to existing hotels "
+                f"for post-opening prospecting"
+            )
         return result
     result["total_score"] += timing_points
 

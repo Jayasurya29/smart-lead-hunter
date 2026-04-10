@@ -610,6 +610,63 @@ class SmartDeduplicator:
             else:
                 sim -= 0.15  # Different brands = likely different hotels
 
+        # Distinctive-word safety net: if both cleaned names share a 5+ letter
+        # word that isn't a generic hospitality term AND they're in the same
+        # city AND same opening year, they're almost certainly the same hotel
+        # even if one has a prefix like "Disney" or "The" that the other lacks.
+        # This catches cases where one extraction run produces "The Lakeshore Lodge"
+        # and another produces "Disney Lakeshore Lodge" (both Orlando, 2027).
+        GENERIC_WORDS = {
+            "hotel",
+            "hotels",
+            "resort",
+            "resorts",
+            "suites",
+            "suite",
+            "lodge",
+            "inn",
+            "club",
+            "spa",
+            "collection",
+            "residences",
+            "residence",
+            "house",
+            "tower",
+            "towers",
+            "place",
+            "plaza",
+            "grand",
+            "royal",
+            "luxury",
+            "the",
+            "and",
+            "new",
+            "beach",
+        }
+        n1_words = set(self._clean_name(lead1.hotel_name).split())
+        n2_words = set(self._clean_name(lead2.hotel_name).split())
+        distinctive_shared = {
+            w for w in (n1_words & n2_words) if len(w) >= 5 and w not in GENERIC_WORDS
+        }
+        if distinctive_shared:
+            same_city = (
+                lead1.city
+                and lead2.city
+                and lead1.city.strip().lower() == lead2.city.strip().lower()
+            )
+            same_year = (
+                lead1.opening_year
+                and lead2.opening_year
+                and str(lead1.opening_year) == str(lead2.opening_year)
+            )
+            if same_city and same_year:
+                # Strong signal these are the same hotel — force above threshold
+                sim = max(sim, self.threshold + 0.05)
+                logger.debug(
+                    f"   🔗 Distinctive-word merge: '{lead1.hotel_name}' ~ "
+                    f"'{lead2.hotel_name}' (shared: {distinctive_shared})"
+                )
+
         return min(sim, 1.0)
 
     # =========================================================================

@@ -122,7 +122,7 @@ EXTRACTOR_CONTENT_LIMIT = 20000  # Chars for extraction
 CLASSIFICATION_CONFIDENCE = 0.45  # Min confidence to extract
 QUALIFICATION_THRESHOLD = 30  # Min score to keep a lead
 MIN_DELAY_SECONDS = 0.15  # Between API calls
-MAX_CONCURRENT_REQUESTS = 20  # Parallel AI calls
+MAX_CONCURRENT_REQUESTS = 8  # Parallel AI calls
 
 # Redis extraction cache
 REDIS_CACHE_TTL_HOURS = 168  # 7 days — covers weekly runs

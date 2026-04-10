@@ -32,7 +32,7 @@ class Settings(BaseSettings):
     ai_provider: str = "vertex_ai"  # vertex_ai | openai | anthropic | ollama
     # AI / Vertex AI (uses $300 Google Cloud credits)
     vertex_project_id: str = "gen-lang-client-0283518101"
-    vertex_location: str = "us-central1"
+    vertex_location: str = "global"
     vertex_key_path: str = "vertex-key.json"
     gemini_model: str = "gemini-2.5-flash"
     gemini_model_lite: str = "gemini-2.5-flash-lite"

@@ -256,13 +256,16 @@ def months_to_opening(opening_date: str) -> int:
 def get_timeline_label(opening_date: str) -> str:
     """Get timeline label for a lead based on opening date.
 
-    EXPIRED: already past opening
-    LATE: 0-3 months out
-    URGENT: 3-6 months out
-    HOT: 6-12 months out (sweet spot for uniform sales)
-    WARM: 12-18 months out
-    COOL: 18+ months out
-    TBD: current year with no month info, or no date at all
+    Business rule: uniform sales require 6+ months lead time to win.
+    Anything under 3 months is too late = EXPIRED (don't pursue).
+    The sweet spot is HOT (6-12 months) when decisions are being made.
+
+    EXPIRED: past opening OR 0-3 months future (too late for sales cycle)
+    URGENT:  3-6 months out  (tight but possible)
+    HOT:     6-12 months out (sweet spot — active decision window)
+    WARM:    12-18 months out (planning phase)
+    COOL:    18+ months out  (too early, watchlist)
+    TBD:     year only with no month info, ambiguous ranges, or no date
     """
     if not opening_date or not opening_date.strip():
         return "TBD"
@@ -274,21 +277,38 @@ def get_timeline_label(opening_date: str) -> str:
     if re.fullmatch(r"20\d{2}\s+or\s+20\d{2}", text):
         return "TBD"
 
+    # Year ranges like "2025-2026", "2026/27", "2026 to 2027" are too vague
+    # to bucket reliably. The source didn't commit to a specific window, so
+    # neither should we — return TBD instead of guessing a month.
+    if re.search(r"20\d{2}\s*[-/]\s*20?\d{2}", text):
+        return "TBD"
+    if re.search(r"20\d{2}\s+to\s+20\d{2}", text):
+        return "TBD"
+
     # Bare current year only (e.g. "2026") — could be any month
     # Future bare years (2027, 2028) use mid-year estimate
     if re.fullmatch(r"20\d{2}", text) and text == current_year:
         return "TBD"
 
     months = months_to_opening(opening_date)
-    if months < 0:
+    # Business rule: uniform sales cycle requires ~6+ months lead time.
+    # Anything under 3 months is too late to win the deal, so it's bucketed
+    # as EXPIRED (don't pursue), not URGENT. The "sweet spot" is 6-12 months.
+    #
+    # Non-overlapping boundaries using strict < so every month lands in
+    # exactly one bucket:
+    #   months <  3  → EXPIRED  (past or 0, 1, 2 months)
+    #   months <  6  → URGENT   (3, 4, 5)
+    #   months < 12  → HOT      (6, 7, 8, 9, 10, 11)
+    #   months < 18  → WARM     (12, 13, 14, 15, 16, 17)
+    #   months ≥ 18  → COOL     (18+)
+    if months < 3:
         return "EXPIRED"
-    elif months <= 3:
-        return "EXPIRED"
-    elif months <= 6:
+    elif months < 6:
         return "URGENT"
-    elif months <= 12:
+    elif months < 12:
         return "HOT"
-    elif months <= 18:
+    elif months < 18:
         return "WARM"
     else:
         return "COOL"
