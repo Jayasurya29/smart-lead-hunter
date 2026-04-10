@@ -1563,7 +1563,19 @@ async def smart_fill_lead(lead_id: int, request: Request, _csrf=Depends(require_
 
         if "opening_date" in enriched:
             lead.opening_date = enriched["opening_date"]
-            lead.timeline_label = get_timeline_label(enriched["opening_date"])
+            new_label = get_timeline_label(enriched["opening_date"])
+            lead.timeline_label = new_label
+            # If the refreshed opening date lands in the EXPIRED bucket
+            # (past or 0-3 months future), auto-expire the lead so it exits
+            # the Pipeline tab. Without this, status stays "new" while the
+            # badge shows "Expired" — a zombie state.
+            if new_label == "EXPIRED":
+                lead.status = "expired"
+                logger.info(
+                    f"Full Refresh auto-expired {lead.hotel_name}: "
+                    f"opening_date refreshed to '{enriched['opening_date']}' "
+                    f"(EXPIRED bucket)"
+                )
         if "brand_tier" in enriched:
             lead.brand_tier = enriched["brand_tier"]
         if "room_count" in enriched:
