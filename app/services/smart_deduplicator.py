@@ -654,11 +654,19 @@ class SmartDeduplicator:
                 and lead2.city
                 and lead1.city.strip().lower() == lead2.city.strip().lower()
             )
-            same_year = (
-                lead1.opening_year
-                and lead2.opening_year
-                and str(lead1.opening_year) == str(lead2.opening_year)
-            )
+
+            # MergedLead stores opening_date as free-form text (e.g. "October 2026",
+            # "Late 2026", "Q4 2027"). Extract the 4-digit year from both and
+            # compare. Fall back to False if either is missing or no year found.
+            def _extract_year(text: str) -> str:
+                if not text:
+                    return ""
+                match = re.search(r"20\d{2}", text)
+                return match.group(0) if match else ""
+
+            year1 = _extract_year(lead1.opening_date)
+            year2 = _extract_year(lead2.opening_date)
+            same_year = bool(year1) and year1 == year2
             if same_city and same_year:
                 # Strong signal these are the same hotel — force above threshold
                 sim = max(sim, self.threshold + 0.05)
