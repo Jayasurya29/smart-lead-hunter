@@ -1,4 +1,3 @@
-
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { useAuth } from '@/hooks/useAuth'
 import AppLayout from '@/components/layout/AppLayout'
@@ -41,16 +40,16 @@ export default function AppRouter() {
           {/* Auth routes */}
           <Route
             path="/login"
-            element={isAuthenticated ? <Navigate to="/dashboard" replace /> : <LoginPage />}
+            element={isAuthenticated ? <Navigate to="/new-hotels" replace /> : <LoginPage />}
           />
           <Route
             path="/register"
-            element={isAuthenticated ? <Navigate to="/dashboard" replace /> : <RegisterPage />}
+            element={isAuthenticated ? <Navigate to="/new-hotels" replace /> : <RegisterPage />}
           />
 
           {/* Protected routes */}
           <Route
-            path="/dashboard"
+            path="/new-hotels"
             element={
               <ProtectedRoute>
                 <Dashboard />
@@ -109,7 +108,7 @@ export default function AppRouter() {
             }
           />
 
-          <Route path="*" element={<Navigate to="/dashboard" replace />} />
+          <Route path="*" element={<Navigate to="/new-hotels" replace />} />
         </Routes>
       </BrowserRouter>
     </ErrorBoundary>

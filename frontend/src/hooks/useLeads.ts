@@ -83,6 +83,7 @@ export function useRejectLead() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['leads'] })
       qc.invalidateQueries({ queryKey: ['stats'] })
+      qc.invalidateQueries({ queryKey: ['map-leads'] })
     },
   })
 }
@@ -94,6 +95,7 @@ export function useRestoreLead() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['leads'] })
       qc.invalidateQueries({ queryKey: ['stats'] })
+      qc.invalidateQueries({ queryKey: ['map-leads'] })
     },
   })
 }
@@ -119,6 +121,7 @@ export function useSmartFill() {
     onSuccess: (_data, vars) => {
       qc.invalidateQueries({ queryKey: ['lead', vars.id] })
       qc.invalidateQueries({ queryKey: ['leads'] })
+      qc.invalidateQueries({ queryKey: ['map-leads'] })
     },
   })
 }

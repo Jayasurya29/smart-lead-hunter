@@ -25,6 +25,9 @@ import re
 import logging
 from dataclasses import dataclass, field
 from typing import Optional
+from app.config.brand_registry import BrandRegistry
+from app.config.procurement_intelligence import get_management_company_intel
+from app.config.project_type_intelligence import get_phase_queries
 
 from app.config.sap_title_classifier import BuyerTier, title_classifier
 
@@ -332,11 +335,18 @@ class ContactValidator:
         org_lower = org.lower().strip()
         hotel_lower = hotel_name.lower().strip()
 
-        # Direct hotel match — best case
-        if hotel_lower in org_lower or org_lower in hotel_lower:
+        # Direct hotel match — use whole-word matching to avoid substring false positives
+        # e.g. "The Dean" must NOT match "Dean's Italian Steakhouse"
+        # Negative lookahead (?!['\w]) excludes possessive/compound forms like "dean's"
+        def _whole_word_in(needle: str, haystack: str) -> bool:
+            return bool(re.search(r"\b" + re.escape(needle) + r"(?!['\w])", haystack))
+
+        if _whole_word_in(hotel_lower, org_lower) or _whole_word_in(
+            org_lower, hotel_lower
+        ):
             return (15, "hotel_specific")
 
-        # Check if org contains significant hotel name words
+        # Check if org contains significant hotel name words (exact word set intersection)
         hotel_words = self._extract_name_words(hotel_name)
         org_words = set(org_lower.split())
         if len(hotel_words & org_words) >= 2:
@@ -564,6 +574,8 @@ class SmartQueryBuilder:
         country: Optional[str] = None,
         mode: str = "pre_opening",
         retry_attempt: int = 0,
+        phase: int = 0,
+        project_type: str = "unknown",
     ) -> list[str]:
         """
         Generate search queries for contact discovery.
@@ -577,50 +589,99 @@ class SmartQueryBuilder:
         location = self._build_location(city, state, country)
 
         if retry_attempt == 0:
-            # ── FIRST ATTEMPT: Standard search ──
-
-            # Query 1: Hotel name + key titles + LinkedIn
-            title_terms = "General Manager OR Director OR Purchasing"
-            queries.append(f"{hotel_name} {title_terms} site:linkedin.com")
-
-            # Query 2: Hotel name + appointment news
-            queries.append(f"{hotel_name} appoints OR hires OR names OR appointed")
-
-            # Query 2b: Hotel/brand official press releases
-            queries.append(
-                f'"{hotel_name}" "General Manager" OR "appointed" OR "announcement"'
-            )
-
-            # Query 3: Brand/parent company + hotel name + staff
-            parent = management_company or brand
-            if parent:
-                queries.append(f"{parent} {hotel_name} team OR staff OR leadership")
-
-            # Query 4: Hotel name + location + GM
-            if location:
-                queries.append(f"{hotel_name} {location} General Manager OR Director")
-
-            # Query 5-N: Targeted title-specific queries (SAP-proven buyer titles)
+            # ── FIRST ATTEMPT: Procurement-intelligence-driven search ──
             location_str = self._build_location(city, state, country)
-            targeted_titles = [
-                "General Manager",
-                "Director of Housekeeping",
-                "Executive Housekeeper",
-                "Housekeeping Manager",
-                "Purchasing Manager",
-                "Director of Purchasing",
-                "Procurement Manager",
-                "Director of Operations",
-                "Director of Rooms",
-                "Hotel Manager",
-                "Director of Food and Beverage",
-                "Executive Chef",
-                "Laundry Manager",
-                "Director of Human Resources",
-                "Director of People and Culture",
-            ]
-            for tt in targeted_titles:
-                queries.append(f"{hotel_name} {location_str} {tt}")
+            parent = management_company or brand
+
+            if mode == "pre_opening":
+                # ── PHASE-AWARE QUERY GENERATION ──
+                # phase is passed in from enrich_lead_contacts based on
+                # timeline_label + project_type. Default to phase 1 if not set.
+                active_phase = phase if phase in (1, 2, 3) else 1
+
+                # Get phase-specific queries from project_type_intelligence
+                phase_queries = get_phase_queries(
+                    phase=active_phase,
+                    hotel_name=hotel_name,
+                    brand=brand,
+                    management_company=management_company,
+                    city=city,
+                    state=state,
+                    project_type=project_type,
+                )
+                queries.extend(phase_queries)
+
+                # Also add management company known contacts if available
+                mgmt_intel = get_management_company_intel(management_company or "")
+                if (
+                    mgmt_intel
+                    and mgmt_intel.get("known_contacts")
+                    and active_phase == 1
+                ):
+                    for contact in mgmt_intel["known_contacts"]:
+                        queries.append(
+                            f'"{contact}" "{management_company}" site:linkedin.com'
+                        )
+
+                # Brand-specific titles as supplemental queries
+                brand_info = BrandRegistry.lookup(brand) if brand else None
+                if (
+                    brand_info
+                    and brand_info.pre_opening_contact_titles
+                    and active_phase <= 2
+                ):
+                    for tt in brand_info.pre_opening_contact_titles[:3]:
+                        queries.append(f'"{hotel_name}" "{tt}" site:linkedin.com')
+
+                logger.debug(
+                    f"Phase {active_phase} queries for {hotel_name} "
+                    f"(project_type={project_type}): {len(queries)} queries"
+                )
+
+            else:
+                # opening_soon or unknown: property-level staff should be hired
+                # Query 1: Hotel name + key titles + LinkedIn
+                title_terms = "General Manager OR Director OR Purchasing"
+                queries.append(f"{hotel_name} {title_terms} site:linkedin.com")
+
+                # Query 2: Hotel name + appointment news
+                queries.append(f"{hotel_name} appoints OR hires OR names OR appointed")
+
+                # Query 2b: Hotel/brand official press releases
+                queries.append(
+                    f'"{hotel_name}" "General Manager" OR "appointed" OR "announcement"'
+                )
+
+                # Query 3: Brand/parent company + hotel name + staff
+                if parent:
+                    queries.append(f"{parent} {hotel_name} team OR staff OR leadership")
+
+                # Query 4: Hotel name + location + GM
+                if location:
+                    queries.append(
+                        f"{hotel_name} {location} General Manager OR Director"
+                    )
+
+                # Query 5-N: Targeted title-specific queries (SAP-proven buyer titles)
+                targeted_titles = [
+                    "General Manager",
+                    "Director of Housekeeping",
+                    "Executive Housekeeper",
+                    "Housekeeping Manager",
+                    "Purchasing Manager",
+                    "Director of Purchasing",
+                    "Procurement Manager",
+                    "Director of Operations",
+                    "Director of Rooms",
+                    "Hotel Manager",
+                    "Director of Food and Beverage",
+                    "Executive Chef",
+                    "Laundry Manager",
+                    "Director of Human Resources",
+                    "Director of People and Culture",
+                ]
+                for tt in targeted_titles:
+                    queries.append(f"{hotel_name} {location_str} {tt}")
 
         elif retry_attempt == 1:
             # ── RETRY: Use parent company / management company ──
@@ -773,11 +834,36 @@ _IRRELEVANT_ORG_KEYWORDS = [
 ]
 
 
+# Chain ops titles that are valuable for PRE-OPENING hotels
+# These people ARE the decision makers before property GM is hired
+_PRE_OPENING_DECISION_MAKER_SIGNALS = [
+    "chief operating officer",
+    " coo ",
+    "/coo",
+    "coo/",
+    "vp of operations",
+    "vp operations",
+    "vp hotel operations",
+    "vice president of operations",
+    "vice president hotel operations",
+    "svp operations",
+    "senior vice president oper",
+    "director of hotel operations",
+    "pre-opening manager",
+    "pre-opening director",
+    "opening manager",
+]
+
+
 def is_corporate_title(title: str) -> bool:
     """Check if a title is corporate/executive (not property-level).
 
     L-04: Single source of truth used by both contact_validator.py
     and contact_enrichment.py.
+
+    NOTE: Chain ops titles (COO, VP Operations) are NOT flagged as corporate
+    because they are valid pre-opening decision makers before the property GM
+    is hired.
     """
     if not title:
         return False
@@ -785,6 +871,10 @@ def is_corporate_title(title: str) -> bool:
 
     # Property-level titles are NEVER corporate
     if any(kw in title_lower for kw in _PROPERTY_TITLES):
+        return False
+
+    # Chain ops titles are valuable for pre-opening — do NOT reject them
+    if any(kw in title_lower for kw in _PRE_OPENING_DECISION_MAKER_SIGNALS):
         return False
 
     return any(kw in title_lower for kw in _CORPORATE_SIGNALS)

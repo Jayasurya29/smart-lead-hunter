@@ -49,6 +49,11 @@ class PotentialLead(Base):
     country = Column(String(100), default="USA")
     location_type = Column(String(20))  # florida, caribbean, usa, international
 
+    # Geocoordinates (for map display)
+    latitude = Column(Float)
+    longitude = Column(Float)
+    website_verified = Column(String(10))  # "auto" | "manual" | None
+
     # Contact Information
     contact_name = Column(String(200))
     contact_title = Column(String(100))
@@ -142,6 +147,9 @@ class PotentialLead(Base):
             "state": self.state,
             "country": self.country,
             "location_type": self.location_type,
+            "latitude": self.latitude,
+            "longitude": self.longitude,
+            "website_verified": self.website_verified,
             # Project Details
             "opening_date": self.opening_date,
             "opening_year": self.opening_year,

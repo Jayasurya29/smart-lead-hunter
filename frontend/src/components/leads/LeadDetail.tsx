@@ -3,6 +3,7 @@ import { useLead, useContacts, useApproveLead, useRejectLead, useRestoreLead, us
 import RevenuePotential from './RevenuePotential'
 import ConfirmDialog from '../ui/ConfirmDialog'
 import { editLead, saveContact, setPrimaryContact, deleteContact, updateContact, toggleContactScope, addContact } from '@/api/leads'
+import api from '@/api/client'
 import { useQueryClient } from '@tanstack/react-query'
 import type { Lead, Contact } from '@/api/types'
 import {
@@ -34,9 +35,14 @@ type DetailTab = 'overview' | 'contacts' | 'edit' | 'sources'
 
 export default function LeadDetail({ leadId, tab, onClose }: Props) {
   const { data: lead, isLoading } = useLead(leadId)
+  const qc = useQueryClient()
   const { data: contacts, isLoading: contactsLoading } = useContacts(leadId)
   const [activeTab, setActiveTab] = useState<DetailTab>('overview')
   const [confirmAction, setConfirmAction] = useState<'approve' | 'reject' | 'restore' | null>(null)
+  const [rejectReason, setRejectReason] = useState('duplicate')
+  const [editingReason, setEditingReason] = useState(false)
+  const [reasonValue, setReasonValue] = useState('')
+  const [savingReason, setSavingReason] = useState(false)
 
   const approveMut = useApproveLead()
   const rejectMut  = useRejectLead()
@@ -47,6 +53,7 @@ export default function LeadDetail({ leadId, tab, onClose }: Props) {
   const isNew      = tab === 'pipeline'
   const isApproved = tab === 'approved'
   const isRejected = tab === 'rejected'
+
 
   if (isLoading || !lead) {
     return (
@@ -98,6 +105,21 @@ export default function LeadDetail({ leadId, tab, onClose }: Props) {
           <span className={cn('inline-flex px-2 py-0.5 rounded text-xs font-bold', getTimelineColor(timeline))}>
             {timeline}
           </span>
+          {/* Project type badge */}
+          {lead.hotel_type && (() => {
+            const typeMap: Record<string, { label: string; color: string }> = {
+              new_opening:      { label: 'New',        color: 'bg-emerald-100 text-emerald-700' },
+              renovation:       { label: 'Reopening',  color: 'bg-blue-100 text-blue-700' },
+              rebrand:          { label: 'Rebrand',    color: 'bg-purple-100 text-purple-700' },
+              ownership_change: { label: 'New Owner',  color: 'bg-amber-100 text-amber-700' },
+            }
+            const t = typeMap[lead.hotel_type]
+            return t ? (
+              <span className={cn('inline-flex px-2 py-0.5 rounded text-xs font-bold', t.color)}>
+                {t.label}
+              </span>
+            ) : null
+          })()}
         </div>
       </div>
 
@@ -162,14 +184,65 @@ export default function LeadDetail({ leadId, tab, onClose }: Props) {
             </button>
           )}
           {isRejected && (
-            <button
-              onClick={() => setConfirmAction('restore')}
-              disabled={restoreMut.isPending}
-              className="flex items-center gap-1.5 px-4 py-2 text-xs font-semibold rounded-lg border border-blue-200 text-blue-600 hover:bg-blue-50 transition disabled:opacity-50"
-            >
-              {restoreMut.isPending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Undo2 className="w-3.5 h-3.5" />}
-              Restore
-            </button>
+            <div className="flex items-center gap-2 flex-1">
+              {/* Editable rejection reason */}
+              {editingReason ? (
+                <div className="flex items-center gap-1.5 flex-1">
+                  <select
+                    value={reasonValue}
+                    onChange={e => setReasonValue(e.target.value)}
+                    autoFocus
+                    className="flex-1 text-xs border border-red-300 rounded-lg px-2 py-1.5 bg-white text-navy-900 focus:outline-none focus:ring-2 focus:ring-red-100"
+                  >
+                    <option value="duplicate">Duplicate</option>
+                    <option value="international">International (outside US/Caribbean)</option>
+                    <option value="budget_brand">Budget brand — not our market</option>
+                    <option value="bad_data">Bad data / incorrect info</option>
+                    <option value="old_opening">Old opening — already opened</option>
+                    <option value="not_relevant">Not relevant to JA Uniforms</option>
+                    <option value="low_priority">Low priority</option>
+                  </select>
+                  <button
+                    disabled={savingReason}
+                    onClick={async () => {
+                      setSavingReason(true)
+                      try {
+                        await api.patch(`/leads/${leadId}`, { rejection_reason: reasonValue })
+                        qc.invalidateQueries({ queryKey: ['lead', leadId] })
+                        qc.invalidateQueries({ queryKey: ['leads'] })
+                        setEditingReason(false)
+                      } catch(e) { /* silent */ }
+                      setSavingReason(false)
+                    }}
+                    className="px-2.5 py-1.5 text-xs font-semibold bg-red-600 text-white rounded-lg hover:bg-red-700 transition disabled:opacity-50"
+                  >
+                    {savingReason ? <Loader2 className="w-3 h-3 animate-spin" /> : 'Save'}
+                  </button>
+                  <button onClick={() => setEditingReason(false)} className="px-2 py-1.5 text-xs text-stone-400 hover:text-stone-600 transition">
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              ) : (
+                <button
+                  onClick={() => { setReasonValue(lead.rejection_reason || 'duplicate'); setEditingReason(true) }}
+                  className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg border border-dashed border-red-200 text-red-500 hover:bg-red-50 transition"
+                >
+                  <Pencil className="w-3 h-3" />
+                  {lead.rejection_reason
+                    ? lead.rejection_reason.replace(/_/g, ' ')
+                    : 'Set reason'}
+                </button>
+              )}
+
+              <button
+                onClick={() => setConfirmAction('restore')}
+                disabled={restoreMut.isPending}
+                className="flex items-center gap-1.5 px-4 py-2 text-xs font-semibold rounded-lg border border-blue-200 text-blue-600 hover:bg-blue-50 transition disabled:opacity-50"
+              >
+                {restoreMut.isPending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Undo2 className="w-3.5 h-3.5" />}
+                Restore
+              </button>
+            </div>
           )}
         </div>
       </div>
@@ -192,9 +265,27 @@ export default function LeadDetail({ leadId, tab, onClose }: Props) {
         message={`Move "${lead.hotel_name}" to the Rejected tab? You can restore it later if needed.`}
         confirmLabel="Reject"
         pending={rejectMut.isPending}
-        onConfirm={() => { rejectMut.mutate({ id: leadId }); setConfirmAction(null) }}
+        onConfirm={() => { rejectMut.mutate({ id: leadId, reason: rejectReason }); setConfirmAction(null) }}
         onCancel={() => setConfirmAction(null)}
-      />
+      >
+        <div className="mt-3">
+          <label className="block text-xs font-semibold text-stone-500 mb-1">Rejection Reason</label>
+          <select
+            value={rejectReason}
+            onChange={e => setRejectReason(e.target.value)}
+            onClick={e => e.stopPropagation()}
+            className="w-full text-sm border border-stone-200 rounded-lg px-3 py-2 bg-white text-navy-900 focus:outline-none focus:border-red-400 focus:ring-2 focus:ring-red-100"
+          >
+            <option value="duplicate">Duplicate</option>
+            <option value="international">International (outside US/Caribbean)</option>
+            <option value="budget_brand">Budget brand — not our market</option>
+            <option value="bad_data">Bad data / incorrect info</option>
+            <option value="old_opening">Old opening — already opened</option>
+            <option value="not_relevant">Not relevant to JA Uniforms</option>
+            <option value="low_priority">Low priority</option>
+          </select>
+        </div>
+      </ConfirmDialog>
       <ConfirmDialog
         open={confirmAction === 'restore'}
         variant="restore"
@@ -220,6 +311,9 @@ function OverviewTab({ lead, leadId, contactList, onEnrich, enriching, onSmartFi
   onSmartFill: (mode: 'smart' | 'full') => void; smartFilling: boolean; smartFillResult?: { status: string; changes?: string[]; confidence?: string }
 }) {
   const hasMissing = !lead.brand_tier || lead.brand_tier === 'unknown' || !lead.opening_date || !lead.room_count
+  const qc = useQueryClient()
+  const [geoEnriching, setGeoEnriching] = useState(false)
+  const [geoResult, setGeoResult] = useState<{website?: string; lat?: number; lng?: number} | null>(null)
 
   return (
     <div className="space-y-5 animate-fadeIn">
@@ -278,20 +372,67 @@ function OverviewTab({ lead, leadId, contactList, onEnrich, enriching, onSmartFi
       {/* ── Revenue Potential ── */}
       <RevenuePotential leadId={leadId} />
 
-      {/* ── Website ── */}
-      {lead.hotel_website && typeof lead.hotel_website === 'string' && (
-        <Section title="Website">
-          <a
-            href={lead.hotel_website.startsWith('http') ? lead.hotel_website : `https://${lead.hotel_website}`}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="flex items-center gap-2 text-sm text-navy-600 hover:text-navy-800 hover:underline transition"
+      {/* ── Website + Location ── */}
+      <Section title="Website & Location">
+        {/* Website row */}
+        <div className="flex items-center gap-2">
+          {lead.hotel_website ? (
+            <a
+              href={lead.hotel_website.startsWith('http') ? lead.hotel_website : `https://${lead.hotel_website}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex items-center gap-2 text-sm text-navy-600 hover:text-navy-800 hover:underline transition flex-1 min-w-0"
+            >
+              <Globe className="w-4 h-4 flex-shrink-0" />
+              <span className="truncate">{lead.hotel_website}</span>
+              {lead.website_verified === 'auto' && (
+                <span className="text-[10px] text-emerald-600 bg-emerald-50 px-1.5 py-0.5 rounded font-medium flex-shrink-0">auto</span>
+              )}
+              <ExternalLink className="w-3 h-3 flex-shrink-0" />
+            </a>
+          ) : (
+            <span className="text-sm text-stone-400 flex-1">No website found yet</span>
+          )}
+          <button
+            onClick={async () => {
+              setGeoEnriching(true)
+              try {
+                const res = await api.post(`/leads/${leadId}/enrich-geo`)
+                setGeoResult({ website: res.data.hotel_website, lat: res.data.latitude, lng: res.data.longitude })
+                qc.invalidateQueries({ queryKey: ['lead', leadId] })
+              } catch(e) { /* silent */ }
+              finally { setGeoEnriching(false) }
+            }}
+            disabled={geoEnriching}
+            title="Find website + geocoordinates"
+            className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium text-stone-500 hover:text-violet-700 hover:bg-violet-50 border border-dashed border-stone-200 hover:border-violet-300 rounded-md transition disabled:opacity-50 flex-shrink-0"
           >
-            <Globe className="w-4 h-4" />
-            {lead.hotel_website}
-          </a>
-        </Section>
-      )}
+            {geoEnriching ? <Loader2 className="w-3 h-3 animate-spin" /> : <Search className="w-3 h-3" />}
+            {geoEnriching ? 'Searching...' : geoResult ? 'Refresh' : 'Find'}
+          </button>
+        </div>
+
+        {/* Geocoords row */}
+        {(lead.latitude && lead.longitude) ? (
+          <div className="mt-2 flex items-center gap-2">
+            <MapPin className="w-3.5 h-3.5 text-stone-400 flex-shrink-0" />
+            <a
+              href={`https://www.google.com/maps?q=${lead.latitude},${lead.longitude}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-xs text-stone-500 hover:text-navy-700 hover:underline transition font-mono"
+            >
+              {lead.latitude.toFixed(4)}, {lead.longitude.toFixed(4)}
+            </a>
+            <span className="text-[10px] text-emerald-600 bg-emerald-50 px-1.5 py-0.5 rounded font-medium">mapped</span>
+          </div>
+        ) : (
+          <div className="mt-2 flex items-center gap-1.5">
+            <MapPin className="w-3.5 h-3.5 text-stone-300" />
+            <span className="text-xs text-stone-400">Not yet geocoded — click Find to place on map</span>
+          </div>
+        )}
+      </Section>
 
       {/* ── Primary Contact ── */}
       <Section title="Primary Contact">
@@ -364,6 +505,52 @@ function OverviewTab({ lead, leadId, contactList, onEnrich, enriching, onSmartFi
 /* ═══════════════════════════════════════════════════
    CONTACTS TAB — with edit, delete, clean layout
    ═══════════════════════════════════════════════════ */
+
+function WizaEmailButton({ contactId, leadId, onEmailFound }: {
+  contactId: number
+  leadId: number
+  onEmailFound: (email: string) => void
+}) {
+  const [loading, setLoading] = useState(false)
+  const [result, setResult] = useState<'found' | 'not_found' | null>(null)
+
+  async function handleClick() {
+    setLoading(true)
+    try {
+      const res = await api.post(
+        `/api/dashboard/leads/${leadId}/contacts/${contactId}/enrich-email`,
+        {},
+        { headers: { 'X-Requested-With': 'XMLHttpRequest' } }
+      )
+      if (res.data.status === 'found') {
+        setResult('found')
+        onEmailFound(res.data.email)
+      } else {
+        setResult('not_found')
+      }
+    } catch {
+      setResult('not_found')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  if (result === 'not_found') {
+    return <span className="text-[10px] text-stone-400 px-2 py-1 bg-stone-50 rounded">No email found</span>
+  }
+
+  return (
+    <button
+      onClick={handleClick}
+      disabled={loading}
+      title="Find email via Wiza (costs 1 credit)"
+      className="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium text-violet-700 bg-violet-50 rounded-md hover:bg-violet-100 border border-violet-200 transition disabled:opacity-50"
+    >
+      {loading ? <Loader2 className="w-3 h-3 animate-spin" /> : <Mail className="w-3 h-3" />}
+      {loading ? 'Searching...' : 'Find Email'}
+    </button>
+  )
+}
 
 function ContactsTab({ contacts, loading, leadId, onEnrich, enriching }: {
   contacts: Contact[]; loading: boolean; leadId: number; onEnrich: () => void; enriching: boolean
@@ -594,11 +781,20 @@ function ContactsTab({ contacts, loading, leadId, onEnrich, enriching }: {
                         <Linkedin className="w-3.5 h-3.5" /> LinkedIn
                       </a>
                     )}
-                    {c.email && (
-                      <a href={`mailto:${c.email}`} className="flex items-center gap-1.5 text-xs text-navy-600 hover:underline">
-                        <Mail className="w-3.5 h-3.5" /> {c.email}
-                      </a>
-                    )}
+                    {c.email ? (
+                      <div className="flex items-center gap-1.5">
+                        <a href={`mailto:${c.email}`} className="flex items-center gap-1.5 text-xs text-navy-600 hover:underline">
+                          <Mail className="w-3.5 h-3.5" /> {c.email}
+                        </a>
+                        {c.found_via?.startsWith('wiza') && (
+                          <span className="text-[10px] px-1.5 py-0.5 bg-violet-50 text-violet-600 rounded font-medium">Wiza</span>
+                        )}
+                      </div>
+                    ) : c.linkedin ? (
+                      <WizaEmailButton contactId={c.id} leadId={leadId} onEmailFound={(email) => {
+                        qc.invalidateQueries({ queryKey: ['contacts', leadId] })
+                      }} />
+                    ) : null}
                     {c.phone && (
                       <a href={`tel:${c.phone}`} className="flex items-center gap-1.5 text-xs text-navy-600 hover:underline">
                         <Phone className="w-3.5 h-3.5" /> {c.phone}

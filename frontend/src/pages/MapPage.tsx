@@ -1,4 +1,5 @@
-import { useState, useEffect, useMemo, useRef, memo } from 'react'
+import { useState, useEffect, useMemo, useRef, memo, useCallback } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import api from '@/api/client'
 import { cn, getTierColor, getTierLabel } from '@/lib/utils'
@@ -16,6 +17,21 @@ import {
 import MarkerClusterGroup from 'react-leaflet-cluster'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
+
+// Inline performance CSS — injected once
+if (typeof document !== 'undefined' && !document.getElementById('lf-perf')) {
+  const s = document.createElement('style')
+  s.id = 'lf-perf'
+  s.textContent = `
+    .leaflet-popup { transition: none !important; animation: none !important; }
+    .leaflet-popup-content-wrapper { box-shadow: 0 2px 12px rgba(0,0,0,.15) !important; border-radius: 8px !important; }
+    .lf-dot, .lf-lead, .lf-stop { background: transparent !important; border: none !important; }
+    .leaflet-marker-icon { will-change: transform; }
+    .leaflet-zoom-animated { will-change: transform; }
+    .leaflet-tile { will-change: auto; }
+  `
+  document.head.appendChild(s)
+}
 
 /* ═══════════════════════════════════════════════════
    CONSTANTS
@@ -48,6 +64,21 @@ interface MapHotel {
 
 interface NearbyHotel extends MapHotel { dist: number }
 
+interface LeadPin {
+  id: number
+  name: string
+  brand: string | null
+  brand_tier: string | null
+  city: string | null
+  state: string | null
+  lat: number
+  lng: number
+  timeline_label: string | null
+  lead_score: number | null
+  revenue_opening: number | null
+  hotel_website: string | null
+}
+
 interface MapFilters { type: '' | 'client' | 'prospect'; tier: string; zone: string }
 
 interface RouteResult {
@@ -76,20 +107,27 @@ function adjustColor(hex: string, amt: number): string {
   return `#${((r << 16) | (g << 8) | b).toString(16).padStart(6, '0')}`
 }
 
+// Icon cache — avoid recreating identical icons on every render
+const _iconCache = new Map<string, L.DivIcon>()
 function createIcon(color: string, size: number = 10, isRouteStop = false, stopNum?: number): L.DivIcon {
   if (isRouteStop && stopNum !== undefined) {
     return L.divIcon({
-      className: '',
-      html: `<div style="width:${size + 8}px;height:${size + 8}px;border-radius:50%;background:#f97316;border:2px solid #c2410c;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:800;color:#fff;box-shadow:0 2px 8px rgba(249,115,22,.5)">${stopNum}</div>`,
-      iconSize: [size + 8, size + 8], iconAnchor: [(size + 8) / 2, (size + 8) / 2],
+      className: 'lf-stop',
+      html: `<div style="width:${size+8}px;height:${size+8}px;border-radius:50%;background:#f97316;border:2px solid #c2410c;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:800;color:#fff">${stopNum}</div>`,
+      iconSize: [size+8, size+8], iconAnchor: [(size+8)/2, (size+8)/2],
     })
   }
-  const border = `2px solid ${adjustColor(color, -40)}`
-  return L.divIcon({
-    className: '',
-    html: `<div style="width:${size}px;height:${size}px;border-radius:50%;background:${color};border:${border};opacity:.85"></div>`,
-    iconSize: [size, size], iconAnchor: [size / 2, size / 2],
+  const key = `${color}-${size}`
+  if (_iconCache.has(key)) return _iconCache.get(key)!
+  // Single div with padding for touch — no nested wrapper div
+  const pad = 11, total = size + pad * 2
+  const icon = L.divIcon({
+    className: 'lf-dot',
+    html: `<div style="width:${size}px;height:${size}px;border-radius:50%;background:${color};border:2px solid ${adjustColor(color,-40)};box-shadow:0 1px 3px rgba(0,0,0,.25);position:absolute;top:${pad}px;left:${pad}px"></div>`,
+    iconSize: [total, total], iconAnchor: [total/2, total/2],
   })
+  _iconCache.set(key, icon)
+  return icon
 }
 
 const officeIcon = L.divIcon({
@@ -97,6 +135,24 @@ const officeIcon = L.divIcon({
   html: `<div style="width:32px;height:32px;border-radius:8px;background:#0f1d32;border:3px solid #d4a853;display:flex;align-items:center;justify-content:center;font-size:16px;color:#d4a853;box-shadow:0 2px 12px rgba(15,29,50,.5);transform:rotate(45deg)"><span style="transform:rotate(-45deg)">★</span></div>`,
   iconSize: [32, 32], iconAnchor: [16, 16],
 })
+
+const _leadIconCache = new Map<string, L.DivIcon>()
+function createLeadIcon(timeline: string | null, score: number | null): L.DivIcon {
+  const colors: Record<string, string> = { URGENT:'#dc2626', HOT:'#ea580c', WARM:'#d97706', COOL:'#2563eb', TBD:'#7c3aed' }
+  const tl = timeline || 'TBD'
+  const color = colors[tl] || '#7c3aed'
+  const s = score && score >= 70 ? 16 : score && score >= 50 ? 13 : 11
+  const key = `${tl}-${s}`
+  if (_leadIconCache.has(key)) return _leadIconCache.get(key)!
+  const pad = 12, total = s + pad * 2
+  const icon = L.divIcon({
+    className: 'lf-lead',
+    html: `<div style="width:${s}px;height:${s}px;border-radius:2px;background:${color};border:2px solid #fff;box-shadow:0 1px 6px rgba(0,0,0,.4);transform:rotate(45deg);position:absolute;top:${pad}px;left:${pad}px"></div>`,
+    iconSize: [total, total], iconAnchor: [total/2, total/2],
+  })
+  _leadIconCache.set(key, icon)
+  return icon
+}
 
 const anchorIcon = L.divIcon({
   className: '',
@@ -320,7 +376,147 @@ function NearbyClick({ active, onClear }: { active: boolean; onClear: () => void
    MAP PAGE
    ═══════════════════════════════════════════════════ */
 
+// Stable cluster icon function — defined outside component to avoid recreation
+const clusterIconFn = (cluster: any) => {
+  const c = cluster.getChildCount()
+  const s = c > 100 ? 46 : c > 30 ? 40 : 34
+  return L.divIcon({
+    html: `<div style="width:${s}px;height:${s}px;border-radius:50%;background:rgba(15,23,42,.88);border:2px solid rgba(255,255,255,.45);display:flex;align-items:center;justify-content:center;font:700 12px/1 sans-serif;color:#fff;box-shadow:0 2px 8px rgba(0,0,0,.3);cursor:pointer">${c}</div>`,
+    className: '', iconSize: L.point(s, s),
+  })
+}
+
+const leadClusterIconFn = (cluster: any) => {
+  const c = cluster.getChildCount()
+  const s = c > 50 ? 42 : c > 20 ? 36 : 30
+  return L.divIcon({
+    html: `<div style="width:${s}px;height:${s}px;border-radius:4px;background:rgba(124,58,237,.88);border:2px solid rgba(255,255,255,.5);display:flex;align-items:center;justify-content:center;font:700 11px/1 sans-serif;color:#fff;box-shadow:0 2px 8px rgba(0,0,0,.3);transform:rotate(45deg)"><span style="transform:rotate(-45deg)">${c}</span></div>`,
+    className: '', iconSize: L.point(s, s),
+  })
+}
+
+// ─── Memoized lead pin layer with clustering ───────────────────────────────────
+const LeadMarkers = memo(function LeadMarkers({
+  leadPins, onNavigate,
+}: {
+  leadPins: LeadPin[]
+  onNavigate: (id: number) => void
+}) {
+  const TIMELINE_COLORS: Record<string, string> = {
+    URGENT: '#dc2626', HOT: '#ea580c', WARM: '#d97706', COOL: '#2563eb', TBD: '#7c3aed',
+  }
+  return (
+    <MarkerClusterGroup
+      chunkedLoading
+      maxClusterRadius={60}
+      animate={false}
+      showCoverageOnHover={false}
+      spiderfyOnMaxZoom
+      iconCreateFunction={leadClusterIconFn}
+    >
+      {leadPins.map(lead => (
+        <Marker
+          key={`lead-${lead.id}`}
+          position={[lead.lat, lead.lng]}
+          icon={createLeadIcon(lead.timeline_label, lead.lead_score)}
+          zIndexOffset={500}
+        >
+          <Popup>
+            <div style={{ minWidth: 210, fontFamily: 'system-ui, sans-serif' }}>
+              {/* Header */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8 }}>
+                <span style={{
+                  background: TIMELINE_COLORS[lead.timeline_label || 'TBD'] || '#7c3aed',
+                  color: '#fff', fontSize: 10, padding: '2px 6px',
+                  borderRadius: 3, fontWeight: 700, flexShrink: 0,
+                }}>{lead.timeline_label || 'TBD'}</span>
+                <span style={{ fontWeight: 700, fontSize: 13, color: '#0f172a' }}>{lead.name}</span>
+              </div>
+              {/* Details */}
+              {lead.brand && <p style={{ color: '#64748b', fontSize: 11, margin: '2px 0' }}>{lead.brand}</p>}
+              <p style={{ color: '#64748b', fontSize: 11, margin: '2px 0' }}>
+                {[lead.city, lead.state].filter(Boolean).join(', ')}
+              </p>
+              {lead.revenue_opening && (
+                <p style={{ color: '#059669', fontWeight: 700, fontSize: 12, margin: '6px 0 2px' }}>
+                  Opening Revenue: {fmtRevenue(lead.revenue_opening)}
+                </p>
+              )}
+              {lead.hotel_website && (
+                <a href={lead.hotel_website} target="_blank" rel="noopener noreferrer"
+                  style={{ color: '#2563eb', fontSize: 11, display: 'block', marginTop: 4 }}>
+                  🌐 {lead.hotel_website.replace(/^https?:\/\/(www\.)?/, '')}
+                </a>
+              )}
+              {/* Open in pipeline button */}
+              <button
+                onClick={() => onNavigate(lead.id)}
+                style={{
+                  marginTop: 10, width: '100%', padding: '6px 0',
+                  background: '#0f1d32', color: '#fff', border: 'none',
+                  borderRadius: 6, fontSize: 11, fontWeight: 700,
+                  cursor: 'pointer', display: 'flex', alignItems: 'center',
+                  justifyContent: 'center', gap: 4,
+                }}
+              >
+                → View in New Hotels
+              </button>
+            </div>
+          </Popup>
+        </Marker>
+      ))}
+    </MarkerClusterGroup>
+  )
+})
+
+// ─── Memoized marker layer — only re-renders when hotels/colorMode/nearby changes ───
+const HotelMarkers = memo(function HotelMarkers({
+  hotels, colorMode, maxRevenue, routeStopIds,
+  nearbyMode, nearbyAnchor, nearbyIds,
+  routeMode, onMarkerClick,
+}: {
+  hotels: MapHotel[]
+  colorMode: ColorMode
+  maxRevenue: number
+  routeStopIds: Set<number>
+  nearbyMode: boolean
+  nearbyAnchor: MapHotel | null
+  nearbyIds: Set<number>
+  routeMode: boolean
+  onMarkerClick: (hotel: MapHotel) => void
+}) {
+  return (
+    <MarkerClusterGroup
+      chunkedLoading
+      maxClusterRadius={80}
+      spiderfyOnMaxZoom
+      showCoverageOnHover={false}
+      animate={false}
+      removeOutsideVisibleBounds
+      disableClusteringAtZoom={nearbyMode && nearbyAnchor ? 1 : undefined}
+      iconCreateFunction={clusterIconFn}
+    >
+      {hotels.filter(h => !routeStopIds.has(h.id)).map(hotel => {
+        const color = getMarkerColor(hotel, colorMode, maxRevenue)
+        const sz = markerSize(hotel.room_count)
+        const isNH = nearbyMode && nearbyAnchor && nearbyIds.has(hotel.id)
+        const isDimmed = nearbyMode && nearbyAnchor && !nearbyIds.has(hotel.id) && hotel.id !== nearbyAnchor?.id
+        return (
+          <Marker key={hotel.id} position={[hotel.lat, hotel.lng]}
+            icon={hotel.id === nearbyAnchor?.id ? anchorIcon : createIcon(isDimmed ? '#cbd5e1' : color, isNH ? sz + 4 : sz)}
+            opacity={isDimmed ? 0.3 : 1}
+            eventHandlers={{ click: () => onMarkerClick(hotel) }}
+          >
+            {!routeMode && !nearbyMode && <Popup><div dangerouslySetInnerHTML={{ __html: hotelPopupHTML(hotel) }} /></Popup>}
+          </Marker>
+        )
+      })}
+    </MarkerClusterGroup>
+  )
+})
+
 export default function MapPage() {
+  const navigate = useNavigate()
   const [filters, setFilters] = useState<MapFilters>(DEFAULT_FILTERS)
   const [showFilters, setShowFilters] = useState(false)
   const [selectedHotel, setSelectedHotel] = useState<MapHotel | null>(null)
@@ -347,11 +543,34 @@ export default function MapPage() {
   const [showOffice, setShowOffice] = useState(true)
   const [isFullscreen, setIsFullscreen] = useState(false)
   const [showGap, setShowGap] = useState(false)
+  const [showLeads, setShowLeads] = useState(true)
 
   // Data
   const { data: hotels = [], isLoading } = useQuery<MapHotel[]>({
     queryKey: ['map-data'],
     queryFn: async () => (await api.get('/api/existing-hotels/map-data')).data,
+    staleTime: 10 * 60_000, // 10 min — hotel data rarely changes intraday
+    gcTime: 30 * 60_000,    // Keep in memory 30 min after unmount
+  })
+
+  const { data: leadPins = [] } = useQuery<LeadPin[]>({
+    queryKey: ['map-leads'],
+    queryFn: async () => {
+      const res = await api.get('/leads', { params: {
+        per_page: 500, has_coords: 'true', status: 'new'
+      }})
+      const pins = (res.data.leads || [])
+        .filter((l: any) => l.latitude && l.longitude)
+        .map((l: any) => ({
+          id: l.id, name: l.hotel_name, brand: l.brand,
+          brand_tier: l.brand_tier, city: l.city, state: l.state,
+          lat: l.latitude, lng: l.longitude,
+          timeline_label: l.timeline_label, lead_score: l.lead_score,
+          revenue_opening: l.revenue_opening, hotel_website: l.hotel_website,
+        }))
+      return pins
+    },
+    staleTime: 5 * 60_000,
   })
 
   const zones = useMemo(() => {
@@ -389,7 +608,7 @@ export default function MapPage() {
   const nearbyIds = useMemo(() => new Set(nearbyHotels.map(h => h.id)), [nearbyHotels])
 
   // Handlers
-  function handleMarkerClick(hotel: MapHotel) {
+  const handleMarkerClick = useCallback((hotel: MapHotel) => {
     if (routeMode) {
       if (routeStopIds.has(hotel.id)) setRouteStops(p => p.filter(h => h.id !== hotel.id))
       else setRouteStops(p => [...p, hotel])
@@ -397,7 +616,7 @@ export default function MapPage() {
     } else if (nearbyMode) {
       setNearbyAnchor(hotel); setSelectedHotel(null)
     } else setSelectedHotel(hotel)
-  }
+  }, [routeMode, nearbyMode, routeStopIds])
 
   async function handleOptimize() {
     if (routeStops.length < 2) return; setIsOptimizing(true)
@@ -466,6 +685,7 @@ export default function MapPage() {
             <ToolBtn active={nearbyMode} color="violet" icon={Radar} label="Nearby" onClick={() => nearbyMode ? exitNearby() : activateMode('nearby')} />
             <ToolBtn active={routeMode} color="orange" icon={Route} label="Route" onClick={() => routeMode ? exitRoute() : activateMode('route')} />
             <ToolBtn active={showGap} color="navy" icon={BarChart3} label="Zones" onClick={() => setShowGap(!showGap)} />
+            <ToolBtn active={showLeads} color="violet" icon={Milestone} label={`Leads${leadPins.length ? ` (${leadPins.length})` : ''}`} onClick={() => setShowLeads(!showLeads)} />
 
             <button onClick={() => setShowFilters(!showFilters)} className={cn('flex items-center gap-1 px-2.5 py-2 text-xs font-semibold rounded-lg transition', hasFilters ? 'bg-navy-900 text-white' : 'bg-white border border-stone-200 text-stone-600 hover:bg-stone-50')}>
               <Filter className="w-3.5 h-3.5" />Filters
@@ -537,7 +757,7 @@ export default function MapPage() {
               <div className="w-8 h-8 border-3 border-navy-200 border-t-navy-600 rounded-full animate-spin" />
             </div>
           ) : (
-            <MapContainer center={[27.5, -81.8]} zoom={7} className="h-full w-full" zoomControl={false} style={{ background: tileStyle === 'dark' ? '#1a1a2e' : '#f1f5f9' }}>
+            <MapContainer center={[27.5, -81.8]} zoom={7} className="h-full w-full" zoomControl={false} preferCanvas={true} style={{ background: tileStyle === 'dark' ? '#1a1a2e' : '#f1f5f9' }}>
               <ZoomControl position="topright" />
               <TileLayer key={tileStyle} attribution={TILES[tileStyle].attribution} url={TILES[tileStyle].url} />
 
@@ -545,30 +765,23 @@ export default function MapPage() {
               {flyTarget && <FlyTo lat={flyTarget.lat} lng={flyTarget.lng} zoom={flyTarget.zoom} trigger={flyTarget.t} />}
               <NearbyClick active={nearbyMode} onClear={() => setNearbyAnchor(null)} />
 
-              {/* Clustered markers */}
-              <MarkerClusterGroup chunkedLoading maxClusterRadius={50} spiderfyOnMaxZoom showCoverageOnHover={false}
-                disableClusteringAtZoom={nearbyMode && nearbyAnchor ? 1 : undefined}
-                iconCreateFunction={(cluster: any) => {
-                  const c = cluster.getChildCount(); const s = c > 100 ? 44 : c > 30 ? 38 : 32
-                  return L.divIcon({ html: `<div style="width:${s}px;height:${s}px;border-radius:50%;background:rgba(15,23,42,.85);border:2px solid rgba(255,255,255,.4);display:flex;align-items:center;justify-content:center;font:700 12px sans-serif;color:#fff;box-shadow:0 2px 8px rgba(0,0,0,.3)">${c}</div>`, className: '', iconSize: L.point(s, s) })
-                }}
-              >
-                {filtered.filter(h => !routeStopIds.has(h.id)).map(hotel => {
-                  const color = getMarkerColor(hotel, colorMode, maxRevenue)
-                  const sz = markerSize(hotel.room_count)
-                  const isNH = nearbyMode && nearbyAnchor && nearbyIds.has(hotel.id)
-                  const isDimmed = nearbyMode && nearbyAnchor && !nearbyIds.has(hotel.id) && hotel.id !== nearbyAnchor?.id
-                  return (
-                    <Marker key={hotel.id} position={[hotel.lat, hotel.lng]}
-                      icon={hotel.id === nearbyAnchor?.id ? anchorIcon : createIcon(isDimmed ? '#cbd5e1' : color, isNH ? sz + 4 : sz)}
-                      opacity={isDimmed ? 0.3 : 1}
-                      eventHandlers={{ click: () => handleMarkerClick(hotel) }}
-                    >
-                      {!routeMode && !nearbyMode && <Popup><HotelPopup hotel={hotel} /></Popup>}
-                    </Marker>
-                  )
-                })}
-              </MarkerClusterGroup>
+              {/* Clustered markers — memoized, won't re-render on unrelated state changes */}
+              <HotelMarkers
+                hotels={filtered}
+                colorMode={colorMode}
+                maxRevenue={maxRevenue}
+                routeStopIds={routeStopIds}
+                nearbyMode={nearbyMode}
+                nearbyAnchor={nearbyAnchor}
+                nearbyIds={nearbyIds}
+                routeMode={routeMode}
+                onMarkerClick={handleMarkerClick}
+              />
+
+              {/* Pre-opening Lead Pins — clustered */}
+              {showLeads && (
+                <LeadMarkers leadPins={leadPins} onNavigate={(id) => navigate(`/new-hotels?lead=${id}`)} />
+              )}
 
               {/* Route stops */}
               {routeStops.map((h, i) => (
@@ -641,6 +854,12 @@ export default function MapPage() {
               {colorMode === 'revenue' && <><Dot c="#3b82f6" l="Low Revenue" /><Dot c="#d4a853" l="Mid Revenue" /><Dot c="#dc2626" l="High Revenue" /></>}
               {colorMode === 'tier' && <><Dot c="#d4a853" l="Ultra Luxury" /><Dot c="#c49a3c" l="Luxury" /><Dot c="#3e638c" l="Upper Upscale" /><Dot c="#6b665e" l="Upscale" /></>}
               {showOffice && <Dot c="#0f1d32" l="JA Office" diamond />}
+              {showLeads && leadPins.length > 0 && (
+                <div className="pt-1 mt-1 border-t border-stone-100">
+                  <p className="text-[9px] text-stone-400 font-semibold uppercase tracking-wide mb-1">Pre-Opening Leads</p>
+                  <Dot c="#dc2626" l="Urgent" square /><Dot c="#ea580c" l="Hot" square /><Dot c="#d97706" l="Warm" square /><Dot c="#2563eb" l="Cool" square />
+                </div>
+              )}
             </div>
           </div>
 
@@ -788,6 +1007,21 @@ export default function MapPage() {
    SUB COMPONENTS
    ═══════════════════════════════════════════════════ */
 
+// HTML string popup — eliminates React portal overhead for 4654 markers
+function hotelPopupHTML(hotel: MapHotel): string {
+  const loc = [hotel.city, hotel.state].filter(Boolean).join(', ')
+  return [
+    '<div style="min-width:190px;font-family:system-ui,sans-serif;font-size:13px">',
+    `<p style="font-weight:700;margin:0 0 2px">${hotel.name}</p>`,
+    hotel.brand ? `<p style="color:#6b7280;font-size:11px;margin:0 0 4px">${hotel.brand}</p>` : '',
+    `<div style="color:#6b7280;font-size:11px;line-height:1.6">`,
+    loc ? `<p style="margin:0">${loc}</p>` : '',
+    hotel.room_count ? `<p style="margin:0">${hotel.room_count} rooms</p>` : '',
+    hotel.revenue_annual ? `<p style="margin:0;color:#059669;font-weight:600">Annual: ${fmtRevenue(hotel.revenue_annual)}</p>` : '',
+    '</div></div>',
+  ].join('')
+}
+// Keep component for backwards compat
 function HotelPopup({ hotel }: { hotel: MapHotel }) {
   return (<div className="min-w-[200px]">
     <p className="font-bold text-sm leading-snug">{hotel.name}</p>
@@ -819,9 +1053,9 @@ function ToolBtn({ active, color, icon: Icon, label, onClick }: { active: boolea
   </button>)
 }
 
-function Dot({ c, l, diamond }: { c: string; l: string; diamond?: boolean }) {
+function Dot({ c, l, diamond, square }: { c: string; l: string; diamond?: boolean; square?: boolean }) {
   return (<div className="flex items-center gap-1.5">
-    <span className={cn('w-3 h-3 flex-shrink-0', diamond ? 'rotate-45 rounded-sm' : 'rounded-full')} style={{ backgroundColor: c }} />
+    <span className={cn('w-3 h-3 flex-shrink-0', diamond ? 'rotate-45 rounded-sm' : square ? 'rotate-45 rounded-sm' : 'rounded-full')} style={{ backgroundColor: c }} />
     <span className="text-2xs text-stone-500 font-medium">{l}</span>
   </div>)
 }

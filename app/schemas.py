@@ -288,6 +288,10 @@ class LeadResponse(LeadBase):
     score_breakdown: Optional[dict] = None
     timeline_label: Optional[str] = None
     status: str
+    rejection_reason: Optional[str] = None
+    latitude: Optional[float] = None
+    longitude: Optional[float] = None
+    website_verified: Optional[str] = None
     source_url: Optional[str] = None
     source_site: Optional[str] = None
     source_urls: Optional[list] = None

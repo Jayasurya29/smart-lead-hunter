@@ -157,6 +157,7 @@ export default function LeadTable({
 
   // Confirm dialog state
   const [confirmTarget, setConfirmTarget] = useState<{ action: 'approve' | 'reject' | 'restore'; lead: Lead } | null>(null)
+  const [rejectReason, setRejectReason] = useState('duplicate')
 
   // Client-side sort
   const sortedLeads = useMemo(() => sortLeads(leads, currentSort), [leads, currentSort])
@@ -165,7 +166,7 @@ export default function LeadTable({
     if (!confirmTarget) return
     const { action, lead } = confirmTarget
     if (action === 'approve') approveMut.mutate(lead.id)
-    if (action === 'reject') rejectMut.mutate({ id: lead.id })
+    if (action === 'reject') rejectMut.mutate({ id: lead.id, reason: rejectReason })
     if (action === 'restore') restoreMut.mutate(lead.id)
     setConfirmTarget(null)
   }
@@ -219,6 +220,11 @@ export default function LeadTable({
                   </span>
                 </th>
               ))}
+              {isRejected && (
+                <th className="px-3 py-2.5 text-left text-[11px] font-bold text-slate-400 uppercase tracking-wider w-40">
+                  Reason
+                </th>
+              )}
               <th className="px-3 py-2.5 w-24" />
             </tr>
           </thead>
@@ -264,9 +270,25 @@ export default function LeadTable({
                   </td>
 
                   <td className="px-3 py-2.5">
-                    <span className={cn('inline-flex px-2 py-0.5 rounded text-2xs font-bold', getTimelineColor(timeline))}>
-                      {timeline}
-                    </span>
+                    <div className="flex items-center gap-1 flex-wrap">
+                      <span className={cn('inline-flex px-2 py-0.5 rounded text-2xs font-bold', getTimelineColor(timeline))}>
+                        {timeline}
+                      </span>
+                      {lead.hotel_type && (() => {
+                        const typeMap: Record<string, { label: string; color: string }> = {
+                          new_opening:      { label: 'New',       color: 'bg-emerald-100 text-emerald-700' },
+                          renovation:       { label: 'Reopening', color: 'bg-blue-100 text-blue-700' },
+                          rebrand:          { label: 'Rebrand',   color: 'bg-purple-100 text-purple-700' },
+                          ownership_change: { label: 'New Owner', color: 'bg-amber-100 text-amber-700' },
+                        }
+                        const t = typeMap[lead.hotel_type]
+                        return t ? (
+                          <span className={cn('inline-flex px-2 py-0.5 rounded text-2xs font-bold', t.color)}>
+                            {t.label}
+                          </span>
+                        ) : null
+                      })()}
+                    </div>
                   </td>
 
                   <td className="px-3 py-2.5">
@@ -294,6 +316,21 @@ export default function LeadTable({
                   <td className="px-3 py-2.5">
                     <span className="text-xs text-slate-400 font-medium">{relativeDate(lead.created_at)}</span>
                   </td>
+
+                  {/* Reason column — only visible on rejected tab */}
+                  {isRejected && (
+                    <td className="px-3 py-2.5">
+                      <span
+                        title={lead.rejection_reason || 'No reason given'}
+                        className="inline-flex items-center px-2 py-0.5 rounded text-2xs font-semibold bg-red-50 text-red-600 max-w-[160px] truncate block"
+                      >
+                        {lead.rejection_reason
+                          ? lead.rejection_reason.replace(/_/g, ' ')
+                          : <span className="text-stone-300 font-normal italic">—</span>
+                        }
+                      </span>
+                    </td>
+                  )}
 
                   <td className="px-2 py-2.5">
                     <div className="row-actions flex items-center gap-0.5 justify-end">
@@ -392,12 +429,30 @@ export default function LeadTable({
         open={confirmAction === 'reject'}
         variant="reject"
         title="Reject Lead"
-        message={`Move "${confirmLead?.hotel_name || confirmLead?.name}" to the Rejected tab? You can restore it later if needed.`}
+        message={`Move "${confirmLead?.hotel_name || confirmLead?.name}" to the Rejected tab?`}
         confirmLabel="Reject"
         pending={rejectMut.isPending}
         onConfirm={handleConfirm}
         onCancel={() => setConfirmTarget(null)}
-      />
+      >
+        <div className="mt-3">
+          <label className="block text-xs font-semibold text-stone-500 mb-1">Rejection Reason</label>
+          <select
+            value={rejectReason}
+            onChange={e => setRejectReason(e.target.value)}
+            onClick={e => e.stopPropagation()}
+            className="w-full text-sm border border-stone-200 rounded-lg px-3 py-2 bg-white text-navy-900 focus:outline-none focus:border-red-400 focus:ring-2 focus:ring-red-100"
+          >
+            <option value="duplicate">Duplicate</option>
+            <option value="international">International (outside US/Caribbean)</option>
+            <option value="budget_brand">Budget brand — not our market</option>
+            <option value="bad_data">Bad data / incorrect info</option>
+            <option value="old_opening">Old opening — already opened</option>
+            <option value="not_relevant">Not relevant to JA Uniforms</option>
+            <option value="low_priority">Low priority</option>
+          </select>
+        </div>
+      </ConfirmDialog>
       <ConfirmDialog
         open={confirmAction === 'restore'}
         variant="restore"

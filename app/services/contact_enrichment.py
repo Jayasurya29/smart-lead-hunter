@@ -6,7 +6,7 @@ Multi-layer contact discovery with SAP-trained intelligence.
 Layer 0: Google Search via Serper.dev (finds LinkedIn posts, press releases)
 Layer 1: Web Scrape + Gemini AI Extract (scrape articles from search results)
 Layer 2: LinkedIn Snippet Extraction (names from search snippets)
-Layer 3: Apollo Fallback (chain-level contacts, uses credits)
+Layer 3: Gemini Verification (validates and scores all contacts)
 Fallback: DuckDuckGo (free, unlimited) when Serper unavailable
 
 KEY v4.1 CHANGES:
@@ -38,6 +38,8 @@ from app.config.enrichment_config import (
     get_enrichment_gemini_model,
 )
 from app.config.sap_title_classifier import title_classifier, BuyerTier
+from app.config.brand_registry import BrandRegistry
+from app.config.project_type_intelligence import classify_project_type
 from app.services.contact_validator import (
     contact_validator,
     query_builder,
@@ -53,7 +55,7 @@ logger = logging.getLogger(__name__)
 MAX_CONTACTS_TO_SAVE = 5
 
 # ═══════════════════════════════════════════════════════════════
-# SHARED HTTP CLIENT — connection pooling for Serper/Gemini/Apollo
+# SHARED HTTP CLIENT — connection pooling for Serper/Gemini
 # Reuses TCP connections across calls (30-50% faster enrichment)
 # ═══════════════════════════════════════════════════════════════
 
@@ -172,6 +174,7 @@ class EnrichmentResult:
         self.sources_used: list[str] = []
         self.layers_tried: list[str] = []
         self.errors: list[str] = []
+        self.metadata: dict = {}
 
     @property
     def best_contact(self) -> Optional[dict]:
@@ -268,21 +271,34 @@ def _get_search_mode(opening_date: Optional[str]) -> str:
         return "pre_opening"
 
 
-def _get_priority_titles(mode: str) -> list[str]:
-    """Get flat list of titles in priority order for the given mode."""
+def _get_priority_titles(mode: str, brand: Optional[str] = None) -> list[str]:
+    """
+    Get flat list of titles in priority order for the given mode.
+    If brand is provided, prepends brand-specific pre-opening titles
+    from BrandRegistry so we search for the right decision makers first.
+    """
     priorities = CONTACT_SEARCH_PRIORITIES.get(
         mode, CONTACT_SEARCH_PRIORITIES["pre_opening"]
     )
     titles = []
     for group in priorities:
         titles.extend(group["titles"])
+
+    # Prepend brand-specific titles at the front so they get searched first
+    if brand and mode == "pre_opening":
+        brand_info = BrandRegistry.lookup(brand)
+        brand_titles = brand_info.pre_opening_contact_titles
+        # Add brand-specific titles that aren't already in the list
+        prepend = [t for t in brand_titles if t not in titles]
+        titles = prepend + titles
+
     return titles
 
 
 def _resolve_parent_brand(
     brand: Optional[str], hotel_name: Optional[str], mgmt_company: Optional[str]
 ) -> tuple[str, str]:
-    """Resolve brand for Apollo search. Returns (specific_brand, parent_company)."""
+    """Resolve brand for web search. Returns (specific_brand, parent_company)."""
     specific = brand or ""
     parent = ""
 
@@ -316,7 +332,7 @@ def _resolve_parent_brand(
 def _build_location_string(
     city: Optional[str], state: Optional[str], country: Optional[str]
 ) -> str:
-    """Build location string for Apollo search."""
+    """Build location string for web search."""
     parts = []
     if city:
         parts.append(city)
@@ -330,7 +346,7 @@ def _build_location_string(
 
 
 def _build_region_string(state: Optional[str], country: Optional[str]) -> str:
-    """Build broader region string for Apollo fallback."""
+    """Build broader region string for web search fallback."""
     if state:
         return f"{state}, United States"
     if country:
@@ -948,7 +964,7 @@ async def _layer_linkedin_snippets(
                     "signalhire.com",
                     "zoominfo.com",
                     "lusha.com",
-                    "apollo.io",
+                    "rockreach.com",
                     "contactout.com",
                 ]
             )
@@ -987,7 +1003,7 @@ async def _layer_linkedin_snippets(
                 # "Carlos Noboa | The Ritz-Carlton, Grand Cayman - RocketReach"
                 if not cd_name and title:
                     title_match = re.match(
-                        r"^([A-Z][a-zA-Z]+(?:\s+[a-zA-Z][a-zA-Z]+){1,3})\s*(?:\||[-–—])\s*(.+?)(?:\s*[-–—|]\s*(?:RocketReach|SignalHire|ZoomInfo|Lusha|Apollo|ContactOut))",
+                        r"^([A-Z][a-zA-Z]+(?:\s+[a-zA-Z][a-zA-Z]+){1,3})\s*(?:\||[-–—])\s*(.+?)(?:\s*[-–—|]\s*(?:RocketReach|SignalHire|ZoomInfo|Lusha|ContactOut))",
                         title,
                     )
                     if title_match:
@@ -1403,7 +1419,14 @@ async def _layer_linkedin_snippets(
             combined_text = f"{title} {sr.get('snippet', '')}".lower()
 
             hotel_words = [w for w in hotel_lower.split() if len(w) > 3]
-            matches = sum(1 for w in hotel_words if w in combined_text)
+
+            # ── Use whole-word matching to avoid substring false positives ──
+            # e.g. "dean" must NOT match "dean's italian steakhouse"
+            # The negative lookahead (?!['\w]) excludes possessive/compound forms
+            def _whole_word_match(word: str, text: str) -> bool:
+                return bool(re.search(r"\b" + re.escape(word) + r"(?!['\w])", text))
+
+            matches = sum(1 for w in hotel_words if _whole_word_match(w, combined_text))
             match_ratio = matches / len(hotel_words) if hotel_words else 0
 
             # ── Check for name collision BEFORE assigning hotel_specific ──
@@ -1417,10 +1440,10 @@ async def _layer_linkedin_snippets(
             # Remove name words from the match count to get true hotel relevance
             true_matches = 0
             for hw in hotel_words:
-                if hw in combined_text:
+                if _whole_word_match(hw, combined_text):
                     # Check if match is ONLY because of the person's name
                     text_without_name = combined_text.replace(name_lower, "")
-                    if hw in text_without_name:
+                    if _whole_word_match(hw, text_without_name):
                         true_matches += 1
             true_match_ratio = true_matches / len(hotel_words) if hotel_words else 0
 
@@ -1547,161 +1570,6 @@ async def _layer_linkedin_snippets(
 
 
 # ═══════════════════════════════════════════════════════════════
-# LAYER 3: APOLLO SEARCH + REVEAL
-# ═══════════════════════════════════════════════════════════════
-
-
-async def _apollo_search(
-    org_name: str, location: str, titles: list[str], max_results: int = 5
-) -> list[dict]:
-    """Search Apollo for people by org + location + titles."""
-    api_key = os.getenv("APOLLO_API_KEY")
-    if not api_key:
-        logger.warning("APOLLO_API_KEY not set, skipping Apollo")
-        return []
-
-    try:
-        client = _get_client()
-        resp = await client.post(
-            "https://api.apollo.io/api/v1/mixed_people/api_search",
-            headers={"Content-Type": "application/json", "X-Api-Key": api_key},
-            json={
-                "q_organization_name": org_name,
-                "person_locations": [location],
-                "person_titles": titles,
-                "page": 1,
-                "per_page": max_results,
-            },
-        )
-        if resp.status_code != 200:
-            logger.warning(f"Apollo search failed: {resp.status_code}")
-            return []
-        return resp.json().get("people", [])
-    except Exception as e:
-        logger.error(f"Apollo search error: {e}")
-        return []
-
-
-async def _apollo_reveal(person_id: str) -> Optional[dict]:
-    """Reveal contact's full details via Apollo."""
-    api_key = os.getenv("APOLLO_API_KEY")
-    if not api_key:
-        return None
-
-    try:
-        client = _get_client()
-        resp = await client.post(
-            "https://api.apollo.io/api/v1/people/match",
-            headers={"Content-Type": "application/json", "X-Api-Key": api_key},
-            json={"id": person_id},
-        )
-        if resp.status_code == 200 and "person" in resp.json():
-            return resp.json()["person"]
-    except Exception as e:
-        logger.error(f"Apollo reveal error: {e}")
-    return None
-
-
-async def _layer_apollo(
-    hotel_name: str,
-    brand: Optional[str],
-    city: Optional[str],
-    state: Optional[str],
-    country: Optional[str],
-    management_company: Optional[str],
-    opening_date: Optional[str],
-    result: EnrichmentResult,
-    broad: bool = False,
-) -> bool:
-    """Layer 3: Apollo search — always tagged as chain_area."""
-    layer_name = "apollo_broad" if broad else "apollo_specific"
-    result.layers_tried.append(layer_name)
-
-    specific_brand, parent_company = _resolve_parent_brand(
-        brand, hotel_name, management_company or result.management_company
-    )
-    parent_brand = specific_brand if not broad else parent_company
-    if not parent_brand:
-        logger.info(f"Cannot resolve parent brand for {hotel_name}")
-        return False
-
-    location = (
-        _build_region_string(state, country)
-        if broad
-        else _build_location_string(city, state, country)
-    )
-
-    mode = _get_search_mode(opening_date)
-    titles = _get_priority_titles(mode)[:6]
-
-    logger.info(f"Apollo {layer_name}: {parent_brand} in {location}")
-
-    people = await _apollo_search(parent_brand, location, titles)
-    await asyncio.sleep(ENRICHMENT_SETTINGS["apollo_delay_seconds"])
-
-    if not people:
-        return False
-
-    max_reveals = ENRICHMENT_SETTINGS["max_apollo_reveals_per_lead"]
-    revealed_count = 0
-
-    for person in people[: max_reveals + 1]:
-        if revealed_count >= max_reveals:
-            break
-
-        person_id = person.get("id")
-        if not person_id:
-            continue
-
-        revealed = await _apollo_reveal(person_id)
-        await asyncio.sleep(ENRICHMENT_SETTINGS["apollo_delay_seconds"])
-
-        if not revealed:
-            continue
-
-        first = revealed.get("first_name", "")
-        last = revealed.get("last_name", "")
-        if not first or not last:
-            continue
-
-        full_name = f"{first} {last}".strip()
-
-        existing_names = [c.get("name", "").lower() for c in result.contacts]
-        if full_name.lower() in existing_names:
-            continue
-
-        org_name = (revealed.get("organization") or {}).get("name", "")
-        person_title = revealed.get("title", "")
-
-        contact = {
-            "name": full_name,
-            "title": _clean_title(person_title),
-            "email": revealed.get("email"),
-            "phone": None,
-            "linkedin": revealed.get("linkedin_url"),
-            "organization": org_name,
-            "scope": "chain_area",
-            "confidence": "low",
-            "confidence_note": (
-                f"Apollo: {parent_brand} in {location}. "
-                f"Not confirmed at {hotel_name} specifically."
-            ),
-            "source": "apollo",
-            "source_type": "apollo_reveal",
-        }
-
-        phones = revealed.get("phone_numbers") or []
-        if phones:
-            contact["phone"] = phones[0].get("sanitized_number", "")
-
-        result.contacts.append(contact)
-        result.sources_used.append(f"Apollo: {full_name}")
-        revealed_count += 1
-
-    return revealed_count > 0
-
-
-# ═══════════════════════════════════════════════════════════════
 # GEMINI CONTACT VERIFICATION — AI reads context to fix false positives
 # ═══════════════════════════════════════════════════════════════
 
@@ -1814,6 +1682,19 @@ says. Examples that MUST be kept:
   → KEEP (title names target hotel)
 - title: "Director of Housekeeping", raw_snippet: "...joins The Nora Hotel as Director..."
   → KEEP (snippet names target hotel)
+
+VENUE NAME FALSE POSITIVE WARNING (CRITICAL):
+The target hotel name may appear as part of a COMPLETELY DIFFERENT venue name. This is a FALSE POSITIVE.
+You MUST reject these — the word overlap does NOT confirm the contact works at the target hotel.
+Examples:
+- Target hotel: "The Dean" → contact title: "General Manager, Dean's Italian Steakhouse" = REJECT
+  ("Dean's" is a restaurant inside a different hotel, not The Dean Hotel)
+- Target hotel: "The Bristol" → contact title: "Bristol Bar Manager" = REJECT (different venue)
+- Target hotel: "The Henry" → contact org: "Henry's Pub" = REJECT (different business)
+RULE: The hotel name must appear as a STANDALONE reference to the target hotel, not embedded
+inside a different restaurant/bar/venue name. If the contact's title or org contains the hotel
+name word as part of a longer venue name that is clearly a restaurant, bar, steakhouse, pub,
+or other F&B outlet at a DIFFERENT property, it is a FALSE POSITIVE — REJECT it.
 
 Check raw_snippet and organization carefully - the target hotel name or its specific city/location
 must appear in their actual profile/snippet (not just in the search query that found them).
@@ -2156,13 +2037,37 @@ async def enrich_lead_contacts(
     country: Optional[str] = None,
     management_company: Optional[str] = None,
     opening_date: Optional[str] = None,
+    timeline_label: Optional[str] = None,
+    description: Optional[str] = None,
+    project_type_str: Optional[str] = None,
 ) -> EnrichmentResult:
     """
     Main enrichment function v4. Runs multi-layer search with
     SAP-trained validation and auto-retry on false positives.
+
+    Now phase-aware: uses timeline_label + project_type to determine
+    the correct starting phase (1=corporate, 2=GM, 3=dept heads)
+    and cascades automatically if a phase returns nothing.
     """
     result = EnrichmentResult()
     logger.info(f"Starting enrichment v4 for lead {lead_id}: {hotel_name}")
+
+    # ── Classify project type + determine starting phase ──
+    pt = classify_project_type(
+        hotel_name=hotel_name,
+        description=description or "",
+        project_type=project_type_str or "",
+        timeline_label=timeline_label or "",
+        management_company=management_company or "",
+    )
+    logger.info(
+        f"Project type: {pt.project_type} (confidence={pt.confidence}) | "
+        f"Starting phase: {pt.starting_phase} | {pt.phase_reason[:80]}"
+    )
+    result.metadata["project_type"] = pt.project_type
+    result.metadata["starting_phase"] = pt.starting_phase
+    result.metadata["phase_reason"] = pt.phase_reason
+    result.metadata["phase_history"] = []
 
     # ── Layer 1: Web search + scrape + AI extract ──
     try:
@@ -2482,6 +2387,25 @@ async def enrich_lead_contacts(
             except Exception as e:
                 logger.warning(f"Retry search failed: {e}")
 
+        # Apply brand-specific score multiplier from BrandRegistry
+        # e.g. independent/collection brands score higher (more opportunity)
+        #      Avendra-constrained brands score slightly lower
+        brand_multiplier = BrandRegistry.get_contact_score_multiplier(brand or "")
+        if brand_multiplier != 1.0:
+            for sc in scored_contacts:
+                sc.total_score = int(sc.total_score * brand_multiplier)
+            logger.debug(f"Brand '{brand}' score multiplier: {brand_multiplier}x")
+
+        # Log brand procurement intelligence
+        if brand:
+            brand_info = BrandRegistry.lookup(brand)
+            logger.info(
+                f"Brand intel: {brand} | model={brand_info.operating_model} | "
+                f"procurement={brand_info.procurement_model} | "
+                f"opportunity={brand_info.opportunity_level} | "
+                f"uniform_freedom={brand_info.uniform_freedom}"
+            )
+
         # Filter and rank — keep only good contacts
         good_contacts = contact_validator.filter_and_rank(
             scored_contacts,
@@ -2506,67 +2430,6 @@ async def enrich_lead_contacts(
             f"Validation: {len(validated_contacts)} contacts passed "
             f"(from {len(scored_contacts)} raw)"
         )
-
-    # ── Layer 3: Apollo (always run as supplement to fill gaps) ──
-    if True:  # Always run Apollo to supplement web/LinkedIn contacts
-        try:
-            pre_apollo_count = len(result.contacts)
-            await _layer_apollo(
-                hotel_name,
-                brand,
-                city,
-                state,
-                country,
-                management_company,
-                opening_date,
-                result,
-                broad=False,
-            )
-            # Validate any new Apollo contacts too
-            if len(result.contacts) > pre_apollo_count:
-                new_apollo = result.contacts[pre_apollo_count:]
-                scored_apollo = contact_validator.validate_and_score(
-                    contacts=new_apollo,
-                    hotel_name=hotel_name,
-                    brand=brand,
-                    management_company=management_company or result.management_company,
-                    city=city,
-                    state=state,
-                    country=country,
-                )
-                good_apollo = contact_validator.filter_and_rank(
-                    scored_apollo, min_score=0
-                )
-                # Replace apollo contacts with validated ones
-                result.contacts = result.contacts[:pre_apollo_count]
-                for sc in good_apollo:
-                    c = sc.contact.copy()
-                    c["_validation_score"] = sc.total_score
-                    c["_buyer_tier"] = (
-                        sc.title_tier.name if sc.title_tier else "UNKNOWN"
-                    )
-                    c["_validation_confidence"] = sc.confidence
-                    c["_validation_scope"] = sc.scope_tag
-                    result.contacts.append(c)
-        except Exception as e:
-            result.errors.append(f"Apollo specific failed: {str(e)}")
-
-    # ── Layer 4: Apollo broad (only if zero contacts) ──
-    if not result.contacts:
-        try:
-            await _layer_apollo(
-                hotel_name,
-                brand,
-                city,
-                state,
-                country,
-                management_company,
-                opening_date,
-                result,
-                broad=True,
-            )
-        except Exception as e:
-            result.errors.append(f"Apollo broad failed: {str(e)}")
 
     # ── Final deduplicate by name ──
     seen = set()

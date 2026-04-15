@@ -617,6 +617,7 @@ class SmartDeduplicator:
         # This catches cases where one extraction run produces "The Lakeshore Lodge"
         # and another produces "Disney Lakeshore Lodge" (both Orlando, 2027).
         GENERIC_WORDS = {
+            # Hospitality terms
             "hotel",
             "hotels",
             "resort",
@@ -638,16 +639,106 @@ class SmartDeduplicator:
             "grand",
             "royal",
             "luxury",
+            "motel",
+            # Articles/prepositions
             "the",
             "and",
             "new",
+            "old",
+            "east",
+            "west",
+            "north",
+            "south",
+            "upper",
+            "lower",
+            "little",
+            "great",
+            "lake",
+            "point",
+            # Common location descriptors that appear in hotel names
+            # but are NOT distinctive identifiers
             "beach",
+            "miami",
+            "island",
+            "hills",
+            "valley",
+            "canyon",
+            "harbor",
+            "harbour",
+            "shore",
+            "coast",
+            "park",
+            "square",
+            "center",
+            "centre",
+            "downtown",
+            "uptown",
+            "village",
+            "creek",
+            "river",
+            "spring",
+            "springs",
+            "mountain",
+            "mountains",
+            "heights",
+            "ridge",
+            "grove",
+            "gardens",
+            "garden",
+            "forest",
+            "woods",
+            "field",
+            "fields",
+            "meadow",
+            "bay",
+            "cove",
+            "inlet",
+            "ocean",
+            "pacific",
+            "atlantic",
+            "gulf",
+            "metro",
+            "urban",
         }
         n1_words = set(self._clean_name(lead1.hotel_name).split())
         n2_words = set(self._clean_name(lead2.hotel_name).split())
         distinctive_shared = {
             w for w in (n1_words & n2_words) if len(w) >= 5 and w not in GENERIC_WORDS
         }
+
+        # ── KEY FIX: Remove location words from distinctive_shared ──
+        # "Grand Hyatt Miami Beach" and "Aman Miami Beach" share "miami" but
+        # that's a location, not a hotel-name identifier. Strip out any word
+        # that appears in either lead's city, state, or country so that only
+        # truly hotel-specific words (like "waldorf", "trailborn", "stockman")
+        # trigger the distinctive-word merge.
+        location_words: set[str] = set()
+        for lead in (lead1, lead2):
+            for field_val in (lead.city, lead.state, lead.country):
+                if field_val:
+                    for w in field_val.lower().split():
+                        w = w.strip(".,;:-")
+                        if len(w) >= 3:
+                            location_words.add(w)
+        if distinctive_shared:
+            distinctive_shared -= location_words
+
+        # ── SECONDARY CHECK: Short primary-name word match (e.g. "MOHI") ──
+        # Words < 5 chars are excluded above, but if the first significant word
+        # of both names matches exactly at 3-4 chars (e.g. "MOHI hotel" vs
+        # "MOHI by Appellation"), that is clearly distinctive. Add it back.
+        def _first_significant_word(name: str) -> str:
+            """Return first word that isn't a generic hospitality/article word."""
+            for w in self._clean_name(name).split():
+                if len(w) >= 3 and w not in GENERIC_WORDS and w not in location_words:
+                    return w
+            return ""
+
+        first1 = _first_significant_word(lead1.hotel_name)
+        first2 = _first_significant_word(lead2.hotel_name)
+        if first1 and first1 == first2 and len(first1) >= 3:
+            distinctive_shared.add(first1)
+
         if distinctive_shared:
             same_city = (
                 lead1.city

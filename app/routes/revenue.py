@@ -195,6 +195,23 @@ async def estimate_lead_revenue(lead_id: int):
         fb_outlets=0,
     )
 
+    # Persist to DB so the pipeline table shows the value without a separate bulk update
+    try:
+        from sqlalchemy import update as sql_update
+
+        async with async_session() as session:
+            await session.execute(
+                sql_update(PotentialLead)
+                .where(PotentialLead.id == lead_id)
+                .values(
+                    revenue_opening=round(opening.ja_addressable),
+                    revenue_annual=round(annual.ja_addressable),
+                )
+            )
+            await session.commit()
+    except Exception as e:
+        logger.warning(f"Could not persist revenue for lead {lead_id}: {e}")
+
     return {
         "status": "success",
         "lead_id": lead_id,

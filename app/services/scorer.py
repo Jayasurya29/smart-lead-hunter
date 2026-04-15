@@ -1249,6 +1249,7 @@ INTERNATIONAL_SKIP = [
     "united arab emirates",
     "uae",
     "dubai",
+    "hatta",  # Dubai exclave
     "abu dhabi",
     "saudi arabia",
     "riyadh",
@@ -1447,17 +1448,38 @@ def get_location_score(
         if _location_keyword_matches(carib_keyword, location_text):
             return (15, "Caribbean", "caribbean")
 
-    # ── STEP 4: Check international keywords (only for non-US locations) ──
-    # Audit Fix H-09: Only check international keywords if state or country
-    # is populated. When both are empty, city alone could be a US city with
-    # an international name (Rome GA, Naples FL, Paris TX, Milan TN, etc.)
-    has_geo_context = bool(state_lower and state_lower not in ("none", "null")) or bool(
-        country_lower and country_lower not in ("none", "null", "")
-    )
-    if has_geo_context:
+    # ── STEP 4: Check international keywords ──
+    # Audit Fix H-09: When BOTH state AND country are empty, city alone could
+    # be a US city with an international name (Rome GA, Naples FL, Paris TX).
+    # BUT — those cities always come with a US state. If state is also empty,
+    # the city is the only signal and we CAN safely check it against
+    # international keywords. "Dubai" with no state is never Rome, GA.
+    #
+    # Rule: skip international check only when state is empty AND city is
+    # ambiguous (i.e. city alone is a known US city name). Otherwise check.
+    state_is_empty = not state_lower or state_lower in ("none", "null", "")
+    country_is_empty = not country_lower or country_lower in ("none", "null", "")
+
+    # If we have a state and it's a US state, we already caught it in Step 1/2.
+    # If state is empty but city matches an international keyword → reject it.
+    # If state is present and not US, also check international keywords.
+    if not state_is_empty or not country_is_empty:
+        # State or country present — standard check (H-09 safe zone)
         for intl_keyword in INTERNATIONAL_SKIP:
             if _location_keyword_matches(intl_keyword, location_text):
                 return (-1, f"International - SKIP ({intl_keyword})", "international")
+    else:
+        # State AND country both empty — city only. Check city against
+        # international keywords. Safe because US cities with foreign names
+        # (Rome GA, Paris TX) always have a state field.
+        city_lower = str(city or "").lower().strip()
+        for intl_keyword in INTERNATIONAL_SKIP:
+            if intl_keyword in city_lower:
+                return (
+                    -1,
+                    f"International - SKIP (city: {intl_keyword})",
+                    "international",
+                )
 
     # ── STEP 5: If country is specified and not matched above, it's international ──
     if country_lower and country_lower not in ["", "none", "null"]:
@@ -1814,6 +1836,23 @@ def calculate_lead_score(
     location_points, location_tier, location_type = get_location_score(
         city, state, country
     )
+
+    # ── NAME-BASED INTERNATIONAL CHECK ──────────────────────────────────────
+    # If location fields are all empty, the geo filter can't catch international
+    # leads. Check the hotel NAME itself against international keywords.
+    # e.g. "Park Hyatt Kyoto Gardens", "Langham London", "Le Méridien Paris"
+    # would all pass through as "Unknown - Assume US" without this check.
+    if location_points >= 0 and not city and not state and not country:
+        name_lower = hotel_name.lower()
+        for intl_kw in INTERNATIONAL_SKIP:
+            if len(intl_kw) >= 4 and intl_kw in name_lower:
+                # Make sure it's not a US city with the same name (Paris TX, etc.)
+                # by requiring the keyword to NOT be preceded/followed by a US context
+                location_points = -1
+                location_tier = f"International in name ({intl_kw})"
+                location_type = "international"
+                break
+
     result["location_type"] = location_type
 
     if location_points == -1:

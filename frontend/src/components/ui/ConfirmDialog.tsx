@@ -14,6 +14,7 @@ interface Props {
   pending?: boolean
   onConfirm: () => void
   onCancel: () => void
+  children?: React.ReactNode
 }
 
 const VARIANT_CONFIG: Record<Variant, {
@@ -48,7 +49,7 @@ const VARIANT_CONFIG: Record<Variant, {
   },
 }
 
-export default function ConfirmDialog({ open, title, message, variant = 'danger', confirmLabel = 'Confirm', cancelLabel = 'Cancel', pending, onConfirm, onCancel }: Props) {
+export default function ConfirmDialog({ open, title, message, variant = 'danger', confirmLabel = 'Confirm', cancelLabel = 'Cancel', pending, onConfirm, onCancel, children }: Props) {
   const cancelRef = useRef<HTMLButtonElement>(null)
 
   // Focus cancel button on open, trap Escape
@@ -88,6 +89,7 @@ export default function ConfirmDialog({ open, title, message, variant = 'danger'
               <p className="text-sm text-stone-500 mt-1 leading-relaxed">{message}</p>
             </div>
           </div>
+          {children && <div className="mt-4">{children}</div>}
         </div>
 
         {/* Actions */}

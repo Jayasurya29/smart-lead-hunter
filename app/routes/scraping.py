@@ -1603,6 +1603,18 @@ async def smart_fill_lead(lead_id: int, request: Request, _csrf=Depends(require_
 
         await session.commit()
 
+        # Recalculate revenue if room_count or brand_tier changed
+        revenue_fields = {"room_count", "brand_tier", "brand"}
+        if set(enriched.get("changes", [])) & revenue_fields:
+            try:
+                from app.services.revenue_updater import update_lead_revenue
+
+                await update_lead_revenue(lead_id)
+            except Exception as e:
+                logger.warning(
+                    f"Revenue update failed after SmartFill for {lead_id}: {e}"
+                )
+
         return {
             "status": "enriched",
             "changes": enriched.get("changes", []),

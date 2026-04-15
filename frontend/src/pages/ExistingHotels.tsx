@@ -374,15 +374,15 @@ function HotelTable({ hotels, total, page, totalPages, tab, selectedId, onSelect
 
   const approveMut = useMutation({
     mutationFn: (id: number) => api.post(`/api/existing-hotels/${id}/approve`),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['existing-hotels'] }); qc.invalidateQueries({ queryKey: ['existing-hotels-stats'] }) },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['existing-hotels'] }); qc.invalidateQueries({ queryKey: ['existing-hotels-stats'] }); qc.invalidateQueries({ queryKey: ['map-data'] }) },
   })
   const rejectMut = useMutation({
     mutationFn: (id: number) => api.post(`/api/existing-hotels/${id}/reject`, {}),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['existing-hotels'] }); qc.invalidateQueries({ queryKey: ['existing-hotels-stats'] }) },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['existing-hotels'] }); qc.invalidateQueries({ queryKey: ['existing-hotels-stats'] }); qc.invalidateQueries({ queryKey: ['map-data'] }) },
   })
   const restoreMut = useMutation({
     mutationFn: (id: number) => api.post(`/api/existing-hotels/${id}/restore`),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['existing-hotels'] }); qc.invalidateQueries({ queryKey: ['existing-hotels-stats'] }) },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['existing-hotels'] }); qc.invalidateQueries({ queryKey: ['existing-hotels-stats'] }); qc.invalidateQueries({ queryKey: ['map-data'] }) },
   })
 
   const isNew = tab === 'pipeline'

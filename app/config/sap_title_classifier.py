@@ -309,11 +309,36 @@ class TitleClassifier:
         if self._matches_any(title_lower, TIER7_IRRELEVANT_KEYWORDS):
             return self._make_result(BuyerTier.TIER7_IRRELEVANT)
 
-        # Corporate: Too high level
+        # Corporate: Chain-level ops titles score higher for pre-opening hotels
+        # COO/VP Operations at management company IS the decision maker before GM hired
         if self._matches_any(title_lower, CORPORATE_KEYWORDS):
+            # Distinguish ops-relevant chain titles from pure corporate
+            ops_chain_signals = [
+                "coo",
+                "chief operating",
+                "vp of operations",
+                "vp operations",
+                "vp hotel operations",
+                "vice president of operations",
+                "vice president hotel",
+                "svp operations",
+                "senior vice president oper",
+                "director of hotel operations",
+                "pre-opening",
+                "opening manager",
+            ]
+            is_ops_chain = any(kw in title_lower for kw in ops_chain_signals)
+            if is_ops_chain:
+                return TitleClassification(
+                    tier=BuyerTier.TIER3_GM_OPS,
+                    score=12,  # High score — chain ops exec is key pre-opening decision maker
+                    reason="Chain ops executive — primary uniform procurement decision maker for pre-opening hotels",
+                    search_priority=2,
+                    is_decision_maker=True,
+                )
             return TitleClassification(
                 tier=BuyerTier.TIER3_GM_OPS,
-                score=5,  # Lower score than property-level GM
+                score=5,  # Lower score — other corporate titles less relevant
                 reason="Corporate/Regional — may influence but not direct buyer",
                 search_priority=7,
                 is_decision_maker=False,
@@ -357,7 +382,7 @@ class TitleClassifier:
 
     def get_search_titles(self, tier: Optional[BuyerTier] = None) -> list[str]:
         """
-        Get human-readable job titles to use in DuckDuckGo/Apollo searches.
+        Get human-readable job titles to use in web searches.
         Trained from SAP data — these are the ACTUAL titles your contacts use.
 
         If tier is None, returns all searchable titles in priority order.

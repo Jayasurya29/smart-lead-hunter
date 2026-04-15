@@ -9,6 +9,9 @@ export interface Lead {
   brand_tier: string | null
   hotel_type: string | null
   hotel_website: string | null
+  website_verified: string | null
+  latitude: number | null
+  longitude: number | null
   city: string | null
   state: string | null
   country: string | null

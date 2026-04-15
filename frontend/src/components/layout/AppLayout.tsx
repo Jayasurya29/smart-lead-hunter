@@ -18,7 +18,7 @@ interface NavItem {
 }
 
 const NAV_ITEMS: NavItem[] = [
-  { to: '/dashboard',        label: 'Dashboard',        icon: LayoutDashboard },
+  { to: '/new-hotels',        label: 'New Hotels',        icon: LayoutDashboard },
   { to: '/existing-hotels',  label: 'Existing Hotels',  icon: Building2 },
   { to: '/clients',          label: 'Clients',          icon: Users },
   { to: '/map',              label: 'Map',              icon: Map },
@@ -52,11 +52,11 @@ function AppLayoutInner({ children }: { children: ReactNode }) {
             <Link to="/dashboard" className="flex items-center gap-3 group">
               <img
                 src="/static/img/logo.svg"
-                alt="Smart Lead Hunter"
+                alt="Lead Generator"
                 className="h-12 w-auto object-contain"
               />
               <span className="text-lg font-bold text-navy-900 tracking-tight whitespace-nowrap">
-                Smart Lead Hunter
+                Lead Generator
               </span>
             </Link>
 

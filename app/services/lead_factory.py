@@ -337,17 +337,30 @@ async def save_lead_to_db(
             "reason": "Already exists (exact match)",
         }
 
-    # FUZZY DEDUP — strip brand suffixes, compare core names in same city
+    # FUZZY DEDUP — strip brand suffixes, compare core names in same city/state
     core_name = _strip_brand_suffix(hotel_name)
     if core_name and len(core_name) > 3:
         city = (lead_dict.get("city") or "").strip().lower()
+        state = (lead_dict.get("state") or "").strip().lower()
 
-        # Get all leads in same city+state for fuzzy comparison
+        # Get all leads in same city OR same state for fuzzy comparison.
+        # We use OR so that leads like "Six Senses South Carolina" (city=state)
+        # and "Six Senses South Carolina Islands" (city=Hilton Head Island, state=SC)
+        # end up in the same candidate pool even when city fields differ.
         fuzzy_query = select(PotentialLead).where(
             PotentialLead.status.notin_(["expired", "rejected"])
         )
+        from sqlalchemy import or_ as sql_or
+
+        location_filters = []
         if city:
-            fuzzy_query = fuzzy_query.where(PotentialLead.city.ilike(f"%{city}%"))
+            location_filters.append(PotentialLead.city.ilike(f"%{city}%"))
+        if state:
+            location_filters.append(PotentialLead.state.ilike(f"%{state}%"))
+            # Also catch when state was accidentally stored in city field
+            location_filters.append(PotentialLead.city.ilike(f"%{state}%"))
+        if location_filters:
+            fuzzy_query = fuzzy_query.where(sql_or(*location_filters))
 
         fuzzy_result = await session.execute(fuzzy_query)
         candidates = fuzzy_result.scalars().all()
@@ -416,6 +429,46 @@ async def save_lead_to_db(
         await update_lead_revenue(lead.id)
     except Exception as e:
         logger.warning(f"Revenue calc failed for {hotel_name}: {e}")
+
+    # Auto geo-enrich: website discovery + geocoding (fire-and-forget)
+    # Runs in background so it doesn't slow down the save pipeline
+    try:
+        from app.services.lead_geo_enrichment import enrich_lead_geo
+        from sqlalchemy import update as sql_update
+
+        # NOTE: PotentialLead is already imported at the top of this file.
+        # Re-importing it here would shadow the module-level binding and
+        # cause UnboundLocalError at the dedup check above.
+
+        geo = await enrich_lead_geo(
+            hotel_name=lead.hotel_name,
+            city=lead.city,
+            state=lead.state,
+            country=lead.country,
+            brand=lead.brand,
+            existing_website=lead.hotel_website,
+        )
+        if geo.get("latitude") or geo.get("hotel_website"):
+            await session.execute(
+                sql_update(PotentialLead)
+                .where(PotentialLead.id == lead.id)
+                .values(
+                    latitude=geo.get("latitude"),
+                    longitude=geo.get("longitude"),
+                    hotel_website=geo.get("hotel_website") or lead.hotel_website,
+                    website_verified=geo.get("website_verified"),
+                )
+            )
+            await session.commit()
+            logger.info(
+                f"   🌐 Geo enriched: {hotel_name} → "
+                f"({geo.get('latitude'):.4f}, {geo.get('longitude'):.4f}) "
+                f"website={geo.get('hotel_website', 'not found')}"
+                if geo.get("latitude")
+                else f"   🌐 Website found: {hotel_name} → {geo.get('hotel_website')}"
+            )
+    except Exception as e:
+        logger.warning(f"Geo enrichment failed for {hotel_name}: {e}")
 
     return {"status": "saved", "id": lead.id, "reason": None}
 

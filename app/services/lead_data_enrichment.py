@@ -51,6 +51,39 @@ async def _search_web(query: str, max_results: int = 5) -> list[dict]:
             if resp.status_code == 200:
                 data = resp.json()
                 results = []
+
+                # Extract answer box — often has direct answers like room counts
+                if data.get("answerBox"):
+                    ab = data["answerBox"]
+                    answer_text = (
+                        ab.get("answer") or ab.get("snippet") or ab.get("title") or ""
+                    )
+                    if answer_text:
+                        results.append(
+                            {
+                                "title": "Direct Answer",
+                                "snippet": answer_text,
+                                "url": ab.get("link", ""),
+                            }
+                        )
+
+                # Extract knowledge graph — hotel info cards
+                if data.get("knowledgeGraph"):
+                    kg = data["knowledgeGraph"]
+                    kg_desc = kg.get("description") or kg.get("title") or ""
+                    kg_attrs = " ".join(
+                        f"{k}: {v}" for k, v in kg.get("attributes", {}).items()
+                    )
+                    if kg_desc or kg_attrs:
+                        results.append(
+                            {
+                                "title": kg.get("title", "Knowledge Graph"),
+                                "snippet": f"{kg_desc} {kg_attrs}".strip(),
+                                "url": kg.get("website", ""),
+                            }
+                        )
+
+                # Organic results
                 for r in data.get("organic", [])[:max_results]:
                     results.append(
                         {
@@ -152,7 +185,12 @@ async def enrich_lead_data(
             queries.append(f'"{hotel_name}" {location} opening date 2025 2026 2027')
         if not current_room_count:
             missing.append("room_count")
-            queries.append(f'"{hotel_name}" {location} hotel rooms keys guest rooms')
+            queries.append(
+                f'"{hotel_name}" {location} "rooms" OR "keys" OR "suites" total number'
+            )
+            queries.append(
+                f'"{hotel_name}" site:sandals.com OR site:marriott.com OR site:hilton.com'
+            )
         if not current_brand_tier or current_brand_tier in ("unknown", ""):
             missing.append("brand_tier")
             queries.append(f'"{hotel_name}" hotel luxury boutique upscale brand')
@@ -189,7 +227,7 @@ async def enrich_lead_data(
     fields_instruction = (
         "Extract ALL available information, even if current values exist. Report the LATEST data."
         if mode == "full"
-        else f"Extract ONLY these missing fields: {', '.join(missing)}"
+        else f"Extract ONLY these missing fields: {', '.join(missing)}. For room_count: look for patterns like 'X rooms', 'X keys', 'X guest rooms', 'X-room', 'X suites and rooms' — extract the NUMBER only."
     )
 
     prompt = f"""You are a hotel industry research assistant. {fields_instruction}
@@ -213,7 +251,21 @@ TIER DEFINITIONS:
 - tier3_upper_upscale: Marriott, Hilton, Westin, Sheraton, upscale independent ($150-300/night)
 - tier4_upscale: Smaller independents, business hotels ($100-200/night)
 
-CRITICAL CHECK: If the search results indicate this hotel has ALREADY OPENED (is currently operating, accepting guests, has reviews), include "already_opened": true and "opened_date": "Month Year" in your response. This is the most important check.
+ROOM COUNT EXTRACTION: For room_count, scan ALL snippets for patterns like:
+"227 rooms", "300 keys", "150-room hotel", "120 guest rooms", "34 suites and 266 rooms"
+Extract the TOTAL room/key count as an integer. This is usually stated clearly in hotel descriptions.
+
+CRITICAL CHECKS — READ CAREFULLY:
+
+1. ALREADY OPEN: If the hotel is currently operating (has reviews, accepting guests, open for business), include "already_opened": true and "opened_date": "Month Year".
+
+2. HURRICANE / DISASTER CLOSURE: If a date appears in the context of "closed for repairs", "closed due to hurricane", "closed until [date] for renovation/damage", "reopening after storm" — this is NOT a new opening date. Include "already_opened": true, "project_type": "renovation", and "reopening_date": "[date]". Do NOT put this date in opening_date.
+
+3. RENOVATION REOPENING: If the hotel closed temporarily for refurbishment and is reopening, include "already_opened": true, "project_type": "renovation". The date is a reopening, not a new build opening.
+
+4. NEW BUILD ONLY: Only use opening_date for hotels that are genuinely under construction for the first time and have never operated before.
+
+Keywords that mean NOT a new opening: "closed for", "repair", "hurricane", "storm damage", "renovation", "refurbishment", "reopening", "temporarily closed", "damage".
 Respond ONLY with a JSON object. Include ONLY fields you found evidence for. Do NOT guess.
 Example: {{"opening_date": "Q3 2026", "brand_tier": "tier2_luxury", "room_count": 150, "brand": "Auberge Collection", "description": "Brief 1-sentence summary", "confidence": "high"}}
 
@@ -295,11 +347,27 @@ Confidence levels: "high" (multiple sources agree), "medium" (one source), "low"
     if "description" in parsed:
         result["description"] = str(parsed["description"])[:500]
 
-    # Check if hotel already opened
+    # Check if hotel already opened or is a renovation reopening
     if parsed.get("already_opened"):
         result["already_opened"] = True
         result["opened_date"] = parsed.get("opened_date", "")
         result["changes"].append("already_opened")
+
+        # If it's a renovation/hurricane closure, capture the reopening date
+        # and project type — do NOT use the date as an opening_date
+        if parsed.get("project_type") == "renovation":
+            result["project_type"] = "renovation"
+            result["changes"].append("project_type")
+            # Use reopening_date as the opening_date so the lead shows
+            # the correct date but is classified as renovation
+            reopening = parsed.get("reopening_date", "")
+            if reopening and "opening_date" not in result:
+                result["opening_date"] = reopening
+                result["changes"].append("opening_date")
+            logger.info(
+                f"Renovation/closure detected for {hotel_name} — "
+                f"reopening: {reopening}. Classified as renovation, not new build."
+            )
 
     result["confidence"] = parsed.get("confidence", "medium")
     result["source_url"] = all_urls[0] if all_urls else None

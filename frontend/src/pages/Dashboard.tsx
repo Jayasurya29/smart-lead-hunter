@@ -1,4 +1,5 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { useLeads } from '@/hooks/useLeads'
 import type { LeadTab } from '@/api/types'
 import StatsCards from '@/components/stats/StatsCards'
@@ -6,7 +7,8 @@ import LeadTable from '@/components/leads/LeadTable'
 import LeadDetail from '@/components/leads/LeadDetail'
 import FilterBar, { DEFAULT_FILTERS, type Filters } from '@/components/leads/FilterBar'
 import { cn } from '@/lib/utils'
-import { Inbox, CheckCircle2, XCircle, Clock, Search, X } from 'lucide-react'
+import { Inbox, CheckCircle2, XCircle, Clock, Search, X, Download, Loader2 } from 'lucide-react'
+import api from '@/api/client'
 
 const TABS: { key: LeadTab; label: string; icon: React.ElementType }[] = [
   { key: 'pipeline', label: 'Pipeline', icon: Inbox },
@@ -20,7 +22,18 @@ export default function Dashboard() {
   const [page, setPage] = useState(1)
   const [search, setSearch] = useState('')
   const [selectedLeadId, setSelectedLeadId] = useState<number | null>(null)
+  const [searchParams, setSearchParams] = useSearchParams()
+
+  // Auto-open lead from map (e.g. ?lead=123)
+  useEffect(() => {
+    const leadParam = searchParams.get('lead')
+    if (leadParam) {
+      setSelectedLeadId(Number(leadParam))
+      setSearchParams({}, { replace: true }) // clean URL
+    }
+  }, [])
   const [filters, setFilters] = useState<Filters>(DEFAULT_FILTERS)
+  const [exporting, setExporting] = useState(false)
 
   const { data, isLoading } = useLeads(tab, page, search, filters as unknown as Record<string, string>)
 
@@ -109,6 +122,32 @@ export default function Dashboard() {
               </button>
             )}
           </div>
+
+          {/* Export Button */}
+          <button
+            onClick={async () => {
+              setExporting(true)
+              try {
+                const params = new URLSearchParams()
+                if (filters.timeline) params.set('timeline', filters.timeline)
+                if (filters.tier) params.set('tier', filters.tier)
+                const res = await api.get(`/api/leads/export?${params}`, { responseType: 'blob' })
+                const url = URL.createObjectURL(new Blob([res.data]))
+                const a = document.createElement('a')
+                a.href = url
+                a.download = `leads_export_${new Date().toISOString().split('T')[0]}.xlsx`
+                a.click()
+                URL.revokeObjectURL(url)
+              } catch(e) { console.error('Export failed', e) }
+              finally { setExporting(false) }
+            }}
+            disabled={exporting}
+            className="flex items-center gap-1.5 px-3 h-9 text-xs font-semibold text-stone-600 bg-white border border-stone-200 rounded-lg hover:bg-emerald-50 hover:text-emerald-700 hover:border-emerald-300 transition disabled:opacity-50 flex-shrink-0"
+            title="Export to Excel"
+          >
+            {exporting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />}
+            {exporting ? 'Exporting...' : 'Export'}
+          </button>
         </div>
 
         <FilterBar filters={filters} onChange={handleFilterChange} />

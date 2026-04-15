@@ -8,6 +8,7 @@ NOTE: enrich_lead() intentionally uses manual sessions because the enrichment
 """
 
 import logging
+import os
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse
@@ -49,6 +50,9 @@ async def enrich_lead(lead_id: int, _csrf=Depends(require_ajax)):
         country = lead.country or "USA"
         management_company = lead.management_company or ""
         opening_date = lead.opening_date or ""
+        timeline_label = lead.timeline_label or ""
+        description = lead.description or ""
+        project_type_str = lead.hotel_type or ""
         # FIX C-04: Capture updated_at for optimistic lock check
         lead_updated_at = lead.updated_at
 
@@ -65,6 +69,9 @@ async def enrich_lead(lead_id: int, _csrf=Depends(require_ajax)):
             country=country,
             management_company=management_company,
             opening_date=opening_date,
+            timeline_label=timeline_label,
+            description=description,
+            project_type_str=project_type_str,
         )
     except Exception as e:
         logger.error(f"Enrichment failed for lead {lead_id}: {e}", exc_info=True)
@@ -287,8 +294,40 @@ async def save_contact(
         raise HTTPException(status_code=404, detail="Contact not found")
     contact.is_saved = True
     contact.updated_at = local_now()
+
+    # Auto-enrich email via Wiza if contact has LinkedIn but no email
+    wiza_result = None
+    if contact.linkedin and not contact.email:
+        try:
+            from app.services.wiza_enrichment import enrich_contact_email
+
+            wiza_result = await enrich_contact_email(
+                linkedin_url=contact.linkedin,
+                contact_name=contact.name,
+            )
+            if wiza_result:
+                contact.email = wiza_result["email"]
+                contact.found_via = f"wiza_{wiza_result['email_status']}"
+                # If this is the primary contact, sync email back to lead
+                if contact.is_primary:
+                    lead_res = await db.execute(
+                        select(PotentialLead).where(PotentialLead.id == lead_id)
+                    )
+                    lead = lead_res.scalar_one_or_none()
+                    if lead:
+                        lead.contact_email = contact.email
+        except Exception as e:
+            logger.warning(
+                f"Wiza enrichment failed on save for contact {contact_id}: {e}"
+            )
+
     await db.commit()
-    return {"status": "saved", "contact_id": contact_id}
+    return {
+        "status": "saved",
+        "contact_id": contact_id,
+        "email_found": wiza_result["email"] if wiza_result else None,
+        "email_status": wiza_result["email_status"] if wiza_result else None,
+    }
 
 
 @router.post("/api/dashboard/leads/{lead_id}/contacts/{contact_id}/unsave")
@@ -567,3 +606,195 @@ async def set_primary_contact(
         lead.updated_at = local_now()
     await db.commit()
     return {"status": "primary_set", "contact_id": contact_id}
+
+
+# ═══════════════════════════════════════════════════════════════
+# WIZA EMAIL ENRICHMENT
+# ═══════════════════════════════════════════════════════════════
+
+
+@router.post("/api/dashboard/leads/{lead_id}/contacts/{contact_id}/enrich-email")
+async def enrich_contact_email_route(
+    lead_id: int,
+    contact_id: int,
+    db: AsyncSession = Depends(get_db),
+    _csrf=Depends(require_ajax),
+):
+    """
+    Manually trigger Wiza email enrichment for a specific contact.
+    Requires contact to have a LinkedIn URL. Costs 1 Wiza credit if email found.
+    """
+    from app.services.wiza_enrichment import enrich_contact_email
+
+    result = await db.execute(
+        select(LeadContact).where(
+            LeadContact.id == contact_id, LeadContact.lead_id == lead_id
+        )
+    )
+    contact = result.scalar_one_or_none()
+    if not contact:
+        raise HTTPException(status_code=404, detail="Contact not found")
+
+    if not contact.linkedin:
+        raise HTTPException(
+            status_code=422,
+            detail="Contact has no LinkedIn URL — required for Wiza enrichment",
+        )
+
+    wiza_result = await enrich_contact_email(
+        linkedin_url=contact.linkedin,
+        contact_name=contact.name,
+    )
+
+    if not wiza_result:
+        return {
+            "status": "not_found",
+            "contact_id": contact_id,
+            "message": "Wiza could not find an email for this contact",
+        }
+
+    # Save email to contact
+    contact.email = wiza_result["email"]
+    contact.found_via = f"wiza_{wiza_result['email_status']}"
+    contact.updated_at = local_now()
+
+    # Sync to lead primary contact if applicable
+    if contact.is_primary:
+        lead_res = await db.execute(
+            select(PotentialLead).where(PotentialLead.id == lead_id)
+        )
+        lead = lead_res.scalar_one_or_none()
+        if lead:
+            lead.contact_email = contact.email
+            lead.updated_at = local_now()
+
+    await db.commit()
+
+    return {
+        "status": "found",
+        "contact_id": contact_id,
+        "email": wiza_result["email"],
+        "email_status": wiza_result["email_status"],
+        "confidence": wiza_result["confidence"],
+        "credits_used": wiza_result.get("credits_used", 1),
+    }
+
+
+@router.post("/api/contacts/bulk-enrich-email")
+async def bulk_enrich_emails(
+    db: AsyncSession = Depends(get_db),
+    limit: int = 50,
+):
+    """
+    Bulk enrich emails for all saved contacts that have a LinkedIn URL but no email.
+    Processes up to `limit` contacts per call. Run multiple times to process all.
+
+    Cost: up to `limit` Wiza credits (only charged when email is found).
+    """
+    from app.services.wiza_enrichment import enrich_contact_email, check_wiza_credits
+
+    # Check credits first
+    credits = await check_wiza_credits()
+    if credits and credits.get("credits_remaining", 999) < 5:
+        return {
+            "status": "insufficient_credits",
+            "credits_remaining": credits.get("credits_remaining"),
+            "message": "Low Wiza credits — purchase more at wiza.co/app/settings/api",
+        }
+
+    # Find saved contacts with LinkedIn but no email
+    result = await db.execute(
+        select(LeadContact)
+        .where(
+            LeadContact.is_saved.is_(True),
+            LeadContact.linkedin.isnot(None),
+            LeadContact.linkedin != "",
+            LeadContact.email.is_(None),
+        )
+        .order_by(LeadContact.score.desc())
+        .limit(limit)
+    )
+    contacts = result.scalars().all()
+
+    if not contacts:
+        return {
+            "status": "complete",
+            "processed": 0,
+            "found": 0,
+            "not_found": 0,
+            "message": "No contacts need email enrichment",
+        }
+
+    found = 0
+    not_found = 0
+    errors = 0
+
+    for contact in contacts:
+        try:
+            wiza_result = await enrich_contact_email(
+                linkedin_url=contact.linkedin,
+                contact_name=contact.name,
+            )
+            if wiza_result:
+                contact.email = wiza_result["email"]
+                contact.found_via = f"wiza_{wiza_result['email_status']}"
+                contact.updated_at = local_now()
+
+                # Sync to lead primary contact if applicable
+                if contact.is_primary:
+                    lead_res = await db.execute(
+                        select(PotentialLead).where(PotentialLead.id == contact.lead_id)
+                    )
+                    lead = lead_res.scalar_one_or_none()
+                    if lead:
+                        lead.contact_email = contact.email
+                        lead.updated_at = local_now()
+
+                await db.commit()
+                found += 1
+                logger.info(
+                    f"Bulk Wiza [{found+not_found}/{len(contacts)}]: {contact.name} → {wiza_result['email']}"
+                )
+            else:
+                not_found += 1
+        except Exception as e:
+            errors += 1
+            logger.warning(f"Bulk Wiza error for {contact.name}: {e}")
+
+    return {
+        "status": "complete",
+        "processed": len(contacts),
+        "found": found,
+        "not_found": not_found,
+        "errors": errors,
+        "credits_used": found,
+        "message": "Run again to process more"
+        if len(contacts) == limit
+        else "All contacts processed",
+    }
+
+
+@router.get("/api/contacts/wiza-credits")
+async def get_wiza_credits():
+    """Check remaining Wiza credit balance."""
+    from app.services.wiza_enrichment import check_wiza_credits
+
+    api_key = os.getenv("WIZA_API_KEY", "")
+    if not api_key or api_key == "your-wiza-api-key-here":
+        return {
+            "configured": False,
+            "message": "Add WIZA_API_KEY to your .env file",
+        }
+
+    credits = await check_wiza_credits()
+    if credits is None:
+        return {
+            "configured": True,
+            "credits_remaining": None,
+            "error": "API call failed",
+        }
+
+    return {
+        "configured": True,
+        "credits_remaining": credits.get("credits_remaining"),
+    }

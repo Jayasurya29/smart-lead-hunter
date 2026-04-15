@@ -60,9 +60,7 @@ class LeadContact(Base):
     is_primary = Column(Boolean, default=False)  # Best contact for this lead
 
     # Source tracking
-    found_via = Column(
-        String(100)
-    )  # "linkedin_search", "apollo", "press_release", "manual"
+    found_via = Column(String(100))  # "linkedin_search", "press_release", "manual"
     source_detail = Column(
         Text
     )  # e.g., "LinkedIn profile mentions Six Senses Napa Valley"

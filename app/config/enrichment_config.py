@@ -18,36 +18,60 @@ WHAT CHANGED:
 
 CONTACT_SEARCH_PRIORITIES = {
     # ── PRE-OPENING MODE (6+ months before opening) ──
-    # GM is king because team is tiny, GM picks all vendors personally
+    # When hotel hasn't opened: no property GM yet. Chain COO/VP Operations
+    # at the management company controls ALL pre-opening procurement decisions.
+    # GM is typically hired only 6-12 months before opening.
     "pre_opening": [
         {
             "priority": 1,
             "titles": [
+                # Chain/management company ops executives — the real decision makers
+                # before property-level staff are hired
+                "Chief Operating Officer",
+                "COO",
+                "VP of Hotel Operations",
+                "VP of Operations",
+                "Vice President of Operations",
+                "SVP of Operations",
+                "Senior Vice President Operations",
+                "VP of Development",
+                "Vice President Hotel Operations",
+                "Director of Hotel Operations",
+                "Director of Operations",  # chain-level
+                "Regional Director of Operations",
+                "Pre-Opening Manager",
+                "Pre-Opening Director",
+                "Opening Manager",
+            ],
+            "reason": "When hotel hasnt opened yet, chain COO/VP Operations controls all pre-opening OS&E procurement — GM may not be hired yet",
+        },
+        {
+            "priority": 2,
+            "titles": [
                 "General Manager",
                 "Pre-Opening General Manager",
                 "Task Force General Manager",
+                "Opening General Manager",
                 "Hotel Manager",  # 7 in SAP
                 "Resort Manager",  # 3 in SAP (HIMANSHU CASE)
                 "Property Manager",  # 21 in SAP
                 "Managing Director",  # 5 in SAP
             ],
-            "reason": "At pre-opening properties, GM personally selects all vendors including uniforms",
+            "reason": "If GM already appointed (6-12mo out), they personally select all vendors including uniforms",
         },
         {
-            "priority": 2,
+            "priority": 3,
             "titles": [
                 "Director of Operations",
-                "VP of Operations",
-                "Regional Director of Operations",
                 "Operations Manager",  # 17 in SAP
                 "Director of Rooms",  # 18 in SAP
                 "Rooms Division Manager",  # 6 in SAP
                 "Rooms Director",  # 3 in SAP
             ],
-            "reason": "Oversees all operational procurement, often handles vendor RFPs",
+            "reason": "Property-level ops — oversees procurement once hired",
         },
         {
-            "priority": 3,
+            "priority": 4,
             "titles": [
                 "Purchasing Manager",
                 "Director of Procurement",
@@ -59,11 +83,12 @@ CONTACT_SEARCH_PRIORITIES = {
                 "Procurement Manager",  # from SAP
                 "General Buyer",  # 3 in SAP
                 "VP Procurement",  # from SAP
+                "VP of Purchasing",  # chain-level purchasing exec
             ],
-            "reason": "Handles vendor selection, negotiates contracts, manages procurement",
+            "reason": "Chain purchasing exec or property purchasing manager — controls vendor RFPs",
         },
         {
-            "priority": 4,
+            "priority": 5,
             "titles": [
                 "Director of Housekeeping",
                 "Executive Housekeeper",
@@ -74,10 +99,10 @@ CONTACT_SEARCH_PRIORITIES = {
                 "Wardrobe Manager",  # from SAP
                 "Laundry Manager",  # from SAP
             ],
-            "reason": "Owns the uniform program — specs fabrics, quantities, styles",
+            "reason": "Owns the uniform program once hired — specs fabrics, quantities, styles",
         },
         {
-            "priority": 5,
+            "priority": 6,
             "titles": [
                 "Assistant General Manager",
                 "Resident Manager",
@@ -87,7 +112,7 @@ CONTACT_SEARCH_PRIORITIES = {
             "reason": "Day-to-day ops authority, often delegates but can approve vendor decisions",
         },
         {
-            "priority": 6,
+            "priority": 7,
             "titles": [
                 "Director of Food and Beverage",
                 "Director of F&B",
@@ -100,7 +125,7 @@ CONTACT_SEARCH_PRIORITIES = {
             "reason": "Decides restaurant, bar, banquet staff uniforms separately from rooms division",
         },
         {
-            "priority": 7,
+            "priority": 8,
             "titles": [
                 "Director of Human Resources",
                 "HR Director",
@@ -202,7 +227,7 @@ CONTACT_SEARCH_PRIORITIES = {
 }
 
 # ═══════════════════════════════════════════════════════════════
-# FLATTENED TITLE LIST (used for Apollo bulk queries)
+# FLATTENED TITLE LIST (used for web search queries)
 # ═══════════════════════════════════════════════════════════════
 
 ALL_UNIFORM_TITLES = list(
@@ -257,22 +282,6 @@ SEARCH_LAYERS = [
         "max_results": 3,
         "requires": ["management_company_or_brand"],
     },
-    {
-        "layer": 4,
-        "name": "apollo_specific",
-        "method": "apollo_search",
-        "description": "Apollo search by parent brand + location + priority titles",
-        "search_by": "brand_location",
-        "reveal": True,
-    },
-    {
-        "layer": 5,
-        "name": "apollo_broad",
-        "method": "apollo_search",
-        "description": "Apollo broader search — brand + state/country level",
-        "search_by": "brand_region",
-        "reveal": True,
-    },
 ]
 
 
@@ -310,7 +319,7 @@ HOSPITALITY_NEWS_DOMAINS = [
 
 # ═══════════════════════════════════════════════════════════════
 # BRAND → PARENT COMPANY MAPPING
-# Apollo can't find individual hotels, so we search parent brands
+# Maps brand names to parent companies for web search fallback
 # ═══════════════════════════════════════════════════════════════
 
 BRAND_TO_PARENT = {
@@ -440,10 +449,8 @@ MANAGEMENT_COMPANIES = [
 ENRICHMENT_SETTINGS = {
     "ddg_delay_seconds": 1.5,
     "serper_delay_seconds": 0.5,  # Serper is fast, minimal delay needed
-    "apollo_delay_seconds": 0.5,
     "crawl_timeout_seconds": 20,
     "max_articles_to_scrape": 5,
-    "max_apollo_reveals_per_lead": 3,
     # M-03: Model name loaded from app settings at runtime (see get_gemini_model())
     "gemini_model": None,  # Resolved lazily below
     "max_article_chars": 12000,
