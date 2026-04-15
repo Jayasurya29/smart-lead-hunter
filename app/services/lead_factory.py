@@ -8,6 +8,34 @@ Used by:
 - POST /leads (manual API)
 - orchestrator.save_leads_to_database (pipeline)
 - scraping_tasks._save_lead_impl (Celery)
+
+DEDUP STRATEGY (in save_lead_to_db):
+  1. Exact match on `hotel_name_normalized` (fast path).
+  2. Fuzzy match. Three steps:
+     a) Build candidate pool by location.
+     b) Normalize both names (strip multi-word brand suffixes, punctuation,
+        generic mid-words like "the"/"hotel"/"resort").
+     c) Strip shared location words from both names so that "Miami Beach"
+        appearing in both "Grand Hyatt Miami Beach" and "Hilton Miami Beach"
+        doesn't falsely signal a duplicate.
+     d) Compare cores: identical → match; containment with shared first word
+        → match; ≥2 shared words AND ≥60% overlap of shorter set → match.
+
+  Candidate pool rules:
+    - Always include leads where city OR state matches.
+    - If `state` is blank in the new lead, OR the country is in
+      SMALL_COUNTRIES (Caribbean / micro-states where city ≈ state ≈ country),
+      ALSO include leads from the same country. Catches the Royalton-Barbados
+      case where the new extraction had city='St. James' but the existing
+      record had city='Barbados'.
+
+  Why this catches both real-world bugs:
+    - Royalton case: country fallback puts Barbados record into pool; after
+      stripping suffix and location words, both cores are 'royalton vessence'
+      → identical → match.
+    - Ritz Savannah case: city filter puts both in pool; after dropping "the"/
+      "hotel" generic tokens AND stripping "savannah" location word, both
+      cores are 'ritz carlton' → identical → match.
 """
 
 import logging
@@ -31,28 +59,223 @@ from app.config.intelligence_config import SCORE_HOT_THRESHOLD, SCORE_WARM_THRES
 logger = logging.getLogger(__name__)
 
 
-# Brand suffixes to strip for fuzzy dedup
+# ─────────────────────────────────────────────────────────────────────────────
+# DEDUP NORMALIZATION
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Multi-word brand/collection suffixes to strip BEFORE punctuation removal.
+# Comma is REQUIRED (not optional) so the regex doesn't eat the brand from
+# names like "Four Seasons Resort Maui" or "Viceroy Snowmass" — those are
+# the actual hotel name, not a third-party brand suffix.
 _BRAND_SUFFIXES = re.compile(
-    r",?\s*(?:An?\s+)?(?:Autograph|Curio|Luxury|Tribute|Tapestry|Unbound)\s+Collection.*$"
-    r"|,?\s*(?:A\s+)?(?:Viceroy|Auberge|Ritz-Carlton|Four Seasons|Six Senses)\s+(?:Resort|Collection|Hotel|Estate).*$"
+    r",\s*(?:An?\s+)?(?:Autograph|Curio|Luxury|Tribute|Tapestry|Unbound)\s+Collection.*$"
+    r"|,\s*(?:A\s+)?(?:Viceroy|Auberge|Ritz-Carlton|Four Seasons|Six Senses)\s+(?:Resort|Collection|Hotel|Estate).*$"
     r"|\s*[-\u2013\u2014]\s*(?:Adults?\s+Only|All[- ]Inclusive).*$"
-    r"|,?\s*(?:by\s+)?(?:Hilton|Hyatt|Marriott|IHG).*$"
-    r"|\s+(?:Resort|Hotel|Residences?|Spa|Inn|Lodge|Suites?|&\s+(?:Resort|Spa|Residences?))+\s*$",
+    r"|,\s*by\s+(?:Hilton|Hyatt|Marriott|IHG).*$",
     re.IGNORECASE,
 )
 
+# Generic words that don't help distinguish hotels — dropped from the word
+# set used for fuzzy matching. "The Ritz-Carlton Hotel Savannah" and
+# "Ritz-Carlton Savannah" must reduce to the same set after dropping these.
+_GENERIC_TOKENS = frozenset(
+    {
+        "the",
+        "a",
+        "an",
+        "by",
+        "of",
+        "and",
+        "hotel",
+        "hotels",
+        "resort",
+        "resorts",
+        "inn",
+        "lodge",
+        "suites",
+        "suite",
+        "spa",
+        "club",
+        "collection",
+        "residences",
+        "residence",
+        "house",
+        "tower",
+        "towers",
+    }
+)
 
-def _strip_brand_suffix(name: str) -> str:
-    """Strip brand/collection suffixes for fuzzy dedup matching."""
-    return _BRAND_SUFFIXES.sub("", name).strip().lower()
+# Countries where city ≈ state ≈ country (or location data is sparse) so the
+# city/state filter often fails to put duplicate records into the same pool.
+# When the new lead's country is in this set, we ALSO match candidates by
+# country alone.
+_SMALL_COUNTRIES = frozenset(
+    {
+        "anguilla",
+        "antigua",
+        "antigua and barbuda",
+        "aruba",
+        "bahamas",
+        "barbados",
+        "belize",
+        "bermuda",
+        "british virgin islands",
+        "cayman islands",
+        "curacao",
+        "curaçao",
+        "dominica",
+        "dominican republic",
+        "grenada",
+        "guadeloupe",
+        "haiti",
+        "jamaica",
+        "martinique",
+        "montserrat",
+        "puerto rico",
+        "saba",
+        "saint barthelemy",
+        "saint barthélemy",
+        "saint kitts and nevis",
+        "saint lucia",
+        "st lucia",
+        "st. lucia",
+        "saint martin",
+        "saint vincent and the grenadines",
+        "sint maarten",
+        "trinidad and tobago",
+        "turks and caicos",
+        "turks and caicos islands",
+        "u.s. virgin islands",
+        "us virgin islands",
+        "usvi",
+        "andorra",
+        "liechtenstein",
+        "luxembourg",
+        "monaco",
+        "san marino",
+        "vatican city",
+    }
+)
+
+
+def _normalize_for_dedup(name: str) -> str:
+    """Aggressively normalize a hotel name for fuzzy comparison.
+
+    Pipeline:
+      1. Strip multi-word brand/collection suffixes (", An Autograph
+         Collection ..." etc.) — comma-prefixed only so we don't eat
+         the brand from names where the brand IS the hotel name.
+      2. Lowercase, strip ALL non-alphanumeric chars to whitespace.
+      3. Drop generic tokens like "the", "hotel", "resort".
+      4. Collapse whitespace.
+
+    Examples:
+      "The Ritz-Carlton Hotel Savannah, A Member Of Marriott"
+                                              →  "ritz carlton savannah member marriott"
+      "Ritz-Carlton Savannah"                 →  "ritz carlton savannah"
+      "Royalton Vessence Barbados, An Autograph Collection All-Inclusive Resort"
+                                              →  "royalton vessence barbados"
+      "Four Seasons Resort Maui"              →  "four seasons maui"
+    """
+    if not name:
+        return ""
+    cleaned = _BRAND_SUFFIXES.sub("", name)
+    cleaned = re.sub(r"[^a-z0-9\s]", " ", cleaned.lower())
+    tokens = [t for t in cleaned.split() if t and t not in _GENERIC_TOKENS]
+    return " ".join(tokens)
+
+
+def _strip_location_words(core: str, *location_strings: Optional[str]) -> str:
+    """Remove location words (≥3 chars) from a normalized core name.
+
+    Used during fuzzy dedup so that location terms appearing in both names
+    (e.g. "Miami Beach" in "Grand Hyatt Miami Beach" AND in "Hilton Miami
+    Beach") don't inflate the word-overlap score and cause false matches
+    between different brands at the same location.
+
+    Pass locations from BOTH leads so we strip whichever variants apply.
+    """
+    location_words: set[str] = set()
+    for loc in location_strings:
+        if not loc:
+            continue
+        for w in re.sub(r"[^a-z0-9\s]", " ", loc.lower()).split():
+            if len(w) >= 3:
+                location_words.add(w)
+    if not location_words:
+        return core
+    return " ".join(w for w in core.split() if w not in location_words)
+
+
+def _names_match(core_a: str, core_b: str) -> bool:
+    """Decide whether two normalized + location-stripped names refer to the
+    same hotel.
+
+    Logic:
+      - Identical strings → match.
+      - One contained in the other AND shared first word → match.
+        (Prevents "hyatt" inside "grand hyatt" from matching.)
+      - ≥2 shared words AND those make up ≥60% of the shorter word set → match.
+    """
+    if not core_a or not core_b:
+        return False
+    if core_a == core_b:
+        return True
+
+    words_a = core_a.split()
+    words_b = core_b.split()
+    if not words_a or not words_b:
+        return False
+
+    short, long = (
+        (words_a, words_b) if len(words_a) <= len(words_b) else (words_b, words_a)
+    )
+
+    if " ".join(short) in " ".join(long) and short[0] == long[0]:
+        return True
+
+    set_a = set(words_a)
+    set_b = set(words_b)
+    common = set_a & set_b
+    if len(common) < 2:
+        return False
+
+    overlap_ratio = len(common) / len(set(short))
+    return overlap_ratio >= 0.6
+
+
+def _build_location_filters(lead_dict: Dict) -> list:
+    """Return SQLAlchemy filter clauses for the fuzzy candidate pool.
+
+    Always includes city/state matches when those fields are present.
+    Adds country match when state is missing OR country is in SMALL_COUNTRIES
+    (catches the Caribbean/micro-state case where city ≈ state ≈ country).
+    """
+    city = (lead_dict.get("city") or "").strip().lower()
+    state = (lead_dict.get("state") or "").strip().lower()
+    country = (lead_dict.get("country") or "").strip().lower()
+
+    filters = []
+    if city:
+        filters.append(PotentialLead.city.ilike(f"%{city}%"))
+    if state:
+        filters.append(PotentialLead.state.ilike(f"%{state}%"))
+        # Also catch when state was accidentally stored in city field
+        filters.append(PotentialLead.city.ilike(f"%{state}%"))
+    if country and (not state or country in _SMALL_COUNTRIES):
+        filters.append(PotentialLead.country.ilike(f"%{country}%"))
+    return filters
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# JUNK / VALIDATION HELPERS
+# ─────────────────────────────────────────────────────────────────────────────
 
 
 def extract_year(date_str: Optional[str]) -> Optional[int]:
     """Extract year from opening date string like 'Q3 2027' or '2026'."""
     if not date_str:
         return None
-    import re
-
     match = re.search(r"20\d{2}", str(date_str))
     return int(match.group()) if match else None
 
@@ -89,25 +312,15 @@ _JUNK_PATTERNS = [
 def prepare_lead(
     lead_dict: Dict,
 ) -> Tuple[Optional[PotentialLead], Optional[str], Dict]:
-    """
-    Normalize, score, and build a PotentialLead from any source.
-
-    Returns:
-        (lead_obj, skip_reason, score_result)
-        - lead_obj: PotentialLead ready for DB insert (or None if skipped)
-        - skip_reason: str if skipped, None if valid
-        - score_result: full scoring dict for reference
-    """
+    """Normalize, score, and build a PotentialLead from any source."""
     hotel_name = (lead_dict.get("hotel_name") or "").strip()
     if not hotel_name:
         return None, "No hotel name", {}
 
-    # Reject article titles / market summaries
     for pattern in _JUNK_PATTERNS:
         if pattern.search(hotel_name):
             return None, f"Article title, not a hotel: {hotel_name}", {}
 
-    # 0. CLEAN VAGUE DATES
     opening_date = (lead_dict.get("opening_date") or "").strip()
     vague_dates = [
         "coming soon",
@@ -121,10 +334,8 @@ def prepare_lead(
     if opening_date.lower() in vague_dates:
         lead_dict["opening_date"] = None
 
-    # 1. NORMALIZE
     normalized = normalize_hotel_name(hotel_name)
 
-    # 2. SCORE (also determines brand_tier, location_type, opening_year, should_save)
     score_result = calculate_lead_score(
         hotel_name=hotel_name,
         city=lead_dict.get("city"),
@@ -138,16 +349,12 @@ def prepare_lead(
         brand=lead_dict.get("brand"),
     )
 
-    # 3. FILTER — skip budget brands
     if not score_result.get("should_save", True):
         return None, score_result.get("skip_reason", "Filtered"), score_result
 
-    # 4. DETERMINE FINAL SCORE
-    # Prefer pipeline qualification_score if available, fall back to calculated
     pipeline_score = lead_dict.get("qualification_score") or lead_dict.get("lead_score")
     final_score = pipeline_score if pipeline_score else score_result["total_score"]
 
-    # 5. PARSE ROOM COUNT
     room_count = None
     try:
         room_count = int(float(lead_dict.get("room_count", 0) or 0))
@@ -156,7 +363,6 @@ def prepare_lead(
     except (ValueError, TypeError):
         pass
 
-    # 6. BUILD LEAD
     lead = PotentialLead(
         hotel_name=hotel_name,
         hotel_name_normalized=normalized,
@@ -201,13 +407,9 @@ def prepare_lead(
 
 
 def enrich_existing_lead(existing: PotentialLead, lead_dict: Dict) -> bool:
-    """
-    Enrich an existing lead with new/better data from a duplicate extraction.
-    Returns True if any fields were updated.
-    """
+    """Enrich an existing lead with new/better data from a duplicate extraction."""
     enriched = False
 
-    # Fill empty fields with new data
     enrichment_fields = {
         "brand": lead_dict.get("brand"),
         "city": lead_dict.get("city"),
@@ -234,7 +436,6 @@ def enrich_existing_lead(existing: PotentialLead, lead_dict: Dict) -> bool:
             setattr(existing, field, new_val)
             enriched = True
         elif field == "opening_date" and len(str(new_val)) > len(str(old_val)):
-            # "March 2026" is more specific than "2026"
             setattr(existing, field, new_val)
             existing.timeline_label = get_timeline_label(str(new_val))
             enriched = True
@@ -251,7 +452,6 @@ def enrich_existing_lead(existing: PotentialLead, lead_dict: Dict) -> bool:
             setattr(existing, field, new_val)
             enriched = True
 
-    # Track source URLs
     new_source_url = lead_dict.get("source_url")
     if new_source_url:
         existing_urls = existing.source_urls or []
@@ -259,7 +459,6 @@ def enrich_existing_lead(existing: PotentialLead, lead_dict: Dict) -> bool:
             existing.source_urls = existing_urls + [new_source_url]
             enriched = True
 
-        # Track what this source extracted
         extractions = dict(existing.source_extractions or {})
         if new_source_url not in extractions:
             extractions[new_source_url] = {
@@ -285,7 +484,6 @@ def enrich_existing_lead(existing: PotentialLead, lead_dict: Dict) -> bool:
             enriched = True
 
     if enriched:
-        # Recalculate timeline_label if opening_date was set or updated
         if existing.opening_date:
             existing.timeline_label = get_timeline_label(existing.opening_date)
         existing.updated_at = local_now()
@@ -298,33 +496,25 @@ async def save_lead_to_db(
     session: AsyncSession,
     commit: bool = True,
 ) -> Dict:
-    """
-    Full pipeline: normalize → dedup → enrich OR score → save.
-    Single entry point for ALL lead saves.
-
-    Returns:
-        {"status": "saved"|"duplicate"|"enriched"|"skipped", "id": int|None, "reason": str|None}
-    """
+    """Full pipeline: normalize → dedup → enrich OR score → save."""
     hotel_name = (lead_dict.get("hotel_name") or "").strip()
     if not hotel_name:
         return {"status": "skipped", "id": None, "reason": "No hotel name"}
 
     normalized = normalize_hotel_name(hotel_name)
 
-    # DEDUP CHECK
+    # ── EXACT MATCH on normalized name ────────────────────────────────
     result = await session.execute(
         select(PotentialLead).where(PotentialLead.hotel_name_normalized == normalized)
     )
     existing = result.scalars().first()
 
     if existing:
-        # Enrich existing lead with new data
         enriched = enrich_existing_lead(existing, lead_dict)
         if enriched:
-            logger.info(f"   🔄 Enriched: {hotel_name}")
+            logger.info(f"   🔄 Enriched (exact): {hotel_name}")
         if commit:
             await session.commit()
-            # Recalculate revenue after enrichment
             try:
                 from app.services.revenue_updater import update_lead_revenue
 
@@ -337,60 +527,57 @@ async def save_lead_to_db(
             "reason": "Already exists (exact match)",
         }
 
-    # FUZZY DEDUP — strip brand suffixes, compare core names in same city/state
-    core_name = _strip_brand_suffix(hotel_name)
-    if core_name and len(core_name) > 3:
-        city = (lead_dict.get("city") or "").strip().lower()
-        state = (lead_dict.get("state") or "").strip().lower()
+    # ── FUZZY MATCH ───────────────────────────────────────────────────
+    new_core = _normalize_for_dedup(hotel_name)
+    if new_core and len(new_core) > 3:
+        from sqlalchemy import or_ as sql_or
 
-        # Get all leads in same city OR same state for fuzzy comparison.
-        # We use OR so that leads like "Six Senses South Carolina" (city=state)
-        # and "Six Senses South Carolina Islands" (city=Hilton Head Island, state=SC)
-        # end up in the same candidate pool even when city fields differ.
         fuzzy_query = select(PotentialLead).where(
             PotentialLead.status.notin_(["expired", "rejected"])
         )
-        from sqlalchemy import or_ as sql_or
-
-        location_filters = []
-        if city:
-            location_filters.append(PotentialLead.city.ilike(f"%{city}%"))
-        if state:
-            location_filters.append(PotentialLead.state.ilike(f"%{state}%"))
-            # Also catch when state was accidentally stored in city field
-            location_filters.append(PotentialLead.city.ilike(f"%{state}%"))
+        location_filters = _build_location_filters(lead_dict)
         if location_filters:
             fuzzy_query = fuzzy_query.where(sql_or(*location_filters))
 
-        fuzzy_result = await session.execute(fuzzy_query)
-        candidates = fuzzy_result.scalars().all()
+        candidates = (await session.execute(fuzzy_query)).scalars().all()
 
         for candidate in candidates:
-            candidate_core = _strip_brand_suffix(candidate.hotel_name or "")
-            if not candidate_core:
+            cand_core = _normalize_for_dedup(candidate.hotel_name or "")
+            if not cand_core or len(cand_core) <= 3:
                 continue
 
-            # Check if core names match or one contains the other
-            is_match = False
-            if core_name == candidate_core:
-                is_match = True
-            elif len(core_name) > 5 and len(candidate_core) > 5:
-                if core_name in candidate_core or candidate_core in core_name:
-                    is_match = True
-                else:
-                    # Word overlap check
-                    words_a = set(core_name.split())
-                    words_b = set(candidate_core.split())
-                    common = {w for w in (words_a & words_b) if len(w) > 2}
-                    min_words = min(len(words_a), len(words_b))
-                    if min_words > 0 and len(common) >= max(2, min_words * 0.6):
-                        is_match = True
+            # Strip location words from BOTH cores using locations from
+            # both leads so that shared geo terms (e.g. "Miami Beach" in
+            # both names) don't inflate the match.
+            new_stripped = _strip_location_words(
+                new_core,
+                lead_dict.get("city"),
+                lead_dict.get("state"),
+                lead_dict.get("country"),
+                candidate.city,
+                candidate.state,
+                candidate.country,
+            )
+            cand_stripped = _strip_location_words(
+                cand_core,
+                lead_dict.get("city"),
+                lead_dict.get("state"),
+                lead_dict.get("country"),
+                candidate.city,
+                candidate.state,
+                candidate.country,
+            )
 
-            if is_match:
+            if _names_match(new_stripped, cand_stripped):
                 enriched = enrich_existing_lead(candidate, lead_dict)
                 if enriched:
                     logger.info(
-                        f"   🔄 Fuzzy match: '{hotel_name}' → '{candidate.hotel_name}'"
+                        f"   🔄 Fuzzy match: '{hotel_name}' → '{candidate.hotel_name}' "
+                        f"(cores: '{new_stripped}' ~ '{cand_stripped}')"
+                    )
+                else:
+                    logger.info(
+                        f"   = Fuzzy duplicate: '{hotel_name}' → '{candidate.hotel_name}'"
                     )
                 if commit:
                     await session.commit()
@@ -400,14 +587,14 @@ async def save_lead_to_db(
                     "reason": f"Fuzzy match: {candidate.hotel_name}",
                 }
 
-    # PREPARE NEW LEAD (normalize + score + filter + build)
+    # ── PREPARE NEW LEAD ──────────────────────────────────────────────
     lead, skip_reason, score_result = prepare_lead(lead_dict)
 
     if lead is None:
         logger.info(f"   ⏭️ Skipped: {hotel_name} - {skip_reason}")
         return {"status": "skipped", "id": None, "reason": skip_reason}
 
-    # SAVE
+    # ── SAVE ──────────────────────────────────────────────────────────
     session.add(lead)
     if commit:
         await session.commit()
@@ -430,15 +617,13 @@ async def save_lead_to_db(
     except Exception as e:
         logger.warning(f"Revenue calc failed for {hotel_name}: {e}")
 
-    # Auto geo-enrich: website discovery + geocoding (fire-and-forget)
-    # Runs in background so it doesn't slow down the save pipeline
+    # Auto geo-enrich: website discovery + geocoding
+    # NOTE: PotentialLead is already imported at the top of this file.
+    # Re-importing it here would shadow the module-level binding and
+    # cause UnboundLocalError at the dedup check above.
     try:
         from app.services.lead_geo_enrichment import enrich_lead_geo
         from sqlalchemy import update as sql_update
-
-        # NOTE: PotentialLead is already imported at the top of this file.
-        # Re-importing it here would shadow the module-level binding and
-        # cause UnboundLocalError at the dedup check above.
 
         geo = await enrich_lead_geo(
             hotel_name=lead.hotel_name,
@@ -477,13 +662,7 @@ async def save_leads_batch(
     lead_dicts: list,
     session: AsyncSession,
 ) -> Dict:
-    """
-    Save a batch of leads through the full pipeline.
-    Wraps each lead in a savepoint for isolation.
-
-    Returns:
-        {"saved": int, "duplicates": int, "enriched": int, "skipped": int, "errors": int}
-    """
+    """Save a batch of leads through the full pipeline."""
     saved = 0
     duplicates = 0
     enriched = 0

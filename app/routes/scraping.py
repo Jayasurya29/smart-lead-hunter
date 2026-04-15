@@ -6,6 +6,7 @@ import logging
 import os
 import time
 import uuid
+from urllib.parse import urlparse
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
@@ -50,6 +51,41 @@ async def _init_orchestrator() -> LeadHunterOrchestrator:
     )
     await orch.initialize()
     return orch
+
+
+async def _find_source_by_url(session, target_url: str):
+    """Match a target URL back to a Source row.
+
+    Tries:
+      1. Exact base_url match (after normalizing trailing slash + case).
+      2. Domain match (host equality after stripping 'www.').
+
+    Returns the Source ORM object or None.
+    """
+    if not target_url:
+        return None
+    target_norm = target_url.strip().lower().rstrip("/")
+    target_domain = urlparse(target_url).netloc.replace("www.", "").lower()
+
+    sources = (await session.execute(select(Source))).scalars().all()
+
+    # Exact base_url match wins
+    for src in sources:
+        if not src.base_url:
+            continue
+        if src.base_url.strip().lower().rstrip("/") == target_norm:
+            return src
+
+    # Fall back to domain match
+    if not target_domain:
+        return None
+    for src in sources:
+        if not src.base_url:
+            continue
+        src_domain = urlparse(src.base_url).netloc.replace("www.", "").lower()
+        if src_domain == target_domain:
+            return src
+    return None
 
 
 @router.post("/api/dashboard/scrape", tags=["Dashboard"])
@@ -333,7 +369,6 @@ async def scrape_with_progress(request: Request):
                                     links = set()
                                     # M-10: Filter out junk URLs before following
                                     _skip_patterns = SKIP_URL_PATTERNS
-                                    from urllib.parse import urlparse
 
                                     gold_domain = urlparse(gold_url).netloc
                                     for a in soup.find_all("a", href=True):
@@ -457,7 +492,7 @@ async def scrape_with_progress(request: Request):
                                         visited.add(gold_url)
                                         # Follow depth-1 links from gold pages
                                         from bs4 import BeautifulSoup
-                                        from urllib.parse import urljoin, urlparse
+                                        from urllib.parse import urljoin
 
                                         soup = BeautifulSoup(result.html or "", "lxml")
                                         gold_domain = urlparse(gold_url).netloc
@@ -920,6 +955,10 @@ async def extract_url_stream(request: Request):
         return StreamingResponse(no_orch(), media_type="text/event-stream")
 
     async def event_generator():
+        # Track whether the page was successfully fetched so Phase 5 can
+        # decide whether to mark the matching source as healthy or failed.
+        page_fetched_ok = False
+
         try:
             yield f"data: {json.dumps({'type': 'started', 'scrape_id': 'url-extract'})}\n\n"
             yield f"data: {json.dumps({'type': 'info', 'message': f'Target: {target_url}'})}\n\n"
@@ -980,15 +1019,41 @@ async def extract_url_stream(request: Request):
                             yield f"data: {json.dumps({'type': 'info', 'message': f'Page fetched (fallback): {len(page_content):,} chars'})}\n\n"
                         else:
                             yield f"data: {json.dumps({'type': 'error', 'message': f'Failed to fetch URL: HTTP {resp.status_code}'})}\n\n"
+                            # Mark source as failed before returning so the
+                            # health badge updates even on fetch failure.
+                            try:
+                                async with async_session() as fail_sess:
+                                    fail_src = await _find_source_by_url(
+                                        fail_sess, target_url
+                                    )
+                                    if fail_src:
+                                        fail_src.record_failure()
+                                        fail_src.last_scraped_at = local_now()
+                                        await fail_sess.commit()
+                            except Exception as _fe:
+                                logger.warning(
+                                    f"URL extract failure-mark failed: {_fe}"
+                                )
                             return
                 except Exception as e2:
                     _err = f"All fetch methods failed: {safe_error(e2)}"
                     yield f"data: {json.dumps({'type': 'error', 'message': _err})}\n\n"
+                    try:
+                        async with async_session() as fail_sess:
+                            fail_src = await _find_source_by_url(fail_sess, target_url)
+                            if fail_src:
+                                fail_src.record_failure()
+                                fail_src.last_scraped_at = local_now()
+                                await fail_sess.commit()
+                    except Exception as _fe:
+                        logger.warning(f"URL extract failure-mark failed: {_fe}")
                     return
 
             if not page_content:
                 yield f"data: {json.dumps({'type': 'error', 'message': 'No content retrieved from URL'})}\n\n"
                 return
+
+            page_fetched_ok = True
 
             # Check if client disconnected
             if await request.is_disconnected():
@@ -998,8 +1063,6 @@ async def extract_url_stream(request: Request):
             yield f"data: {json.dumps({'type': 'info', 'message': 'Phase 2: AI extraction (Gemini)...'})}\n\n"
 
             # Extract domain for source name
-            from urllib.parse import urlparse
-
             domain = urlparse(target_url).netloc.replace("www.", "")
             source_label = f"URL Extract ({domain})"
 
@@ -1025,6 +1088,15 @@ async def extract_url_stream(request: Request):
 
             if leads_extracted == 0:
                 yield f"data: {json.dumps({'type': 'info', 'message': 'No hotel leads found on this page. Try a different URL with hotel opening announcements.'})}\n\n"
+
+                # Even with 0 leads, the FETCH succeeded so the source isn't
+                # broken. Update health to reflect a successful scrape pass.
+                await _update_source_health_for_url_extract(
+                    target_url=target_url,
+                    leads_saved=0,
+                    page_fetched_ok=True,
+                )
+
                 end_time = local_now()
                 duration = (end_time - start_time).total_seconds()
                 yield f"data: {json.dumps({'type': 'complete', 'stats': {'sources_scraped': 1, 'urls_scraped': 1, 'leads_found': 0, 'leads_saved': 0, 'leads_skipped': 0}, 'duration_seconds': duration})}\n\n"
@@ -1077,6 +1149,26 @@ async def extract_url_stream(request: Request):
 
                 yield f"data: {json.dumps({'type': 'info', 'message': f'Saved {leads_saved} new leads, {leads_dupes} already existed'})}\n\n"
 
+            # --- PHASE 5: SOURCE HEALTH UPDATE ─────────────────────────
+            # The full scrape path runs this in its own Phase 5 block, but
+            # URL extract previously skipped it entirely — that's why
+            # successful URL extracts left the source's health badge stuck
+            # on 'failing'. Match this URL back to its Source row by
+            # base_url / domain and update the same fields the full scrape
+            # touches (last_scraped_at, last_success_at, total_scrapes,
+            # consecutive_failures, health_status, leads_found, avg yield).
+            try:
+                health_msg = await _update_source_health_for_url_extract(
+                    target_url=target_url,
+                    leads_saved=leads_saved + leads_dupes,
+                    page_fetched_ok=page_fetched_ok,
+                )
+                if health_msg:
+                    yield f"data: {json.dumps({'type': 'info', 'message': health_msg})}\n\n"
+            except Exception as health_err:
+                logger.error(f"URL extract source health update failed: {health_err}")
+                # Non-fatal — don't break the SSE stream
+
             # --- COMPLETE ---
             end_time = local_now()
             duration = (end_time - start_time).total_seconds()
@@ -1105,6 +1197,61 @@ async def extract_url_stream(request: Request):
                     pass
 
     return StreamingResponse(event_generator(), media_type="text/event-stream")
+
+
+async def _update_source_health_for_url_extract(
+    target_url: str,
+    leads_saved: int,
+    page_fetched_ok: bool,
+) -> str:
+    """Update the matching Source row's health fields after a URL extract.
+
+    Mirrors the bookkeeping the full scrape does in its Phase 5 block, but
+    scoped to the single source matching `target_url`.
+
+    Returns a short status string suitable for emitting as an SSE info
+    message (or empty string if no matching source was found).
+    """
+    async with async_session() as session:
+        source_obj = await _find_source_by_url(session, target_url)
+        if not source_obj:
+            logger.info(
+                f"URL extract: no matching Source for {target_url} — health not updated"
+            )
+            return ""
+
+        source_obj.total_scrapes = (source_obj.total_scrapes or 0) + 1
+        source_obj.last_scraped_at = local_now()
+
+        if page_fetched_ok:
+            # Page fetch worked → source is reachable. Mark healthy even if
+            # 0 leads were extracted (a hub page may legitimately have no
+            # NEW openings on a given day; that doesn't mean the source
+            # is broken).
+            source_obj.last_success_at = local_now()
+            source_obj.consecutive_failures = 0
+            source_obj.health_status = "healthy"
+
+            if leads_saved > 0:
+                source_obj.leads_found = (source_obj.leads_found or 0) + leads_saved
+
+            # Keep avg_lead_yield consistent with the full scrape's formula
+            scrapes = source_obj.total_scrapes or 1
+            old_avg = float(source_obj.avg_lead_yield or 0)
+            source_obj.avg_lead_yield = (
+                (old_avg * (scrapes - 1)) + leads_saved
+            ) / scrapes
+        else:
+            source_obj.record_failure()
+
+        await session.commit()
+
+        return (
+            f"Source health updated: {source_obj.name} "
+            f"(healthy, {leads_saved} leads this run)"
+            if page_fetched_ok
+            else f"Source marked failing: {source_obj.name}"
+        )
 
 
 @router.post("/api/dashboard/scrape/cancel/{scrape_id}", tags=["Dashboard"])

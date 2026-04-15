@@ -554,14 +554,19 @@ class ContactValidator:
 
 class SmartQueryBuilder:
     """
-    Builds intelligent DuckDuckGo search queries that avoid the
+    Builds intelligent search queries that avoid the
     name-collision problem and leverage parent company knowledge.
 
-    Instead of just: "The Nora Hotel" General Manager
-    Now generates:
-        1. "The Nora Hotel" "General Manager" OR "Director" site:linkedin.com
-        2. "BD Hotels" "The Nora Hotel" staff OR team
-        3. "The Nora Hotel" New York appoints OR hires OR names
+    Both pre_opening and opening_soon now route through
+    project_type_intelligence.get_phase_queries() so the query set
+    matches the lead's actual stage:
+      - pre_opening: phase determined by project_type + timeline
+        (Phase 1 corporate for COOL/WARM, Phase 2 GM for HOT,
+         Phase 3 dept heads for URGENT)
+      - opening_soon (≤6 mo): always Phase 3 by default — the property
+        team IS hired by now, dept heads are the actual buyers.
+        Rebrand/renovation overrides via the passed-in `phase` arg
+        still apply.
     """
 
     def build_queries(
@@ -583,112 +588,65 @@ class SmartQueryBuilder:
         Args:
             retry_attempt: 0=first try, 1+=retry with different strategy
 
-        Returns: List of query strings for DuckDuckGo
+        Returns: List of query strings for Serper.
         """
         queries = []
         location = self._build_location(city, state, country)
 
         if retry_attempt == 0:
-            # ── FIRST ATTEMPT: Procurement-intelligence-driven search ──
-            location_str = self._build_location(city, state, country)
-            parent = management_company or brand
+            # ── Determine the active phase ──
+            # Both modes route through get_phase_queries now. The only
+            # difference: opening_soon defaults to Phase 3 (dept heads
+            # are hired and buying NOW), while pre_opening defaults to
+            # Phase 1 (corporate is the only contact).
+            if phase in (1, 2, 3):
+                # Caller passed an explicit phase (from project_type
+                # classification — rebrand=3, renovation=2, etc.)
+                active_phase = phase
+            elif mode == "opening_soon":
+                active_phase = 3
+            else:
+                active_phase = 1
 
-            if mode == "pre_opening":
-                # ── PHASE-AWARE QUERY GENERATION ──
-                # phase is passed in from enrich_lead_contacts based on
-                # timeline_label + project_type. Default to phase 1 if not set.
-                active_phase = phase if phase in (1, 2, 3) else 1
+            # ── Phase queries from project_type_intelligence ──
+            phase_queries = get_phase_queries(
+                phase=active_phase,
+                hotel_name=hotel_name,
+                brand=brand,
+                management_company=management_company,
+                city=city,
+                state=state,
+                project_type=project_type,
+            )
+            queries.extend(phase_queries)
 
-                # Get phase-specific queries from project_type_intelligence
-                phase_queries = get_phase_queries(
-                    phase=active_phase,
-                    hotel_name=hotel_name,
-                    brand=brand,
-                    management_company=management_company,
-                    city=city,
-                    state=state,
-                    project_type=project_type,
-                )
-                queries.extend(phase_queries)
-
-                # Also add management company known contacts if available
+            # ── Mgmt company known contacts (Phase 1 only) ──
+            if active_phase == 1:
                 mgmt_intel = get_management_company_intel(management_company or "")
-                if (
-                    mgmt_intel
-                    and mgmt_intel.get("known_contacts")
-                    and active_phase == 1
-                ):
+                if mgmt_intel and mgmt_intel.get("known_contacts"):
                     for contact in mgmt_intel["known_contacts"]:
                         queries.append(
                             f'"{contact}" "{management_company}" site:linkedin.com'
                         )
 
-                # Brand-specific titles as supplemental queries
+            # ── Brand-specific titles (Phase 1 or 2 only) ──
+            # At Phase 3 these are redundant with the dept-title sweep.
+            if active_phase <= 2:
                 brand_info = BrandRegistry.lookup(brand) if brand else None
-                if (
-                    brand_info
-                    and brand_info.pre_opening_contact_titles
-                    and active_phase <= 2
-                ):
+                if brand_info and brand_info.pre_opening_contact_titles:
                     for tt in brand_info.pre_opening_contact_titles[:3]:
                         queries.append(f'"{hotel_name}" "{tt}" site:linkedin.com')
 
-                logger.debug(
-                    f"Phase {active_phase} queries for {hotel_name} "
-                    f"(project_type={project_type}): {len(queries)} queries"
-                )
-
-            else:
-                # opening_soon or unknown: property-level staff should be hired
-                # Query 1: Hotel name + key titles + LinkedIn
-                title_terms = "General Manager OR Director OR Purchasing"
-                queries.append(f"{hotel_name} {title_terms} site:linkedin.com")
-
-                # Query 2: Hotel name + appointment news
-                queries.append(f"{hotel_name} appoints OR hires OR names OR appointed")
-
-                # Query 2b: Hotel/brand official press releases
-                queries.append(
-                    f'"{hotel_name}" "General Manager" OR "appointed" OR "announcement"'
-                )
-
-                # Query 3: Brand/parent company + hotel name + staff
-                if parent:
-                    queries.append(f"{parent} {hotel_name} team OR staff OR leadership")
-
-                # Query 4: Hotel name + location + GM
-                if location:
-                    queries.append(
-                        f"{hotel_name} {location} General Manager OR Director"
-                    )
-
-                # Query 5-N: Targeted title-specific queries (SAP-proven buyer titles)
-                targeted_titles = [
-                    "General Manager",
-                    "Director of Housekeeping",
-                    "Executive Housekeeper",
-                    "Housekeeping Manager",
-                    "Purchasing Manager",
-                    "Director of Purchasing",
-                    "Procurement Manager",
-                    "Director of Operations",
-                    "Director of Rooms",
-                    "Hotel Manager",
-                    "Director of Food and Beverage",
-                    "Executive Chef",
-                    "Laundry Manager",
-                    "Director of Human Resources",
-                    "Director of People and Culture",
-                ]
-                for tt in targeted_titles:
-                    queries.append(f"{hotel_name} {location_str} {tt}")
+            logger.debug(
+                f"Phase {active_phase} queries for {hotel_name} "
+                f"(mode={mode}, project_type={project_type}): "
+                f"{len(queries)} queries"
+            )
 
         elif retry_attempt == 1:
             # ── RETRY: Use parent company / management company ──
-
             parent = management_company or brand
             if parent:
-                # Search by parent company + location
                 queries.append(f"{parent} {hotel_name} site:linkedin.com")
                 queries.append(f"{parent} {location} General Manager hotel")
 

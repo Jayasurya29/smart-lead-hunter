@@ -1,5 +1,5 @@
 """
-SMART LEAD HUNTER — Contact Enrichment Service v4.1
+SMART LEAD HUNTER — Contact Enrichment Service v4.2
 =====================================================
 Multi-layer contact discovery with SAP-trained intelligence.
 
@@ -8,6 +8,17 @@ Layer 1: Web Scrape + Gemini AI Extract (scrape articles from search results)
 Layer 2: LinkedIn Snippet Extraction (names from search snippets)
 Layer 3: Gemini Verification (validates and scores all contacts)
 Fallback: DuckDuckGo (free, unlimited) when Serper unavailable
+
+KEY v4.2 CHANGES:
+- TIGHTENED _title_proves_hotel: now requires CONTIGUOUS hotel-name match
+  (literal phrase or distinctive bigram) instead of scattered word-overlap.
+  Word-bag overlap was generating false positives on short hotel names
+  (e.g. "Pan Am Hotel" was matching any text containing "pan" + "am" + "hotel"
+  scattered anywhere — promoted Iqbal Mallik (Magnuson Grand) as the
+  Pan Am Hotel GM and made him immune to Gemini's correct rejection).
+- Protection now ALSO requires the contact's name to look like a real person
+  (≥2 words, not all-caps, no org words). Catches "Travel Turtle Magazine"
+  type publications that were protected by the old rule.
 
 KEY v4.1 CHANGES:
 - Google search via Serper.dev (finds Kara DePool that DDG misses)
@@ -435,6 +446,176 @@ def _is_corporate_title(title: str) -> bool:
     L-04: Delegates to shared is_corporate_title() in contact_validator.
     """
     return is_corporate_title(title)
+
+
+# ═══════════════════════════════════════════════════════════════
+# PROTECTION HELPERS — used by _title_proves_hotel
+# ═══════════════════════════════════════════════════════════════
+
+# Words that disqualify a "name" from being a real person.
+# Used to reject "Travel Turtle Magazine", "UPDATE GROUP", etc. from
+# the protection rule that makes contacts immune to Gemini rejection.
+_NON_PERSON_NAME_TOKENS = frozenset(
+    {
+        "magazine",
+        "news",
+        "media",
+        "press",
+        "post",
+        "update",
+        "group",
+        "company",
+        "corp",
+        "corporation",
+        "inc",
+        "llc",
+        "ltd",
+        "hotel",
+        "hotels",
+        "resort",
+        "resorts",
+        "the",
+        "linkedin",
+        "publication",
+        "publishing",
+        "journal",
+        "review",
+        "times",
+        "weekly",
+        "daily",
+        "today",
+        "report",
+        "channel",
+        "network",
+        "tv",
+        "radio",
+        "podcast",
+        "blog",
+        "official",
+    }
+)
+
+
+def _looks_like_real_person(name: str) -> bool:
+    """Heuristic check that a name belongs to an individual, not an entity.
+
+    Returns False for things like "Travel Turtle Magazine", "UPDATE GROUP",
+    "LinkedIn News", or single-word handles. Returns True for plausible
+    "First Last" style person names.
+    """
+    if not name:
+        return False
+    name = name.strip()
+    if len(name) < 4:
+        return False
+    if name.isupper():
+        return False
+    parts = name.split()
+    if len(parts) < 2:
+        return False
+    # Reject if any token is a known non-person noun (publication / org word)
+    for token in parts:
+        clean = token.strip(".,;:'\"()[]").lower()
+        if clean in _NON_PERSON_NAME_TOKENS:
+            return False
+    # First and last token should both start with a capital letter
+    if not (parts[0][0].isupper() and parts[-1][0].isupper()):
+        return False
+    return True
+
+
+def _hotel_phrase_appears(hotel_name: str, haystacks: list[str]) -> bool:
+    """Check if the hotel name appears as a CONTIGUOUS phrase in any haystack.
+
+    This is the tightened replacement for the old word-bag overlap that
+    falsely matched 'Pan Am Hotel' against any text containing the words
+    'pan', 'am', and 'hotel' scattered separately.
+
+    Match rules (any one is sufficient):
+      1. The full normalized hotel name appears as a contiguous substring
+         in any haystack (e.g. 'pan am hotel' must literally appear).
+      2. For multi-word hotel names with ≥2 distinctive (non-filler) words,
+         the contiguous bigram of the FIRST TWO distinctive words appears
+         (e.g. 'pan am' for 'Pan Am Hotel'; 'four seasons' for 'Four
+         Seasons Resort Maui'). This catches cases where the snippet
+         abbreviates but preserves the brand-distinguishing portion.
+
+    Filler words (the, hotel, resort, etc.) are stripped before the
+    bigram check so they don't act as the "first distinctive word".
+    """
+    if not hotel_name:
+        return False
+
+    _filler = {
+        "the",
+        "and",
+        "at",
+        "by",
+        "of",
+        "in",
+        "on",
+        "for",
+        "a",
+        "an",
+        "&",
+        "east",
+        "west",
+        "north",
+        "south",
+        "village",
+        "downtown",
+        "uptown",
+        "hotel",
+        "hotels",
+        "resort",
+        "resorts",
+        "spa",
+        "inn",
+        "lodge",
+        "suites",
+        "suite",
+        "club",
+        "house",
+        "tower",
+        "towers",
+        "collection",
+        "residences",
+        "residence",
+    }
+
+    # Normalize hotel name: lowercase, strip punctuation, collapse spaces
+    hotel_norm = re.sub(r"[^a-z0-9\s]", " ", hotel_name.lower())
+    hotel_norm = " ".join(hotel_norm.split())
+    if not hotel_norm:
+        return False
+
+    # Build distinctive-word bigram (first two non-filler tokens)
+    distinctive_tokens = [t for t in hotel_norm.split() if t not in _filler]
+    distinctive_bigram = ""
+    if len(distinctive_tokens) >= 2:
+        distinctive_bigram = f"{distinctive_tokens[0]} {distinctive_tokens[1]}"
+    elif len(distinctive_tokens) == 1 and len(distinctive_tokens[0]) >= 5:
+        # Single distinctive word — only use it if long enough to be unambiguous
+        # (avoids "dean" matching "dean's italian steakhouse")
+        distinctive_bigram = distinctive_tokens[0]
+
+    for h in haystacks:
+        if not h:
+            continue
+        h_norm = re.sub(r"[^a-z0-9\s]", " ", h.lower())
+        h_norm = " ".join(h_norm.split())
+        if not h_norm:
+            continue
+        # Match #1: full hotel name as contiguous substring
+        if hotel_norm in h_norm:
+            return True
+        # Match #2: distinctive bigram as contiguous substring,
+        # using word boundaries so 'pan am' does NOT match inside 'panama'
+        if distinctive_bigram:
+            if re.search(r"\b" + re.escape(distinctive_bigram) + r"\b", h_norm):
+                return True
+
+    return False
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -2210,64 +2391,40 @@ async def enrich_lead_contacts(
     # ═══════════════════════════════════════════════════════════
 
     # PRE-GEMINI PROTECTION: deterministically mark contacts whose title or
-    # raw snippet literally proves they work at the target hotel. These will
-    # survive even if Gemini votes to reject them — Gemini sometimes loses
-    # the hotel context after title resolution overwrites the original headline.
+    # raw snippet PROVES they work at the target hotel (contiguous phrase
+    # match + plausible person name). These survive even if Gemini votes
+    # to reject them — Gemini sometimes loses hotel context after title
+    # resolution overwrites the original headline.
+    #
+    # v4.2 TIGHTENED: protection now requires
+    #   (a) the hotel name (or its distinctive bigram) appears as a
+    #       contiguous phrase in title/org/snippet — NOT just word-bag
+    #       overlap that produced false positives like Iqbal Mallik
+    #       (Magnuson Grand) being protected as the Pan Am Hotel GM,
+    #   AND
+    #   (b) the contact's name passes the person-name heuristic — so
+    #       publication names like "Travel Turtle Magazine" can never
+    #       be protected.
     def _title_proves_hotel(contact: dict, hotel: str) -> bool:
-        if not hotel:
+        """Return True only if (a) hotel name appears as a contiguous
+        phrase in title/snippet/org AND (b) the contact name looks like
+        a real person."""
+        if not _looks_like_real_person(contact.get("name", "")):
             return False
-        hotel_lower = hotel.lower()
         haystacks = [
-            (contact.get("title") or "").lower(),
-            (contact.get("_raw_snippet") or "").lower(),
-            (contact.get("_raw_title") or "").lower(),
-            (contact.get("organization") or "").lower(),
+            contact.get("title") or "",
+            contact.get("_raw_snippet") or "",
+            contact.get("_raw_title") or "",
+            contact.get("organization") or "",
         ]
-        # Direct substring of full hotel name
-        if any(hotel_lower in h for h in haystacks):
-            return True
-        # Word overlap (drop common filler)
-        _filler = {
-            "the",
-            "and",
-            "at",
-            "by",
-            "of",
-            "in",
-            "on",
-            "for",
-            "east",
-            "west",
-            "north",
-            "south",
-            "village",
-            "downtown",
-            "uptown",
-            "resort",
-            "hotel",
-            "hotels",
-            "a",
-            "an",
-        }
-        hotel_core = {
-            w
-            for w in hotel_lower.replace(",", " ").split()
-            if len(w) > 2 and w not in _filler
-        }
-        if not hotel_core or len(hotel_core) < 2:
-            return False
-        for h in haystacks:
-            words = set(h.replace(",", " ").replace("-", " ").split())
-            if len(hotel_core & words) >= 2:
-                return True
-        return False
+        return _hotel_phrase_appears(hotel, haystacks)
 
     for c in result.contacts:
         if _title_proves_hotel(c, hotel_name):
             c["_protected_title_match"] = True
             logger.info(
-                f"PROTECTED: {c.get('name')} — title/snippet proves hotel link, "
-                f"immune to Gemini rejection"
+                f"PROTECTED: {c.get('name')} — hotel name appears verbatim in "
+                f"title/snippet, immune to Gemini rejection"
             )
 
     if result.contacts:

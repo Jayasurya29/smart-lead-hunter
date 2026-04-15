@@ -348,10 +348,13 @@ def get_phase_queries(
                 f'"{mgmt}" "pre-opening" OR "new opening" {hotel_name}',
                 f'"{mgmt}" procurement OR purchasing OR vendor 2026 site:linkedin.com',
             ]
-        queries += [
-            f'"{hotel_name}" developer OR owner OR "KPC Development" OR "{mgmt}" leadership',
-            f'"{hotel_name}" opening 2026 management OR operations team',
-        ]
+        # Generic developer/owner search — kept generic, no per-lead names
+        # leaking from prior debug iterations.
+        if mgmt:
+            queries.append(f'"{hotel_name}" developer OR owner OR "{mgmt}" leadership')
+        else:
+            queries.append(f'"{hotel_name}" developer OR owner OR leadership')
+        queries.append(f'"{hotel_name}" opening 2026 management OR operations team')
 
     elif phase == 2:
         # ── PHASE 2: General Manager Hunt ──
@@ -368,7 +371,11 @@ def get_phase_queries(
 
     elif phase == 3:
         # ── PHASE 3: Department Heads ──
-        # The property team is being assembled — search each key role
+        # The property team is being assembled — search each key role.
+        # Run the FULL list of buyer-relevant dept titles. Previously
+        # capped at [:6] which silently dropped Director of Purchasing,
+        # Director of Rooms, Purchasing Manager, Director of Operations
+        # — all SAP-confirmed buyers.
         dept_titles = [
             "Director of Housekeeping",
             "Executive Housekeeper",
@@ -389,7 +396,7 @@ def get_phase_queries(
                 f'"{hotel_name}" {location} leadership OR team OR staff',
             ]
 
-        for title in dept_titles[:6]:
+        for title in dept_titles:
             queries.append(f'"{hotel_name}" "{title}" site:linkedin.com')
 
         queries += [
