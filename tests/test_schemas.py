@@ -90,37 +90,47 @@ class TestLeadResponseSchema:
         from app.schemas import LeadResponse
         from unittest.mock import MagicMock
         lead = MagicMock()
+        # ── Required fields ──
         lead.id = 1
         lead.hotel_name = "Test Hotel"
-        lead.timeline_label = "HOT"
         lead.status = "new"
-        lead.lead_score = 75
-        lead.city = "Miami"
-        lead.state = "Florida"
-        lead.country = "USA"
         lead.created_at = datetime.now(timezone.utc)
-        lead.updated_at = None
-        lead.score_breakdown = {"brand": 20}
-        lead.source_url = "https://test.com"
-        lead.source_site = "test.com"
-        lead.source_urls = ["https://test.com"]
-        lead.source_extractions = {"https://test.com": {"city": "Miami"}}
+        # ── Optional string fields (must be str or None — MagicMock won't coerce) ──
         lead.contact_email = None
         lead.contact_phone = None
         lead.contact_name = None
         lead.contact_title = None
+        lead.city = "Miami"
+        lead.state = "Florida"
+        lead.country = "USA"
         lead.opening_date = "Q3 2027"
-        lead.room_count = 200
         lead.hotel_type = None
         lead.brand = "Test"
         lead.brand_tier = "tier2_luxury"
         lead.location_type = "florida"
+        lead.hotel_website = None
         lead.management_company = "Test Management"
         lead.developer = "Test Developer"
         lead.owner = "Test Owner"
-        lead.hotel_website = None
         lead.description = None
         lead.notes = None
+        lead.timeline_label = "HOT"
+        lead.rejection_reason = None
+        lead.website_verified = None
+        lead.source_url = "https://test.com"
+        lead.source_site = "test.com"
+        # ── Optional numeric fields ──
+        lead.lead_score = 75
+        lead.room_count = 200
+        lead.revenue_opening = None
+        lead.revenue_annual = None
+        lead.latitude = None
+        lead.longitude = None
+        # ── Optional structured fields ──
+        lead.score_breakdown = {"brand": 20}
+        lead.source_urls = ["https://test.com"]
+        lead.source_extractions = {"https://test.com": {"city": "Miami"}}
+        lead.updated_at = None
 
         resp = LeadResponse.model_validate(lead)
         assert resp.id == 1
