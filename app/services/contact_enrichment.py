@@ -63,7 +63,7 @@ load_dotenv()
 
 logger = logging.getLogger(__name__)
 
-MAX_CONTACTS_TO_SAVE = 5
+MAX_CONTACTS_TO_SAVE = 10
 
 # ═══════════════════════════════════════════════════════════════
 # SHARED HTTP CLIENT — connection pooling for Serper/Gemini
@@ -91,6 +91,130 @@ def _get_client() -> httpx.AsyncClient:
 # ═══════════════════════════════════════════════════════════════
 
 _GEMINI_RETRY_ATTEMPTS = 3
+
+
+def _try_recover_json(text: str):
+    """Attempt to recover usable JSON from a slightly malformed Gemini response.
+
+    Tries (in order):
+      1. Strip trailing garbage after the last balanced brace/bracket
+      2. Use json5 if available (more lenient — accepts trailing commas,
+         single-quoted strings, unquoted keys)
+      3. Extract the largest JSON array via regex and parse just that
+      4. Per-item parsing for arrays — keep the items that parse cleanly
+      5. TRUNCATION RECOVERY — for responses where Gemini was cut off
+         mid-object, walk object-by-object and keep all complete ones
+    """
+    import json as _json
+    import re as _re
+
+    if not text:
+        return None
+    text = text.strip()
+
+    # ── Strategy 1: trim trailing junk past the last balanced close ──
+    for end_char in ("]", "}"):
+        last = text.rfind(end_char)
+        if last > 0:
+            try:
+                return _json.loads(text[: last + 1])
+            except _json.JSONDecodeError:
+                pass
+
+    # ── Strategy 2: try json5 (handles trailing commas, comments, etc) ──
+    try:
+        import json5  # type: ignore
+
+        try:
+            return json5.loads(text)
+        except Exception:
+            pass
+    except ImportError:
+        pass  # json5 not installed — skip
+
+    # ── Strategy 3: extract largest JSON array via regex ──
+    array_match = _re.search(r"\[\s*\{.*\}\s*\]", text, flags=_re.DOTALL)
+    if array_match:
+        try:
+            return _json.loads(array_match.group(0))
+        except _json.JSONDecodeError:
+            # ── Strategy 4: split into individual { ... } blocks, parse each ──
+            arr_text = array_match.group(0)
+            object_pattern = _re.compile(r"\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}", _re.DOTALL)
+            recovered = []
+            for obj_match in object_pattern.finditer(arr_text):
+                try:
+                    recovered.append(_json.loads(obj_match.group(0)))
+                except _json.JSONDecodeError:
+                    continue
+            if recovered:
+                return recovered
+
+    # ── Strategy 5: TRUNCATION RECOVERY ──
+    # Gemini response was cut off mid-object (common when it hits the
+    # token limit while generating an array of contacts). Walk the text
+    # and extract every complete balanced {...} block we can find.
+    recovered_objects = []
+    # Find start of what looks like a JSON array of objects
+    start = text.find("[")
+    if start < 0:
+        start = text.find('{"')
+    if start < 0:
+        return None
+
+    depth = 0
+    in_string = False
+    escape_next = False
+    obj_start = -1
+    working = text[start:]
+
+    for i, ch in enumerate(working):
+        if escape_next:
+            escape_next = False
+            continue
+        if ch == "\\":
+            escape_next = True
+            continue
+        if ch == '"' and not escape_next:
+            in_string = not in_string
+            continue
+        if in_string:
+            continue
+
+        if ch == "{":
+            if depth == 0:
+                obj_start = i
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+            if depth == 0 and obj_start >= 0:
+                candidate = working[obj_start : i + 1]
+                try:
+                    parsed = _json.loads(candidate)
+                    if isinstance(parsed, dict):
+                        recovered_objects.append(parsed)
+                except _json.JSONDecodeError:
+                    pass
+                obj_start = -1
+
+    if recovered_objects:
+        return recovered_objects  # caller wraps lists into {"contacts": [...]}
+
+    return None
+
+
+def _count_items(data) -> int:
+    """How many items are in a recovered JSON payload (for logging)."""
+    if isinstance(data, list):
+        return len(data)
+    if isinstance(data, dict):
+        for k in ("contacts", "items", "results"):
+            if k in data and isinstance(data[k], list):
+                return len(data[k])
+        return 1
+    return 0
+
+
 _GEMINI_RETRY_BASE_DELAY = 2  # seconds
 
 
@@ -107,7 +231,14 @@ async def _call_gemini(
     url = get_gemini_url(model)
     payload = {
         "contents": [{"role": "user", "parts": [{"text": prompt}]}],
-        "generationConfig": {"temperature": 0.1},
+        "generationConfig": {
+            "temperature": 0.1,
+            # Gemini 2.5 Flash "thinking" tokens count against maxOutputTokens
+            # (known quirk: thoughts_token_count + output_token_count must be
+            # <= max). Without this set, responses truncate mid-object. The
+            # 2.5 family caps at 65536, we use 16384 for headroom + safety.
+            "maxOutputTokens": 16384,
+        },
     }
 
     client = _get_client()
@@ -135,7 +266,34 @@ async def _call_gemini(
                     return None
                 text = re.sub(r"```json\s*", "", text)
                 text = re.sub(r"```\s*", "", text)
-                return json.loads(text.strip())
+                text = text.strip()
+                try:
+                    return json.loads(text)
+                except json.JSONDecodeError as e:
+                    # FIX: Gemini occasionally returns slightly malformed JSON
+                    # (missing comma, unescaped quote in a string value, trailing
+                    # comma, control char in string). Try a few recovery strategies
+                    # before giving up — losing a whole batch of contacts because
+                    # of one stray comma is too costly.
+                    logger.warning(
+                        f"Gemini JSON parse error: {e}. Attempting recovery..."
+                    )
+                    recovered = _try_recover_json(text)
+                    if recovered is not None:
+                        # If recovery returned a bare list, wrap it so callers
+                        # that expect {"contacts": [...]} don't crash with
+                        # "'list' object has no attribute 'get'".
+                        if isinstance(recovered, list):
+                            recovered = {"contacts": recovered}
+                        logger.info(
+                            f"JSON recovery succeeded "
+                            f"(extracted {_count_items(recovered)} items)"
+                        )
+                        return recovered
+                    logger.error(
+                        f"Gemini response unrecoverable. First 300 chars: {text[:300]!r}"
+                    )
+                    return None
 
             elif resp.status_code in (429, 500, 503):
                 delay = _GEMINI_RETRY_BASE_DELAY * (2**attempt)
@@ -944,8 +1102,18 @@ async def _layer_web_search(
     opening_date: Optional[str],
     result: EnrichmentResult,
     retry_attempt: int = 0,
+    phase: int = 0,
+    project_type: str = "unknown",
 ) -> bool:
-    """Layer 1: Search web using smart queries, scrape articles, extract contacts."""
+    """Layer 1: Search web using smart queries, scrape articles, extract contacts.
+
+    Args:
+        phase: Starting phase from project_type_intelligence (1, 2, or 3).
+               Pass 0 for default (Phase 1 / Phase 3 based on opening proximity).
+        project_type: Result of classify_project_type — "new_opening",
+               "renovation", "rebrand", "ownership_change", or "unknown".
+               Drives phase-specific query templates.
+    """
     result.layers_tried.append(f"web_search_attempt_{retry_attempt}")
 
     location = _build_location_string(city, state, country)
@@ -960,6 +1128,8 @@ async def _layer_web_search(
         country=country,
         mode=_get_search_mode(opening_date),
         retry_attempt=retry_attempt,
+        phase=phase,
+        project_type=project_type,
     )
 
     all_urls = []
@@ -991,6 +1161,59 @@ async def _layer_web_search(
 
     all_urls.sort(key=_source_priority)
 
+    # ── BRAND-AWARE CORPORATE FILTERING ──
+    # Default behavior: filter out corporate/founder/C-suite titles because
+    # for chain-managed brands they're locked behind GPOs.
+    # For independent / founder-led brands, corporate IS the buyer — so we
+    # keep them. This decision flag is checked when applying the filter below.
+    skip_corporate_filter = False
+    try:
+        layer1_brand_info = BrandRegistry.lookup(brand) if brand else None
+        if layer1_brand_info:
+            uniform_freedom = (layer1_brand_info.uniform_freedom or "").lower()
+            procurement_model = (layer1_brand_info.procurement_model or "").lower()
+            opportunity = (layer1_brand_info.opportunity_level or "").lower()
+            is_independent = (
+                uniform_freedom in ("high", "full")
+                or procurement_model
+                in ("fully_open", "independent", "owner_decides", "open")
+                or opportunity == "high"
+            )
+
+            # Also detect cluster brands (HIC etc) where the registry's own
+            # pre_opening_contact_titles list calls out corporate roles
+            _CLUSTER_KW = (
+                "vp ",
+                "vice president",
+                "svp",
+                "senior vice president",
+                "cluster",
+                "above property",
+                "corporate",
+                "regional",
+                "head of",
+                "chief commercial",
+                "chief operating",
+            )
+            is_cluster_brand = False
+            if layer1_brand_info.pre_opening_contact_titles:
+                for tt in layer1_brand_info.pre_opening_contact_titles:
+                    tt_lower = (tt or "").lower()
+                    if any(kw in tt_lower for kw in _CLUSTER_KW):
+                        is_cluster_brand = True
+                        break
+
+            if is_independent or is_cluster_brand:
+                skip_corporate_filter = True
+                kind = "independent" if is_independent else "cluster"
+                logger.info(
+                    f"Brand {brand!r} is {kind} brand "
+                    f"(procurement={procurement_model!r}, freedom={uniform_freedom!r}) "
+                    f"— keeping corporate/regional contacts"
+                )
+    except Exception as ex:
+        logger.debug(f"Could not resolve brand for corporate filter: {ex}")
+
     found_contacts = False
     for item in all_urls[: ENRICHMENT_SETTINGS["max_articles_to_scrape"]]:
         url = item["url"]
@@ -1020,16 +1243,29 @@ async def _layer_web_search(
                 continue
 
             if _is_corporate_title(contact.get("title", "")):
-                logger.info(
-                    f"Filtered out: {name} (corporate title: {contact.get('title')})"
-                )
-                # Stash as fallback — if enrichment ends with zero contacts,
-                # a corporate/founder contact at a small brand is better than nothing.
-                contact["_fallback_reason"] = f"corporate_title: {contact.get('title')}"
-                contact["source"] = url
-                contact["source_type"] = "press_release"
-                result.fallback_contacts.append(contact)
-                continue
+                if skip_corporate_filter:
+                    # Independent / founder-led brand — corporate IS the buyer.
+                    # Don't reject. Tag scope so downstream knows this is a
+                    # corporate-level contact, not a property-specific one.
+                    logger.info(
+                        f"KEEPING corporate (independent brand): {name} "
+                        f"({contact.get('title')})"
+                    )
+                    if contact.get("scope") == "unknown" or not contact.get("scope"):
+                        contact["scope"] = "chain_corporate"
+                else:
+                    logger.info(
+                        f"Filtered out: {name} (corporate title: {contact.get('title')})"
+                    )
+                    # Stash as fallback — if enrichment ends with zero contacts,
+                    # a corporate/founder contact at a small brand is better than nothing.
+                    contact["_fallback_reason"] = (
+                        f"corporate_title: {contact.get('title')}"
+                    )
+                    contact["source"] = url
+                    contact["source_type"] = "press_release"
+                    result.fallback_contacts.append(contact)
+                    continue
 
             if _is_irrelevant_org(contact.get("organization", "")):
                 logger.info(
@@ -1097,6 +1333,82 @@ async def _layer_linkedin_snippets(
         f"{hotel_name} Purchasing OR Housekeeping OR Operations site:linkedin.com",
         f"{hotel_name} Chef OR Laundry OR Rooms site:linkedin.com",
     ]
+
+    # ── OPERATOR + REGION queries for corporate executives ──
+    # FIX: Corporate execs (e.g. "VP Commercial Services Latin America Caribbean")
+    # don't list individual hotels in their LinkedIn. They DO list the
+    # operator parent ("Hyatt Inclusive Collection") and the regional
+    # bucket ("Caribbean", "Latin America"). These queries target them.
+    #
+    # Why Layer 2 instead of Layer 1: Layer 1 scrapes full pages and skips
+    # LinkedIn URLs entirely. Layer 2 already has rich snippet-extraction
+    # logic for LinkedIn profiles — we just need to feed it the right
+    # queries.
+    try:
+        from app.config.region_map import regional_terms_for_country
+
+        # Resolve the best operator name to search by
+        brand_info = BrandRegistry.lookup(brand) if brand else None
+        operator_candidates = []
+        if brand_info and brand_info.parent_company:
+            # Strip parenthetical context like "(formerly AMR Collection)"
+            parent_clean = brand_info.parent_company.split("(")[0].strip()
+            operator_candidates.append(parent_clean)
+        # Only add management_company if it's NOT shorter/more generic than parent
+        if management_company:
+            mgmt_clean = management_company.strip()
+            already_have = any(
+                mgmt_clean.lower() in cand.lower() or cand.lower() in mgmt_clean.lower()
+                for cand in operator_candidates
+            )
+            if not already_have:
+                operator_candidates.append(mgmt_clean)
+
+        # Get up to 2 regional buckets (most-specific first)
+        region_terms = regional_terms_for_country(country)[:2]
+
+        # Build operator + region queries for corporate roles
+        if operator_candidates and region_terms:
+            corporate_titles = []
+            if brand_info and brand_info.pre_opening_contact_titles:
+                corporate_titles = brand_info.pre_opening_contact_titles[:4]
+
+            # Prepend operator+region queries (most valuable — runs first)
+            #
+            # NO site:linkedin.com here. Corporate execs are named in trade
+            # press (Travel Market Report, Hospitality Net, Hotelier
+            # Magazine, operator newsroom press releases), NOT in property-
+            # specific LinkedIn results. Property-anchored LinkedIn searches
+            # in Layer 1 already cover the easy targets — Layer 2's job is
+            # to surface the corporate names that LinkedIn searches miss.
+            operator_queries = []
+            for operator in operator_candidates[:1]:  # primary operator only
+                for region in region_terms:
+                    # Operator + region appointment / leadership sweep.
+                    # Trade press articles literally name new corporate
+                    # appointments by full name + title.
+                    operator_queries.append(
+                        f'{operator} {region} appointment OR leadership OR "vice president"'
+                    )
+                # Per-title operator searches (no region — title is
+                # specific enough). Trade press uses these exact phrases.
+                for title in corporate_titles[:3]:
+                    operator_queries.append(f'"{operator}" "{title}"')
+                # Title + region combo for highest-priority Phase 1 titles
+                if corporate_titles and region_terms:
+                    operator_queries.append(
+                        f'"{operator}" "General Manager" {region_terms[0]}'
+                    )
+
+            queries = operator_queries + queries  # prepend → runs first
+            logger.info(
+                f"Layer 2: added {len(operator_queries)} operator+region queries "
+                f"(operator={operator_candidates[0]!r}, "
+                f"region={region_terms[0] if region_terms else 'none'!r})"
+            )
+    except Exception as ex:
+        logger.warning(f"Failed to build operator+region queries: {ex}")
+
     # Hotel name variants to catch what Layer 1 missed
     short_hotel_name = re.sub(
         r"\s+(?:Resort|Hotel|Spa|Suites?|Residences?|Inn|Lodge|&)+(?:\s+(?:Resort|Hotel|Spa|Suites?|Residences?|Inn|Lodge|&))*\s*$",
@@ -1763,6 +2075,8 @@ BRAND: {brand}
 MANAGEMENT COMPANY: {management_company}
 {hotel_status}
 
+{procurement_guidance}
+
 Below are contacts discovered during lead research. For EACH contact, determine:
 1) Their ACTUAL job title (not someone else mentioned in a post)
 2) Their ACTUAL employer/organization
@@ -1989,12 +2303,161 @@ async def _verify_contacts_with_gemini(
     else:
         hotel_status = "HOTEL STATUS: OPEN — Standard verification rules apply."
 
+    # ── BRAND-AWARE PROCUREMENT GUIDANCE ──
+    # Independent / boutique / founder-led brands have a fundamentally
+    # different procurement structure than chain-managed brands. For a
+    # brand like Appellation (independent, fully open procurement), the
+    # FOUNDER and CORPORATE EXECUTIVES are the actual uniform buyers —
+    # rejecting them is rejecting our customer.
+    #
+    # For chain-managed brands (Marriott, Hilton, IHG with Avendra GPO),
+    # corporate is locked in to mandated suppliers and unreachable. For
+    # those, keep rejecting C-suite and target only property-level staff.
+    procurement_guidance = ""
+    try:
+        brand_info = BrandRegistry.lookup(brand) if brand else None
+        if brand_info:
+            uniform_freedom = (brand_info.uniform_freedom or "").lower()
+            procurement_model = (brand_info.procurement_model or "").lower()
+            opportunity = (brand_info.opportunity_level or "").lower()
+
+            # Independent / founder-led / boutique signals
+            is_independent = (
+                uniform_freedom in ("high", "full")
+                or procurement_model
+                in ("fully_open", "independent", "owner_decides", "open")
+                or opportunity == "high"
+            )
+
+            # NEW: Regional cluster brands (HIC, certain Hyatt clusters, Auberge,
+            # Belmond etc) have brand-managed procurement BUT through regional
+            # corporate execs who ARE reachable. Detect this by looking at the
+            # brand registry's own pre_opening_contact_titles list — if it
+            # explicitly names corporate roles (VP, SVP, Cluster, Above
+            # Property, Corporate, Regional), then the brand registry is
+            # telling us "for this brand, corporate IS the buyer."
+            _CLUSTER_TITLE_KEYWORDS = (
+                "vp ",
+                "vice president",
+                "svp",
+                "senior vice president",
+                "cluster",
+                "above property",
+                "corporate",
+                "regional",
+                "head of",
+                "chief commercial",
+                "chief operating",
+            )
+            is_cluster_brand = False
+            if brand_info.pre_opening_contact_titles:
+                for tt in brand_info.pre_opening_contact_titles:
+                    tt_lower = (tt or "").lower()
+                    if any(kw in tt_lower for kw in _CLUSTER_TITLE_KEYWORDS):
+                        is_cluster_brand = True
+                        break
+
+            if is_independent:
+                procurement_guidance = (
+                    "═══════════════════════════════════════════════════════════════\n"
+                    "PROCUREMENT MODEL: INDEPENDENT / BOUTIQUE / FOUNDER-LED\n"
+                    "═══════════════════════════════════════════════════════════════\n"
+                    f"This brand has procurement model: {brand_info.procurement_model!r}, "
+                    f"uniform freedom: {brand_info.uniform_freedom!r}, "
+                    f"opportunity level: {brand_info.opportunity_level!r}.\n"
+                    "\n"
+                    "CRITICAL OVERRIDE: For THIS brand, the buyers we want ARE corporate.\n"
+                    "Founders, co-founders, presidents, COOs, VPs of Operations, and\n"
+                    "regional VPs at independent / boutique brands are the ACTUAL\n"
+                    "decision-makers for uniform contracts. They are NOT to be rejected\n"
+                    "as 'C-suite' or 'corporate roles' for this brand.\n"
+                    "\n"
+                    "KEEP these for this brand (mark scope as chain_corporate or chain_area):\n"
+                    "- Founder, Co-Founder, Owner, Principal\n"
+                    "- President, COO, CEO (if directly involved in operations)\n"
+                    "- VP Operations, VP Hotel Operations, SVP Operations\n"
+                    "- Regional VP, Regional Director of Operations\n"
+                    "- Head of Procurement, Director of Procurement, VP Procurement\n"
+                    "- Chief Operating Officer, Chief Brand Officer\n"
+                    "\n"
+                    "STILL REJECT for this brand:\n"
+                    "- Pure investors / board members with no operational role\n"
+                    "- Pure marketing/revenue roles (Revenue Manager, National Accounts, PR)\n"
+                    "  BUT KEEP: Director of Sales & Events, Director of Catering,\n"
+                    "  Director of Banquets — they manage staff who NEED uniforms\n"
+                    "- Construction / development contractors\n"
+                    "- People at clearly different hotels/brands\n"
+                    "═══════════════════════════════════════════════════════════════\n"
+                )
+            elif is_cluster_brand:
+                # Build the "preferred titles" list directly from the brand
+                # registry so Gemini sees exactly what we want for THIS brand
+                titles_str = "\n".join(
+                    f"- {t}" for t in (brand_info.pre_opening_contact_titles or [])
+                )
+                procurement_guidance = (
+                    "═══════════════════════════════════════════════════════════════\n"
+                    "PROCUREMENT MODEL: REGIONAL CLUSTER BRAND (corporate IS reachable)\n"
+                    "═══════════════════════════════════════════════════════════════\n"
+                    f"This brand ({brand!r}) has procurement model: {brand_info.procurement_model!r}, "
+                    f"but is structured around REGIONAL corporate teams.\n"
+                    "\n"
+                    "CRITICAL OVERRIDE: For THIS brand, the actual uniform buyers are\n"
+                    "REGIONAL CORPORATE executives — VPs of Commercial Services, Cluster\n"
+                    "GMs, Above-Property Procurement Directors, Senior Corporate F&B\n"
+                    "Directors, etc. These people are NOT 'corporate noise to filter out';\n"
+                    "they ARE the decision-makers JA Uniforms needs to reach.\n"
+                    "\n"
+                    f"PREFERRED TITLES per the brand registry for {brand!r}:\n"
+                    f"{titles_str}\n"
+                    "\n"
+                    "KEEP for this brand (mark scope as chain_corporate or chain_area):\n"
+                    "- Anyone with the preferred titles above\n"
+                    "- Regional VPs / SVPs covering the property's region\n"
+                    "- Cluster General Managers (one GM covers multiple properties)\n"
+                    "- Above-Property / Corporate Procurement Directors\n"
+                    "- Senior Corporate Directors of F&B, Operations, Housekeeping\n"
+                    "- President/SVP of the brand's regional sub-organization\n"
+                    "  (e.g. 'President, Latin America & Caribbean')\n"
+                    "- VP/SVP Commercial Services for the property's region\n"
+                    "\n"
+                    "REGIONAL FIT MATTERS: A 'VP Operations EMEA' is NOT a fit for a\n"
+                    "Caribbean property. Match region to property location. If a contact\n"
+                    "covers a clearly different region, mark scope as chain_area instead\n"
+                    "of rejecting outright.\n"
+                    "\n"
+                    "STILL REJECT for this brand:\n"
+                    "- Pure investors / board members with no operational role\n"
+                    "- Pure marketing/revenue roles (Revenue Manager, National Accounts, PR)\n"
+                    "  BUT KEEP: Director of Sales & Events, Director of Catering,\n"
+                    "  Director of Banquets — they manage staff who NEED uniforms\n"
+                    "- Construction / development contractors\n"
+                    "- People at clearly different brands\n"
+                    "- People whose region is clearly mismatched (e.g. EMEA contact for Caribbean property)\n"
+                    "═══════════════════════════════════════════════════════════════\n"
+                )
+            else:
+                procurement_guidance = (
+                    "═══════════════════════════════════════════════════════════════\n"
+                    "PROCUREMENT MODEL: CHAIN-MANAGED (corporate locked / GPO-controlled)\n"
+                    "═══════════════════════════════════════════════════════════════\n"
+                    f"This brand has procurement model: {brand_info.procurement_model!r}, "
+                    f"uniform freedom: {brand_info.uniform_freedom!r}.\n"
+                    "Apply standard rules — reject C-suite/corporate, target property-\n"
+                    "level operational staff only. Corporate procurement at this brand\n"
+                    "is locked in to mandated suppliers / GPOs and not reachable.\n"
+                    "═══════════════════════════════════════════════════════════════\n"
+                )
+    except Exception as ex:
+        logger.debug(f"Failed to build procurement guidance: {ex}")
+
     prompt = CONTACT_VERIFICATION_PROMPT.format(
         hotel_name=hotel_name,
         location=location,
         brand=brand or "Unknown",
         management_company=management_company or "Unknown",
         hotel_status=hotel_status,
+        procurement_guidance=procurement_guidance,
         contacts_json=json.dumps(contacts_for_verification, indent=2),
     )
 
@@ -2221,6 +2684,244 @@ async def enrich_lead_contacts(
     timeline_label: Optional[str] = None,
     description: Optional[str] = None,
     project_type_str: Optional[str] = None,
+    search_name: Optional[str] = None,
+    former_names: Optional[list] = None,
+) -> EnrichmentResult:
+    """
+    Main enrichment entry (v5 — iterative researcher).
+
+    Replaces the v4 fixed-query pipeline with an incremental researcher
+    that asks ~3 queries, learns about the lead, then asks smarter
+    follow-up queries based on what it learned. See iterative_researcher.py
+    for the full strategy.
+
+    Output shape is identical to v4 (EnrichmentResult), so all callers
+    (routes, Celery tasks) keep working unchanged.
+
+    If iterative researcher fails for any reason, falls back to v4 legacy
+    pipeline so enrichment never returns nothing.
+    """
+    from app.services.iterative_researcher import (
+        ResearchState,
+        run_iterative_research,
+    )
+
+    result = EnrichmentResult()
+    logger.info(f"Starting enrichment v5 (iterative) for lead {lead_id}: {hotel_name}")
+
+    # ── Build research state from lead facts ──
+    research_state = ResearchState(
+        hotel_name=hotel_name,
+        brand=brand,
+        management_company=management_company,
+        city=city,
+        state=state,
+        country=country,
+        opening_date=opening_date,
+        timeline_label=timeline_label,
+        project_type=project_type_str,
+        search_name=search_name,
+        former_names=former_names,
+    )
+
+    # ── Run the iteration loop ──
+    try:
+        await run_iterative_research(research_state)
+    except Exception as ex:
+        logger.exception(f"Iterative researcher failed, falling back to v4: {ex}")
+        return await _enrich_lead_contacts_v4_legacy(
+            lead_id=lead_id,
+            hotel_name=hotel_name,
+            brand=brand,
+            city=city,
+            state=state,
+            country=country,
+            management_company=management_company,
+            opening_date=opening_date,
+            timeline_label=timeline_label,
+            description=description,
+            project_type_str=project_type_str,
+        )
+
+    # ── Convert ResearchState into EnrichmentResult ──
+    result.contacts = []
+    for n in research_state.discovered_names:
+        result.contacts.append(
+            {
+                "name": n.get("name", ""),
+                "title": n.get("title", ""),
+                "organization": n.get("organization", ""),
+                "scope": n.get("scope", "unknown"),
+                "confidence": n.get("confidence", "medium"),
+                "source": n.get("source", ""),
+                "source_type": n.get("source_type", "trade_press"),
+                "source_detail": n.get("source_detail"),  # Rich evidence from Iter 5/6
+                "linkedin": n.get("linkedin"),
+                "_iteration_found": n.get("_iteration_found"),
+                "_verification_result": n.get("_verification_result"),
+                "_current_employer": n.get("_current_employer"),
+                "_current_title": n.get("_current_title"),
+                "_role_period": n.get("_role_period"),
+                "_final_priority": n.get("_final_priority"),  # Iter 6: P1/P2/P3/P4
+                "_final_reasoning": n.get(
+                    "_final_reasoning"
+                ),  # Iter 6: strategist reasoning
+            }
+        )
+    result.sources_used = list(set(research_state.urls_scraped))
+    result.layers_tried = [
+        f"iter_{i}" for i in range(1, research_state.iterations_done + 1)
+    ]
+    result.management_company = research_state.operator_parent or management_company
+
+    # ── Apply Gemini verification on the discovered contacts ──
+    # CRITICAL: _verify_contacts_with_gemini returns NEW contact dicts that
+    # don't carry our Iter 5/6 metadata forward. Save the strategist verdicts
+    # by name BEFORE calling it, then re-merge them onto the survivors AFTER.
+    # Without this, strategist_priority is NULL in the DB and priority badges
+    # fall back to algorithmic values.
+    strategist_verdicts_by_name: dict = {}
+    for c in result.contacts:
+        nm = (c.get("name") or "").strip().lower()
+        if not nm:
+            continue
+        strategist_verdicts_by_name[nm] = {
+            "_final_priority": c.get("_final_priority"),
+            "_final_reasoning": c.get("_final_reasoning"),
+            "source_detail": c.get("source_detail"),
+            "_verification_result": c.get("_verification_result"),
+            "_current_employer": c.get("_current_employer"),
+            "_current_title": c.get("_current_title"),
+            "_role_period": c.get("_role_period"),
+            "_iteration_found": c.get("_iteration_found"),
+        }
+
+    if result.contacts:
+        try:
+            result.contacts = await _verify_contacts_with_gemini(
+                contacts=result.contacts,
+                hotel_name=hotel_name,
+                brand=brand,
+                management_company=research_state.operator_parent or management_company,
+                city=city,
+                state=state,
+                country=country,
+                opening_date=opening_date,
+            )
+        except Exception as ex:
+            logger.warning(f"Gemini verification failed (keeping raw contacts): {ex}")
+
+    # ── Re-merge strategist verdicts onto surviving contacts ──
+    # Gemini verification removed some contacts (rejected) and rebuilt the
+    # dicts for the ones it kept. Restore our Iter 5/6 fields so the strategist
+    # priority actually reaches the DB.
+    merged_count = 0
+    for c in result.contacts:
+        nm = (c.get("name") or "").strip().lower()
+        saved = strategist_verdicts_by_name.get(nm)
+        if not saved:
+            continue
+        for key, val in saved.items():
+            if val is not None and not c.get(key):
+                c[key] = val
+        if saved.get("_final_priority"):
+            merged_count += 1
+    if merged_count:
+        logger.info(
+            f"[PERSIST] Re-merged strategist verdicts onto {merged_count} "
+            f"surviving contacts after Gemini verification"
+        )
+
+    # ── Final dedupe by name ──
+    seen = set()
+    deduped = []
+    for c in result.contacts:
+        key = (c.get("name") or "").lower().strip()
+        if key and key not in seen:
+            seen.add(key)
+            deduped.append(c)
+    result.contacts = deduped
+
+    # ── Classify tier + score every contact (so dashboard sort works) ──
+    # The legacy v4 pipeline did this via contact_validator.filter_and_rank.
+    # The iterative pipeline bypasses that, so contacts arrived at the
+    # dashboard with no tier/score → no proper priority ordering.
+    #
+    # When Iter 6 (reasoning pass) has assigned a final_priority (P1-P4),
+    # we use THAT as the primary signal and boost/floor the score accordingly.
+    # Title classification is the fallback when Gemini didn't decide.
+    _FINAL_PRIORITY_SCORE_FLOOR = {
+        "P1": 28,  # Higher than the old "tier 1 hotel_specific" ceiling
+        "P2": 18,
+        "P3": 10,
+        "P4": 2,
+    }
+    for c in result.contacts:
+        title = c.get("title") or ""
+        try:
+            classification = title_classifier.classify(title)
+            c["_buyer_tier"] = classification.tier.name
+            # Base score from tier + scope multiplier (matches legacy pattern)
+            base = title_classifier.TIER_SCORES.get(classification.tier, 3)
+            scope_mult = {
+                "hotel_specific": 3.0,
+                "chain_area": 2.0,
+                "chain_corporate": 1.2,
+                "unknown": 1.0,
+            }.get(c.get("scope") or "unknown", 1.0)
+            c["_validation_score"] = int(base * scope_mult)
+        except Exception as ex:
+            logger.debug(f"Title classification failed for {title!r}: {ex}")
+            c["_buyer_tier"] = "UNKNOWN"
+            c["_validation_score"] = 5
+
+        # Apply Iter 6 final priority — it overrides title-based scoring when
+        # present. The strategist sees the whole picture (timeline, stage,
+        # company verification, role verification) and its verdict wins.
+        fp = c.get("_final_priority")
+        if fp in _FINAL_PRIORITY_SCORE_FLOOR:
+            floor = _FINAL_PRIORITY_SCORE_FLOOR[fp]
+            # Score = max(title-based, priority floor). So a P1 is always >=28
+            # even if the title wasn't a classic buyer role.
+            c["_validation_score"] = max(c["_validation_score"], floor)
+
+    # ── Sort contacts: by Iter 6 final priority first (P1→P4), then score ──
+    _PRIORITY_RANK = {"P1": 0, "P2": 1, "P3": 2, "P4": 3}
+    result.contacts.sort(
+        key=lambda c: (
+            _PRIORITY_RANK.get(c.get("_final_priority") or "", 4),  # P1 contacts first
+            # Within same priority, prefer property-specific scope
+            {"hotel_specific": 0, "chain_area": 1, "chain_corporate": 2}.get(
+                c.get("scope") or "unknown", 3
+            ),
+            -(c.get("_validation_score") or 0),
+        )
+    )
+
+    logger.info(
+        f"Enrichment v5 complete for {hotel_name}: "
+        f"{len(result.contacts)} contacts, "
+        f"iters={research_state.iterations_done}, "
+        f"queries_run={len(research_state.queries_run)}, "
+        f"discovered_owner={research_state.owner_company!r}, "
+        f"discovered_operator_parent={research_state.operator_parent!r}"
+    )
+
+    return result
+
+
+async def _enrich_lead_contacts_v4_legacy(
+    lead_id: int,
+    hotel_name: str,
+    brand: Optional[str] = None,
+    city: Optional[str] = None,
+    state: Optional[str] = None,
+    country: Optional[str] = None,
+    management_company: Optional[str] = None,
+    opening_date: Optional[str] = None,
+    timeline_label: Optional[str] = None,
+    description: Optional[str] = None,
+    project_type_str: Optional[str] = None,
 ) -> EnrichmentResult:
     """
     Main enrichment function v4. Runs multi-layer search with
@@ -2262,6 +2963,8 @@ async def enrich_lead_contacts(
             opening_date,
             result,
             retry_attempt=0,
+            phase=pt.starting_phase,
+            project_type=pt.project_type,
         )
         if found:
             hotel_specific = [
@@ -2447,6 +3150,75 @@ async def enrich_lead_contacts(
             # Restore protected contacts that Gemini tried to reject.
             # These are in contacts_before_verify with _gemini_rejected=True but
             # are NOT in the returned list because _verify drops rejects.
+            #
+            # FIX: Even when "title proves hotel" (target hotel name appears
+            # in snippet), we must NOT override Gemini if its rejection reason
+            # explicitly identifies the contact as a hotel/brand name rather
+            # than a person, OR as belonging to a different hotel, OR as
+            # not having a confirmable operational role. Trust Gemini in
+            # these cases — the heuristic is wrong.
+            #
+            # ADDITIONAL FIX: Even if the rejection reason isn't on the trust
+            # list, never force-keep a contact with no title. A "high
+            # confidence hotel_specific" tag on someone whose title is empty
+            # is meaningless and contaminates the contact list.
+            _GEMINI_TRUST_PHRASES = (
+                # Identity-based — not a person at all
+                "is a hotel name",
+                "is likely a hotel",
+                "is the hotel",
+                "is the resort",
+                "is a brand",
+                "is a brand name",
+                "is the name of",
+                "is a property",
+                "not a person",
+                "is not a person",
+                # Wrong target
+                "different hotel",
+                "different property",
+                "different resort",
+                "wrong hotel",
+                "wrong property",
+                "mentioned in a post by someone else",
+                # No usable role
+                "no current job title",
+                "no specific job title",
+                "no specific operational title",
+                "no operational title",
+                "no job title provided",
+                "is not a current job title",
+                "aspiring",
+                "aspiring chef",
+                "aspiring professional",
+                # Wrong role for uniform sales
+                "not operational hotel staff",
+                "is a sales/marketing role",
+                "sales role",
+                "marketing role",
+            )
+
+            def _has_real_title(contact: dict) -> bool:
+                """Contact must have a non-empty, non-generic title to be
+                worth force-keeping despite Gemini rejection."""
+                title = (contact.get("title") or "").strip().lower()
+                if not title or len(title) < 4:
+                    return False
+                # Reject placeholder/generic titles
+                generic_titles = {
+                    "director of",
+                    "manager",
+                    "professional",
+                    "staff",
+                    "employee",
+                    "aspiring",
+                    "aspiring chef",
+                    "student",
+                    "intern",
+                    "trainee",
+                }
+                return title not in generic_titles
+
             restored_names = {
                 c.get("name", "").lower().strip() for c in result.contacts
             }
@@ -2456,6 +3228,25 @@ async def enrich_lead_contacts(
                     and c.get("_gemini_rejected")
                     and c.get("name", "").lower().strip() not in restored_names
                 ):
+                    rejection_reason = (c.get("_gemini_rejection_reason") or "").lower()
+                    # Trust Gemini when reason matches any trust phrase
+                    if any(p in rejection_reason for p in _GEMINI_TRUST_PHRASES):
+                        logger.info(
+                            f"NO OVERRIDE: trusting Gemini reject for "
+                            f"{c.get('name')} — reason matches trust phrase "
+                            f"({(c.get('_gemini_rejection_reason') or '')[:80]})"
+                        )
+                        continue
+                    # Also reject the override if the contact has no real title.
+                    # A no-title contact should NEVER be force-kept as
+                    # "high confidence hotel_specific".
+                    if not _has_real_title(c):
+                        logger.info(
+                            f"NO OVERRIDE: refusing to force-keep "
+                            f"{c.get('name')} — title is empty/generic "
+                            f"({c.get('title')!r}), can't justify override"
+                        )
+                        continue
                     logger.info(
                         f"OVERRIDE: keeping {c.get('name')} despite Gemini reject "
                         f"({c.get('_gemini_rejection_reason')}) — title proves hotel"
@@ -2528,6 +3319,8 @@ async def enrich_lead_contacts(
                     opening_date,
                     result,
                     retry_attempt=1,
+                    phase=pt.starting_phase,
+                    project_type=pt.project_type,
                 )
                 # Re-validate with new contacts included
                 if len(result.contacts) > retry_result_contacts_before:
@@ -2548,6 +3341,21 @@ async def enrich_lead_contacts(
         # e.g. independent/collection brands score higher (more opportunity)
         #      Avendra-constrained brands score slightly lower
         brand_multiplier = BrandRegistry.get_contact_score_multiplier(brand or "")
+
+        # FIX: For renovations/rebrands, property-level contacts gain expanded
+        # vendor authority (emergency reorders, post-closure procurement).
+        # The brand registry's static "brand_managed → 0.75x" penalty understates
+        # opportunity in these scenarios. Bump multiplier toward 1.0 (or above)
+        # for these project types so property-found contacts aren't suppressed.
+        if pt.project_type in ("rebrand", "renovation") and brand_multiplier < 1.0:
+            adjusted_multiplier = min(1.1, brand_multiplier + 0.25)
+            logger.info(
+                f"Project type {pt.project_type}: bumping brand multiplier "
+                f"{brand_multiplier}x -> {adjusted_multiplier}x "
+                f"(property GMs gain vendor authority during reopenings)"
+            )
+            brand_multiplier = adjusted_multiplier
+
         if brand_multiplier != 1.0:
             for sc in scored_contacts:
                 sc.total_score = int(sc.total_score * brand_multiplier)
@@ -2599,13 +3407,37 @@ async def enrich_lead_contacts(
     result.contacts = unique
 
     # ── Fill missing LinkedIn URLs via quick search ──
+    # For each discovered contact, search Google to find their specific
+    # LinkedIn profile URL. Uses the full name + operator context.
+    #
+    # FIX: use parent_company (e.g. "Hyatt Inclusive Collection") over bare
+    # brand (e.g. "Dreams") because corporate execs list the PARENT on
+    # LinkedIn, not the individual brand. Also quote the name to force an
+    # exact-match lookup — unquoted names match unrelated people.
+    try:
+        brand_info = BrandRegistry.lookup(brand) if brand else None
+    except Exception:
+        brand_info = None
+
+    # Preferred operator context for LinkedIn search, in priority order:
+    #   1. parent_company from registry (e.g. "Hyatt Inclusive Collection")
+    #   2. the lead's management_company
+    #   3. fall back to the bare brand
+    operator_context = ""
+    if brand_info and brand_info.parent_company:
+        operator_context = brand_info.parent_company.split("(")[0].strip()
+    elif management_company:
+        operator_context = management_company
+    elif brand:
+        operator_context = brand
+
     for c in result.contacts:
         if not c.get("linkedin") and c.get("name"):
             try:
                 name = c["name"]
-                # Keep query short for better results
-                short_brand = brand or hotel_name.split(",")[0].split(" - ")[0][:30]
-                li_query = f"{name} {short_brand} linkedin"
+                # Quote the name for exact-match. Append operator context
+                # so we don't match strangers with the same name.
+                li_query = f'"{name}" {operator_context} linkedin'.strip()
                 li_results = await _search_web(li_query, max_results=3)
                 for r in li_results:
                     r_url = r.get("url", "")
@@ -2800,3 +3632,202 @@ async def save_enrichment_to_lead(lead_id: int, result: EnrichmentResult) -> dic
             "contacts_found": len(result.contacts),
             "best_contact": best,
         }
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# PERSIST HELPER — saves enrichment to BOTH flat fields AND lead_contacts table
+# ───────────────────────────────────────────────────────────────────────────
+# Why this exists:
+#   - save_enrichment_to_lead() (above) only updates potential_leads.contact_*
+#     and the notes blob. It never populates the lead_contacts table.
+#   - The dashboard's /enrich button (routes/contacts.py) had this logic
+#     inlined. The auto_enrich Celery task did NOT — so auto-enriched leads
+#     showed an empty contacts panel in the dashboard.
+#   - This helper centralizes the lead_contacts persistence so any caller
+#     (dashboard route, autonomous task, future CLI) gets identical behavior.
+#
+# Behavior:
+#   - flat fields on potential_leads: fill-empty only (never overwrite)
+#   - lead_contacts table: MERGE on normalized name
+#       * existing contact found → fill empty fields only (respects user pins)
+#       * new name → insert as LeadContact
+#   - First contact in the result list is marked is_primary=True on insert
+#   - Caller MUST commit the session (this helper does not commit)
+#   - Caller may want to call rescore_lead() afterwards
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+async def persist_enrichment_contacts(
+    lead_id: int,
+    enrichment_result: "EnrichmentResult",
+    session,
+) -> dict:
+    """
+    Persist enrichment results into the database.
+
+    Updates:
+      1. potential_leads.contact_* / management_company / developer / owner
+         (fill-empty only — never overwrites populated fields)
+      2. lead_contacts table (MERGE on normalized name)
+
+    Args:
+        lead_id: PotentialLead.id to persist into
+        enrichment_result: EnrichmentResult from enrich_lead_contacts()
+        session: open AsyncSession (caller manages transaction + commit)
+
+    Returns:
+        dict with: status, contacts_added, contacts_updated, flat_fields_updated, lead_not_found
+    """
+    from sqlalchemy import select
+    from app.models.potential_lead import PotentialLead
+    from app.models.lead_contact import LeadContact
+    from app.services.utils import normalize_hotel_name
+
+    summary = {
+        "status": "no_data",
+        "contacts_added": 0,
+        "contacts_updated": 0,
+        "flat_fields_updated": [],
+    }
+
+    # ── Load lead ──
+    lead_result = await session.execute(
+        select(PotentialLead).where(PotentialLead.id == lead_id)
+    )
+    lead = lead_result.scalar_one_or_none()
+    if not lead:
+        summary["status"] = "lead_not_found"
+        logger.warning(f"persist_enrichment_contacts: lead {lead_id} not found")
+        return summary
+
+    # ── Update flat lead fields (fill-empty only) ──
+    if enrichment_result.management_company and not lead.management_company:
+        lead.management_company = enrichment_result.management_company
+        summary["flat_fields_updated"].append("management_company")
+    if enrichment_result.developer and not lead.developer:
+        lead.developer = enrichment_result.developer
+        summary["flat_fields_updated"].append("developer")
+    if getattr(enrichment_result, "owner", None) and not lead.owner:
+        lead.owner = enrichment_result.owner
+        summary["flat_fields_updated"].append("owner")
+
+    if enrichment_result.best_contact:
+        bc = enrichment_result.best_contact
+        if bc.get("name") and not lead.contact_name:
+            lead.contact_name = bc["name"]
+            summary["flat_fields_updated"].append("contact_name")
+        if bc.get("title") and not lead.contact_title:
+            lead.contact_title = bc["title"]
+            summary["flat_fields_updated"].append("contact_title")
+        if bc.get("email") and not lead.contact_email:
+            lead.contact_email = bc["email"]
+            summary["flat_fields_updated"].append("contact_email")
+        if bc.get("phone") and not lead.contact_phone:
+            lead.contact_phone = bc["phone"]
+            summary["flat_fields_updated"].append("contact_phone")
+
+    lead.updated_at = local_now()
+
+    # ── Persist contacts to lead_contacts table (MERGE) ──
+    if enrichment_result.contacts:
+        existing_result = await session.execute(
+            select(LeadContact).where(LeadContact.lead_id == lead_id)
+        )
+        existing_by_norm: dict = {
+            normalize_hotel_name(c.name): c for c in existing_result.scalars().all()
+        }
+
+        for i, c in enumerate(enrichment_result.contacts):
+            name = (c.get("name") or "").strip()
+            if not name:
+                continue
+
+            normalized = normalize_hotel_name(name)
+            existing = existing_by_norm.get(normalized)
+
+            if existing:
+                # Fill empty fields only — respects user-pinned contacts
+                filled = []
+                if not existing.email and c.get("email"):
+                    existing.email = c["email"]
+                    filled.append("email")
+                if not existing.phone and c.get("phone"):
+                    existing.phone = c["phone"]
+                    filled.append("phone")
+                if not existing.linkedin and c.get("linkedin"):
+                    existing.linkedin = c["linkedin"]
+                    filled.append("linkedin")
+                if not existing.title and c.get("title"):
+                    existing.title = c["title"]
+                    filled.append("title")
+                if not existing.organization and c.get("organization"):
+                    existing.organization = c["organization"]
+                    filled.append("organization")
+                if not existing.evidence_url and c.get("source"):
+                    existing.evidence_url = c["source"]
+                    filled.append("evidence_url")
+                # Strategist verdict is always refreshed (not fill-empty) —
+                # each enrichment should carry the latest strategic assessment
+                if c.get("_final_priority"):
+                    if existing.strategist_priority != c["_final_priority"]:
+                        filled.append("strategist_priority")
+                    existing.strategist_priority = c["_final_priority"]
+                if c.get("_final_reasoning"):
+                    existing.strategist_reasoning = c["_final_reasoning"]
+                # source_detail gets refreshed too when new rich evidence arrives
+                new_detail = c.get("source_detail")
+                if new_detail and new_detail != existing.source_detail:
+                    existing.source_detail = new_detail
+                    filled.append("source_detail")
+                if filled:
+                    existing.last_enriched_at = local_now()
+                    summary["contacts_updated"] += 1
+                    logger.info(
+                        f"persist_enrichment_contacts: lead {lead_id}: "
+                        f"updated '{existing.name}' (filled {', '.join(filled)})"
+                    )
+            else:
+                # Insert new contact
+                contact = LeadContact(
+                    lead_id=lead_id,
+                    name=name,
+                    title=c.get("title"),
+                    email=c.get("email"),
+                    phone=c.get("phone"),
+                    linkedin=c.get("linkedin"),
+                    organization=c.get("organization"),
+                    scope=c.get("scope", "unknown"),
+                    confidence=c.get(
+                        "_validation_confidence", c.get("confidence", "medium")
+                    ),
+                    tier=c.get("_buyer_tier"),
+                    score=c.get("_validation_score", 0),
+                    # Iter 6 strategist verdict — authoritative priority + reasoning
+                    strategist_priority=c.get("_final_priority"),
+                    strategist_reasoning=c.get("_final_reasoning"),
+                    is_primary=(i == 0),
+                    found_via=", ".join(enrichment_result.layers_tried)
+                    if enrichment_result.layers_tried
+                    else "web_search",
+                    source_detail=c.get(
+                        "source_detail",  # Rich evidence from Iter 5 verification
+                        c.get("confidence_note", c.get("_validation_reason", "")),
+                    ),
+                    evidence_url=c.get("source"),
+                    last_enriched_at=local_now(),
+                )
+                session.add(contact)
+                summary["contacts_added"] += 1
+                logger.info(
+                    f"persist_enrichment_contacts: lead {lead_id}: "
+                    f"added '{name}' [{c.get('scope', 'unknown')}]"
+                )
+
+    if (
+        summary["contacts_added"]
+        or summary["contacts_updated"]
+        or summary["flat_fields_updated"]
+    ):
+        summary["status"] = "saved"
+
+    return summary

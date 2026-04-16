@@ -291,7 +291,7 @@ SEARCH_LAYERS = [
 
 VALIDATION_SETTINGS = {
     "min_contact_score": 5,
-    "max_contacts_per_lead": 5,
+    "max_contacts_per_lead": 10,
     "name_collision_penalty": -15,
     "unrelated_org_penalty": -10,
     "hotel_specific_bonus": 15,
@@ -307,6 +307,7 @@ VALIDATION_SETTINGS = {
 # ═══════════════════════════════════════════════════════════════
 
 HOSPITALITY_NEWS_DOMAINS = [
+    # ── Hospitality trade press (industry news, appointments, interviews) ──
     "hotel-online.com",
     "hotelexecutive.com",
     "hotelmanagement.net",
@@ -314,6 +315,31 @@ HOSPITALITY_NEWS_DOMAINS = [
     "hotelsmag.com",
     "hotelnewsresource.com",
     "costar.com",
+    "hoteliermagazine.com",  # named Hyatt corp execs in HIC reorg article
+    "travelmarketreport.com",  # interviews with corporate VPs (Shyla Gardner)
+    "luxurytraveladvisor.com",
+    "travelweekly.com",
+    "skift.com",
+    "businesstravelnews.com",
+    "phocuswire.com",
+    "lodgingmagazine.com",
+    "hotelbusiness.com",
+    "asiahoteliers.com",
+    "caribjournal.com",  # Caribbean-specific hotel news
+    "caribbeanjournal.com",
+    "ourtoday.news",  # Jamaican business news
+    "jamaica-gleaner.com",  # Jamaican news (Caribbean leads)
+    # ── Operator newsrooms (press releases naming corporate appointments) ──
+    "newsroom.hyatt.com",
+    "news.marriott.com",
+    "newsroom.marriott.com",
+    "newsroom.hilton.com",
+    "newsroom.ihg.com",
+    "press.accor.com",
+    "press.radissonhotels.com",
+    "newsroom.wyndhamhotels.com",
+    # ── Corporate org / professional profile sites ──
+    "theorg.com",  # corporate org charts with named execs
 ]
 
 
@@ -450,7 +476,7 @@ ENRICHMENT_SETTINGS = {
     "ddg_delay_seconds": 1.5,
     "serper_delay_seconds": 0.5,  # Serper is fast, minimal delay needed
     "crawl_timeout_seconds": 20,
-    "max_articles_to_scrape": 5,
+    "max_articles_to_scrape": 12,
     # M-03: Model name loaded from app settings at runtime (see get_gemini_model())
     "gemini_model": None,  # Resolved lazily below
     "max_article_chars": 12000,

@@ -351,7 +351,10 @@ def auto_enrich(self) -> Dict[str, Any]:
 
             for lead in to_enrich:
                 try:
-                    from app.services.contact_enrichment import enrich_lead_contacts
+                    from app.services.contact_enrichment import (
+                        enrich_lead_contacts,
+                        persist_enrichment_contacts,
+                    )
                     from app.services.rescore import rescore_lead
 
                     logger.info(
@@ -366,20 +369,35 @@ def auto_enrich(self) -> Dict[str, Any]:
                         state=lead.state,
                         country=lead.country,
                         management_company=lead.management_company,
+                        opening_date=lead.opening_date,
+                        timeline_label=lead.timeline_label,
+                        description=lead.description,
+                        project_type_str=lead.hotel_type,
                     )
 
                     if enrich_result and enrich_result.contacts:
+                        # FIX: Persist to lead_contacts table + flat lead fields.
+                        # Previously this task called enrich_lead_contacts() but
+                        # never wrote contacts to the DB, so the dashboard's
+                        # contacts panel stayed empty for auto-enriched leads.
+                        persist_summary = await persist_enrichment_contacts(
+                            lead.id, enrich_result, session
+                        )
                         results["enriched"] += 1
                         results["leads_enriched"].append(
                             {
                                 "name": lead.hotel_name,
                                 "contacts": len(enrich_result.contacts),
+                                "added": persist_summary["contacts_added"],
+                                "updated": persist_summary["contacts_updated"],
                             }
                         )
                         await rescore_lead(lead.id, session)
                         logger.info(
                             f"  {lead.hotel_name}: "
-                            f"{len(enrich_result.contacts)} contacts"
+                            f"{len(enrich_result.contacts)} contacts found "
+                            f"({persist_summary['contacts_added']} new, "
+                            f"{persist_summary['contacts_updated']} updated)"
                         )
                     else:
                         results["skipped"] += 1

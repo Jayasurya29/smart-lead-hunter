@@ -53,6 +53,8 @@ async def enrich_lead(lead_id: int, _csrf=Depends(require_ajax)):
         timeline_label = lead.timeline_label or ""
         description = lead.description or ""
         project_type_str = lead.hotel_type or ""
+        search_name = getattr(lead, "search_name", None) or ""
+        former_names = getattr(lead, "former_names", None) or []
         # FIX C-04: Capture updated_at for optimistic lock check
         lead_updated_at = lead.updated_at
 
@@ -72,6 +74,8 @@ async def enrich_lead(lead_id: int, _csrf=Depends(require_ajax)):
             timeline_label=timeline_label,
             description=description,
             project_type_str=project_type_str,
+            search_name=search_name,
+            former_names=former_names,
         )
     except Exception as e:
         logger.error(f"Enrichment failed for lead {lead_id}: {e}", exc_info=True)
@@ -195,6 +199,18 @@ async def enrich_lead(lead_id: int, _csrf=Depends(require_ajax)):
                             if not ec.evidence_url and c.get("source"):
                                 ec.evidence_url = c["source"]
                                 filled.append("evidence_url")
+                            # Strategist verdict always refreshes (not fill-empty)
+                            if c.get("_final_priority"):
+                                if ec.strategist_priority != c["_final_priority"]:
+                                    filled.append("strategist_priority")
+                                ec.strategist_priority = c["_final_priority"]
+                            if c.get("_final_reasoning"):
+                                ec.strategist_reasoning = c["_final_reasoning"]
+                            # source_detail refreshes when new evidence arrives
+                            new_detail = c.get("source_detail")
+                            if new_detail and new_detail != ec.source_detail:
+                                ec.source_detail = new_detail
+                                filled.append("source_detail")
                             if filled:
                                 logger.info(
                                     f"Updated {ec.name}: filled {', '.join(filled)}"
@@ -215,12 +231,16 @@ async def enrich_lead(lead_id: int, _csrf=Depends(require_ajax)):
                         ),
                         tier=c.get("_buyer_tier"),
                         score=c.get("_validation_score", 0),
+                        # Iter 6 strategist verdict — the authoritative priority
+                        strategist_priority=c.get("_final_priority"),
+                        strategist_reasoning=c.get("_final_reasoning"),
                         is_primary=(i == 0),
                         found_via=", ".join(enrichment_result.layers_tried)
                         if enrichment_result.layers_tried
                         else "web_search",
                         source_detail=c.get(
-                            "confidence_note", c.get("_validation_reason", "")
+                            "source_detail",
+                            c.get("confidence_note", c.get("_validation_reason", "")),
                         ),
                         evidence_url=c.get("source"),
                         last_enriched_at=local_now(),
@@ -265,6 +285,10 @@ async def list_contacts(lead_id: int, db: AsyncSession = Depends(get_db)):
         .where(LeadContact.lead_id == lead_id)
         .order_by(
             LeadContact.is_primary.desc(),
+            # Strategist priority (P1/P2/P3/P4) takes precedence when set.
+            # Postgres sorts NULL last by default — contacts without a
+            # strategist verdict fall to the bottom of their is_primary group.
+            LeadContact.strategist_priority.asc().nullslast(),
             case(
                 (LeadContact.scope == "hotel_specific", 0),
                 (LeadContact.scope == "chain_area", 1),
@@ -274,7 +298,21 @@ async def list_contacts(lead_id: int, db: AsyncSession = Depends(get_db)):
             LeadContact.is_saved.desc(),
         )
     )
-    return [c.to_dict() for c in result.scalars().all()]
+    contacts = [c.to_dict() for c in result.scalars().all()]
+
+    # Re-sort using the computed priority_label (P1 → P4) so the sales team
+    # always sees the highest-priority contacts first. Falls back to score
+    # within the same priority bucket.
+    _PRI_RANK = {"P1": 0, "P2": 1, "P3": 2, "P4": 3}
+    contacts.sort(
+        key=lambda c: (
+            0 if c.get("is_primary") else 1,
+            _PRI_RANK.get(c.get("priority_label", "P4"), 4),
+            -(c.get("score") or 0),
+            0 if c.get("is_saved") else 1,
+        )
+    )
+    return contacts
 
 
 @router.post("/api/dashboard/leads/{lead_id}/contacts/{contact_id}/save")

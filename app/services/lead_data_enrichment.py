@@ -170,16 +170,35 @@ async def enrich_lead_data(
 
     if mode == "full":
         # Refresh everything
-        missing = ["opening_date", "brand_tier", "room_count", "brand"]
+        missing = [
+            "opening_date",
+            "brand_tier",
+            "room_count",
+            "brand",
+            "city",
+            "state",
+            "country",
+        ]
         queries = [
             f'"{hotel_name}" {location} hotel opening 2025 2026 2027',
             f'"{hotel_name}" {location} hotel rooms brand development',
+            # Name discovery — find the official name + operator
+            f'"{hotel_name}" {location} hotel "managed by" OR "operated by" OR "officially" OR "known as"',
         ]
     else:
         # Smart mode: only search for missing fields
         missing = []
         queries = []
 
+        # Always add a name-discovery query — correcting the name is always valuable
+        queries.append(
+            f'"{hotel_name}" {location} hotel announcement OR opening OR management'
+        )
+
+        if not city:
+            missing.append("city")
+        if not state:
+            missing.append("state")
         if not current_opening_date:
             missing.append("opening_date")
             queries.append(f'"{hotel_name}" {location} opening date 2025 2026 2027')
@@ -204,7 +223,7 @@ async def enrich_lead_data(
         queries.insert(0, f'"{hotel_name}" {location} hotel')
 
     # Limit to 3 queries max
-    queries = queries[:3]
+    queries = queries[:4]
 
     # Search
     all_snippets = []
@@ -255,6 +274,56 @@ ROOM COUNT EXTRACTION: For room_count, scan ALL snippets for patterns like:
 "227 rooms", "300 keys", "150-room hotel", "120 guest rooms", "34 suites and 266 rooms"
 Extract the TOTAL room/key count as an integer. This is usually stated clearly in hotel descriptions.
 
+LOCATION EXTRACTION: If city or state is missing, extract from snippets or the hotel name itself.
+- "Hard Rock Hotel & Casino San Juan" → city: "San Juan", state: "Puerto Rico", country: "Puerto Rico"
+- "Kali Hotel and Rooftop, Autograph Collection" in Inglewood → city: "Inglewood", state: "California", country: "USA"
+- "Royalton CHIC Jamaica Paradise Cove" in Runaway Bay → city: "Runaway Bay", state: "St. Ann", country: "Jamaica"
+- For Caribbean islands, country = island name (e.g. "Jamaica", "Turks and Caicos", "Barbados")
+- For US territories, country = "USA" but state = territory name (e.g. "Puerto Rico", "US Virgin Islands")
+
+═══════════════════════════════════════════════════════════════
+NAME INTELLIGENCE — ALWAYS EXTRACT THESE (regardless of mode):
+═══════════════════════════════════════════════════════════════
+
+1. official_name: The CORRECT, full official hotel name as used in press releases,
+   the hotel's own website, or Marriott/Hilton/Hyatt listings. The input name may be
+   a project code, developer shorthand, or abbreviated version.
+   Examples:
+   - "KPC Hollywood Park Hotel" → "Kali Hotel and Rooftop, Autograph Collection"
+   - "Treasure Beach Village, Beaches Turks & Caicos" → same (already correct)
+   - "Dreams Rose Hall Resort & Spa" → same (already correct)
+
+2. search_name: A SHORT version of the hotel name for Google searches — strip
+   "Resort & Spa", "Hotel", "An Autograph Collection Resort", "by Marriott" etc.
+   Examples:
+   - "Kali Hotel and Rooftop, Autograph Collection" → "Kali Hotel"
+   - "Dreams Rose Hall Resort & Spa" → "Dreams Rose Hall"
+   - "Secrets Macao Beach Punta Cana" → "Secrets Macao Beach"
+   - "Royalton CHIC Jamaica Paradise Cove" → "Royalton CHIC Jamaica"
+
+3. management_company: The company that OPERATES/MANAGES the hotel day-to-day.
+   This is NOT always the brand owner. For soft brands like Autograph Collection,
+   Tribute Portfolio, Curio Collection — the operator is often a third-party company.
+   Examples:
+   - Kali Hotel → Crescent Hotels & Resorts (NOT Marriott)
+   - Dreams Rose Hall → Hyatt Inclusive Collection
+   - Royalton CHIC Jamaica → Royalton Hotels & Resorts (formerly Blue Diamond)
+
+4. owner: The company/person that OWNS the physical property.
+   Examples:
+   - Kali Hotel → KPC Development Company
+   - Dreams Rose Hall → Hyatt (owned and operated)
+   - Secrets Macao Beach → GSM Investissements Dominicana S.R.L.
+
+5. former_names: JSON array of any PREVIOUS names this property had, if it was
+   rebranded or converted. Empty array [] if it's a new build.
+   Examples:
+   - St. Regis Kapalua Bay → ["Montage Kapalua Bay", "The Residences at Kapalua Bay"]
+   - Dreams Rose Hall → ["Hilton Rose Hall Resort & Spa"]
+   - Kali Hotel → [] (new build)
+
+═══════════════════════════════════════════════════════════════
+
 CRITICAL CHECKS — READ CAREFULLY:
 
 1. ALREADY OPEN: If the hotel is currently operating (has reviews, accepting guests, open for business), include "already_opened": true and "opened_date": "Month Year".
@@ -267,7 +336,7 @@ CRITICAL CHECKS — READ CAREFULLY:
 
 Keywords that mean NOT a new opening: "closed for", "repair", "hurricane", "storm damage", "renovation", "refurbishment", "reopening", "temporarily closed", "damage".
 Respond ONLY with a JSON object. Include ONLY fields you found evidence for. Do NOT guess.
-Example: {{"opening_date": "Q3 2026", "brand_tier": "tier2_luxury", "room_count": 150, "brand": "Auberge Collection", "description": "Brief 1-sentence summary", "confidence": "high"}}
+Example: {{"opening_date": "Q3 2026", "brand_tier": "tier2_luxury", "room_count": 150, "brand": "Auberge Collection", "official_name": "Auberge Beach Residences & Spa", "search_name": "Auberge Beach", "management_company": "Auberge Resorts Collection", "owner": "The Related Group", "former_names": [], "description": "Brief 1-sentence summary", "confidence": "high"}}
 
 If you cannot find reliable information for a field, DO NOT include it.
 Confidence levels: "high" (multiple sources agree), "medium" (one source), "low" (inferred)
@@ -344,6 +413,22 @@ Confidence levels: "high" (multiple sources agree), "medium" (one source), "low"
             result["brand"] = str(parsed["brand"])
             result["changes"].append("brand")
 
+    if "city" in parsed:
+        c = str(parsed["city"]).strip()
+        if c and c.lower() not in ("unknown", "n/a", ""):
+            result["city"] = c
+            result["changes"].append("city")
+    if "state" in parsed:
+        s = str(parsed["state"]).strip()
+        if s and s.lower() not in ("unknown", "n/a", ""):
+            result["state"] = s
+            result["changes"].append("state")
+    if "country" in parsed:
+        co = str(parsed["country"]).strip()
+        if co and co.lower() not in ("unknown", "n/a", ""):
+            result["country"] = co
+            result["changes"].append("country")
+
     if "description" in parsed:
         result["description"] = str(parsed["description"])[:500]
 
@@ -368,6 +453,36 @@ Confidence levels: "high" (multiple sources agree), "medium" (one source), "low"
                 f"Renovation/closure detected for {hotel_name} — "
                 f"reopening: {reopening}. Classified as renovation, not new build."
             )
+
+    # ── NAME INTELLIGENCE — always extracted ──
+    if "official_name" in parsed:
+        official = str(parsed["official_name"]).strip()
+        if official and official.lower() != hotel_name.lower():
+            result["official_name"] = official
+            result["changes"].append("official_name")
+            logger.info(f"Name correction: '{hotel_name}' → '{official}'")
+
+    if "search_name" in parsed:
+        result["search_name"] = str(parsed["search_name"]).strip()
+        result["changes"].append("search_name")
+
+    if "management_company" in parsed:
+        mc = str(parsed["management_company"]).strip()
+        if mc and mc.lower() not in ("unknown", "n/a", "none", ""):
+            result["management_company"] = mc
+            result["changes"].append("management_company")
+
+    if "owner" in parsed:
+        ow = str(parsed["owner"]).strip()
+        if ow and ow.lower() not in ("unknown", "n/a", "none", ""):
+            result["owner"] = ow
+            result["changes"].append("owner")
+
+    if "former_names" in parsed:
+        fn = parsed["former_names"]
+        if isinstance(fn, list) and fn:
+            result["former_names"] = fn
+            result["changes"].append("former_names")
 
     result["confidence"] = parsed.get("confidence", "medium")
     result["source_url"] = all_urls[0] if all_urls else None

@@ -25,6 +25,27 @@ function safe(val: any): string {
   return ''
 }
 
+/** Priority badge — P1 (green) = call first, P4 (gray) = escalation only */
+function PriorityBadge({ label, reason }: { label?: string; reason?: string }) {
+  if (!label) return null
+  const style =
+    label === 'P1' ? 'bg-emerald-100 text-emerald-700 border-emerald-300' :
+    label === 'P2' ? 'bg-blue-100 text-blue-700 border-blue-300' :
+    label === 'P3' ? 'bg-amber-100 text-amber-700 border-amber-300' :
+                     'bg-stone-100 text-stone-500 border-stone-300'
+  return (
+    <span
+      title={reason || label}
+      className={cn(
+        'inline-flex items-center px-1.5 py-0.5 rounded text-2xs font-bold border',
+        style,
+      )}
+    >
+      {label}
+    </span>
+  )
+}
+
 interface Props {
   leadId: number
   tab: 'pipeline' | 'approved' | 'rejected' | 'expired'
@@ -445,7 +466,13 @@ function OverviewTab({ lead, leadId, contactList, onEnrich, enriching, onSmartFi
                 </span>
               </div>
               <div className="min-w-0 flex-1">
-                <p className="text-sm font-semibold text-navy-900">{contactList[0].name}</p>
+                <div className="flex items-center gap-2">
+                  <PriorityBadge
+                    label={(contactList[0] as any).priority_label}
+                    reason={(contactList[0] as any).priority_reason}
+                  />
+                  <p className="text-sm font-semibold text-navy-900">{contactList[0].name}</p>
+                </div>
                 <p className="text-xs text-stone-500 truncate">{contactList[0].title || 'No title'}</p>
               </div>
               {contactList.length > 1 && (
@@ -647,6 +674,27 @@ function ContactsTab({ contacts, loading, leadId, onEnrich, enriching }: {
 
   return (
     <div className="space-y-2.5 animate-fadeIn">
+      {/* Priority legend — quick sales team reference */}
+      <div className="flex items-center gap-3 px-3 py-2 bg-slate-50 rounded-md border border-slate-200 text-2xs flex-wrap">
+        <span className="font-semibold text-stone-500 uppercase tracking-wide">Priority:</span>
+        <span className="inline-flex items-center gap-1">
+          <span className="inline-block w-2 h-2 rounded-full bg-emerald-500" />
+          <span className="text-stone-600"><strong>P1</strong> Call first</span>
+        </span>
+        <span className="inline-flex items-center gap-1">
+          <span className="inline-block w-2 h-2 rounded-full bg-blue-500" />
+          <span className="text-stone-600"><strong>P2</strong> Strong fit</span>
+        </span>
+        <span className="inline-flex items-center gap-1">
+          <span className="inline-block w-2 h-2 rounded-full bg-amber-500" />
+          <span className="text-stone-600"><strong>P3</strong> Useful</span>
+        </span>
+        <span className="inline-flex items-center gap-1">
+          <span className="inline-block w-2 h-2 rounded-full bg-stone-400" />
+          <span className="text-stone-600"><strong>P4</strong> Escalation only</span>
+        </span>
+      </div>
+
       {contacts.map((c) => (
         <div
           key={c.id}
@@ -748,24 +796,27 @@ function ContactsTab({ contacts, loading, leadId, onEnrich, enriching }: {
               ) : (
                 /* ── VIEW MODE ── */
                 <>
-                  {/* Row 1: Name + Primary star + Score */}
+                  {/* Row 1: Name + Primary star + (right side) Priority + Score */}
                   <div className="flex items-center gap-2">
                     <span className="text-sm font-semibold text-navy-900">{c.name}</span>
                     {c.is_primary && <Star className="w-3.5 h-3.5 text-gold-500 fill-gold-500" />}
-                    {c.score > 0 && (
-                      <div className="flex flex-col items-end ml-auto">
-                        <span className="text-sm font-bold text-navy-900">{c.score}</span>
-                        {c.confidence && (
-                          <span className={cn(
-                            'text-2xs font-bold uppercase',
-                            c.confidence === 'high' ? 'text-emerald-600' :
-                            c.confidence === 'medium' ? 'text-gold-600' : 'text-stone-400',
-                          )}>
-                            {c.confidence}
-                          </span>
-                        )}
-                      </div>
-                    )}
+                    <div className="flex items-center gap-2 ml-auto">
+                      <PriorityBadge label={(c as any).priority_label} reason={(c as any).priority_reason} />
+                      {c.score > 0 && (
+                        <div className="flex flex-col items-end">
+                          <span className="text-sm font-bold text-navy-900">{c.score}</span>
+                          {c.confidence && (
+                            <span className={cn(
+                              'text-2xs font-bold uppercase',
+                              c.confidence === 'high' ? 'text-emerald-600' :
+                              c.confidence === 'medium' ? 'text-gold-600' : 'text-stone-400',
+                            )}>
+                              {c.confidence}
+                            </span>
+                          )}
+                        </div>
+                      )}
+                    </div>
                   </div>
 
                   {/* Row 2: Title */}

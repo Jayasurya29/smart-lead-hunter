@@ -339,17 +339,41 @@ def get_phase_queries(
 
     if phase == 1:
         # ── PHASE 1: Management Company Corporate ──
-        # Target SVP/VP Procurement, President of Hospitality, COO
-        # For known companies, search by name directly
+        # Target: corporate procurement, F&B, operations, regional VPs.
+        #
+        # CRITICAL ARCHITECTURE NOTE — site:linkedin.com is BANNED in Phase 1.
+        #
+        # Why: corporate execs don't surface in property-specific LinkedIn
+        # searches. Their NAMES live in trade press (Travel Market Report,
+        # Hospitality Net, Hotelier Magazine, Hotel News Resource), in
+        # operator newsroom press releases, and in interviews. Once we
+        # discover a name there, downstream layers can search LinkedIn for
+        # that specific person to grab their profile + email pattern.
+        #
+        # Phase 1 is the DISCOVERY step. Phase 2/3 keep site:linkedin.com
+        # because GMs and dept heads ARE searchable by property name.
+        #
+        # Also dropped: hotel_name from corporate queries. A "VP Procurement"
+        # at HIC covers 150 properties — they'll never be named in a
+        # property-specific search. We search by operator + region only.
         if mgmt:
             queries += [
-                f'"{mgmt}" "SVP Procurement" OR "VP Procurement" OR "Director of Procurement" site:linkedin.com',
-                f'"{mgmt}" "VP Operations" OR "COO" OR "President" OR "EVP Operations" site:linkedin.com',
-                f'"{mgmt}" "pre-opening" OR "new opening" {hotel_name}',
-                f'"{mgmt}" procurement OR purchasing OR vendor 2026 site:linkedin.com',
+                # Trade press: appointment / leadership announcements.
+                # These articles literally name new hires by full name + title.
+                f'{mgmt} appointment OR appointed OR "vice president" OR "senior vice president"',
+                f'{mgmt} leadership announcement OR "new role" OR "joins as"',
+                # Procurement / purchasing / sourcing — the actual buyers
+                f'{mgmt} procurement OR purchasing OR sourcing director OR "vp procurement"',
+                # F&B operations — kitchen/restaurant uniforms
+                f'{mgmt} "food and beverage" OR "F&B operations" director OR vice president',
+                # General operations leadership for the region
+                f'{mgmt} operations "vice president" OR "regional vice president"',
+                # Trade press interviews (rich source — execs quoted by name)
+                f'{mgmt} interview "vice president" OR "senior vice president"',
             ]
-        # Generic developer/owner search — kept generic, no per-lead names
-        # leaking from prior debug iterations.
+        # Hotel-specific developer/owner search — useful for finding the
+        # ownership group + management announcement press release for the
+        # SPECIFIC property (different signal than corporate roles above).
         if mgmt:
             queries.append(f'"{hotel_name}" developer OR owner OR "{mgmt}" leadership')
         else:

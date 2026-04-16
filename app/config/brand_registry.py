@@ -42,7 +42,28 @@ from typing import Optional
 
 @dataclass
 class BrandInfo:
-    """Complete intelligence profile for a hotel brand."""
+    """Complete intelligence profile for a hotel brand.
+
+    TIERED CONTACT TITLES (v2 schema — production)
+    -----------------------------------------------
+    The uniform buying decision hierarchy is:
+      1. PROPERTY TEAM — GM + Dept Heads at THIS hotel (primary buyers)
+      2. CLUSTER/AREA — Cluster GM, Area GM, Complex DoO (fallback when
+         property team not yet hired, or for cluster-purchased supplies)
+      3. REGIONAL EXEC — Regional VP Ops, VP Commercial Services, Dir of
+         Procurement at the region level (escalation path + master contracts
+         for multi-property buys)
+
+    Our hunt pipeline collects ALL THREE tiers for every lead (abundance
+    principle — more info is better). The Iter 6 strategist then decides
+    P1/P2/P3/P4 based on which tier has the strongest fit.
+
+    LEGACY FIELDS
+    -------------
+    pre_opening_contact_titles + opening_contact_titles are retained for
+    backwards compatibility but are derived from the tiered lists at runtime
+    via the helpers get_pre_opening_titles() / get_opening_titles().
+    """
 
     # Identity
     parent_company: str  # e.g. "Marriott", "Hilton", "Independent"
@@ -60,15 +81,314 @@ class BrandInfo:
     uniform_freedom: str  # high / medium / low
     procurement_note: str  # How uniform decisions actually get made
 
-    # Pre-opening contact strategy
-    pre_opening_decision_maker: str  # Who to target BEFORE property GM is hired
-    pre_opening_contact_titles: list  # Specific titles to search for
-    opening_contact_titles: list  # Titles once hotel is 3-6mo from opening
+    # Pre-opening contact strategy (LEGACY — see helpers below)
+    pre_opening_decision_maker: (
+        str  # Human-readable description of the primary pre-opening buyer
+    )
+    pre_opening_contact_titles: (
+        list  # LEGACY: titles before GM hired — derived from cluster+regional
+    )
+    opening_contact_titles: (
+        list  # LEGACY: titles once open — derived from property_team
+    )
+
+    # TIERED TITLES (v2 schema, production)
+    # Each list is searched independently by the iterative researcher.
+    # Defaults keep existing brands working without touching their entries.
+    property_team_titles: list = (
+        None  # Tier 1 — on-property (GM + dept heads). PRIMARY.
+    )
+    cluster_team_titles: list = None  # Tier 2 — cluster/area roles. FALLBACK.
+    regional_team_titles: list = None  # Tier 3 — regional execs. ESCALATION.
 
     # Scoring adjustment
-    contact_score_multiplier: float  # Multiplier on contact scores (1.0 = no change)
-    opportunity_level: str  # high / medium / low
+    contact_score_multiplier: float = (
+        1.0  # Multiplier on contact scores (1.0 = no change)
+    )
+    opportunity_level: str = "medium"  # high / medium / low
 
+    def __post_init__(self):
+        """
+        Backfill the v2 tiered lists from the legacy fields when a brand
+        entry doesn't yet declare them. Keeps the registry backwards-compatible
+        with the 40+ existing brand entries while new code can reliably rely
+        on property_team_titles / cluster_team_titles / regional_team_titles.
+
+        Migration strategy:
+          - If property_team_titles is None → use opening_contact_titles
+          - If cluster_team_titles is None → extract cluster-flavored titles
+            from pre_opening_contact_titles (Cluster/Area/Complex keywords)
+          - If regional_team_titles is None → extract regional-flavored
+            titles from pre_opening_contact_titles (VP/SVP/Regional keywords)
+        """
+        # Property team defaults — operational dept heads at THIS hotel
+        if self.property_team_titles is None:
+            self.property_team_titles = list(self.opening_contact_titles or [])
+            # Ensure the universal property baseline is present
+            _property_baseline = [
+                "General Manager",
+                "Hotel Manager",
+                "Resort Manager",
+                "Director of Operations",
+                "Director of Rooms",
+                "Director of Housekeeping",
+                "Executive Housekeeper",
+                "Director of Food and Beverage",
+                "Executive Chef",
+                "Director of Sales",
+                "Director of Events",
+                "Human Resources Director",
+                "Director of Finance",
+                "Controller",
+                "Purchasing Manager",
+            ]
+            existing_lower = {t.lower() for t in self.property_team_titles}
+            for t in _property_baseline:
+                if t.lower() not in existing_lower:
+                    self.property_team_titles.append(t)
+
+        # Cluster team defaults — sibling-property + area coordination roles
+        if self.cluster_team_titles is None:
+            cluster_keywords = (
+                "cluster",
+                "area",
+                "complex",
+                "multi-property",
+                "regional gm",
+                "regional general manager",
+            )
+            derived: list = []
+            for t in self.pre_opening_contact_titles or []:
+                if any(kw in t.lower() for kw in cluster_keywords):
+                    derived.append(t)
+            # Universal cluster baseline — these exist for almost every chain
+            _cluster_baseline = [
+                "Cluster General Manager",
+                "Area General Manager",
+                "Complex General Manager",
+                "Complex Director of Operations",
+                "Area Director of Operations",
+            ]
+            existing_lower = {t.lower() for t in derived}
+            for t in _cluster_baseline:
+                if t.lower() not in existing_lower:
+                    derived.append(t)
+            self.cluster_team_titles = derived
+
+        # Regional team defaults — above-property / corporate execs for the region
+        if self.regional_team_titles is None:
+            cluster_keywords = (
+                "cluster",
+                "area",
+                "complex",
+                "multi-property",
+                "regional gm",
+                "regional general manager",
+            )
+            derived = []
+            for t in self.pre_opening_contact_titles or []:
+                # Everything in legacy pre_opening_contact_titles that WASN'T
+                # cluster-flavored is treated as regional/corporate
+                if not any(kw in t.lower() for kw in cluster_keywords):
+                    derived.append(t)
+            self.regional_team_titles = derived
+
+    # ── Helpers — use these everywhere in new code ──
+
+    def all_target_titles(self) -> list:
+        """Every title we'd want to find for this brand, across all 3 tiers."""
+        combined: list = []
+        seen = set()
+        for group in (
+            self.property_team_titles or [],
+            self.cluster_team_titles or [],
+            self.regional_team_titles or [],
+        ):
+            for t in group:
+                k = (t or "").lower().strip()
+                if k and k not in seen:
+                    seen.add(k)
+                    combined.append(t)
+        return combined
+
+    def tier_for_title(self, title: str) -> str:
+        """
+        Given a contact's title, classify which tier it belongs to.
+        Returns one of: 'property' | 'cluster' | 'regional' | 'unknown'.
+        Used by the Iter 6 strategist to map titles → P1/P2/P3 priorities.
+
+        Order matters: we check cluster/regional markers FIRST because strings
+        like "Cluster General Manager" contain "General Manager" and would
+        otherwise false-match the property tier.
+        """
+        if not title:
+            return "unknown"
+        tl = title.lower()
+
+        # Regional tier — above-property/corporate keywords
+        regional_keywords = (
+            "regional",
+            "vp operations",
+            "svp operations",
+            "vice president operations",
+            "senior vice president",
+            "vp commercial",
+            "vp procurement",
+            "director of procurement",
+            "above property",
+            "vp field",
+            "group president",
+            "chief operating officer",
+            "chief executive",
+            "president ",
+            "president,",
+            "evp ",
+            "executive vice president",
+        )
+        if any(kw in tl for kw in regional_keywords):
+            return "regional"
+
+        # Cluster tier — cluster/area/complex in the title
+        cluster_keywords = (
+            "cluster",
+            "area general",
+            "area director",
+            "complex general",
+            "complex director",
+            "multi-property",
+        )
+        if any(kw in tl for kw in cluster_keywords):
+            return "cluster"
+
+        # Property tier — on-property dept-head match
+        for t in self.property_team_titles or []:
+            t_lower = t.lower()
+            # Require a substantial substring match — prevents 'manager'
+            # alone from pulling in every possible role
+            if t_lower in tl or tl in t_lower:
+                return "property"
+
+        return "unknown"
+
+    def get_pre_opening_titles(self) -> list:
+        """Legacy accessor — returns cluster + regional combined."""
+        return (self.cluster_team_titles or []) + (self.regional_team_titles or [])
+
+    def get_opening_titles(self) -> list:
+        """Legacy accessor — returns property team titles."""
+        return self.property_team_titles or []
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# SHARED TIERED TITLE CONSTANTS (v2 schema)
+# ═══════════════════════════════════════════════════════════════════════════════
+# Defined once, referenced by every brand that shares the same decision-maker
+# structure. Prevents drift across sister brands (e.g. all HIC brands share the
+# same regional team, so they all share HIC_REGIONAL_TITLES).
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# Universal on-property team — used as a baseline for EVERY brand that doesn't
+# override. These are the real uniform buyers for any staffed hotel.
+_UNIVERSAL_PROPERTY_TITLES = [
+    "General Manager",
+    "Hotel Manager",
+    "Resort Manager",
+    "Director of Operations",
+    "Director of Rooms",
+    "Director of Housekeeping",
+    "Executive Housekeeper",
+    "Director of Food and Beverage",
+    "F&B Director",
+    "Executive Chef",
+    "Director of Sales",
+    "Director of Sales and Marketing",
+    "Director of Events",
+    "Director of Banquets",
+    "Human Resources Director",
+    "Director of Human Resources",
+    "People and Culture Director",
+    "Director of Finance",
+    "Financial Controller",
+    "Purchasing Manager",
+    "Director of Purchasing",
+]
+
+# Universal cluster/area titles — exist at almost every major chain
+_UNIVERSAL_CLUSTER_TITLES = [
+    "Cluster General Manager",
+    "Complex General Manager",
+    "Area General Manager",
+    "Complex Director of Operations",
+    "Area Director of Operations",
+    "Cluster Director of Finance",
+    "Cluster Director of Human Resources",
+    "Multi-Property General Manager",
+]
+
+# ── HYATT INCLUSIVE COLLECTION (Dreams, Secrets, Breathless, Zoëtry, Hyatt Vivid) ──
+_HIC_REGIONAL_TITLES = [
+    "VP Commercial Services Latin America Caribbean",
+    "VP Commercial Services LATAM",
+    "Director Above Property Procurement",
+    "Senior Corporate Director F&B Operations",
+    "SVP Inclusive Collection",
+    "Regional VP Operations Caribbean",
+    "Regional Vice President Operations",
+    "VP Field Operations Americas",
+    "VP Procurement Americas",
+    "President Latin America Caribbean",
+    "President Inclusive Collection",
+]
+
+# ── MARRIOTT LUXURY (Ritz-Carlton, St. Regis, Luxury Collection, JW Marriott) ──
+_MARRIOTT_LUXURY_REGIONAL_TITLES = [
+    "VP Luxury Operations",
+    "VP of Luxury Operations",
+    "Regional VP Operations",
+    "VP Hotel Operations Americas",
+    "VP Hotel Operations Caribbean",
+    "Regional VP The Americas",
+    "Pre-Opening Director",
+    "Director of Pre-Opening",
+    "VP Owner and Franchise Services",
+    "VP Procurement Americas",
+    "VP Global Procurement",
+    "Global Officer Luxury Brands",
+    "President Americas",
+    "SVP Luxury Operations",
+]
+
+# ── AUBERGE RESORTS COLLECTION (independent luxury, owner-managed) ──
+_AUBERGE_REGIONAL_TITLES = [
+    "Executive Vice President Global Operations",
+    "EVP Global Operations",
+    "Chief Operating Officer",
+    "VP Operations",
+    "SVP Operations",
+    "Regional VP Operations",
+    "Regional Vice President",
+    "Pre-Opening Director",
+    "VP Procurement",
+    "Director of Procurement",
+    "President",
+    "Chief Financial Officer",
+]
+
+# ── FOUR SEASONS (managed, owner-agreement heavy) ──
+_FOUR_SEASONS_REGIONAL_TITLES = [
+    "Regional VP Operations",
+    "VP Operations Americas",
+    "VP Hotel Operations",
+    "Regional Vice President",
+    "President Hotel Operations",
+    "President Americas",
+    "VP Procurement",
+    "Director of Procurement",
+    "VP Owner Relations",
+    "Opening GM",
+    "Pre-Opening Director",
+    "SVP Global Operations",
+]
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # BRAND REGISTRY
@@ -105,6 +425,9 @@ BRAND_REGISTRY: dict[str, BrandInfo] = {
             "Purchasing Manager",
             "Director of Operations",
         ],
+        property_team_titles=list(_UNIVERSAL_PROPERTY_TITLES),
+        cluster_team_titles=list(_UNIVERSAL_CLUSTER_TITLES),
+        regional_team_titles=list(_MARRIOTT_LUXURY_REGIONAL_TITLES),
         contact_score_multiplier=0.85,
         opportunity_level="medium",
     ),
@@ -128,6 +451,9 @@ BRAND_REGISTRY: dict[str, BrandInfo] = {
             "Director of Housekeeping",
             "Purchasing Manager",
         ],
+        property_team_titles=list(_UNIVERSAL_PROPERTY_TITLES),
+        cluster_team_titles=list(_UNIVERSAL_CLUSTER_TITLES),
+        regional_team_titles=list(_MARRIOTT_LUXURY_REGIONAL_TITLES),
         contact_score_multiplier=0.9,
         opportunity_level="medium",
     ),
@@ -151,6 +477,9 @@ BRAND_REGISTRY: dict[str, BrandInfo] = {
             "Director of Housekeeping",
             "Purchasing Manager",
         ],
+        property_team_titles=list(_UNIVERSAL_PROPERTY_TITLES),
+        cluster_team_titles=list(_UNIVERSAL_CLUSTER_TITLES),
+        regional_team_titles=list(_MARRIOTT_LUXURY_REGIONAL_TITLES),
         contact_score_multiplier=0.85,
         opportunity_level="medium",
     ),
@@ -166,6 +495,9 @@ BRAND_REGISTRY: dict[str, BrandInfo] = {
         pre_opening_decision_maker="Marriott VP Luxury + Pre-Opening Manager",
         pre_opening_contact_titles=["VP Luxury Operations", "Pre-Opening Director"],
         opening_contact_titles=["General Manager", "Director of Housekeeping"],
+        property_team_titles=list(_UNIVERSAL_PROPERTY_TITLES),
+        cluster_team_titles=list(_UNIVERSAL_CLUSTER_TITLES),
+        regional_team_titles=list(_MARRIOTT_LUXURY_REGIONAL_TITLES),
         contact_score_multiplier=0.85,
         opportunity_level="medium",
     ),
@@ -257,6 +589,9 @@ BRAND_REGISTRY: dict[str, BrandInfo] = {
             "Director of Housekeeping",
             "Purchasing Manager",
         ],
+        property_team_titles=list(_UNIVERSAL_PROPERTY_TITLES),
+        cluster_team_titles=list(_UNIVERSAL_CLUSTER_TITLES),
+        regional_team_titles=list(_MARRIOTT_LUXURY_REGIONAL_TITLES),
         contact_score_multiplier=0.9,
         opportunity_level="medium",
     ),
@@ -281,6 +616,9 @@ BRAND_REGISTRY: dict[str, BrandInfo] = {
             "Director of Housekeeping",
             "Purchasing Manager",
         ],
+        property_team_titles=list(_UNIVERSAL_PROPERTY_TITLES),
+        cluster_team_titles=list(_UNIVERSAL_CLUSTER_TITLES),
+        regional_team_titles=list(_MARRIOTT_LUXURY_REGIONAL_TITLES),
         contact_score_multiplier=1.1,
         opportunity_level="high",
     ),
@@ -946,110 +1284,148 @@ BRAND_REGISTRY: dict[str, BrandInfo] = {
     ),
     # All-inclusive (Hyatt acquired Apple Leisure Group)
     "secrets resorts": BrandInfo(
-        parent_company="Hyatt (AMR Collection)",
+        parent_company="Hyatt Inclusive Collection (formerly AMResorts/AMR Collection)",
         tier="tier2_luxury",
         operating_model="all_inclusive",
-        typical_model_note="Adults-only luxury all-inclusive. Caribbean/Mexico.",
+        typical_model_note="Adults-only luxury all-inclusive. Caribbean/Mexico. Part of Hyatt Inclusive Collection (~150 resorts) post-Playa acquisition June 2025.",
         procurement_model="brand_managed",
         gpo=None,
         uniform_freedom="low",
-        procurement_note="AMR/Hyatt corporate procurement controls all OS&E including uniforms. Property GM has minimal input.",
-        pre_opening_decision_maker="AMR Collection VP Operations (corporate)",
+        procurement_note="Hyatt Inclusive Collection (HIC) corporate procurement controls OS&E including uniforms. During reopenings/renovations, Cluster GMs gain expanded vendor authority. Property GM input minimal in greenfield openings.",
+        pre_opening_decision_maker="HIC VP Commercial Services Latin America & Caribbean (Shyla Gardner) + Cluster GM",
         pre_opening_contact_titles=[
-            "VP Operations AMR",
-            "VP Procurement",
-            "Director of Procurement",
-            "Regional VP",
+            "VP Commercial Services Latin America Caribbean",
+            "Cluster General Manager",
+            "Director Above Property Procurement",
+            "Senior Corporate Director F&B Operations",
+            "SVP Inclusive Collection",
         ],
         opening_contact_titles=[
             "General Manager",
             "Director of Housekeeping",
+            "Director of Operations",
             "Purchasing Manager",
+            "Director of Food and Beverage",
         ],
+        # ── v2 tiered titles (same HIC structure as Dreams) ──
+        property_team_titles=list(_UNIVERSAL_PROPERTY_TITLES),
+        cluster_team_titles=list(_UNIVERSAL_CLUSTER_TITLES),
+        regional_team_titles=list(_HIC_REGIONAL_TITLES),
         contact_score_multiplier=0.75,
         opportunity_level="low",
     ),
     "dreams resorts": BrandInfo(
-        parent_company="Hyatt (AMR Collection)",
+        parent_company="Hyatt Inclusive Collection (formerly AMResorts/AMR Collection)",
         tier="tier3_upper_upscale",
         operating_model="all_inclusive",
-        typical_model_note="Family all-inclusive brand.",
+        typical_model_note="Family all-inclusive brand. Part of Hyatt Inclusive Collection (~150 resorts) post-Playa acquisition June 2025. Many former Playa-managed properties (Rose Hall, Cap Cana, etc.) rebranded under Dreams.",
         procurement_model="brand_managed",
         gpo=None,
         uniform_freedom="low",
-        procurement_note="AMR/Hyatt corporate procurement. Same as Secrets.",
-        pre_opening_decision_maker="AMR Collection VP Operations (corporate)",
+        procurement_note="Hyatt Inclusive Collection (HIC) corporate procurement. During reopenings/renovations (e.g. Q1 2027 Jamaica cluster post-Hurricane Melissa), Cluster GMs and on-property procurement teams gain expanded vendor authority for emergency reorders.",
+        pre_opening_decision_maker="HIC VP Commercial Services Latin America & Caribbean (Shyla Gardner) + Cluster GM",
         pre_opening_contact_titles=[
-            "VP Operations AMR",
-            "VP Procurement",
-            "Regional VP",
+            "VP Commercial Services Latin America Caribbean",
+            "Cluster General Manager",
+            "Director Above Property Procurement",
+            "Senior Corporate Director F&B Operations",
+            "SVP Inclusive Collection",
         ],
         opening_contact_titles=[
             "General Manager",
+            "Hotel Manager",
             "Director of Housekeeping",
+            "Director of Operations",
+            "Director of Food and Beverage",
             "Purchasing Manager",
         ],
+        # ── v2 tiered titles (production) ──
+        property_team_titles=list(_UNIVERSAL_PROPERTY_TITLES),
+        cluster_team_titles=list(_UNIVERSAL_CLUSTER_TITLES),
+        regional_team_titles=list(_HIC_REGIONAL_TITLES),
         contact_score_multiplier=0.75,
         opportunity_level="low",
     ),
     "zoetry wellness resorts": BrandInfo(
-        parent_company="Hyatt (AMR Collection)",
+        parent_company="Hyatt Inclusive Collection (formerly AMResorts/AMR Collection)",
         tier="tier2_luxury",
         operating_model="all_inclusive",
-        typical_model_note="Ultra-luxury wellness all-inclusive.",
+        typical_model_note="Ultra-luxury wellness all-inclusive within Hyatt Inclusive Collection.",
         procurement_model="brand_managed",
         gpo=None,
         uniform_freedom="low",
-        procurement_note="AMR/Hyatt corporate procurement.",
-        pre_opening_decision_maker="AMR Collection VP Operations",
-        pre_opening_contact_titles=["VP Operations", "VP Procurement"],
-        opening_contact_titles=["General Manager", "Director of Housekeeping"],
+        procurement_note="Hyatt Inclusive Collection (HIC) corporate procurement.",
+        pre_opening_decision_maker="HIC VP Commercial Services Latin America & Caribbean + Cluster GM",
+        pre_opening_contact_titles=[
+            "VP Commercial Services Latin America Caribbean",
+            "Cluster General Manager",
+            "Director Above Property Procurement",
+            "Senior Corporate Director F&B Operations",
+        ],
+        opening_contact_titles=[
+            "General Manager",
+            "Hotel Manager",
+            "Director of Housekeeping",
+        ],
+        property_team_titles=list(_UNIVERSAL_PROPERTY_TITLES),
+        cluster_team_titles=list(_UNIVERSAL_CLUSTER_TITLES),
+        regional_team_titles=list(_HIC_REGIONAL_TITLES),
         contact_score_multiplier=0.75,
         opportunity_level="low",
     ),
     "hyatt vivid hotels": BrandInfo(
-        parent_company="Hyatt",
+        parent_company="Hyatt Inclusive Collection",
         tier="tier3_upper_upscale",
         operating_model="all_inclusive",
-        typical_model_note="Hyatt's newer all-inclusive lifestyle brand.",
+        typical_model_note="Hyatt's newer all-inclusive lifestyle brand for younger travelers. Launched in Cancun April 2024; second property opening Punta Cana 2026.",
         procurement_model="brand_managed",
         gpo=None,
         uniform_freedom="low",
-        procurement_note="Hyatt/AMR corporate procurement controls uniforms.",
-        pre_opening_decision_maker="Hyatt VP All-Inclusive + AMR Operations",
+        procurement_note="Hyatt Inclusive Collection (HIC) corporate procurement.",
+        pre_opening_decision_maker="HIC VP Commercial Services Latin America & Caribbean + Cluster GM",
         pre_opening_contact_titles=[
-            "VP Operations",
-            "VP All-Inclusive",
-            "Director Procurement",
+            "VP Commercial Services Latin America Caribbean",
+            "Cluster General Manager",
+            "Director Above Property Procurement",
+            "Senior Corporate Director F&B Operations",
         ],
         opening_contact_titles=[
             "General Manager",
+            "Hotel Manager",
             "Director of Housekeeping",
             "Purchasing Manager",
         ],
+        property_team_titles=list(_UNIVERSAL_PROPERTY_TITLES),
+        cluster_team_titles=list(_UNIVERSAL_CLUSTER_TITLES),
+        regional_team_titles=list(_HIC_REGIONAL_TITLES),
         contact_score_multiplier=0.8,
         opportunity_level="low",
     ),
     "hyatt vivid hotels & resorts": BrandInfo(
-        parent_company="Hyatt",
+        parent_company="Hyatt Inclusive Collection",
         tier="tier3_upper_upscale",
         operating_model="all_inclusive",
         typical_model_note="Same as Hyatt Vivid Hotels.",
         procurement_model="brand_managed",
         gpo=None,
         uniform_freedom="low",
-        procurement_note="Hyatt/AMR corporate procurement controls uniforms.",
-        pre_opening_decision_maker="Hyatt VP All-Inclusive",
+        procurement_note="Hyatt Inclusive Collection (HIC) corporate procurement.",
+        pre_opening_decision_maker="HIC VP Commercial Services Latin America & Caribbean + Cluster GM",
         pre_opening_contact_titles=[
-            "VP Operations",
-            "VP All-Inclusive",
-            "Director Procurement",
+            "VP Commercial Services Latin America Caribbean",
+            "Cluster General Manager",
+            "Director Above Property Procurement",
+            "Senior Corporate Director F&B Operations",
         ],
         opening_contact_titles=[
             "General Manager",
+            "Hotel Manager",
             "Director of Housekeeping",
             "Purchasing Manager",
         ],
+        property_team_titles=list(_UNIVERSAL_PROPERTY_TITLES),
+        cluster_team_titles=list(_UNIVERSAL_CLUSTER_TITLES),
+        regional_team_titles=list(_HIC_REGIONAL_TITLES),
         contact_score_multiplier=0.8,
         opportunity_level="low",
     ),
@@ -1372,6 +1748,9 @@ BRAND_REGISTRY: dict[str, BrandInfo] = {
             "Director of Rooms",
             "Purchasing Manager",
         ],
+        property_team_titles=list(_UNIVERSAL_PROPERTY_TITLES),
+        cluster_team_titles=list(_UNIVERSAL_CLUSTER_TITLES),
+        regional_team_titles=list(_FOUR_SEASONS_REGIONAL_TITLES),
         contact_score_multiplier=1.0,
         opportunity_level="medium",
     ),
@@ -1749,6 +2128,9 @@ BRAND_REGISTRY: dict[str, BrandInfo] = {
             "Director of Operations",
             "Purchasing Manager",
         ],
+        property_team_titles=list(_UNIVERSAL_PROPERTY_TITLES),
+        cluster_team_titles=list(_UNIVERSAL_CLUSTER_TITLES),
+        regional_team_titles=list(_AUBERGE_REGIONAL_TITLES),
         contact_score_multiplier=1.2,
         opportunity_level="high",
     ),
@@ -1768,6 +2150,9 @@ BRAND_REGISTRY: dict[str, BrandInfo] = {
             "Director of Housekeeping",
             "Purchasing Manager",
         ],
+        property_team_titles=list(_UNIVERSAL_PROPERTY_TITLES),
+        cluster_team_titles=list(_UNIVERSAL_CLUSTER_TITLES),
+        regional_team_titles=list(_AUBERGE_REGIONAL_TITLES),
         contact_score_multiplier=1.2,
         opportunity_level="high",
     ),
@@ -2640,85 +3025,124 @@ _ADDITIONAL_BRANDS: dict[str, BrandInfo] = {
         opportunity_level="medium",
     ),
     "hyatt zilara": BrandInfo(
-        parent_company="Hyatt (AMR Collection)",
+        parent_company="Hyatt Inclusive Collection (formerly AMResorts/AMR Collection)",
         tier="tier2_luxury",
         operating_model="all_inclusive",
-        typical_model_note="Adults-only luxury all-inclusive. Caribbean/Mexico.",
+        typical_model_note="Adults-only luxury all-inclusive. Caribbean/Mexico. Many Caribbean Zilara properties owned by Playa pre-2025, now under HIC.",
         procurement_model="brand_managed",
         gpo=None,
         uniform_freedom="low",
-        procurement_note="AMR/Hyatt corporate procurement controls all OS&E.",
-        pre_opening_decision_maker="AMR Collection VP Operations",
+        procurement_note="Hyatt Inclusive Collection (HIC) corporate procurement controls all OS&E. During reopenings/renovations, Cluster GMs gain expanded vendor authority.",
+        pre_opening_decision_maker="HIC VP Commercial Services Latin America & Caribbean (Shyla Gardner) + Cluster GM",
         pre_opening_contact_titles=[
-            "VP Operations AMR",
-            "VP Procurement",
-            "Regional VP",
+            "VP Commercial Services Latin America Caribbean",
+            "Cluster General Manager",
+            "Director Above Property Procurement",
+            "Senior Corporate Director F&B Operations",
+            "SVP Inclusive Collection",
         ],
         opening_contact_titles=[
             "General Manager",
+            "Hotel Manager",
             "Director of Housekeeping",
+            "Director of Operations",
             "Purchasing Manager",
         ],
         contact_score_multiplier=0.75,
         opportunity_level="low",
     ),
     "hyatt ziva": BrandInfo(
-        parent_company="Hyatt (AMR Collection)",
+        parent_company="Hyatt Inclusive Collection (formerly AMResorts/AMR Collection)",
         tier="tier2_luxury",
         operating_model="all_inclusive",
-        typical_model_note="Family all-inclusive luxury.",
+        typical_model_note="Family all-inclusive luxury. Many Caribbean Ziva properties owned by Playa pre-2025, now under HIC.",
         procurement_model="brand_managed",
         gpo=None,
         uniform_freedom="low",
-        procurement_note="AMR/Hyatt corporate procurement.",
-        pre_opening_decision_maker="AMR Collection VP Operations",
-        pre_opening_contact_titles=["VP Operations AMR", "VP Procurement"],
-        opening_contact_titles=["General Manager", "Director of Housekeeping"],
+        procurement_note="Hyatt Inclusive Collection (HIC) corporate procurement.",
+        pre_opening_decision_maker="HIC VP Commercial Services Latin America & Caribbean + Cluster GM",
+        pre_opening_contact_titles=[
+            "VP Commercial Services Latin America Caribbean",
+            "Cluster General Manager",
+            "Director Above Property Procurement",
+            "Senior Corporate Director F&B Operations",
+        ],
+        opening_contact_titles=[
+            "General Manager",
+            "Hotel Manager",
+            "Director of Housekeeping",
+        ],
         contact_score_multiplier=0.75,
         opportunity_level="low",
     ),
     "now resorts": BrandInfo(
-        parent_company="Hyatt (AMR Collection)",
+        parent_company="Hyatt Inclusive Collection (formerly AMResorts/AMR Collection)",
         tier="tier3_upper_upscale",
         operating_model="all_inclusive",
-        typical_model_note="Unlimited luxury all-inclusive brand.",
+        typical_model_note="Unlimited luxury all-inclusive brand within Hyatt Inclusive Collection.",
         procurement_model="brand_managed",
         gpo=None,
         uniform_freedom="low",
-        procurement_note="AMR/Hyatt corporate procurement.",
-        pre_opening_decision_maker="AMR Collection VP Operations",
-        pre_opening_contact_titles=["VP Operations", "VP Procurement"],
-        opening_contact_titles=["General Manager", "Director of Housekeeping"],
+        procurement_note="Hyatt Inclusive Collection (HIC) corporate procurement.",
+        pre_opening_decision_maker="HIC VP Commercial Services Latin America & Caribbean + Cluster GM",
+        pre_opening_contact_titles=[
+            "VP Commercial Services Latin America Caribbean",
+            "Cluster General Manager",
+            "Director Above Property Procurement",
+        ],
+        opening_contact_titles=[
+            "General Manager",
+            "Hotel Manager",
+            "Director of Housekeeping",
+        ],
         contact_score_multiplier=0.75,
         opportunity_level="low",
     ),
     "breathless resorts": BrandInfo(
-        parent_company="Hyatt (AMR Collection)",
+        parent_company="Hyatt Inclusive Collection (formerly AMResorts/AMR Collection)",
         tier="tier3_upper_upscale",
         operating_model="all_inclusive",
-        typical_model_note="Adults-only lively all-inclusive.",
+        typical_model_note="Adults-only lively all-inclusive within Hyatt Inclusive Collection.",
         procurement_model="brand_managed",
         gpo=None,
         uniform_freedom="low",
-        procurement_note="AMR/Hyatt corporate procurement.",
-        pre_opening_decision_maker="AMR Collection VP Operations",
-        pre_opening_contact_titles=["VP Operations", "VP Procurement"],
-        opening_contact_titles=["General Manager", "Director of Housekeeping"],
+        procurement_note="Hyatt Inclusive Collection (HIC) corporate procurement.",
+        pre_opening_decision_maker="HIC VP Commercial Services Latin America & Caribbean + Cluster GM",
+        pre_opening_contact_titles=[
+            "VP Commercial Services Latin America Caribbean",
+            "Cluster General Manager",
+            "Director Above Property Procurement",
+            "Senior Corporate Director F&B Operations",
+        ],
+        opening_contact_titles=[
+            "General Manager",
+            "Hotel Manager",
+            "Director of Housekeeping",
+        ],
         contact_score_multiplier=0.75,
         opportunity_level="low",
     ),
     "impression by secrets": BrandInfo(
-        parent_company="Hyatt (AMR Collection)",
+        parent_company="Hyatt Inclusive Collection (formerly AMResorts/AMR Collection)",
         tier="tier1_ultra_luxury",
         operating_model="all_inclusive",
-        typical_model_note="Ultra-luxury all-inclusive within Secrets.",
+        typical_model_note="Ultra-luxury all-inclusive within Secrets brand family.",
         procurement_model="brand_managed",
         gpo=None,
         uniform_freedom="low",
-        procurement_note="AMR/Hyatt corporate procurement.",
-        pre_opening_decision_maker="AMR Collection VP Operations",
-        pre_opening_contact_titles=["VP Operations", "VP Procurement"],
-        opening_contact_titles=["General Manager", "Director of Housekeeping"],
+        procurement_note="Hyatt Inclusive Collection (HIC) corporate procurement.",
+        pre_opening_decision_maker="HIC VP Commercial Services Latin America & Caribbean + Cluster GM",
+        pre_opening_contact_titles=[
+            "VP Commercial Services Latin America Caribbean",
+            "Cluster General Manager",
+            "Director Above Property Procurement",
+            "Senior Corporate Director F&B Operations",
+        ],
+        opening_contact_titles=[
+            "General Manager",
+            "Hotel Manager",
+            "Director of Housekeeping",
+        ],
         contact_score_multiplier=0.75,
         opportunity_level="low",
     ),
@@ -3780,19 +4204,31 @@ _ADDITIONAL_BRANDS: dict[str, BrandInfo] = {
         opportunity_level="medium",
     ),
     "royalton": BrandInfo(
-        parent_company="Playa Hotels & Resorts",
+        parent_company="Royalton Hotels & Resorts (formerly Blue Diamond Resorts)",
         tier="tier3_upper_upscale",
         operating_model="all_inclusive",
-        typical_model_note="All-inclusive brand under Playa Hotels.",
+        typical_model_note="Owner-operated Caribbean all-inclusive. Marriott Autograph Collection affiliation. Centralized procurement.",
         procurement_model="brand_managed",
         gpo=None,
         uniform_freedom="low",
-        procurement_note="Playa corporate procurement controls.",
-        pre_opening_decision_maker="Playa VP Operations",
-        pre_opening_contact_titles=["VP Operations", "COO", "VP Procurement"],
-        opening_contact_titles=["General Manager", "Director of Housekeeping"],
+        procurement_note="Royalton corporate procurement controls. VP Operations and SVP Operations are the key buyers. President: Jordi Pelfort.",
+        pre_opening_decision_maker="SVP Operations or VP Operations",
+        pre_opening_contact_titles=[
+            "SVP Operations",
+            "VP Operations",
+            "Executive Vice President",
+            "President",
+            "Area General Manager",
+            "Pre-Opening Director",
+        ],
+        opening_contact_titles=[
+            "General Manager",
+            "Director of Housekeeping",
+            "Director of Food and Beverage",
+            "Executive Chef",
+        ],
         contact_score_multiplier=0.8,
-        opportunity_level="low",
+        opportunity_level="medium",
     ),
     "vidanta": BrandInfo(
         parent_company="Grupo Vidanta (Independent Mexico)",
@@ -4161,6 +4597,27 @@ BRAND_REGISTRY.update(_ADDITIONAL_BRANDS)
 
 # Add aliases for common variations
 _ADDITIONAL_ALIASES = {
+    # Beaches → Sandals (family-friendly sister brand)
+    "beaches": "sandals",
+    "beaches resorts": "sandals",
+    "beaches resort": "sandals",
+    "beaches turks": "sandals",
+    "beaches turks and caicos": "sandals",
+    "beaches negril": "sandals",
+    # Royalton sub-brands
+    "royalton chic": "royalton",
+    "royalton hideaway": "royalton",
+    "royalton vessence": "royalton",
+    "royalton luxury": "royalton",
+    "royalton luxury resorts": "royalton",
+    "royalton hotels & resorts": "royalton",
+    "royalton hotels and resorts": "royalton",
+    "royalton splash": "royalton",
+    "blue diamond resorts": "royalton",
+    "blue diamond": "royalton",
+    "mystique by royalton": "royalton",
+    "planet hollywood by royalton": "royalton",
+    # Existing aliases
     "ac hotel": "ac hotels",
     "gaylord hotels": "gaylord",
     "gaylord resort": "gaylord",

@@ -479,7 +479,7 @@ class ContactValidator:
         self,
         scored_contacts: list[ContactScore],
         min_score: int = 5,
-        max_contacts: int = 5,
+        max_contacts: int = 10,
     ) -> list[ContactScore]:
         """
         Filter out low-quality contacts and return the best ones.
@@ -487,7 +487,7 @@ class ContactValidator:
         Args:
             scored_contacts: Output from validate_and_score()
             min_score: Minimum total score to keep (default: 5)
-            max_contacts: Maximum contacts to return (default: 5)
+            max_contacts: Maximum contacts to return (default: 10)
 
         Returns: Filtered and ranked list of ContactScore
         """
@@ -631,11 +631,87 @@ class SmartQueryBuilder:
 
             # ── Brand-specific titles (Phase 1 or 2 only) ──
             # At Phase 3 these are redundant with the dept-title sweep.
+            #
+            # FIX: For each brand-specific title from the registry, emit BOTH
+            # forms — "hotel_name + title" AND "operator + region + title" —
+            # because corporate executives (e.g. HIC's "VP Commercial Services
+            # Latin America Caribbean", "Senior Corporate Director F&B
+            # Operations") cover dozens of properties and do NOT list
+            # individual hotels in their LinkedIn. Searching only by hotel_name
+            # silently filtered them out.
+            #
+            # Operator preference: parent_company (e.g. "Hyatt Inclusive
+            # Collection") is preferred over the lead's `management_company`
+            # field, which is often too generic ("Hyatt"). Generic strings
+            # match thousands of properties globally → noise.
+            #
+            # Region: corporate execs describe their patch by regional bucket
+            # ("Caribbean", "Latin America"), not by country ("Jamaica").
+            # Adding region narrows the search to the right people.
             if active_phase <= 2:
                 brand_info = BrandRegistry.lookup(brand) if brand else None
                 if brand_info and brand_info.pre_opening_contact_titles:
+                    # Resolve operator name — prefer parent_company over
+                    # generic management_company
+                    operator_candidates = []
+                    if brand_info.parent_company:
+                        # Strip "(formerly AMR Collection)" type parentheticals
+                        parent_clean = brand_info.parent_company.split("(")[0].strip()
+                        operator_candidates.append(parent_clean)
+                    if management_company:
+                        mgmt_clean = management_company.strip()
+                        # Skip if it's contained in / contains the parent
+                        # (e.g. parent="Hyatt Inclusive Collection",
+                        #       mgmt="Hyatt" → skip mgmt, parent is better)
+                        already_have = any(
+                            mgmt_clean.lower() in cand.lower()
+                            or cand.lower() in mgmt_clean.lower()
+                            for cand in operator_candidates
+                        )
+                        if not already_have:
+                            operator_candidates.append(mgmt_clean)
+
+                    operator_clean = (
+                        operator_candidates[0] if operator_candidates else None
+                    )
+
+                    # Resolve region term from the lead's country
+                    region_term = ""
+                    try:
+                        from app.config.region_map import primary_region
+
+                        region_term = primary_region(country) or ""
+                    except Exception:
+                        pass
+
                     for tt in brand_info.pre_opening_contact_titles[:3]:
+                        # Form 1: property-level — catches contacts whose
+                        # LinkedIn explicitly references this property
+                        # (recent appointments, property-specific roles).
+                        # Keep site:linkedin.com here — property GMs ARE
+                        # findable by hotel name on LinkedIn.
                         queries.append(f'"{hotel_name}" "{tt}" site:linkedin.com')
+
+                        # Form 2: operator + title (NO site:linkedin.com).
+                        # Corporate execs are named in trade press, newsroom
+                        # press releases, and interviews — not in property-
+                        # specific LinkedIn results. Letting Google return
+                        # news/trade sources surfaces the actual names.
+                        # Once we have a name, downstream layers can hit
+                        # LinkedIn for that specific person.
+                        if (
+                            operator_clean
+                            and operator_clean.lower() not in hotel_name.lower()
+                        ):
+                            queries.append(f'"{operator_clean}" "{tt}"')
+
+                            # Form 3: operator + title + region — narrows
+                            # to the right regional patch. Still no
+                            # site:linkedin.com — trade press is the goal.
+                            if region_term:
+                                queries.append(
+                                    f'"{operator_clean}" "{tt}" {region_term}'
+                                )
 
             logger.debug(
                 f"Phase {active_phase} queries for {hotel_name} "

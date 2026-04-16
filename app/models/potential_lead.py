@@ -79,6 +79,10 @@ class PotentialLead(Base):
     developer = Column(String(200))
     owner = Column(String(200))
 
+    # Name intelligence (filled by SmartFill)
+    search_name = Column(String(255))  # Stripped name for search queries ("Kali Hotel")
+    former_names = Column(JSONB)  # Previous hotel names ["Montage Kapalua Bay"]
+
     # Scoring (0-100)
     lead_score = Column(
         Integer, CheckConstraint("lead_score >= 0 AND lead_score <= 100")
@@ -162,6 +166,8 @@ class PotentialLead(Base):
             "management_company": self.management_company,
             "developer": self.developer,
             "owner": self.owner,
+            "search_name": self.search_name,
+            "former_names": self.former_names,
             # Contact
             "contact_name": self.contact_name,
             "contact_title": self.contact_title,

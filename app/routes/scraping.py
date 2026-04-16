@@ -1729,9 +1729,36 @@ async def smart_fill_lead(lead_id: int, request: Request, _csrf=Depends(require_
             lead.room_count = enriched["room_count"]
         if "brand" in enriched:
             lead.brand = enriched["brand"]
+        if "city" in enriched:
+            if mode == "full" or not lead.city:
+                lead.city = enriched["city"]
+        if "state" in enriched:
+            if mode == "full" or not lead.state:
+                lead.state = enriched["state"]
+        if "country" in enriched:
+            if mode == "full" or not lead.country:
+                lead.country = enriched["country"]
         if "description" in enriched:
             if mode == "full" or not lead.description:
                 lead.description = enriched["description"]
+
+        # ── Name intelligence — correct hotel name + save operator/owner ──
+        if "official_name" in enriched:
+            old_name = lead.hotel_name
+            lead.hotel_name = enriched["official_name"]
+            logger.info(
+                f"SmartFill corrected hotel name: '{old_name}' → '{enriched['official_name']}'"
+            )
+        if "search_name" in enriched:
+            lead.search_name = enriched["search_name"]
+        if "management_company" in enriched:
+            if mode == "full" or not lead.management_company:
+                lead.management_company = enriched["management_company"]
+        if "owner" in enriched:
+            if mode == "full" or not lead.owner:
+                lead.owner = enriched["owner"]
+        if "former_names" in enriched:
+            lead.former_names = enriched["former_names"]
 
         score_result = calculate_lead_score(
             hotel_name=lead.hotel_name,
