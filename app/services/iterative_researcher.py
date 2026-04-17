@@ -122,12 +122,15 @@ async def iteration_1_discovery(state: ResearchState) -> int:
             pass
 
     # ── Query batch 1: project announcement / management agreement ──
+    # Use short name for queries — long names like "Royalton Vessence Barbados,
+    # An Autograph Collection All-Inclusive Resort – Adults Only" return zero results.
+    discovery_name = state.search_name or _shorten_hotel_name(state.hotel_name)
     queries = [
         # Trade press articles announcing the project / signing
-        f'"{state.hotel_name}" announcement OR opening OR "management agreement"',
-        f'"{state.hotel_name}" developer OR owner OR partnership',
+        f'"{discovery_name}" announcement OR opening OR "management agreement"',
+        f'"{discovery_name}" developer OR owner OR partnership',
         # Project type signals — picks up reopening, conversion, renovation
-        f'"{state.hotel_name}" reopening OR conversion OR renovation OR rebrand',
+        f'"{discovery_name}" reopening OR conversion OR renovation OR rebrand',
     ]
 
     facts_before = _fact_count(state)
@@ -174,7 +177,8 @@ async def _verify_operating_companies(state: ResearchState) -> None:
         ):
             continue
 
-        query = f'"{company}" "{state.hotel_name}" 2025 OR 2026 management OR operator'
+        verify_name = state.search_name or _shorten_hotel_name(state.hotel_name)
+        query = f'"{company}" "{verify_name}" 2025 OR 2026 management OR operator'
         if query in state.queries_run:
             continue
         state.queries_run.append(query)
@@ -290,7 +294,7 @@ async def iteration_2_gm_hunt(state: ResearchState) -> int:
         # LinkedIn-specific — catches GMs who list the parent brand, not property name
         f'"{short_name}" "general manager" OR "hotel manager" site:linkedin.com',
         # Press releases with appointment announcements
-        f'"{state.hotel_name}" "general manager" appointed OR named OR hired',
+        f'"{short_name}" "general manager" appointed OR named OR hired',
         # Generic GM mention with year filter
         f'"{short_name}" general manager 2025 OR 2026',
     ]
@@ -652,8 +656,24 @@ async def iteration_3_corporate_hunt(state: ResearchState) -> int:
             )
 
     # ── Independent / boutique brand: founder IS the buyer ──
-    if bi and (bi.uniform_freedom or "").lower() in ("high", "full"):
-        queries.append(f'"{state.brand}" founder OR "co-founder" OR "chief executive"')
+    brand_lower = (state.brand or "").lower().strip()
+    is_indie = (
+        (bi and (bi.uniform_freedom or "").lower() in ("high", "full"))
+        or not brand_lower
+        or brand_lower in ("independent", "boutique", "lifestyle")
+        or (brand_lower and not bi)  # brand name exists but not in registry
+    )
+    if is_indie:
+        # Search for founders/principals at the owner/operator company
+        search_company = (
+            state.management_company
+            or state.owner_company
+            or state.operator_parent
+            or state.hotel_name
+        )
+        queries.append(
+            f'"{search_company}" founder OR "co-founder" OR "chief executive" OR "managing director"'
+        )
 
     # Dedupe
     seen = set()
@@ -760,9 +780,9 @@ async def iteration_4_linkedin_lookup(state: ResearchState) -> int:
                     .encode("ascii", "ignore")
                     .decode()
                 )
-                if last_clean and last_clean.replace(".", "") in slug_clean.replace(
+                if last_clean and last_clean.replace(".", "").replace(
                     "-", ""
-                ):
+                ) in slug_clean.replace("-", ""):
                     contact["linkedin"] = r_url
                     logger.info(f"LinkedIn URL found for {name}: {r_url}")
                     found_url = True
@@ -812,7 +832,11 @@ async def iteration_5_verify_current_role(state: ResearchState) -> int:
             continue
 
         # Confirmation query — forces Google to show RECENT mentions
-        query = f'"{name}" "{state.hotel_name}" 2025 OR 2026 OR current OR present'
+        # Use SHORT name — "Royalton Vessence Barbados, An Autograph Collection
+        # All-Inclusive Resort – Adults Only" returns ZERO Google results.
+        # "Royalton Vessence Barbados" works perfectly.
+        verify_name = state.search_name or _shorten_hotel_name(state.hotel_name)
+        query = f'"{name}" "{verify_name}" 2025 OR 2026 OR current OR present'
         if query in state.queries_run:
             continue
         state.queries_run.append(query)
@@ -1054,7 +1078,7 @@ async def iteration_5_5_regional_fit(state: ResearchState) -> int:
     """
     from app.services import contact_enrichment as ce
 
-    (state.region_term or "").lower()
+    (state.region_term or "").lower()  # region used via _REGION_MARKERS
     (state.country or "").lower()
 
     checked = 0
@@ -1358,6 +1382,21 @@ async def iteration_6_reasoning_pass(state: ResearchState) -> int:
                 )
     except Exception as ex:
         logger.debug(f"Brand registry lookup in Iter 6 prompt failed: {ex}")
+
+    # ── INDEPENDENT / BOUTIQUE FALLBACK ──
+    # If no brand registry match and brand signals independence,
+    # tell the strategist that founders ARE the buyers.
+    if not brand_tier_block and not brand_model_block:
+        brand_lower = (state.brand or "").lower().strip()
+        if not brand_lower or brand_lower in ("independent", "boutique", "lifestyle"):
+            brand_model_block = (
+                "\nBRAND PROCUREMENT MODEL: INDEPENDENT / BOUTIQUE\n"
+                "This is an independent hotel — NOT part of a major chain.\n"
+                "Founders, CEOs, Managing Directors, Principals, and COOs ARE the\n"
+                "uniform buyers. There is NO corporate procurement layer or GPO.\n"
+                "The owner/operator makes every vendor decision directly.\n"
+                "Do NOT downgrade founders or C-suite as 'too senior' — they are P1.\n"
+            )
 
     prompt = f"""You are a senior hospitality sales strategist for JA Uniforms,
 a hotel uniform supplier. JA Uniforms needs 6 months of lead time to deliver

@@ -1179,37 +1179,26 @@ async def _layer_web_search(
                 in ("fully_open", "independent", "owner_decides", "open")
                 or opportunity == "high"
             )
-
-            # Also detect cluster brands (HIC etc) where the registry's own
-            # pre_opening_contact_titles list calls out corporate roles
-            _CLUSTER_KW = (
-                "vp ",
-                "vice president",
-                "svp",
-                "senior vice president",
-                "cluster",
-                "above property",
-                "corporate",
-                "regional",
-                "head of",
-                "chief commercial",
-                "chief operating",
+        else:
+            # No brand registry entry — check if this is an independent/boutique hotel.
+            # "Independent", blank brand, or unrecognized brand = founder-led.
+            # At these hotels, the CEO/founder/principal IS the uniform buyer.
+            brand_lower = (brand or "").lower().strip()
+            is_independent = (
+                not brand_lower
+                or brand_lower == "independent"
+                or brand_lower == "boutique"
+                or brand_lower == "lifestyle"
             )
-            is_cluster_brand = False
-            if layer1_brand_info.pre_opening_contact_titles:
-                for tt in layer1_brand_info.pre_opening_contact_titles:
-                    tt_lower = (tt or "").lower()
-                    if any(kw in tt_lower for kw in _CLUSTER_KW):
-                        is_cluster_brand = True
-                        break
+            uniform_freedom = "high" if is_independent else ""
+            procurement_model = "independent" if is_independent else ""
+            opportunity = ""
 
-            if is_independent or is_cluster_brand:
+            if is_independent:
                 skip_corporate_filter = True
-                kind = "independent" if is_independent else "cluster"
                 logger.info(
-                    f"Brand {brand!r} is {kind} brand "
-                    f"(procurement={procurement_model!r}, freedom={uniform_freedom!r}) "
-                    f"— keeping corporate/regional contacts"
+                    f"Brand {brand!r} is independent/boutique "
+                    f"(no registry entry) — keeping corporate/regional contacts"
                 )
     except Exception as ex:
         logger.debug(f"Could not resolve brand for corporate filter: {ex}")
@@ -2158,12 +2147,16 @@ Interstate Hotels, Extell Hospitality Services, Palladium Hotel Group, Hyatt Hot
 (when managing non-Hyatt brands), and many others. These names usually contain words like
 "Hospitality", "Hotels", "Hotel Group", "Hotel Management", or "Hospitality Services".
 
-The MANAGEMENT COMPANY for this lead is: {management_company}
+The MANAGEMENT COMPANY / OPERATOR(s) for this lead is: {management_company}
+(This may list multiple companies separated by " / " — contacts from ANY of them are valid.)
 
 RULES:
-- If a contact's organization matches the MANAGEMENT COMPANY above (or is clearly a hotel
-  management company by name), and their TITLE or LinkedIn headline mentions the target hotel
-  or its specific location → KEEP as hotel_specific with high confidence.
+- If a contact's organization matches ANY of the management companies/operators listed above
+  (or is clearly a hotel management company by name), and their TITLE or LinkedIn headline
+  mentions the target hotel or its specific location → KEEP as hotel_specific with high confidence.
+- When multiple operators are listed (e.g. "Crescent Hotels & Resorts / Marriott"), the first
+  is typically the day-to-day management company and the second is the brand flag. Contacts
+  from BOTH are valid — do NOT reject one as "a different company."
 - A management company employer is NOT grounds for rejection. Do NOT reject Andrew Carey types
   who say "General Manager - Canopy by Hilton at Deer Valley" employed by "Extell Hospitality
   Services" — that is the textbook case of a real GM at the target hotel.
@@ -2473,13 +2466,44 @@ async def _verify_contacts_with_gemini(
             "═══════════════════════════════════════════════════════════════\n"
         )
 
+    # ── INDEPENDENT / BOUTIQUE OVERRIDE ──
+    # For independent hotels (no chain brand), the CEO/founder/principal
+    # IS the uniform buyer. There's no corporate procurement layer.
+    # A 29-room boutique hotel's CEO picks every vendor personally.
+    independent_override = ""
+    brand_lower = (brand or "").lower().strip()
+    if (
+        not brand_lower
+        or brand_lower in ("independent", "boutique", "lifestyle")
+        or (brand_lower and not BrandRegistry.lookup(brand))
+    ):
+        independent_override = (
+            "\n═══════════════════════════════════════════════════════════════\n"
+            "INDEPENDENT / BOUTIQUE HOTEL OVERRIDE\n"
+            "═══════════════════════════════════════════════════════════════\n"
+            "This is an INDEPENDENT or boutique hotel — NOT part of a major chain.\n"
+            "For independent hotels, the normal C-suite rejection rules DO NOT APPLY.\n"
+            "Founders, CEOs, Managing Directors, Principals, and Co-Founders ARE\n"
+            "the uniform buyers at these properties. There is no corporate procurement\n"
+            "layer or GPO. The owner/operator makes every vendor decision directly.\n\n"
+            "KEEP (do NOT reject) these roles for independent hotels:\n"
+            "- CEO, Co-Founder, Founder, Principal, Managing Partner\n"
+            "- Managing Director, President, COO\n"
+            "- CDO (Chief Development Officer) — handles procurement for new openings\n"
+            "- VP Operations, Director of Operations\n"
+            "- General Manager, Hotel Manager\n"
+            "═══════════════════════════════════════════════════════════════\n"
+        )
+
     prompt = CONTACT_VERIFICATION_PROMPT.format(
         hotel_name=hotel_name,
         location=location,
-        brand=brand or "Unknown",
+        brand=brand or "Independent",
         management_company=management_company or "Unknown",
         hotel_status=hotel_status,
-        procurement_guidance=procurement_guidance + conversion_override,
+        procurement_guidance=procurement_guidance
+        + conversion_override
+        + independent_override,
         contacts_json=json.dumps(contacts_for_verification, indent=2),
     )
 
@@ -2794,7 +2818,9 @@ async def enrich_lead_contacts(
     result.layers_tried = [
         f"iter_{i}" for i in range(1, research_state.iterations_done + 1)
     ]
-    result.management_company = research_state.operator_parent or management_company
+    # Prefer SmartFill's management_company (actual operator like "Crescent")
+    # over Shift A's operator_parent (brand flag like "Marriott")
+    result.management_company = management_company or research_state.operator_parent
 
     # ── Apply Gemini verification on the discovered contacts ──
     # CRITICAL: _verify_contacts_with_gemini returns NEW contact dicts that
@@ -2819,12 +2845,25 @@ async def enrich_lead_contacts(
         }
 
     if result.contacts:
+        # Build a combined list of ALL verified operators so the prompt
+        # doesn't reject contacts from the management company.
+        # "Marriott" = brand flag, "Crescent Hotels & Resorts" = actual operator.
+        # BOTH are valid — contacts from either should NOT be rejected.
+        all_operators = set()
+        if research_state.operator_parent:
+            all_operators.add(research_state.operator_parent)
+        if management_company:
+            all_operators.add(management_company)
+        for vc in research_state.verified_current_companies:
+            all_operators.add(vc)
+        combined_mgmt = " / ".join(sorted(all_operators)) or "Unknown"
+
         try:
             result.contacts = await _verify_contacts_with_gemini(
                 contacts=result.contacts,
                 hotel_name=hotel_name,
                 brand=brand,
-                management_company=research_state.operator_parent or management_company,
+                management_company=combined_mgmt,
                 city=city,
                 state=state,
                 country=country,

@@ -270,6 +270,15 @@ TIER DEFINITIONS:
 - tier3_upper_upscale: Marriott, Hilton, Westin, Sheraton, upscale independent ($150-300/night)
 - tier4_upscale: Smaller independents, business hotels ($100-200/night)
 
+TIER INFERENCE FOR INDEPENDENT/BOUTIQUE HOTELS:
+When the brand is "Independent" or unknown, infer tier from these clues:
+- Room rates mentioned in articles: "$995/night peak" = tier2_luxury, "$200-400" = tier3_upper_upscale
+- Positioning words: "luxury" = tier2_luxury, "high-design" or "boutique" = tier3_upper_upscale
+- Comparable properties mentioned: "joins Nantucket's luxury scene" = tier2_luxury
+- Room count: under 50 rooms + design-forward = usually tier2_luxury or tier3_upper_upscale
+- Developer reputation: Blue Flag Capital, Auberge, etc. = tier2_luxury
+Do NOT leave brand_tier as "unknown" if ANY pricing or positioning clue exists.
+
 ROOM COUNT EXTRACTION: For room_count, scan ALL snippets for patterns like:
 "227 rooms", "300 keys", "150-room hotel", "120 guest rooms", "34 suites and 266 rooms"
 Extract the TOTAL room/key count as an integer. This is usually stated clearly in hotel descriptions.
