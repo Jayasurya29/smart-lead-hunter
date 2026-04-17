@@ -545,14 +545,28 @@ async def iteration_3_corporate_hunt(state: ResearchState) -> int:
     location_specific = state.state or state.city or state.country or ""
     region = location_specific if location_specific else (state.region_term or "")
 
-    # Decide which companies to hunt at. Prefer verified-current ones
-    # (Shift A output). Fall back to the operator parent if we haven't
-    # verified anything yet.
+    # Decide which companies to hunt at.
+    # PRIORITY: management_company (actual operator like Crescent) comes FIRST.
+    # Brand flag (Marriott for Autograph Collection) comes second.
+    # This prevents searching "Marriott" Area GM when Crescent is the real operator.
     hunt_companies: list[str] = []
+
+    # 1. Management company from SmartFill (most reliable — actual operator)
+    if (
+        state.management_company
+        and state.management_company not in state.historical_companies
+    ):
+        hunt_companies.append(state.management_company)
+
+    # 2. Verified current companies from Shift A
     if state.verified_current_companies:
-        hunt_companies = list(state.verified_current_companies)
-    elif state.operator_parent:
+        for vc in state.verified_current_companies:
+            if vc not in hunt_companies:
+                hunt_companies.append(vc)
+    elif state.operator_parent and state.operator_parent not in hunt_companies:
         hunt_companies.append(state.operator_parent)
+
+    # 3. Owner company (if distinct)
     if (
         state.owner_company
         and state.owner_company not in hunt_companies
@@ -719,11 +733,45 @@ async def iteration_4_linkedin_lookup(state: ResearchState) -> int:
             results = await ce._search_web(q, max_results=3)
             for r in results:
                 r_url = r.get("url", "")
-                if "linkedin.com/in/" in r_url:
+                if "linkedin.com/in/" not in r_url:
+                    continue
+                # Verify the URL slug contains the person's name parts.
+                # Without this, "Sean Verney" could get Debbie Riga's URL
+                # just because it appeared in the same search results.
+                slug = (
+                    r_url.lower()
+                    .split("linkedin.com/in/")[-1]
+                    .split("?")[0]
+                    .split("/")[0]
+                )
+                name_parts = name.lower().split()
+                # At least the last name (longest part) must appear in slug
+                last_name = max(name_parts, key=len) if name_parts else ""
+                # Normalize: remove accents for comparison
+                import unicodedata
+
+                slug_clean = (
+                    unicodedata.normalize("NFKD", slug)
+                    .encode("ascii", "ignore")
+                    .decode()
+                )
+                last_clean = (
+                    unicodedata.normalize("NFKD", last_name)
+                    .encode("ascii", "ignore")
+                    .decode()
+                )
+                if last_clean and last_clean.replace(".", "") in slug_clean.replace(
+                    "-", ""
+                ):
                     contact["linkedin"] = r_url
                     logger.info(f"LinkedIn URL found for {name}: {r_url}")
                     found_url = True
                     break
+                else:
+                    logger.debug(
+                        f"LinkedIn URL rejected for {name}: slug '{slug}' "
+                        f"doesn't match name part '{last_name}'"
+                    )
 
     state.iterations_done = 4
     return _fact_count(state) - facts_before
@@ -886,12 +934,86 @@ async def iteration_5_verify_current_role(state: ResearchState) -> int:
                 f"Listed: {contact.get('title') or 'unknown'}. Verify before outreach."
             )
 
+    # ── COMPANY-LEVEL VERIFICATION for corporate contacts ──
+    # Juan Pablo Puerta left Hyatt → now CFO at Vitro Glass.
+    # Property-level check doesn't catch this because he was never AT
+    # the property. Check: is this person still at the COMPANY?
+    operator = state.operator_parent or state.management_company or ""
+    if operator:
+        for contact in state.discovered_names:
+            scope = (contact.get("scope") or "").lower()
+            if scope not in ("chain_area", "chain_corporate"):
+                continue
+            # Skip if already verified/downgraded
+            if contact.get("_verification_result"):
+                continue
+            name = (contact.get("name") or "").strip()
+            if not name or len(name.split()) < 2:
+                continue
+
+            # Quick search: is this person still at the operator company?
+            query = f'"{name}" "{operator}" 2025 OR 2026 OR current'
+            if query in state.queries_run:
+                continue
+            state.queries_run.append(query)
+
+            try:
+                results = await ce._search_web(query, max_results=3)
+            except Exception:
+                continue
+
+            if not results:
+                # No recent mentions at this company — could have left
+                contact["source_detail"] = (
+                    f"⚠ No recent mentions of {name} at {operator}. "
+                    f"May have left. Verify before outreach."
+                )
+                contact["_verification_result"] = "company_unverified"
+                continue
+
+            # Check snippets for red flags: "former", "left", "joined [other company]"
+            blob = " ".join(
+                (r.get("snippet") or "") + " " + (r.get("title") or "")
+                for r in results[:3]
+            ).lower()
+
+            left_signals = [
+                "former",
+                "previously",
+                "ex-",
+                "departed",
+                "has left",
+                "moved to",
+                "joined",
+                "now at",
+                "no longer",
+                "vitro",
+                "resigned",
+            ]
+            found_left = [s for s in left_signals if s in blob]
+            if found_left:
+                contact["source_detail"] = (
+                    f"⚠ May have LEFT {operator}. "
+                    f"Signals: {', '.join(found_left[:3])}. Verify before outreach."
+                )
+                contact["_verification_result"] = "possibly_departed"
+                logger.info(
+                    f"[ITER 5] {name}: possibly left {operator} — "
+                    f"signals: {', '.join(found_left[:3])}"
+                )
+
     state.iterations_done = 5
     return _fact_count(state) - facts_before
 
 
 # ═══════════════════════════════════════════════════════════════
 # ITERATION 5.5 — REGIONAL FIT VERIFICATION
+# For contacts whose title says "Global" or has no clear region,
+# run a quick search to discover which region they actually cover.
+# The results get attached to the contact and feed Iter 6's reasoning.
+# This prevents "SVP Global HIC Growth" (actually EMEA) from being
+# misread as a Caribbean-property contact.
+# ═══════════════════════════════════════════════════════════════
 # For contacts whose title says "Global" or has no clear region,
 # run a quick search to discover which region they actually cover.
 # The results get attached to the contact and feed Iter 6's reasoning.
@@ -1613,6 +1735,14 @@ IMPORTANT:
 - RocketReach snippets say "Name is currently a Title at Company" — extract directly.
 - If a person clearly works at a DIFFERENT hotel (not {hotel_name}), mark scope as "wrong_hotel".
 - Only extract real person names. Skip company names, locations, generic text.
+
+JOB POSTING DETECTION — CRITICAL:
+- If someone is POSTING a job opening (e.g. "General Manager | {hotel_name} | Job Opportunity Link"),
+  they are a RECRUITER, not the actual role holder. Do NOT extract them as the GM.
+- Signals: "Job Opportunity", "hiring", "we're looking for", "apply now", "open position",
+  "lnkd.in/e" (shortened job links), "Base Compensation", "Property opening in"
+- Recruiters often have titles like "Principal", "Talent Acquisition", "HCA", "Headhunter"
+- If the snippet is a job posting, SKIP the poster entirely.
 
 SEARCH RESULT SNIPPETS:
 {snippet_block}

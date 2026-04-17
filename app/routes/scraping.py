@@ -1760,6 +1760,71 @@ async def smart_fill_lead(lead_id: int, request: Request, _csrf=Depends(require_
         if "former_names" in enriched:
             lead.former_names = enriched["former_names"]
 
+        # ── Always update normalized name for dedup matching ──
+        from app.services.utils import normalize_hotel_name
+
+        lead.hotel_name_normalized = normalize_hotel_name(lead.hotel_name)
+
+        # ── Dedup check — find potential duplicates ──
+        try:
+            from sqlalchemy import and_, func
+
+            dup_query = select(PotentialLead.id, PotentialLead.hotel_name).where(
+                and_(
+                    PotentialLead.id != lead_id,
+                    PotentialLead.hotel_name_normalized == lead.hotel_name_normalized,
+                    PotentialLead.status != "rejected",
+                )
+            )
+            dup_result = await session.execute(dup_query)
+            duplicates = dup_result.all()
+            if duplicates:
+                dup_names = ", ".join(f"#{d.id} ({d.hotel_name})" for d in duplicates)
+                logger.warning(
+                    f"DUPLICATE DETECTED: Lead {lead_id} ({lead.hotel_name}) "
+                    f"matches: {dup_names}"
+                )
+                # Store in key_insights so sales team sees it
+                dup_note = f"⚠️ POSSIBLE DUPLICATE of {dup_names}"
+                if not lead.key_insights or dup_note not in (lead.key_insights or ""):
+                    lead.key_insights = (
+                        f"{dup_note}\n{lead.key_insights or ''}"
+                    ).strip()
+            elif lead.brand and lead.opening_year:
+                # Fuzzy match: same brand + same country + same opening year
+                # Catches "Royalton Chic Jamaica Paradise Cove" vs "Royalton Chic Runaway Bay"
+                fuzzy_query = select(PotentialLead.id, PotentialLead.hotel_name).where(
+                    and_(
+                        PotentialLead.id != lead_id,
+                        func.lower(PotentialLead.brand) == lead.brand.lower(),
+                        func.lower(PotentialLead.country)
+                        == (lead.country or "").lower(),
+                        PotentialLead.opening_year == lead.opening_year,
+                        PotentialLead.status != "rejected",
+                    )
+                )
+                fuzzy_result = await session.execute(fuzzy_query)
+                fuzzy_matches = fuzzy_result.all()
+                if fuzzy_matches:
+                    fuzzy_names = ", ".join(
+                        f"#{f.id} ({f.hotel_name})" for f in fuzzy_matches
+                    )
+                    logger.warning(
+                        f"FUZZY DUPLICATE: Lead {lead_id} ({lead.hotel_name}) "
+                        f"same brand+country+year as: {fuzzy_names}"
+                    )
+                    dup_note = (
+                        f"⚠️ SIMILAR LEAD: same brand/country/year as {fuzzy_names}"
+                    )
+                    if not lead.key_insights or "SIMILAR LEAD" not in (
+                        lead.key_insights or ""
+                    ):
+                        lead.key_insights = (
+                            f"{dup_note}\n{lead.key_insights or ''}"
+                        ).strip()
+        except Exception as ex:
+            logger.debug(f"Dedup check failed: {ex}")
+
         score_result = calculate_lead_score(
             hotel_name=lead.hotel_name,
             city=lead.city,

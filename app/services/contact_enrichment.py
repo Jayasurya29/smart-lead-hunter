@@ -2110,7 +2110,9 @@ ALWAYS REJECT these even if they appear connected to the hotel:
 - C-suite/corporate: CEO, COO, CFO, Chairman, Investor, Founder, President, Board Member
 - Regional/area roles: Regional Director, VP of Development, SVP, Area Manager
 - Construction: contractors, architects, project managers for building projects
-- Sales/marketing: Director of Sales, National Accounts, Revenue Management, Catering Sales
+- Pure marketing/revenue roles (Revenue Manager, National Accounts, PR Director)
+  BUT KEEP: Director of Sales & Events, Director of Catering,
+  Director of Banquets — they manage staff who NEED uniforms
 - People confirmed to work at a DIFFERENT hotel than the target
 - People with NO title whose snippet context mentions construction, building site, onsite progress, or groundbreaking
   (these are typically contractors visiting the construction site, NOT hotel operational staff)
@@ -2263,6 +2265,7 @@ async def _verify_contacts_with_gemini(
     state: Optional[str] = None,
     country: Optional[str] = None,
     opening_date: Optional[str] = None,
+    project_type: Optional[str] = None,
 ) -> list[dict]:
     """
     AI verification layer: Gemini reads raw snippets to determine each contact
@@ -2451,13 +2454,32 @@ async def _verify_contacts_with_gemini(
     except Exception as ex:
         logger.debug(f"Failed to build procurement guidance: {ex}")
 
+    # ── CONVERSION/REBRAND OVERRIDE ──
+    # For conversion leads (Montage→St. Regis, Hilton→Dreams), the development
+    # executive who signed the deal IS relevant — they're managing the transition
+    # and making vendor decisions during the conversion period.
+    conversion_override = ""
+    if project_type in ("conversion", "rebrand", "ownership_change"):
+        conversion_override = (
+            "\n═══════════════════════════════════════════════════════════════\n"
+            "CONVERSION/REBRAND OVERRIDE\n"
+            "═══════════════════════════════════════════════════════════════\n"
+            "This property is undergoing a CONVERSION or REBRAND. During this\n"
+            "transition period, development executives (Chief Development Officer,\n"
+            "VP Development, SVP Development) who signed the management agreement\n"
+            "ARE relevant — they are managing the transition and making vendor\n"
+            "decisions. Do NOT reject them as 'C-suite/development'.\n"
+            "KEEP: CDO, VP Development, SVP Development for conversion leads.\n"
+            "═══════════════════════════════════════════════════════════════\n"
+        )
+
     prompt = CONTACT_VERIFICATION_PROMPT.format(
         hotel_name=hotel_name,
         location=location,
         brand=brand or "Unknown",
         management_company=management_company or "Unknown",
         hotel_status=hotel_status,
-        procurement_guidance=procurement_guidance,
+        procurement_guidance=procurement_guidance + conversion_override,
         contacts_json=json.dumps(contacts_for_verification, indent=2),
     )
 
@@ -2807,6 +2829,7 @@ async def enrich_lead_contacts(
                 state=state,
                 country=country,
                 opening_date=opening_date,
+                project_type=research_state.project_stage,
             )
         except Exception as ex:
             logger.warning(f"Gemini verification failed (keeping raw contacts): {ex}")
@@ -3146,6 +3169,7 @@ async def _enrich_lead_contacts_v4_legacy(
                 state=state,
                 country=country,
                 opening_date=opening_date,
+                project_type=project_type_str,
             )
             # Restore protected contacts that Gemini tried to reject.
             # These are in contacts_before_verify with _gemini_rejected=True but

@@ -504,7 +504,7 @@ async def toggle_contact_scope(
     if not contact:
         raise HTTPException(status_code=404, detail="Contact not found")
     contact.scope = new_scope
-    # Rescore: hotel_specific gets +30, chain_area gets +12
+    # Rescore: base score depends on scope
     if contact.tier in (
         "TIER1_HSKP",
         "TIER2_PURCH",
@@ -521,6 +521,14 @@ async def toggle_contact_scope(
         else:
             contact.score = 5
             contact.confidence = "low"
+
+    # Preserve strategist priority floor — P1=28, P2=18, P3=10, P4=2
+    # Without this, toggling scope on a P1 contact drops 28→12
+    _PRIORITY_FLOOR = {"P1": 28, "P2": 18, "P3": 10, "P4": 2}
+    if contact.strategist_priority and contact.strategist_priority in _PRIORITY_FLOOR:
+        floor = _PRIORITY_FLOOR[contact.strategist_priority]
+        if contact.score < floor:
+            contact.score = floor
     contact.updated_at = local_now()
     await db.flush()
     try:
