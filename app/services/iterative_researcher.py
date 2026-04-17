@@ -1775,6 +1775,15 @@ IMPORTANT:
 - If a person clearly works at a DIFFERENT hotel (not {hotel_name}), mark scope as "wrong_hotel".
 - Only extract real person names. Skip company names, locations, generic text.
 
+TITLE ACCURACY — CRITICAL:
+- Each person's title must come from text DIRECTLY adjacent to their name.
+- Do NOT assign a title to Person A that actually belongs to Person B in the same snippet.
+- Example: "Omar Dueñas García ... Regional Commercial Director Juan Carlos Mendez" —
+  Omar's title is NOT "Regional Commercial Director" — that belongs to Juan Carlos.
+- If a person's title is unclear or not directly stated, leave it EMPTY rather than guessing.
+- LinkedIn profile format: "Name - Title at Company" → the title is between the dash and "at".
+- RocketReach format: "Name is currently a Title at Company" → title is after "currently a".
+
 JOB POSTING DETECTION — CRITICAL:
 - If someone is POSTING a job opening (e.g. "General Manager | {hotel_name} | Job Opportunity Link"),
   they are a RECRUITER, not the actual role holder. Do NOT extract them as the GM.
