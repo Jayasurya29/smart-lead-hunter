@@ -37,6 +37,7 @@ import re
 from datetime import date
 from typing import Optional
 from app.services.gemini_client import get_gemini_url, get_gemini_headers
+from app.services.ai_client import is_vertex_ai
 
 import httpx
 from dotenv import load_dotenv
@@ -219,26 +220,57 @@ _GEMINI_RETRY_BASE_DELAY = 2  # seconds
 
 
 async def _call_gemini(
-    prompt: str, model: Optional[str] = None, timeout: int = 30
+    prompt: str,
+    model: Optional[str] = None,
+    timeout: int = 30,
+    response_schema: Optional[dict] = None,
+    max_output_tokens: int = 16384,
 ) -> Optional[dict]:
     """Call Gemini API with retry and exponential backoff.
 
     Returns parsed JSON response or None on failure.
     Retries on 429 (rate limit), 500, 503 (server errors).
+
+    Args:
+        prompt: The user prompt.
+        model: Model name; defaults to enrichment model.
+        timeout: Request timeout in seconds.
+        response_schema: Optional OpenAPI-3.0 subset JSON schema. When provided
+            AND the provider is Vertex AI, sets responseMimeType + responseSchema
+            in generationConfig so Gemini returns structurally valid JSON by
+            construction (eliminates the malformed-JSON recovery path). Ignored
+            for non-Vertex providers.
+        max_output_tokens: Gemini 2.5 Flash's "thinking" tokens share this budget
+            with actual output (thoughts_token_count + output_token_count <= max).
+            Default 16384 is tight for large extractions — bump to 32768 for
+            big pages with many contacts to avoid mid-object truncation. Cap
+            is 65536.
     """
     if not model:
         model = get_enrichment_gemini_model()
     url = get_gemini_url(model)
+    generation_config: dict = {
+        "temperature": 0.1,
+        "maxOutputTokens": max_output_tokens,
+    }
+    # ── STRUCTURED OUTPUTS (Vertex AI / Gemini 2.x) ──
+    # When a schema is supplied and we're on Vertex, force Gemini to return
+    # well-formed JSON matching the schema. This eliminates the malformed-JSON
+    # recovery path that was silently dropping contacts (Bug #1, 2026-04-22).
+    schema_active = False
+    if response_schema is not None:
+        try:
+            if is_vertex_ai():
+                generation_config["responseMimeType"] = "application/json"
+                generation_config["responseSchema"] = response_schema
+                schema_active = True
+        except Exception as ex:
+            # Never let schema attachment block the call — fall back to prompt-only
+            logger.debug(f"Could not attach responseSchema (continuing without): {ex}")
+
     payload = {
         "contents": [{"role": "user", "parts": [{"text": prompt}]}],
-        "generationConfig": {
-            "temperature": 0.1,
-            # Gemini 2.5 Flash "thinking" tokens count against maxOutputTokens
-            # (known quirk: thoughts_token_count + output_token_count must be
-            # <= max). Without this set, responses truncate mid-object. The
-            # 2.5 family caps at 65536, we use 16384 for headroom + safety.
-            "maxOutputTokens": 16384,
-        },
+        "generationConfig": generation_config,
     }
 
     client = _get_client()
@@ -264,19 +296,40 @@ async def _call_gemini(
                 except (KeyError, IndexError) as e:
                     logger.error(f"Unexpected Gemini response structure: {e}")
                     return None
+                # finishReason surfaces truncation — log it if it's not STOP
+                finish_reason = candidates[0].get("finishReason", "")
                 text = re.sub(r"```json\s*", "", text)
                 text = re.sub(r"```\s*", "", text)
                 text = text.strip()
                 try:
-                    return json.loads(text)
+                    parsed = json.loads(text)
+                    if finish_reason and finish_reason not in (
+                        "STOP",
+                        "FINISH_REASON_UNSPECIFIED",
+                    ):
+                        logger.warning(
+                            f"Gemini finished with {finish_reason!r} "
+                            f"(schema_active={schema_active}, "
+                            f"max_output_tokens={max_output_tokens}, "
+                            f"text_len={len(text)}) — output may be truncated"
+                        )
+                    return parsed
                 except json.JSONDecodeError as e:
-                    # FIX: Gemini occasionally returns slightly malformed JSON
-                    # (missing comma, unescaped quote in a string value, trailing
-                    # comma, control char in string). Try a few recovery strategies
-                    # before giving up — losing a whole batch of contacts because
-                    # of one stray comma is too costly.
+                    # Gemini occasionally returns slightly malformed JSON
+                    # (missing comma, unescaped quote, trailing comma, control
+                    # char in string, or a response truncated mid-object because
+                    # "thinking" tokens ate the output budget). Try recovery
+                    # strategies before giving up — losing a batch of contacts
+                    # because of one stray comma is too costly.
+                    #
+                    # NOTE: when response_schema is supplied on Vertex, this
+                    # path should almost never fire. If it does, something
+                    # deeper is wrong (schema mismatch, provider regression).
                     logger.warning(
-                        f"Gemini JSON parse error: {e}. Attempting recovery..."
+                        f"Gemini JSON parse error: {e} "
+                        f"(schema_active={schema_active}, "
+                        f"finish_reason={finish_reason!r}, "
+                        f"text_len={len(text)}). Attempting recovery..."
                     )
                     recovered = _try_recover_json(text)
                     if recovered is not None:
@@ -285,13 +338,28 @@ async def _call_gemini(
                         # "'list' object has no attribute 'get'".
                         if isinstance(recovered, list):
                             recovered = {"contacts": recovered}
-                        logger.info(
-                            f"JSON recovery succeeded "
-                            f"(extracted {_count_items(recovered)} items)"
-                        )
+                        recovered_count = _count_items(recovered)
+                        # Flag suspicious low counts — 3 from a >5K-char
+                        # response usually means truncation or cascading
+                        # per-item parse failures. This is the signal
+                        # Bug #1 was silently missing.
+                        if recovered_count < 3 and len(text) > 5000:
+                            logger.warning(
+                                f"JSON recovery yielded only {recovered_count} "
+                                f"items from {len(text)}-char response — likely "
+                                f"truncation. Consider raising max_output_tokens "
+                                f"or enabling response_schema."
+                            )
+                        else:
+                            logger.info(
+                                f"JSON recovery succeeded "
+                                f"(extracted {recovered_count} items from "
+                                f"{len(text)}-char response)"
+                            )
                         return recovered
                     logger.error(
-                        f"Gemini response unrecoverable. First 300 chars: {text[:300]!r}"
+                        f"Gemini response unrecoverable "
+                        f"(text_len={len(text)}). First 300 chars: {text[:300]!r}"
                     )
                     return None
 
@@ -783,6 +851,57 @@ def _hotel_phrase_appears(hotel_name: str, haystacks: list[str]) -> bool:
 # GEMINI AI EXTRACTION PROMPT v3 — Stricter hotel verification
 # ═══════════════════════════════════════════════════════════════
 
+# ── STRUCTURED OUTPUT SCHEMA (matches CONTACT_EXTRACTION_PROMPT_V3) ──
+# Passed to _call_gemini(response_schema=...) when using Vertex AI.
+# Forces Gemini to return well-formed JSON by construction, bypassing the
+# _try_recover_json path that was silently dropping contacts (Bug #1).
+#
+# Schema grammar = OpenAPI 3.0 subset supported by Vertex AI:
+#   https://cloud.google.com/vertex-ai/generative-ai/docs/multimodal/control-generated-output
+# Use `nullable: true` instead of JSON Schema's null union type. Keep enums
+# aligned with the prompt's SCOPE / CONFIDENCE rules.
+CONTACT_EXTRACTION_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "contacts": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string"},
+                    "title": {"type": "string"},
+                    "email": {"type": "string", "nullable": True},
+                    "phone": {"type": "string", "nullable": True},
+                    "linkedin": {"type": "string", "nullable": True},
+                    "organization": {"type": "string", "nullable": True},
+                    "scope": {
+                        "type": "string",
+                        "enum": [
+                            "hotel_specific",
+                            "chain_area",
+                            "chain_corporate",
+                            "wrong_hotel",
+                            "irrelevant",
+                        ],
+                    },
+                    "confidence": {
+                        "type": "string",
+                        "enum": ["high", "medium", "low"],
+                    },
+                    "confidence_note": {"type": "string"},
+                },
+                "required": ["name", "title", "scope", "confidence"],
+            },
+        },
+        "management_company": {"type": "string", "nullable": True},
+        "developer": {"type": "string", "nullable": True},
+        "opening_update": {"type": "string", "nullable": True},
+        "additional_details": {"type": "string", "nullable": True},
+    },
+    "required": ["contacts"],
+}
+
+
 CONTACT_EXTRACTION_PROMPT_V3 = """You are extracting hotel staff contact information from a news article.
 
 TARGET HOTEL: {hotel_name}
@@ -1080,7 +1199,13 @@ async def _scrape_url(url: str) -> Optional[str]:
 async def _extract_contacts_with_gemini(
     article_text: str, hotel_name: str, location: str
 ) -> Optional[dict]:
-    """Use Gemini to extract contacts with scope tagging."""
+    """Use Gemini to extract contacts with scope tagging.
+
+    Uses Vertex AI structured outputs (responseSchema) to guarantee
+    well-formed JSON, and raises max_output_tokens to 32768 to leave
+    headroom for Gemini 2.5 Flash "thinking" tokens on large pages.
+    (Bug #1 fix — 2026-04-22.)
+    """
     model = get_enrichment_gemini_model()
     prompt = CONTACT_EXTRACTION_PROMPT_V3.format(
         hotel_name=hotel_name,
@@ -1089,7 +1214,12 @@ async def _extract_contacts_with_gemini(
     )
 
     try:
-        return await _call_gemini(prompt, model=model)
+        return await _call_gemini(
+            prompt,
+            model=model,
+            response_schema=CONTACT_EXTRACTION_SCHEMA,
+            max_output_tokens=32768,
+        )
     except Exception as e:
         logger.error(f"Gemini extraction failed: {e}")
         return None
@@ -3505,16 +3635,206 @@ async def _enrich_lead_contacts_v4_legacy(
         if not c.get("linkedin") and c.get("name"):
             try:
                 name = c["name"]
-                # Quote the name for exact-match. Append operator context
-                # so we don't match strangers with the same name.
-                li_query = f'"{name}" {operator_context} linkedin'.strip()
+
+                # ── DISTINCTIVE TOKEN BUILDER (priority-based) ──
+                # What token sources matter depends on WHO we're searching
+                # for. A hotel GM lists the PROPERTY on LinkedIn. A VP at
+                # the operator lists the OPERATOR (Crescent Hotels). Only
+                # a Marriott HQ employee lists the CHAIN. Nobody on earth
+                # lists "Autograph Collection" as an employer — that's a
+                # marketing umbrella, not a company.
+                _LINKEDIN_STOPWORDS = {
+                    # Short words / articles
+                    "the",
+                    "and",
+                    "of",
+                    "for",
+                    "at",
+                    "a",
+                    "an",
+                    "&",
+                    "in",
+                    "on",
+                    "to",
+                    "by",
+                    "or",
+                    # Generic hospitality category words
+                    "hotel",
+                    "hotels",
+                    "resort",
+                    "resorts",
+                    "spa",
+                    "spas",
+                    "inn",
+                    "inns",
+                    "suites",
+                    "suite",
+                    "lodge",
+                    "club",
+                    "property",
+                    "properties",
+                    "lodging",
+                    "hospitality",
+                    # Soft-brand / collection labels — marketing umbrellas,
+                    # NOT employers. Must be filtered out or we end up
+                    # searching for the wrong associations on LinkedIn.
+                    "collection",
+                    "collections",
+                    "autograph",
+                    "curio",
+                    "tribute",
+                    "unbound",
+                    "luxury",
+                    "tapestry",
+                    "mgallery",
+                    "vignette",
+                    "destination",
+                    "editions",
+                    "edition",
+                    # Generic corporate suffixes
+                    "group",
+                    "groups",
+                    "company",
+                    "companies",
+                    "corp",
+                    "corporation",
+                    "inc",
+                    "llc",
+                    "ltd",
+                    "plc",
+                    "international",
+                    "global",
+                    "americas",
+                    "worldwide",
+                    "management",
+                    "services",
+                    # Generic hotel-name descriptors
+                    "rooftop",
+                    "tower",
+                    "towers",
+                    "plaza",
+                    "palace",
+                    "grand",
+                    "downtown",
+                    "boutique",
+                    "premium",
+                }
+
+                def _extract_tokens(sources):
+                    out = set()
+                    for s in sources:
+                        for word in re.split(r"[^a-z0-9]+", (s or "").lower()):
+                            if len(word) >= 3 and word not in _LINKEDIN_STOPWORDS:
+                                out.add(word)
+                    return out
+
+                # Detect contact scope — this drives which tokens we use.
+                scope = (
+                    c.get("scope", "") or c.get("_validation_scope", "") or ""
+                ).lower()
+
+                # TIER 1 (property / operator) — for hotel-specific or
+                # chain-area contacts, i.e. people who actually work at
+                # the property or for the operator of the property.
+                tier1 = _extract_tokens([hotel_name, management_company])
+
+                # TIER 2 (chain parent) — only used when the contact is
+                # flagged as corporate/HQ-level (scope=chain_corporate),
+                # because those folks list the parent chain on LinkedIn.
+                # For everyone else, the chain name is NOISE: a Crescent
+                # VP doesn't have "Marriott" in their Experience section.
+                tier2 = set()
+                if scope == "chain_corporate":
+                    tier2 = _extract_tokens([operator_context])
+
+                # Fallback: if tier 1 is empty (no hotel name, no mgmt co)
+                # AND this isn't a corporate contact, lean on whatever we
+                # have — org field and operator context. Still filtered
+                # against the stopword list so "Autograph" etc. are out.
+                fallback = set()
+                if not tier1 and not tier2:
+                    fallback = _extract_tokens(
+                        [c.get("organization"), operator_context]
+                    )
+
+                distinctive = tier1 | tier2 | fallback
+
+                # No distinctive tokens = no way to verify a match — skip.
+                # Attaching a blind URL here is what produced the
+                # Michael Metcalf -> CS student bug.
+                if not distinctive:
+                    logger.debug(
+                        f"LinkedIn lookup skipped for {name}: "
+                        f"no distinctive tokens (scope={scope!r})"
+                    )
+                    continue
+
+                # ── Targeted query: site:linkedin.com/in + name + tokens.
+                #    Google indexes the Experience section of public
+                #    LinkedIn profiles. Putting tokens INSIDE the search
+                #    query forces Google to return only profiles whose
+                #    indexed content (headline, summary, OR Experience
+                #    entries) contains at least one of our tokens.
+                #    Catches legit execs with generic headlines; rejects
+                #    namesakes with zero association to the property.
+                tokens_for_query = sorted(distinctive)[:3]
+                tokens_clause = " OR ".join(f'"{t}"' for t in tokens_for_query)
+                li_query = f'"{name}" ({tokens_clause}) site:linkedin.com/in'
                 li_results = await _search_web(li_query, max_results=3)
+
+                attached = False
                 for r in li_results:
                     r_url = r.get("url", "")
-                    if "linkedin.com/in/" in r_url:
-                        c["linkedin"] = r_url
-                        logger.info(f"LinkedIn URL found for {name}: {r_url}")
-                        break
+                    if "linkedin.com/in/" not in r_url:
+                        continue
+
+                    # Sanity: SERP title must contain the contact's name.
+                    # LinkedIn SERP format is "Name - Title - Company |
+                    # LinkedIn"; if the name isn't present, Google fell
+                    # back to fuzzy matching and returned a different
+                    # profile. Reject and move to the next candidate.
+                    serp_title_lower = (r.get("title") or "").lower()
+                    name_parts = [p for p in name.lower().split() if len(p) >= 2]
+                    if name_parts and not all(
+                        p in serp_title_lower for p in name_parts
+                    ):
+                        logger.debug(
+                            f"LinkedIn rejected for {name}: SERP title "
+                            f"{(r.get('title') or '')[:60]!r} missing name parts"
+                        )
+                        continue
+
+                    # Log whether tokens are visible in SERP snippet (high
+                    # confidence) or only in the indexed Experience
+                    # section (still valid, just less visible).
+                    haystack = (
+                        (r.get("snippet") or "") + " " + (r.get("title") or "")
+                    ).lower()
+                    visible_tokens = [t for t in distinctive if t in haystack]
+
+                    c["linkedin"] = r_url
+                    if visible_tokens:
+                        logger.info(
+                            f"LinkedIn URL found for {name}: {r_url} "
+                            f"(visible tokens in SERP: {visible_tokens}, "
+                            f"scope={scope})"
+                        )
+                    else:
+                        logger.info(
+                            f"LinkedIn URL found for {name}: {r_url} "
+                            f"(verified via Experience section - tokens "
+                            f"{tokens_for_query} matched in profile's "
+                            f"indexed content, scope={scope})"
+                        )
+                    attached = True
+                    break
+
+                if not attached:
+                    logger.info(
+                        f"No verifiable LinkedIn URL for {name} "
+                        f"(query tokens: {tokens_for_query}, scope={scope}) "
+                        f"— leaving null rather than attach wrong profile"
+                    )
             except Exception as e:
                 logger.debug(f"LinkedIn URL lookup failed for {c.get('name')}: {e}")
 

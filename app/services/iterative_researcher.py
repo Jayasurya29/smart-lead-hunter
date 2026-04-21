@@ -62,7 +62,20 @@ class ResearchState:
 
     # ── Discovered facts (filled in as iterations run) ──
     operator_parent: Optional[str] = None  # "Hyatt Inclusive Collection"
+    brand_parent: Optional[str] = (
+        None  # "Marriott" — chain that owns the BRAND. For soft brands
+        # (Autograph, Curio, Tribute, MGallery, etc.) this is NOT the
+        # operator; the independent management company is. Separated from
+        # operator_parent so Iter 5 verification doesn't search for a
+        # Crescent exec under "Marriott" (Bug #3 fix — 2026-04-22).
+    )
     owner_company: Optional[str] = None  # "Playa Hotels & Resorts"
+    owner_principal: Optional[str] = (
+        None  # "Dr. Kali P. Chaudhuri" — natural person behind the owner
+        # entity when discoverable. Useful for independent/single-property
+        # owners where the check-writer is a named individual, not a REIT
+        # (Bug #4 fix — 2026-04-22).
+    )
     region_term: Optional[str] = None  # "Caribbean"
     cluster_siblings: list[str] = field(default_factory=list)
     project_stage: Optional[str] = (
@@ -134,12 +147,35 @@ async def iteration_1_discovery(state: ResearchState) -> int:
         contact_enrichment as ce,
     )  # delayed import to avoid circularity
 
-    # Resolve operator_parent from the brand registry (if known)
-    if not state.operator_parent and state.brand:
+    # Resolve operator_parent / brand_parent from the brand registry.
+    # Split into two fields so soft brands (Autograph, Curio, Tribute,
+    # MGallery, etc.) don't pollute operator_parent with the chain name.
+    # For Autograph Collection: brand_parent=Marriott, operator_parent
+    # stays empty so Iter 1's article scrape can discover the actual
+    # management company (e.g. Crescent Hotels) without Marriott masking
+    # it. Bug #3 fix — 2026-04-22.
+    if state.brand:
         try:
             bi = BrandRegistry.lookup(state.brand)
             if bi and bi.parent_company:
-                state.operator_parent = bi.parent_company.split("(")[0].strip()
+                parent_clean = bi.parent_company.split("(")[0].strip()
+                # Always record the brand parent chain
+                if not state.brand_parent:
+                    state.brand_parent = parent_clean
+                # Only use brand_parent as operator_parent for chain-managed
+                # brands. Soft-brand collections (operating_model=="collection")
+                # are operated by independent management companies, not the
+                # brand parent — those get discovered from scraped articles.
+                operating_model = (bi.operating_model or "").lower()
+                is_soft_brand = operating_model in ("collection", "franchised")
+                if not state.operator_parent and not is_soft_brand:
+                    state.operator_parent = parent_clean
+                elif is_soft_brand:
+                    logger.info(
+                        f"[ITER 1] {state.brand!r} is a soft brand "
+                        f"(operating_model={operating_model!r}) — leaving "
+                        f"operator_parent empty; brand_parent={parent_clean!r}"
+                    )
         except Exception:
             pass
 
@@ -167,9 +203,79 @@ async def iteration_1_discovery(state: ResearchState) -> int:
     facts_before = _fact_count(state)
     await _run_queries_and_extract(state, queries, ce, scrape_limit=5)
 
+    # ── Explicit owner/developer extraction (Bug #4 fix — 2026-04-22) ──
+    # The old _guess_owner_from_state only looked at contact organization
+    # fields — so for Kali, where every discovered contact's org field was
+    # "Crescent Hotels" (the operator), Crescent got promoted to "owner"
+    # and the actual owner (KPC Development / Dr. Kali P. Chaudhuri) was
+    # never surfaced. Now we scrape the developer/owner query results
+    # and ask Gemini to extract the ownership entity directly from the
+    # article text, which is where it's always named.
+    if not state.owner_company or not state.owner_principal:
+        try:
+            owner_data = await _extract_owner_with_gemini(state, ce)
+            if owner_data:
+                if not state.owner_company and owner_data.get("owner_company"):
+                    state.owner_company = owner_data["owner_company"]
+                    logger.info(
+                        f"[ITER 1] Owner extracted: " f"{state.owner_company!r}"
+                    )
+                if not state.owner_principal and owner_data.get("owner_principal"):
+                    state.owner_principal = owner_data["owner_principal"]
+                    logger.info(
+                        f"[ITER 1] Owner principal extracted: "
+                        f"{state.owner_principal!r}"
+                    )
+                # ── Synthesize a contact entry for the owner principal ──
+                # Without this, the Iter 6 strategist would see the owner
+                # in context but have no contact record to assign priority
+                # to. Adding them as a discovered_names entry lets the
+                # strategist promote them to P2 (check-writer tier) per
+                # the owner-vs-operator guidance in the prompt.
+                principal = state.owner_principal
+                ownership_type = owner_data.get("ownership_type") or ""
+                if principal and len(principal.split()) >= 2:
+                    already_present = any(
+                        (n.get("name") or "").strip().lower() == principal.lower()
+                        for n in state.discovered_names
+                    )
+                    if not already_present:
+                        # Derive a reasonable title from ownership type
+                        principal_title = {
+                            "individual_investor": "Owner / Principal",
+                            "family_office": "Principal / Family Office",
+                            "REIT": "REIT Principal",
+                            "PE": "Principal / Investor",
+                            "corporate": "Principal",
+                        }.get(ownership_type, "Owner / Principal")
+                        state.discovered_names.append(
+                            {
+                                "name": principal,
+                                "title": principal_title,
+                                "organization": state.owner_company or "Owner entity",
+                                "scope": "owner",
+                                "source_url": "",
+                                "source_detail": (
+                                    f"Owner principal identified via Iter 1 "
+                                    f"owner extraction. "
+                                    f"{owner_data.get('reasoning') or ''}"
+                                ).strip(),
+                                "_iteration_found": 1,
+                                "_found_by": "owner_extraction",
+                            }
+                        )
+                        logger.info(
+                            f"[ITER 1] Synthesized owner-principal contact: "
+                            f"{principal} ({principal_title} at "
+                            f"{state.owner_company or 'owner entity'})"
+                        )
+        except Exception as ex:
+            logger.warning(f"[ITER 1] Explicit owner extraction failed: {ex}")
+
     # ── Mine the scraped articles to fill in owner_company + project_stage ──
     # The Gemini-extracted contacts include `organization` field which often
-    # IS the owner company name (e.g. "Playa Resorts Management").
+    # IS the owner company name (e.g. "Playa Resorts Management"). Only used
+    # as a fallback when the explicit extraction above didn't yield anything.
     if not state.owner_company:
         state.owner_company = _guess_owner_from_state(state)
 
@@ -253,6 +359,170 @@ async def _verify_operating_companies(state: ResearchState) -> None:
             # Unknown / ambiguous — default to keep (don't drop real data on weak signal)
             state.verified_current_companies.append(company)
             logger.info(f"[SHIFT A] {company!r} ambiguous — keeping as candidate")
+
+
+async def _extract_owner_with_gemini(state, ce_module) -> Optional[dict]:
+    """
+    Bug #4 fix: explicit owner/developer extraction from scraped articles.
+
+    Scrapes a handful of the developer/owner query results that were
+    already fetched in Iter 1 and asks Gemini to identify:
+      - owner_company     — the legal/REIT/LLC entity that owns the property
+      - owner_principal   — the natural person behind the owner when named
+                            (e.g. Dr. Kali P. Chaudhuri behind KPC Development)
+      - developer_company — the construction/development firm, if distinct
+      - ownership_type    — individual_investor / REIT / PE / sovereign /
+                            family_office / corporate / unknown
+
+    Returns None on failure; a dict with the above keys on success. Any
+    key may be None if Gemini couldn't determine it from the evidence.
+    """
+    import json
+
+    # Pull 3-5 URLs that look like they'd mention ownership. We already
+    # have them cached in state.urls_scraped from Iter 1's query batch.
+    candidate_urls = [
+        u
+        for u in state.urls_scraped
+        if any(
+            kw in u.lower()
+            for kw in (
+                "developer",
+                "owner",
+                "partnership",
+                "announce",
+                "hotel-online",
+                "hospitalitynet",
+                "hoteldive",
+                "hotelexecutive",
+                "travelweekly",
+                "skift",
+            )
+        )
+    ][:5]
+    if not candidate_urls:
+        # Fall back to any 3 scraped URLs
+        candidate_urls = list(state.urls_scraped)[:3]
+    if not candidate_urls:
+        return None
+
+    # Scrape text from each (short cap — ownership is usually in first paragraphs)
+    texts: list[str] = []
+    for url in candidate_urls:
+        try:
+            text = await ce_module._scrape_url(url)
+        except Exception:
+            text = None
+        if text and len(text) > 200:
+            texts.append(f"[{url}]\n{text[:4000]}")
+        if len(texts) >= 3:
+            break
+    if not texts:
+        return None
+
+    evidence = "\n\n---\n\n".join(texts)[:12000]
+
+    prompt = f"""You are extracting property ownership information from trade-press
+articles about a specific hotel. Current date: April 2026.
+
+HOTEL: {state.hotel_name}
+LOCATION: {", ".join(filter(None, [state.city, state.state, state.country]))}
+
+TASK: From the evidence below, identify WHO OWNS THIS HOTEL PROPERTY.
+
+Ownership ≠ operation. The OPERATOR (management company) runs daily
+operations. The OWNER is the entity that holds title and put up the capital.
+For new builds, there's also often a DEVELOPER. These can overlap but often don't.
+
+Rules:
+- owner_company: the entity that owns the real estate (LLC, REIT, corporation,
+  family office). Examples: "KPC Development Company", "Blackstone", "Host
+  Hotels & Resorts". NOT the management company (Crescent, Aimbridge, etc.).
+- owner_principal: the natural person publicly associated with ownership when
+  named (founder, chairman, controlling shareholder, managing member). Example:
+  "Dr. Kali P. Chaudhuri" for KPC Development. Leave null for institutional
+  owners (REITs, PE funds) where no single person is the public face.
+- developer_company: the construction/development firm, only if distinct from
+  the owner. Leave null if same as owner.
+- ownership_type: one of individual_investor | REIT | PE | sovereign_wealth |
+  family_office | corporate | unknown.
+
+Use null (not empty strings, not "unknown"/"N/A") when evidence doesn't name
+a specific entity. Do NOT guess.
+
+Respond with JSON only, no prose:
+{{
+  "owner_company": "...",
+  "owner_principal": "...",
+  "developer_company": "...",
+  "ownership_type": "...",
+  "reasoning": "1 short sentence citing which source you used"
+}}
+
+EVIDENCE:
+{evidence}
+"""
+
+    schema = {
+        "type": "object",
+        "properties": {
+            "owner_company": {"type": "string", "nullable": True},
+            "owner_principal": {"type": "string", "nullable": True},
+            "developer_company": {"type": "string", "nullable": True},
+            "ownership_type": {
+                "type": "string",
+                "nullable": True,
+                "enum": [
+                    "individual_investor",
+                    "REIT",
+                    "PE",
+                    "sovereign_wealth",
+                    "family_office",
+                    "corporate",
+                    "unknown",
+                ],
+            },
+            "reasoning": {"type": "string", "nullable": True},
+        },
+    }
+
+    try:
+        resp = await ce_module._call_gemini(
+            prompt,
+            response_schema=schema,
+            max_output_tokens=8192,
+            timeout=60,
+        )
+    except Exception as ex:
+        logger.debug(f"Owner extraction Gemini call failed: {ex}")
+        return None
+
+    if not resp:
+        return None
+    if isinstance(resp, str):
+        try:
+            resp = json.loads(resp)
+        except json.JSONDecodeError:
+            return None
+    if not isinstance(resp, dict):
+        return None
+
+    # Clean: turn empty strings and common null-ish placeholders into None
+    def _clean(v):
+        if not v:
+            return None
+        s = str(v).strip()
+        if not s or s.lower() in ("null", "none", "n/a", "unknown", "not specified"):
+            return None
+        return s
+
+    return {
+        "owner_company": _clean(resp.get("owner_company")),
+        "owner_principal": _clean(resp.get("owner_principal")),
+        "developer_company": _clean(resp.get("developer_company")),
+        "ownership_type": _clean(resp.get("ownership_type")),
+        "reasoning": resp.get("reasoning"),
+    }
 
 
 async def _check_company_currency_with_gemini(
@@ -699,6 +969,30 @@ async def iteration_3_corporate_hunt(state: ResearchState) -> int:
             "Pre-Opening Director",
         ]
 
+    # ── MANDATORY PROCUREMENT TITLES (Bug #6 fix — 2026-04-22) ──
+    # For a UNIFORM SUPPLIER, procurement VPs at the management company are
+    # the #1 buyers — but the brand registry's regional_team_titles often
+    # omits generic procurement titles (they're chain-agnostic). And even
+    # when they exist, the query builder only takes regional_titles[:8],
+    # so procurement titles may never get queried.
+    #
+    # Fix: ALWAYS run a dedicated procurement-titles query per hunt company,
+    # regardless of what the brand registry says. Covers Adam Butts-type
+    # contacts (SVP Procurement at Crescent, Aimbridge, Highgate, etc.)
+    # that were silently missing from every run.
+    _MANDATORY_PROCUREMENT_TITLES = [
+        "VP Procurement",
+        "SVP Procurement",
+        "Director of Procurement",
+        "Chief Procurement Officer",
+    ]
+    _MANDATORY_PROCUREMENT_TITLES_B = [
+        "VP Purchasing",
+        "Director of Purchasing",
+        "Head of Procurement",
+        "VP Supply Chain",
+    ]
+
     def _group_or_query(company: str, titles: list[str], region_term: str) -> str:
         """Build a single Serper query OR'ing up to 4 titles for one company."""
         if not titles:
@@ -727,6 +1021,18 @@ async def iteration_3_corporate_hunt(state: ResearchState) -> int:
             q = _group_or_query(company, cluster_titles[4:8], region)
             if q:
                 queries.append(q)
+
+        # ── MANDATORY procurement query (Bug #6 fix — 2026-04-22) ──
+        # Always hunt for procurement-role contacts at every company in
+        # every lead, regardless of what the brand registry says. The
+        # first batch covers the standard titles; second batch covers
+        # the purchasing / supply chain variants. 2 queries per company.
+        q = _group_or_query(company, _MANDATORY_PROCUREMENT_TITLES, region)
+        if q:
+            queries.append(q)
+        q = _group_or_query(company, _MANDATORY_PROCUREMENT_TITLES_B, region)
+        if q:
+            queries.append(q)
 
         # ── Regional tier queries (1-2 OR'd groups) ──
         q = _group_or_query(company, regional_titles[:4], region)
@@ -782,8 +1088,10 @@ async def iteration_3_corporate_hunt(state: ResearchState) -> int:
         return 0
 
     facts_before = _fact_count(state)
-    # Cap at 8 queries — covers cluster + regional for 2 companies + extras
-    await _run_queries_and_extract(state, deduped[:8], ce, scrape_limit=6)
+    # Cap raised to 12 — covers cluster + regional + mandatory procurement
+    # + extras for 2 companies. Bug #6 fix added 2 procurement queries per
+    # company; leaving the cap at 8 meant they often got truncated away.
+    await _run_queries_and_extract(state, deduped[:12], ce, scrape_limit=6)
 
     state.iterations_done = 3
     return _fact_count(state) - facts_before
@@ -1055,7 +1363,18 @@ async def iteration_5_verify_current_role(state: ResearchState) -> int:
     # Juan Pablo Puerta left Hyatt → now CFO at Vitro Glass.
     # Property-level check doesn't catch this because he was never AT
     # the property. Check: is this person still at the COMPANY?
-    operator = state.operator_parent or state.management_company or ""
+    #
+    # PRIORITY: management_company FIRST (most specific — the actual
+    # employer of corporate contacts associated with the property). Fall
+    # back to operator_parent, then brand_parent. Previously this was
+    # ordered operator_parent first, which for soft-brand properties
+    # (Autograph, Curio, etc.) meant searching "Michael Metcalf"
+    # "Marriott" instead of "Michael Metcalf" "Crescent Hotels" — the
+    # wrong company, so stale/departed signals were never picked up.
+    # Bug #3 follow-up — 2026-04-22.
+    operator = (
+        state.management_company or state.operator_parent or state.brand_parent or ""
+    )
     if operator:
         for contact in state.discovered_names:
             scope = (contact.get("scope") or "").lower()
@@ -1117,6 +1436,108 @@ async def iteration_5_verify_current_role(state: ResearchState) -> int:
                 logger.info(
                     f"[ITER 5] {name}: possibly left {operator} — "
                     f"signals: {', '.join(found_left[:3])}"
+                )
+
+    # ── TITLE-CURRENCY VERIFICATION (Bug #2 fix — 2026-04-22) ──
+    # The company-level verify above catches "person left the company" but
+    # misses "person still at company, different role". Michael Metcalf is
+    # still at Crescent Hotels — just not as COO anymore (Elie Khoury
+    # replaced him in March 2025). To catch stale titles, we search
+    # specifically for RECENT appointments to each contact's title at their
+    # company. If a different name is named in that role, the contact's
+    # title is stale → flag and downgrade.
+    if operator:
+        _EXEC_TITLE_KEYWORDS = (
+            "chief executive",
+            "ceo",
+            "chief operating",
+            "coo",
+            "chief financial",
+            "cfo",
+            "chief commercial",
+            "cco",
+            "chief marketing",
+            "cmo",
+            "chief legal",
+            "president",
+            "svp",
+            "evp",
+            "managing director",
+            "vp operations",
+            "vp procurement",
+            "vice president",
+        )
+        seen_title_checks: set[str] = set()
+        for contact in state.discovered_names:
+            name = (contact.get("name") or "").strip()
+            title = (contact.get("title") or "").strip()
+            if not name or not title or len(name.split()) < 2:
+                continue
+            scope = (contact.get("scope") or "").lower()
+            # Only check named executives — title-currency doesn't apply
+            # to property-level roles (GMs, directors of housekeeping, etc.)
+            # because those get caught by the property-level verify already.
+            if scope not in ("chain_area", "chain_corporate"):
+                continue
+            title_lower = title.lower()
+            if not any(kw in title_lower for kw in _EXEC_TITLE_KEYWORDS):
+                continue
+            # Skip if already flagged as departed/unverified — adding stale
+            # on top would be noise.
+            if contact.get("_verification_result") in (
+                "former_employee",
+                "possibly_departed",
+                "company_unverified",
+            ):
+                continue
+            # One title-currency search per (company, title) pair — multiple
+            # contacts claiming the same title only need one check.
+            title_key = (operator.lower(), title_lower)
+            if title_key in seen_title_checks:
+                continue
+            seen_title_checks.add(title_key)
+
+            verdict = await _check_title_currency_with_gemini(
+                company=operator,
+                title=title,
+                claimed_holder=name,
+                ce_module=ce,
+                state=state,
+            )
+            if not verdict:
+                continue
+
+            current_holder = (verdict.get("current_holder") or "").strip()
+            is_stale = verdict.get("is_stale", False)
+            if not is_stale or not current_holder:
+                continue
+
+            # Find all contacts who claimed THIS title at THIS company
+            # and flag them if their name doesn't match the current holder.
+            for c in state.discovered_names:
+                c_title = (c.get("title") or "").lower().strip()
+                c_name = (c.get("name") or "").strip()
+                if c_title != title_lower:
+                    continue
+                if c_name.lower() == current_holder.lower():
+                    # This contact IS the current holder — mark as
+                    # confirmed, don't downgrade.
+                    c["_verification_result"] = "title_confirmed"
+                    continue
+                # Stale — someone else holds the title now.
+                c["_verification_result"] = "stale_title"
+                c["_replaced_by"] = current_holder
+                c["source_detail"] = (
+                    f"⚠ STALE TITLE: {c_name} is no longer {title} at "
+                    f"{operator}. Current holder: {current_holder}. "
+                    f"Do NOT contact as {title} — verify current role."
+                )
+                # Downgrade scope so Iter 6 strategist won't promote to P1
+                if c.get("scope") == "chain_corporate":
+                    c["scope"] = "chain_area"
+                logger.info(
+                    f"[ITER 5/TITLE] {c_name} STALE as {title} at "
+                    f"{operator} — replaced by {current_holder}"
                 )
 
     state.iterations_done = 5
@@ -1323,6 +1744,123 @@ EVIDENCE:
         except json.JSONDecodeError:
             return None
     return None
+
+
+async def _check_title_currency_with_gemini(
+    company: str,
+    title: str,
+    claimed_holder: str,
+    ce_module,
+    state,
+) -> Optional[dict]:
+    """
+    Bug #2 fix: verify that the CURRENT holder of <title> at <company>
+    is <claimed_holder>. Catches stale titles — cases where the person
+    is still at the company but in a different role.
+
+    Searches specifically for recent appointment news for the title, then
+    asks Gemini to identify the current holder. If the current holder's
+    name doesn't match claimed_holder, flag as stale.
+
+    Returns dict: {current_holder, is_stale, reason} or None on failure.
+    """
+    import json
+
+    # Search for recent announcements of this title. Covers both
+    # "[Name] appointed [Title]" and "[Title] announced as..." phrasings.
+    query = (
+        f'"{company}" "{title}" appointed OR named OR new OR announces ' f"2025 OR 2026"
+    )
+    if query in state.queries_run:
+        return None
+    state.queries_run.append(query)
+
+    logger.info(f"[ITER 5/TITLE] Query: {query}")
+
+    try:
+        results = await ce_module._search_web(query, max_results=5)
+    except Exception as ex:
+        logger.warning(f"[ITER 5/TITLE] Search failed: {ex}")
+        return None
+    if not results:
+        return None
+
+    # Build evidence blob from snippets + titles — usually enough signal
+    # without full-page scraping, which is expensive and often blocked.
+    evidence = "\n\n".join(
+        f"[{r.get('url','')}] {(r.get('title') or '')} — " f"{(r.get('snippet') or '')}"
+        for r in results[:5]
+    )[:6000]
+
+    prompt = f"""You are verifying who CURRENTLY holds a specific executive
+title at a specific company. Current date: April 2026.
+
+COMPANY: {company}
+TITLE: {title}
+CLAIMED HOLDER (unverified): {claimed_holder}
+
+TASK: From the evidence below, identify the person who is the CURRENT
+holder of this title at this company (as of 2025–2026). Be strict —
+only return a name you can directly support from the evidence.
+
+If the evidence shows:
+- A DIFFERENT person named as the current holder of this title,
+  return that person's name and set is_stale=true.
+- The CLAIMED HOLDER is still in this role (recent articles confirm),
+  return their name and set is_stale=false.
+- The evidence is ambiguous or doesn't clearly name ANY current holder,
+  return current_holder=null and is_stale=false.
+
+Do NOT mark is_stale=true unless you have explicit evidence of a
+different person in the role — absence of mention is not enough.
+
+Respond with JSON only, no prose:
+{{
+  "current_holder": "full name or null",
+  "is_stale": true | false,
+  "reason": "1 short sentence citing which source / phrase you used"
+}}
+
+EVIDENCE:
+{evidence}
+"""
+
+    schema = {
+        "type": "object",
+        "properties": {
+            "current_holder": {"type": "string", "nullable": True},
+            "is_stale": {"type": "boolean"},
+            "reason": {"type": "string", "nullable": True},
+        },
+        "required": ["is_stale"],
+    }
+
+    try:
+        resp = await ce_module._call_gemini(
+            prompt,
+            response_schema=schema,
+            max_output_tokens=4096,
+            timeout=45,
+        )
+    except Exception as ex:
+        logger.debug(f"Title-currency Gemini call failed: {ex}")
+        return None
+
+    if not resp:
+        return None
+    if isinstance(resp, str):
+        try:
+            resp = json.loads(resp)
+        except json.JSONDecodeError:
+            return None
+    if not isinstance(resp, dict):
+        return None
+
+    return {
+        "current_holder": resp.get("current_holder"),
+        "is_stale": bool(resp.get("is_stale")),
+        "reason": resp.get("reason"),
+    }
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -1583,6 +2121,8 @@ uniforms for a new opening or major renovation. Current date: April 2026.
 LEAD CONTEXT:
 - Hotel: {state.hotel_name}
 - Brand: {state.brand or "unknown"}
+- Brand parent (chain): {state.brand_parent or "unknown"}
+- Management company (operator): {state.management_company or "unknown — discover from evidence"}
 - Location: {state.city or ""}, {state.state or ""}, {state.country or ""}
 - Opening: {state.opening_date or "unknown"}
 - Timeline label: {tl} — {timeline_hint}
@@ -1590,8 +2130,24 @@ LEAD CONTEXT:
 - Project TYPE (Phase A classifier): {state.project_type or "unknown"}
 - Operator parent: {state.operator_parent or "unknown"}
 - Owner company: {state.owner_company or "unknown"}
+- Owner principal (natural person behind ownership): {state.owner_principal or "not identified"}
 - Verified-current companies: {", ".join(state.verified_current_companies) or "none confirmed"}
 - Historical (skip) companies: {", ".join(state.historical_companies) or "none"}
+
+OWNER vs OPERATOR vs BRAND-PARENT DISTINCTION (IMPORTANT):
+- The BRAND PARENT (e.g. Marriott) owns the brand badge (Autograph Collection,
+  Curio, Tribute). For soft-brand properties, they do NOT operate or own the
+  hotel — their staff are not buyers for this property. Mark their contacts P4
+  unless a specific corporate procurement role explicitly covers this property.
+- The MANAGEMENT COMPANY (e.g. Crescent Hotels & Resorts) is the actual
+  employer that runs day-to-day operations. Their corporate execs (COO, VP
+  Ops, Dir Procurement) ARE buyers → P1/P2 depending on property readiness.
+- The OWNER (entity + principal) is the CHECK-WRITER. For single-property or
+  independent ownership (e.g. Dr. Kali P. Chaudhuri / KPC Development),
+  include the owner principal as a P2 "decision influencer" contact — they
+  hold ultimate budget authority even though day-to-day buying goes through
+  the management company. For institutional owners (REITs, PE funds), the
+  owner entity itself is P3 (procurement goes through the operator).
 {phase_b_block}{brand_tier_block}{brand_model_block}{cascade_block}
 YOUR JOB:
 For each candidate below, decide (a) the FINAL priority and (b) a one-sentence
@@ -1984,6 +2540,14 @@ async def _extract_contacts_from_snippets(
     the actual URL would fail (403, empty content, blocked).
 
     Returns a list of contact dicts: [{name, title, organization, source, ...}]
+
+    Bug #5 fix (2026-04-22): Previously this used raw _call_gemini with no
+    response_schema, which meant Gemini occasionally returned contacts with
+    just a name (no title, no organization) — the downstream verifier then
+    rejected them for "no evidence of connection". Now uses structured
+    output schema to force title + organization into every contact (using
+    empty strings when not determinable) so the downstream can reason about
+    the completeness of the extraction explicitly.
     """
     if not snippets:
         return []
@@ -2007,24 +2571,36 @@ async def _extract_contacts_from_snippets(
 
     prompt = f"""Extract contact names from these Google search result snippets about the hotel "{hotel_name}" in {location}.
 
-For each person mentioned who works at or is associated with this hotel (or its parent brand/operator), return their name, title, and organization.
+For each person mentioned who works at or is associated with this hotel (or its parent brand/operator/owner), return their name, title, and organization.
 
-IMPORTANT:
-- Read the snippet text carefully. "Carl Ainscough - Hotel Manager" means Carl Ainscough IS the Hotel Manager.
-- "Mr. X the General Manager at the hotel" means X IS the General Manager.
-- LinkedIn snippets often show: "Name - Title · Company · Location" — extract all parts.
-- RocketReach snippets say "Name is currently a Title at Company" — extract directly.
-- If a person clearly works at a DIFFERENT hotel (not {hotel_name}), mark scope as "wrong_hotel".
-- Only extract real person names. Skip company names, locations, generic text.
+CRITICAL CO-EXTRACTION RULE:
+When you extract a person's name, you MUST ALSO extract their title and organization
+from the SAME snippet if they appear anywhere in it. Do NOT return a name with empty
+title/organization when that information is sitting in the same snippet text.
+
+Look at the ENTIRE snippet — the title may appear before OR after the name:
+  - "Dr. Kali P. Chaudhuri, Chairman and Founder of KPC Development Company"
+    → name="Dr. Kali P. Chaudhuri", title="Chairman and Founder", organization="KPC Development Company"
+  - "Carl Ainscough - Hotel Manager"
+    → name="Carl Ainscough", title="Hotel Manager", organization="" (if not stated)
+  - "Mr. X the General Manager at Hotel Y"
+    → name="X", title="General Manager", organization="Hotel Y"
+  - LinkedIn snippets: "Name - Title · Company · Location"
+    → extract all three parts
+  - RocketReach snippets: "Name is currently a Title at Company"
+    → extract directly
+
+If the title or organization is truly NOT in the snippet, use empty string "". Do NOT
+invent titles. But also do NOT omit them when they ARE present — the #1 failure mode
+is extracting just the name when the title/org is sitting right there in the text.
 
 TITLE ACCURACY — CRITICAL:
 - Each person's title must come from text DIRECTLY adjacent to their name.
 - Do NOT assign a title to Person A that actually belongs to Person B in the same snippet.
 - Example: "Omar Dueñas García ... Regional Commercial Director Juan Carlos Mendez" —
   Omar's title is NOT "Regional Commercial Director" — that belongs to Juan Carlos.
-- If a person's title is unclear or not directly stated, leave it EMPTY rather than guessing.
-- LinkedIn profile format: "Name - Title at Company" → the title is between the dash and "at".
-- RocketReach format: "Name is currently a Title at Company" → title is after "currently a".
+- If a person clearly works at a DIFFERENT hotel (not {hotel_name}), mark scope as "wrong_hotel".
+- Only extract real person names. Skip company names, locations, generic text.
 
 JOB POSTING DETECTION — CRITICAL:
 - If someone is POSTING a job opening (e.g. "General Manager | {hotel_name} | Job Opportunity Link"),
@@ -2037,15 +2613,64 @@ JOB POSTING DETECTION — CRITICAL:
 SEARCH RESULT SNIPPETS:
 {snippet_block}
 
-Respond ONLY with JSON:
+Respond ONLY with JSON. Every contact MUST include name, title, organization, scope,
+and confidence keys — use empty string "" (not null) for fields where information
+is truly absent.
 {{"contacts": [
   {{"name": "...", "title": "...", "organization": "...", "scope": "hotel_specific" | "chain_area" | "wrong_hotel", "confidence": "high" | "medium" | "low"}}
 ]}}
 If no contacts found, return {{"contacts": []}}
 """
 
+    # Structured output schema — forces Gemini to include title + organization
+    # fields on every contact, even if empty. This eliminates the
+    # "name-only" extraction that was rejecting valid contacts downstream
+    # (e.g. Dr. Kali P. Chaudhuri being extracted with no title even though
+    # "Chairman and Founder of KPC Development Company" was in the snippet).
+    _SNIPPET_CONTACT_SCHEMA = {
+        "type": "object",
+        "properties": {
+            "contacts": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "name": {"type": "string"},
+                        "title": {"type": "string"},
+                        "organization": {"type": "string"},
+                        "scope": {
+                            "type": "string",
+                            "enum": [
+                                "hotel_specific",
+                                "chain_area",
+                                "wrong_hotel",
+                                "irrelevant",
+                            ],
+                        },
+                        "confidence": {
+                            "type": "string",
+                            "enum": ["high", "medium", "low"],
+                        },
+                    },
+                    "required": [
+                        "name",
+                        "title",
+                        "organization",
+                        "scope",
+                        "confidence",
+                    ],
+                },
+            }
+        },
+        "required": ["contacts"],
+    }
+
     try:
-        resp = await ce_module._call_gemini(prompt)
+        resp = await ce_module._call_gemini(
+            prompt,
+            response_schema=_SNIPPET_CONTACT_SCHEMA,
+            max_output_tokens=16384,
+        )
     except Exception as ex:
         logger.debug(f"Snippet extraction Gemini call failed: {ex}")
         return []
@@ -2060,12 +2685,36 @@ If no contacts found, return {{"contacts": []}}
         contacts = resp
 
     extracted = []
+    dropped_for_empty_metadata = 0
     for c in contacts:
         if c.get("scope") in ("wrong_hotel", "irrelevant"):
             continue
         name = (c.get("name") or "").strip()
-        if name and len(name) >= 3 and len(name.split()) >= 2:
-            extracted.append(c)
+        if not name or len(name) < 3 or len(name.split()) < 2:
+            continue
+        # Bug #5 guard: if BOTH title and organization are empty, the
+        # contact has no metadata to support downstream verification and
+        # will almost certainly be rejected. Log and drop here rather
+        # than passing a doomed record forward — but keep the count so
+        # we can see if the schema/prompt is still leaking metadata.
+        title = (c.get("title") or "").strip()
+        organization = (c.get("organization") or "").strip()
+        if not title and not organization:
+            dropped_for_empty_metadata += 1
+            logger.warning(
+                f"[SNIPPET] {name!r} extracted with empty title AND "
+                f"organization — dropping (metadata leak, likely prompt "
+                f"miss or schema regression)"
+            )
+            continue
+        extracted.append(c)
+
+    if dropped_for_empty_metadata:
+        logger.warning(
+            f"[SNIPPET] Dropped {dropped_for_empty_metadata} name-only "
+            f"contacts (no title, no org). If this keeps happening, "
+            f"check prompt co-extraction rule or schema."
+        )
 
     if extracted:
         logger.info(
