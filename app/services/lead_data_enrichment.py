@@ -626,7 +626,6 @@ async def batch_smart_fill(limit: int = 10, mode: str = "smart") -> Dict:
         await session.commit()
 
     logger.info(
-        f"Smart Fill complete: {stats['checked']} checked, "
-        f"{stats['enriched']} enriched"
+        f"Smart Fill complete: {stats['checked']} checked, {stats['enriched']} enriched"
     )
     return stats

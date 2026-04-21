@@ -87,6 +87,39 @@ async def enrich_lead(lead_id: int, _csrf=Depends(require_ajax)):
             status_code=502,
         )
 
+    # Phase B: if researcher flagged this lead as residences_only (or similar),
+    # mark it as rejected in the DB so it doesn't re-trigger enrichment
+    if enrichment_result.should_reject:
+        try:
+            async with async_session() as session:
+                lead_result = await session.execute(
+                    select(PotentialLead).where(PotentialLead.id == lead_id)
+                )
+                lead = lead_result.scalar_one_or_none()
+                if lead:
+                    lead.status = "rejected"
+                    lead.rejection_reason = (
+                        enrichment_result.rejection_reason or "auto_reject"
+                    )[:100]  # VARCHAR(100) guard
+                    await session.commit()
+                    logger.info(
+                        f"Lead {lead_id} auto-rejected: "
+                        f"{enrichment_result.rejection_reason}"
+                    )
+            return JSONResponse(
+                content={
+                    "status": "rejected",
+                    "message": f"Lead auto-rejected: {enrichment_result.rejection_reason}",
+                    "reason": enrichment_result.rejection_reason,
+                },
+                status_code=200,
+            )
+        except Exception as e:
+            logger.error(
+                f"Failed to mark lead {lead_id} as rejected: {e}", exc_info=True
+            )
+            # Fall through — still return the empty contacts result rather than 500
+
     # Session 2: Save results (with optimistic lock check)
     try:
         async with async_session() as session:
@@ -799,7 +832,7 @@ async def bulk_enrich_emails(
                 await db.commit()
                 found += 1
                 logger.info(
-                    f"Bulk Wiza [{found+not_found}/{len(contacts)}]: {contact.name} → {wiza_result['email']}"
+                    f"Bulk Wiza [{found + not_found}/{len(contacts)}]: {contact.name} → {wiza_result['email']}"
                 )
             else:
                 not_found += 1

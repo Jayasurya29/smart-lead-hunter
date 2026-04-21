@@ -230,7 +230,7 @@ async def _verify_operating_companies(state: ResearchState) -> None:
 
         # Build a snippet blob and let Gemini decide
         snippets = "\n\n".join(
-            f"[{r.get('url','')}] {r.get('snippet') or r.get('title') or ''}"
+            f"[{r.get('url', '')}] {r.get('snippet') or r.get('title') or ''}"
             for r in results[:5]
         )
         verdict = await _check_company_currency_with_gemini(
@@ -395,7 +395,7 @@ async def iteration_2_gm_hunt(state: ResearchState) -> int:
         brand_or = " OR ".join(brand_variants)
         queries.append(
             f'"{location_short}" {state.country or ""} "general manager" OR "hotel manager" '
-            f'{brand_or} site:linkedin.com'.strip()
+            f"{brand_or} site:linkedin.com".strip()
         )
 
     facts_before = _fact_count(state)
@@ -968,7 +968,7 @@ async def iteration_5_verify_current_role(state: ResearchState) -> int:
         # Also include the search result snippets (they often have enough signal
         # even when full-page scraping fails)
         snippets_blob = "\n\n".join(
-            f"[{r.get('url','')}] {r.get('snippet','') or r.get('title','')}"
+            f"[{r.get('url', '')}] {r.get('snippet', '') or r.get('title', '')}"
             for r in results[:5]
         )
 
@@ -1274,9 +1274,9 @@ at a specific hotel, based on evidence from LinkedIn, press releases, or news
 articles. Current year: {today_year}.
 
 CONTACT: {name}
-LISTED TITLE (unverified): {candidate_title or 'unknown'}
+LISTED TITLE (unverified): {candidate_title or "unknown"}
 TARGET HOTEL: {target_hotel}
-OPERATOR PARENT: {operator_parent or 'unknown'}
+OPERATOR PARENT: {operator_parent or "unknown"}
 
 TASK: Determine this person's CURRENT role ({today_year}), not past roles.
 LinkedIn profiles list many jobs — only the one with "Present" or the most
@@ -1590,8 +1590,8 @@ LEAD CONTEXT:
 - Project TYPE (Phase A classifier): {state.project_type or "unknown"}
 - Operator parent: {state.operator_parent or "unknown"}
 - Owner company: {state.owner_company or "unknown"}
-- Verified-current companies: {', '.join(state.verified_current_companies) or 'none confirmed'}
-- Historical (skip) companies: {', '.join(state.historical_companies) or 'none'}
+- Verified-current companies: {", ".join(state.verified_current_companies) or "none confirmed"}
+- Historical (skip) companies: {", ".join(state.historical_companies) or "none"}
 {phase_b_block}{brand_tier_block}{brand_model_block}{cascade_block}
 YOUR JOB:
 For each candidate below, decide (a) the FINAL priority and (b) a one-sentence
@@ -1872,8 +1872,7 @@ async def run_iterative_research(state: ResearchState) -> ResearchState:
     if _should_continue(state):
         new_facts = await iteration_2_5_property_staff(state)
         logger.info(
-            f"[ITER 2.5/STAFF] +{new_facts} facts. "
-            f"Names={len(state.discovered_names)}"
+            f"[ITER 2.5/STAFF] +{new_facts} facts. Names={len(state.discovered_names)}"
         )
 
     # ── Iteration 3: corporate / owner hunt ──
@@ -1998,7 +1997,7 @@ async def _extract_contacts_from_snippets(
         if not snippet and not title:
             continue
         snippet_lines.append(
-            f"Result {i+1} [{url[:80]}]:\n  Title: {title}\n  Snippet: {snippet}"
+            f"Result {i + 1} [{url[:80]}]:\n  Title: {title}\n  Snippet: {snippet}"
         )
 
     if not snippet_lines:

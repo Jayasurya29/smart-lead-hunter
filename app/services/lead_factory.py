@@ -334,6 +334,42 @@ def prepare_lead(
     if opening_date.lower() in vague_dates:
         lead_dict["opening_date"] = None
 
+    # ── HARD LOCATION GATE ────────────────────────────────────────────────
+    # Refuse leads where BOTH state AND country are empty AND the city
+    # isn't in our known US/Caribbean market list.
+    #
+    # Rationale: city alone is insufficient signal in general — "Jinan"
+    # could be the Chinese city, an OCR misread, or junk. Without state
+    # or country the scorer falls through to "Assume US" (+10) and
+    # international leads slip in.
+    #
+    # Exception: if the city IS in our recognized US or Caribbean
+    # keyword list (Chicago, Miami, Gustavia, Mustique, Parrot Cay, etc.),
+    # trust the extraction — the city name itself carries the geographic
+    # signal.
+    #
+    # Cases handled:
+    #   state="FL", country=""        → scorer recognizes US via state
+    #   state="", country="Bahamas"   → scorer recognizes Caribbean
+    #   state="Shandong", country=""  → scorer Step 6 rejects as international
+    #   city="Chicago", rest empty    → passes (city is in OTHER_US_KEYWORDS)
+    #   city="Gustavia", rest empty   → passes (city is in CARIBBEAN_KEYWORDS)
+    #   city="Jinan", rest empty      → REJECTED (city not in any list)
+    #   city="Kyoto", rest empty      → already rejected by scorer's
+    #                                   INTERNATIONAL_SKIP city check
+    state_present = bool((lead_dict.get("state") or "").strip())
+    country_present = bool((lead_dict.get("country") or "").strip())
+    if not state_present and not country_present:
+        from app.services.scorer import is_known_us_or_caribbean_city
+
+        city = (lead_dict.get("city") or "").strip()
+        if not is_known_us_or_caribbean_city(city):
+            return (
+                None,
+                f"Insufficient location — city '{city}' not in US/Caribbean list: {hotel_name}",
+                {},
+            )
+
     normalized = normalize_hotel_name(hotel_name)
 
     score_result = calculate_lead_score(

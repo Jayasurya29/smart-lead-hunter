@@ -626,9 +626,9 @@ async def export_leads_excel(
         if not val:
             return "—"
         if val >= 1_000_000:
-            return f"${val/1_000_000:.1f}M"
+            return f"${val / 1_000_000:.1f}M"
         if val >= 1_000:
-            return f"${val/1_000:.0f}K"
+            return f"${val / 1_000:.0f}K"
         return f"${val:,.0f}"
 
     # ════════════════════════════════════════════════════════

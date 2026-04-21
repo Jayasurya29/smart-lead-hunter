@@ -180,7 +180,7 @@ async def update_lead_revenue(lead_id: int) -> tuple[float | None, float | None]
                 f"Revenue updated for lead {lead_id} ({lead.hotel_name}): "
                 f"opening=${opening:,}"
                 if opening
-                else "N/A" f", annual=${annual:,}"
+                else f"N/A, annual=${annual:,}"
                 if annual
                 else "N/A"
             )

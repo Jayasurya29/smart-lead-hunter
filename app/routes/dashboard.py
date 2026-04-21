@@ -95,9 +95,7 @@ async def dashboard_edit_lead(
     except HTTPException:
         raise
     except Exception:
-        return JSONResponse(
-            content={"detail": "Invalid request body"}, status_code=400
-        )
+        return JSONResponse(content={"detail": "Invalid request body"}, status_code=400)
 
     # ── Input validation (FIX M-13: uses shared constants from schemas.py) ──
     errors = []

@@ -879,90 +879,191 @@ FLORIDA_KEYWORDS = [
 
 # Caribbean - YOUR SECONDARY MARKET
 CARIBBEAN_KEYWORDS = [
+    # ── US territory postal codes ──
+    "pr",  # Puerto Rico
+    "vi",  # US Virgin Islands
     # Bahamas
     "bahamas",
+    "bs",  # ISO
     "nassau",
     "paradise island",
     "exuma",
     "harbour island",
     "bimini",
     "eleuthera",
+    "abaco",
+    "grand bahama",
+    "freeport bahamas",
+    "andros",
     # Cayman
     "cayman islands",
     "grand cayman",
     "cayman",
+    "cayman brac",
+    "little cayman",
+    # NOTE: "KY" intentionally NOT added — conflicts with Kentucky
     # Turks & Caicos
     "turks and caicos",
     "turks & caicos",
     "providenciales",
     "turks",
     "grace bay",
+    "parrot cay",
+    "ambergris cay",
+    "pine cay",
+    "north caicos",
+    "middle caicos",
+    "south caicos",
+    "tc",  # ISO
     # Jamaica
     "jamaica",
+    "jm",  # ISO
     "montego bay",
     "ocho rios",
     "negril",
     "kingston jamaica",
+    "port antonio",
     # Barbados
     "barbados",
+    "bb",  # ISO
     "bridgetown",
+    "christ church",
+    "holetown",
+    "st. james barbados",
+    "st james barbados",
     # St. Lucia
     "st. lucia",
     "saint lucia",
     "st lucia",
+    "lc",  # ISO
+    "castries",
+    "soufriere",
     # Bermuda
     "bermuda",
-    # ABC Islands
+    "bm",  # ISO
+    "hamilton bermuda",
+    # ABC Islands — Aruba
     "aruba",
+    "aw",  # ISO
+    "oranjestad",
+    "palm beach aruba",
+    "eagle beach aruba",
+    "noord aruba",
+    # ABC Islands — Curaçao
     "curacao",
+    "curaçao",
+    "cw",  # ISO
+    "willemstad",
+    # ABC Islands — Bonaire
     "bonaire",
+    "kralendijk",
     # US Virgin Islands
     "usvi",
     "u.s. virgin islands",
+    "us virgin islands",
     "st. thomas",
+    "st thomas usvi",
     "st. john usvi",
+    "st john usvi",
     "st. croix",
+    "st croix",
     # British Virgin Islands
     "bvi",
     "british virgin islands",
     "virgin gorda",
     "tortola",
-    # Other Caribbean
+    "anegada",
+    "jost van dyke",
+    "vg",  # ISO
+    # Anguilla
     "anguilla",
+    # Antigua & Barbuda
     "antigua",
     "antigua and barbuda",
+    "barbuda",
+    "st. john's antigua",
+    "ag",  # ISO
+    # Dominica (separate from Dominican Republic)
+    "dominica",
+    "roseau",
+    "dm",  # ISO
+    # Dominican Republic
     "dominican republic",
     "punta cana",
     "santo domingo",
     "cap cana",
     "la romana",
+    # Puerto Rico
     "puerto rico",
     "san juan",
     "dorado",
     "vieques",
     "culebra",
+    "rincon",
+    # St. Martin / St. Maarten
     "st. martin",
     "saint martin",
     "st. maarten",
     "sint maarten",
+    "philipsburg",
+    "marigot",
+    "sx",  # ISO (Sint Maarten)
+    # St. Barts
+    "st. barts",
+    "st barts",
+    "saint barthélemy",
+    "saint barthelemy",
+    "st. barthelemy",
+    "st barthelemy",
+    "gustavia",
+    # Grenada
     "grenada",
     "st. george's grenada",
+    "st georges grenada",
+    "carriacou",
+    "gd",  # ISO
+    # St. Kitts & Nevis
     "st. kitts",
     "saint kitts",
     "nevis",
     "st. kitts and nevis",
+    "basseterre",
+    "charlestown nevis",
+    "kn",  # ISO
+    # St. Vincent & the Grenadines
+    "st. vincent",
+    "saint vincent",
+    "grenadines",
+    "mustique",
+    "canouan",
+    "bequia",
+    "union island",
+    "vc",  # ISO
+    # Trinidad & Tobago
     "trinidad",
     "tobago",
     "trinidad and tobago",
+    "port of spain",
+    "scarborough tobago",
+    "tt",  # ISO
+    # French Caribbean
     "martinique",
+    "fort-de-france",
     "guadeloupe",
+    "basse-terre",
+    # Generic
     "caribbean",
+    "west indies",
+    # NOTE: Intentionally skipped as conflict/ambiguity risks:
+    #   "ky" → Kentucky; "ms" → Mississippi; "do" → common English word;
+    #   "ai" → Anguilla but matches too broadly.
 ]
 
 # Strong US Markets (existing client presence)
 STRONG_US_KEYWORDS = [
     # California
     "california",
+    "ca",
     "los angeles",
     "san francisco",
     "san diego",
@@ -979,6 +1080,7 @@ STRONG_US_KEYWORDS = [
     "hollywood ca",
     # New York
     "new york",
+    "ny",
     "manhattan",
     "brooklyn",
     "hamptons",
@@ -986,6 +1088,7 @@ STRONG_US_KEYWORDS = [
     "westchester",
     # Texas
     "texas",
+    "tx",
     "austin tx",
     "houston",
     "dallas",
@@ -993,14 +1096,17 @@ STRONG_US_KEYWORDS = [
     "fort worth",
     # Georgia
     "georgia",
+    "ga",
     "atlanta",
     "savannah",
     # Tennessee
     "tennessee",
+    "tn",
     "nashville",
     "memphis",
     # South Carolina
     "south carolina",
+    "sc",
     "charleston sc",
     "myrtle beach",
     "hilton head",
@@ -1008,51 +1114,97 @@ STRONG_US_KEYWORDS = [
 
 # Other US States (lower priority but still US)
 OTHER_US_KEYWORDS = [
+    # ── Full state names + 2-letter postal codes ──
     "alabama",
+    "al",
     "alaska",
+    "ak",
     "arizona",
+    "az",
     "arkansas",
+    "ar",
     "colorado",
+    "co",
     "connecticut",
+    "ct",
     "delaware",
+    "de",
     "hawaii",
+    "hi",
     "idaho",
+    "id",
     "illinois",
+    "il",
     "indiana",
+    "in",
     "iowa",
+    "ia",
     "kansas",
+    "ks",
     "kentucky",
+    "ky",
     "louisiana",
+    "la",
     "maine",
+    "me",
     "maryland",
+    "md",
     "massachusetts",
+    "ma",
     "michigan",
+    "mi",
     "minnesota",
+    "mn",
     "mississippi",
+    "ms",
     "missouri",
+    "mo",
     "montana",
+    "mt",
     "nebraska",
+    "ne",
     "nevada",
+    "nv",
     "new hampshire",
+    "nh",
     "new jersey",
+    "nj",
     "new mexico",
+    "nm",
     "north carolina",
+    "nc",
     "north dakota",
+    "nd",
     "ohio",
+    "oh",
     "oklahoma",
+    "ok",
     "oregon",
+    "or",
     "pennsylvania",
+    "pa",
     "rhode island",
+    "ri",
     "south dakota",
+    "sd",
     "utah",
+    "ut",
     "vermont",
+    "vt",
     "virginia",
+    "va",
     "washington",
+    "wa",
     "west virginia",
+    "wv",
     "wisconsin",
+    "wi",
     "wyoming",
+    "wy",
+    # DC variants
     "district of columbia",
     "washington dc",
+    "dc",
     "d.c.",
     # Common US cities not in strong markets
     "chicago",
@@ -1481,11 +1633,34 @@ def get_location_score(
                     "international",
                 )
 
-    # ── STEP 5: If country is specified and not matched above, it's international ──
-    if country_lower and country_lower not in ["", "none", "null"]:
+    # ── STEP 5: Country allowlist gate ──
+    # If country is populated and wasn't recognized as US or Caribbean in
+    # Step 1, it's international. Clean, definitive reject.
+    if country_lower and country_lower not in ("", "none", "null", "unknown", "n/a"):
         return (-1, f"International - SKIP (country: {country})", "international")
 
-    # Unknown - give benefit of doubt
+    # ── STEP 6: State allowlist gate ──
+    # Country is empty/unknown. If state is populated but wasn't recognized
+    # as a US state in Step 1 or a Caribbean territory in Step 3's loop,
+    # treat as international. This catches non-US provinces/prefectures
+    # (Shandong, Ontario, Bavaria, Lombardia, Hokkaido, Guangdong, etc.)
+    # that the INTERNATIONAL_SKIP keyword blocklist can't reasonably cover.
+    #
+    # By the time we reach here:
+    #   - Step 1 confirmed state_lower is NOT in any US state list
+    #   - Step 3's carib loop confirmed location_text doesn't match any
+    #     Caribbean territory keyword
+    # So a non-empty, non-placeholder state here is definitionally international.
+    if state_lower and state_lower not in ("", "none", "null", "unknown", "n/a", "na"):
+        return (
+            -1,
+            f"International - SKIP (non-US state/region: {state})",
+            "international",
+        )
+
+    # ── STEP 7: Unknown — give benefit of doubt ──
+    # All location fields empty or ambiguous. Assume US to avoid false
+    # rejections when extraction is incomplete for an otherwise valid lead.
     return (10, "Unknown - Assume US", "usa")
 
 
@@ -1495,6 +1670,39 @@ def should_skip_location(
     """Check if location should be filtered out (international)"""
     score, _, _ = get_location_score(city, state, country)
     return score == -1
+
+
+def is_known_us_or_caribbean_city(city: str = None) -> bool:
+    """Check if a city name alone is recognized as a US or Caribbean market.
+
+    Used by lead_factory's hard gate to decide whether city-only extraction
+    (no state, no country) is trustworthy. Famous US cities like "Chicago"
+    or recognized Caribbean markets like "Gustavia" can pass the gate on
+    city alone — unknown foreign cities like "Jinan" cannot.
+
+    Returns True if the city matches any keyword in FLORIDA_KEYWORDS,
+    STRONG_US_KEYWORDS, OTHER_US_KEYWORDS, or CARIBBEAN_KEYWORDS.
+
+    Note: this does NOT check INTERNATIONAL_SKIP — callers should rely on
+    the full get_location_score() pipeline for international rejection.
+    This helper is purely for "is this city in our target market list?"
+    """
+    if not city:
+        return False
+    city_lower = str(city).lower().strip()
+    if not city_lower or city_lower in ("none", "null", "unknown", "n/a"):
+        return False
+
+    for kw_list in (
+        FLORIDA_KEYWORDS,
+        STRONG_US_KEYWORDS,
+        OTHER_US_KEYWORDS,
+        CARIBBEAN_KEYWORDS,
+    ):
+        for kw in kw_list:
+            if _location_keyword_matches(kw, city_lower):
+                return True
+    return False
 
 
 # =============================================================================

@@ -62,9 +62,9 @@ async def send_verification_email(to_email: str, first_name: str, otp: str) -> b
             f"SMTP not configured — OTP for {to_email}: {otp} "
             f"(set SMTP_HOST/SMTP_USER/SMTP_PASSWORD in .env)"
         )
-        print(f"\n{'='*50}")
+        print(f"\n{'=' * 50}")
         print(f"  OTP for {to_email}: {otp}")
-        print(f"{'='*50}\n")
+        print(f"{'=' * 50}\n")
         return True  # Return True so registration flow continues
 
     try:
