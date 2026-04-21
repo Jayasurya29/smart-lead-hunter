@@ -425,8 +425,10 @@ class EnrichmentResult:
         scope_rank = {
             "hotel_specific": 0,
             "chain_area": 1,
-            "chain_corporate": 2,
-            "unknown": 3,
+            "management_corporate": 2,
+            "chain_corporate": 3,
+            "owner": 2,
+            "unknown": 4,
         }
         confidence_rank = {"high": 0, "medium": 1, "low": 2}
 
@@ -2374,11 +2376,41 @@ Do NOT default to keeping contacts just because you are uncertain — uncertaint
 LOW-SCORE CONTACTS: If a contact has no title AND no organization matching the target hotel, they should be REJECTED.
 A contact with zero evidence of working at the target hotel should never be classified as hotel_specific.
 
+OWNER / PRINCIPAL RULE (CRITICAL — do not reject as "Investor"):
+If a contact arrives with scope="owner" already set, OR if their title is
+Chairman, Founder, Principal, Managing Partner, Owner, Managing Member and
+their organization is a development/holdings/capital/REIT/family-office entity,
+they are the property's CHECK-WRITER. Keep them and return corrected_scope="owner".
+- They will NOT have hotel-operational titles (that's the whole point).
+- They WILL have non-hotel organizations (development companies, REITs, family
+  offices, LLCs). That's also the whole point.
+- Owner principals are legitimate P2 sales contacts (budget authority) — do
+  NOT reject them as "Investor" or "non-hotel-ops" just because they don't fit
+  the operational-staff mold.
+- Example: "Dr. Kali P. Chaudhuri — Founder & Chairman, KPC Development Company"
+  → is_hotel_ops=false, is_at_target_hotel=false, corrected_scope="owner",
+  rejection_reason=null.
+
+MANAGEMENT COMPANY vs BRAND PARENT SCOPE DISTINCTION (CRITICAL):
+Soft-brand properties (Autograph Collection, Curio, Tribute, MGallery, etc.)
+are BRANDED by Marriott/Hilton/Hyatt but OPERATED by an independent management
+company (Crescent Hotels, Aimbridge, Highgate, Pyramid, etc.). The operator's
+corporate executives are the ACTUAL uniform buyers — not the brand parent's.
+- Contacts at the MANAGEMENT COMPANY's corporate HQ (Crescent CEO/COO/SVP
+  Procurement) → corrected_scope="management_corporate". These are P1/P2 buyers.
+- Contacts at the BRAND PARENT's HQ (Marriott VP of Autograph Brand, Hilton
+  Curio team) → corrected_scope="chain_corporate". These are usually P3/P4
+  because they don't control procurement for soft-brand properties.
+- If unsure whether a contact's org is the management company or the brand
+  parent, check their organization field: "Crescent Hotels & Resorts" is
+  management_corporate; "Marriott International" / "Marriott Luxury Group"
+  is chain_corporate.
+
 CONTACTS TO VERIFY:
 {contacts_json}
 
 Respond with ONLY a JSON array. For each contact:
-{{"name": "original name", "verified_title": "actual title or empty", "verified_org": "actual employer", "is_hotel_ops": true/false, "is_at_target_hotel": true/false, "rejection_reason": "why rejected or null", "corrected_scope": "hotel_specific|chain_area|chain_corporate|rejected"}}
+{{"name": "original name", "verified_title": "actual title or empty", "verified_org": "actual employer", "is_hotel_ops": true/false, "is_at_target_hotel": true/false, "rejection_reason": "why rejected or null", "corrected_scope": "hotel_specific|chain_area|chain_corporate|management_corporate|owner|rejected"}}
 """
 
 
@@ -2768,7 +2800,13 @@ async def _verify_contacts_with_gemini(
         if verified_org:
             match["organization"] = verified_org
 
-        if corrected_scope in ("hotel_specific", "chain_area", "chain_corporate"):
+        if corrected_scope in (
+            "hotel_specific",
+            "chain_area",
+            "chain_corporate",
+            "management_corporate",
+            "owner",
+        ):
             old_scope = match.get("scope", "")
             if old_scope != corrected_scope:
                 logger.info(
@@ -2828,14 +2866,32 @@ async def _verify_contacts_with_gemini(
     for c in verified_contacts:
         org = (c.get("organization") or "").lower()
         title = (c.get("title") or "").lower()
+        scope = (c.get("scope") or "").lower()
         has_non_hotel_org = any(kw in org for kw in NON_HOTEL_ORG_KEYWORDS)
         has_operational_title = any(kw in title for kw in OPERATIONAL_TITLES)
-        if has_non_hotel_org and not has_operational_title:
+        # ── Owner/principal whitelist (Bug #7 fix — 2026-04-22) ──
+        # Contacts flagged scope=="owner" are the property's check-writers
+        # (e.g. Dr. Kali P. Chaudhuri / KPC Development Company). By
+        # definition they sit at an investment/development entity, NOT at
+        # a hotel, and their title is ownership-class (Chairman, Founder,
+        # Principal, Managing Partner) — NOT operational. Without this
+        # whitelist the NON_HOTEL_ORG_KEYWORDS filter deletes every owner
+        # principal we surface via Iter 1's explicit owner extraction,
+        # defeating Bug #4's entire purpose. Owners are P2 per the Iter 6
+        # strategist; they belong in the final contact list.
+        is_owner_principal = scope == "owner"
+        if has_non_hotel_org and not has_operational_title and not is_owner_principal:
             logger.info(
                 f"Org-filter REJECTED: {c.get('name')} -- org='{c.get('organization')}' "
                 f"title='{c.get('title', '')}' (non-hotel org, no operational title)"
             )
             continue
+        if is_owner_principal and has_non_hotel_org:
+            logger.info(
+                f"Org-filter KEPT owner: {c.get('name')} -- "
+                f"org='{c.get('organization')}' title='{c.get('title', '')}' "
+                f"(scope=owner exempt from non-hotel-org reject)"
+            )
         final_contacts.append(c)
 
     rejected_count = len(contacts) - len(final_contacts)
@@ -3065,7 +3121,9 @@ async def enrich_lead_contacts(
             scope_mult = {
                 "hotel_specific": 3.0,
                 "chain_area": 2.0,
+                "management_corporate": 1.5,
                 "chain_corporate": 1.2,
+                "owner": 1.5,
                 "unknown": 1.0,
             }.get(c.get("scope") or "unknown", 1.0)
             c["_validation_score"] = int(base * scope_mult)
@@ -3090,9 +3148,13 @@ async def enrich_lead_contacts(
         key=lambda c: (
             _PRIORITY_RANK.get(c.get("_final_priority") or "", 4),  # P1 contacts first
             # Within same priority, prefer property-specific scope
-            {"hotel_specific": 0, "chain_area": 1, "chain_corporate": 2}.get(
-                c.get("scope") or "unknown", 3
-            ),
+            {
+                "hotel_specific": 0,
+                "chain_area": 1,
+                "management_corporate": 2,
+                "chain_corporate": 3,
+                "owner": 2,
+            }.get(c.get("scope") or "unknown", 4),
             -(c.get("_validation_score") or 0),
         )
     )
@@ -3842,8 +3904,10 @@ async def _enrich_lead_contacts_v4_legacy(
     scope_rank = {
         "hotel_specific": 0,
         "chain_area": 1,
-        "chain_corporate": 2,
-        "unknown": 3,
+        "management_corporate": 2,
+        "chain_corporate": 3,
+        "owner": 2,
+        "unknown": 4,
     }
     # ── LAST-RESORT FALLBACK ──
     # If all real contacts got filtered out but we have stashed corporate/C-suite

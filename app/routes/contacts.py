@@ -239,6 +239,35 @@ async def enrich_lead(lead_id: int, _csrf=Depends(require_ajax)):
                                 ec.strategist_priority = c["_final_priority"]
                             if c.get("_final_reasoning"):
                                 ec.strategist_reasoning = c["_final_reasoning"]
+                            # ── Always refresh classification fields on
+                            #    re-enrichment (bug fix 2026-04-22). Previously
+                            #    these stayed frozen from the first insert —
+                            #    so Elie Khoury kept score=5 from April 16
+                            #    even after today's pipeline scored her P1
+                            #    (floor=28). Mismatch between strategist_priority
+                            #    (refreshed) and score (stuck) made the UI
+                            #    show "P1 / 5 LOW" instead of "P1 / 28 HIGH".
+                            new_score = c.get("_validation_score")
+                            if new_score is not None and new_score != ec.score:
+                                filled.append(f"score({ec.score}->{new_score})")
+                                ec.score = new_score
+                            new_tier = c.get("_buyer_tier")
+                            if new_tier and new_tier != ec.tier:
+                                filled.append("tier")
+                                ec.tier = new_tier
+                            new_confidence = c.get("_validation_confidence") or c.get(
+                                "confidence"
+                            )
+                            if new_confidence and new_confidence != ec.confidence:
+                                filled.append("confidence")
+                                ec.confidence = new_confidence
+                            # Scope may shift if Iter 6 or verifier
+                            # reclassified (e.g. chain_area -> owner)
+                            new_scope = c.get("scope")
+                            if new_scope and new_scope != ec.scope:
+                                filled.append(f"scope({ec.scope}->{new_scope})")
+                                ec.scope = new_scope
+                            ec.last_enriched_at = local_now()
                             # source_detail refreshes when new evidence arrives
                             new_detail = c.get("source_detail")
                             if new_detail and new_detail != ec.source_detail:

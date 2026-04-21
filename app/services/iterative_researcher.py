@@ -1159,39 +1159,213 @@ async def iteration_4_linkedin_lookup(state: ResearchState) -> int:
                 # Verify the URL slug contains the person's name parts.
                 # Without this, "Sean Verney" could get Debbie Riga's URL
                 # just because it appeared in the same search results.
+                #
+                # Bug fix (2026-04-22 cross-check audit): the old logic used
+                # max(name_parts, key=len) as a proxy for last name and only
+                # required THAT token to appear. For "Michael Thomas George",
+                # `michael` (7 chars) is the longest token — so the slug
+                # `michael-thomas-6ba7226` (a different Michael Thomas, NOT
+                # Michael George) slipped through because "michael" appears
+                # in the slug. Now requires BOTH the first AND actual-last
+                # name tokens to appear, with titles (Dr./Mr./etc.) and
+                # initials stripped.
                 slug = (
                     r_url.lower()
                     .split("linkedin.com/in/")[-1]
                     .split("?")[0]
                     .split("/")[0]
                 )
-                name_parts = name.lower().split()
-                # At least the last name (longest part) must appear in slug
-                last_name = max(name_parts, key=len) if name_parts else ""
-                # Normalize: remove accents for comparison
                 import unicodedata
 
-                slug_clean = (
-                    unicodedata.normalize("NFKD", slug)
-                    .encode("ascii", "ignore")
-                    .decode()
-                )
-                last_clean = (
-                    unicodedata.normalize("NFKD", last_name)
-                    .encode("ascii", "ignore")
-                    .decode()
-                )
-                if last_clean and last_clean.replace(".", "").replace(
-                    "-", ""
-                ) in slug_clean.replace("-", ""):
+                def _norm_token(s: str) -> str:
+                    s = unicodedata.normalize("NFKD", s)
+                    s = s.encode("ascii", "ignore").decode()
+                    return s.lower().replace(".", "").strip()
+
+                _NAME_TITLES = {
+                    "dr",
+                    "mr",
+                    "mrs",
+                    "ms",
+                    "miss",
+                    "mme",
+                    "prof",
+                    "professor",
+                    "sir",
+                    "madam",
+                    "rev",
+                }
+                # Build usable name tokens: strip titles, drop initials
+                # (< 2 chars after removing periods), normalize accents.
+                raw_parts = [_norm_token(p) for p in name.split()]
+                clean_parts = [
+                    p for p in raw_parts if len(p) >= 2 and p not in _NAME_TITLES
+                ]
+
+                if not clean_parts:
+                    logger.debug(
+                        f"LinkedIn URL rejected for {name}: no usable "
+                        f"name tokens after title/initial stripping"
+                    )
+                    continue
+
+                slug_clean = _norm_token(slug).replace("-", "").replace("_", "")
+
+                if len(clean_parts) >= 2:
+                    # Require BOTH first AND actual last name to appear.
+                    # Using name_parts[-1], NOT max-by-length, so "Michael
+                    # Thomas George" correctly requires "george" to appear.
+                    first_name = clean_parts[0]
+                    last_name = clean_parts[-1]
+                    required = [first_name, last_name]
+                else:
+                    # Single-token name (mononym) — just require it
+                    required = clean_parts
+
+                if all(tok in slug_clean for tok in required):
+                    # ── SERP CONTEXT CHECK (2026-04-22 cross-check) ──
+                    # Slug match is necessary but NOT sufficient for common
+                    # names. "Rob Smith" + slug "robsmithonline13" passes
+                    # the token check but resolves to a political media
+                    # personality, not the Crescent CFO. Require the SERP
+                    # title or snippet to ALSO contain a distinctive token
+                    # from the lead's context (hotel name, mgmt company,
+                    # or brand parent).
+                    _CONTEXT_STOPWORDS = {
+                        "the",
+                        "and",
+                        "of",
+                        "for",
+                        "at",
+                        "a",
+                        "an",
+                        "&",
+                        "in",
+                        "on",
+                        "to",
+                        "by",
+                        "or",
+                        "hotel",
+                        "hotels",
+                        "resort",
+                        "resorts",
+                        "spa",
+                        "inn",
+                        "suites",
+                        "lodge",
+                        "club",
+                        "property",
+                        "properties",
+                        "lodging",
+                        "hospitality",
+                        "collection",
+                        "autograph",
+                        "curio",
+                        "tribute",
+                        "unbound",
+                        "tapestry",
+                        "mgallery",
+                        "vignette",
+                        "destination",
+                        "edition",
+                        "luxury",
+                        "group",
+                        "company",
+                        "companies",
+                        "corp",
+                        "corporation",
+                        "inc",
+                        "llc",
+                        "ltd",
+                        "plc",
+                        "international",
+                        "global",
+                        "americas",
+                        "worldwide",
+                        "management",
+                        "services",
+                        "rooftop",
+                        "tower",
+                        "towers",
+                        "plaza",
+                        "palace",
+                        "grand",
+                        "downtown",
+                        "boutique",
+                        "premium",
+                        # All-inclusive marketing fluff (2026-04-22 fix):
+                        # "all" alone appears in nearly every LinkedIn
+                        # profile and defeated the SERP context check for
+                        # all-inclusive properties. Royalton Chic run had
+                        # 3 contacts accepted with only "all" matching.
+                        "all",
+                        "inclusive",
+                        "adults",
+                        "only",
+                        "paradise",
+                        "oasis",
+                    }
+
+                    def _build_context_tokens():
+                        sources = [
+                            state.hotel_name or "",
+                            state.management_company or "",
+                            state.brand_parent or "",
+                            state.owner_company or "",
+                        ]
+                        toks = set()
+                        for src in sources:
+                            for w in __import__("re").split(
+                                r"[^a-z0-9]+", (src or "").lower()
+                            ):
+                                if len(w) >= 3 and w not in _CONTEXT_STOPWORDS:
+                                    toks.add(w)
+                        return toks
+
+                    context_tokens = _build_context_tokens()
+
+                    haystack = (
+                        (r.get("snippet") or "") + " " + (r.get("title") or "")
+                    ).lower()
+
+                    # If no distinctive context tokens exist, fall back
+                    # to accepting the slug-match result (rare — only if
+                    # hotel/mgmt/brand/owner are all generic or blank).
+                    if context_tokens and not any(
+                        t in haystack for t in context_tokens
+                    ):
+                        logger.debug(
+                            f"LinkedIn URL rejected for {name}: slug "
+                            f"{slug!r} passed token check but SERP "
+                            f"snippet/title lacks any context token "
+                            f"(sampled: {sorted(context_tokens)[:5]}). "
+                            f"Likely wrong person (common name)."
+                        )
+                        continue
+
                     contact["linkedin"] = r_url
-                    logger.info(f"LinkedIn URL found for {name}: {r_url}")
+                    matched = (
+                        [t for t in context_tokens if t in haystack][:3]
+                        if context_tokens
+                        else []
+                    )
+                    if matched:
+                        logger.info(
+                            f"LinkedIn URL found for {name}: {r_url} "
+                            f"(SERP context: {matched})"
+                        )
+                    else:
+                        logger.info(
+                            f"LinkedIn URL found for {name}: {r_url} "
+                            f"(slug match, no context tokens to verify)"
+                        )
                     found_url = True
                     break
                 else:
+                    missing = [t for t in required if t not in slug_clean]
                     logger.debug(
                         f"LinkedIn URL rejected for {name}: slug '{slug}' "
-                        f"doesn't match name part '{last_name}'"
+                        f"missing name tokens {missing} (required: {required})"
                     )
 
     state.iterations_done = 4
@@ -1889,6 +2063,104 @@ _MAX_ITERATIONS = 4
 # ═══════════════════════════════════════════════════════════════
 
 
+def _apply_iter6_fallback(state: ResearchState) -> None:
+    """
+    Title-based priority fallback when Iter 6 Gemini strategist fails.
+
+    Before this existed, a Gemini 429 / parse failure silently left all
+    `_final_priority` and `_final_reasoning` values at whatever they were
+    before — which for existing DB contacts meant STALE values from a
+    PRIOR run carried over as if they were today's output. That's how
+    Jordi Pelfort ended up with a "MEA region" hallucination on a fresh
+    Royalton Chic run where Iter 6 hit a 429.
+
+    This fallback:
+      1. Assigns `_final_priority` P1/P2/P3/P4 based on title + scope
+      2. Writes honest `_final_reasoning` that explicitly says it's
+         title-based, NOT strategist-based. This prevents the UI from
+         showing stale hallucinations and prevents us from trusting
+         fallback verdicts as if Gemini had approved them.
+      3. Does NOT override any contact that already has a valid Iter 6
+         verdict (shouldn't happen on this code path, but defensive).
+
+    Priority rules:
+      - Owner scope (check-writer)                  → P2 ("budget authority")
+      - Management_corporate + Tier 1/2 procurement → P1
+      - Hotel_specific + Tier 3 GM/ops              → P1
+      - Management_corporate + Tier 3 GM/ops/C-suite→ P2
+      - Chain_area + Tier 3                         → P2
+      - Hotel_specific + Tier 4/5 (F&B/HR)          → P2
+      - Chain_corporate (brand parent) anything     → P3
+      - Tier 6/7 (finance/irrelevant) anything      → P4
+      - Everything else                             → P3
+    """
+    from app.config.sap_title_classifier import BuyerTier, title_classifier
+
+    SENTINEL = (
+        "[Title-based fallback — strategist pass unavailable. "
+        "Re-run enrichment when Gemini quota returns for verified priority.]"
+    )
+
+    applied = 0
+    counts = {"P1": 0, "P2": 0, "P3": 0, "P4": 0}
+    for contact in state.discovered_names:
+        title = contact.get("title") or ""
+        scope = (contact.get("scope") or "unknown").lower()
+
+        try:
+            cls = title_classifier.classify(title)
+            tier = cls.tier
+        except Exception:
+            tier = BuyerTier.UNKNOWN
+
+        # Decision tree
+        if scope == "owner":
+            priority = "P2"
+        elif tier in (BuyerTier.TIER1_UNIFORM_DIRECT, BuyerTier.TIER2_PURCHASING):
+            if scope in ("hotel_specific", "management_corporate", "chain_area"):
+                priority = "P1"
+            elif scope == "chain_corporate":
+                priority = "P3"  # Brand-parent procurement rarely buys for soft brands
+            else:
+                priority = "P2"
+        elif tier == BuyerTier.TIER3_GM_OPS:
+            if scope == "hotel_specific":
+                priority = "P1"  # On-property GM for URGENT/HOT timeline
+            elif scope in ("management_corporate", "chain_area"):
+                priority = "P2"
+            elif scope == "chain_corporate":
+                priority = "P3"
+            else:
+                priority = "P3"
+        elif tier in (BuyerTier.TIER4_FB, BuyerTier.TIER5_HR):
+            if scope == "hotel_specific":
+                priority = "P2"
+            elif scope in ("management_corporate", "chain_area"):
+                priority = "P3"
+            else:
+                priority = "P3"
+        elif tier in (BuyerTier.TIER6_FINANCE, BuyerTier.TIER7_IRRELEVANT):
+            priority = "P4"
+        else:
+            # UNKNOWN tier — conservative default
+            priority = "P3"
+
+        contact["_final_priority"] = priority
+        contact["_final_reasoning"] = SENTINEL
+        counts[priority] += 1
+        applied += 1
+
+    logger.warning(
+        f"[ITER 6/FALLBACK] Applied title-based priority to {applied} contacts: "
+        f"P1={counts['P1']}, P2={counts['P2']}, "
+        f"P3={counts['P3']}, P4={counts['P4']}. "
+        f"Reasoning marked as fallback — UI should show sentinel text, not stale Gemini output."
+    )
+
+
+# ═══════════════════════════════════════════════════════════════
+
+
 async def iteration_6_reasoning_pass(state: ResearchState) -> int:
     """
     Feed Gemini the whole lead context + all discovered candidates and
@@ -2237,14 +2509,34 @@ hasn't started yet is STILL P1 — that announcement IS the buying moment.
 Don't downgrade because they're "not on site yet."
 
 For each candidate, also correct their scope if wrong:
-- hotel_specific  = currently at THIS property
-- chain_area      = at a sibling/cluster property OR regional role covering this property
-- chain_corporate = at corporate HQ, not property-facing
+- hotel_specific       = currently at THIS property
+- chain_area           = at a sibling/cluster property OR regional role covering this property
+- chain_corporate      = at BRAND PARENT HQ (e.g. Marriott HQ for an Autograph property,
+                         Hilton HQ for a Curio property). For soft-brand properties these
+                         are rarely the actual uniform buyers — the operator controls
+                         procurement. Use this for Marriott/Hilton/Hyatt-direct brand
+                         reps ONLY, not for management-company execs.
+- management_corporate = at MANAGEMENT COMPANY HQ (e.g. Crescent Hotels & Resorts for an
+                         Autograph property they operate; Aimbridge / Highgate / Pyramid
+                         for properties they run). These are THE actual corporate buyers
+                         for uniforms — the check-approvers. When a soft-brand property
+                         is managed by an independent operator, the operator's CEO, COO,
+                         President, VP Operations, VP/SVP/Dir Procurement sit here.
+                         Use P1 if they hold the procurement or ops decision-making role
+                         for this property's operator.
+- owner                = holds ownership/equity in the property itself (Chairman, Founder,
+                         Principal, Managing Partner of the owning entity like a development
+                         company, REIT, or family office). NOT an operational role. This
+                         scope is the check-writer and MUST be preserved on contacts where
+                         Iter 1's owner-extraction flagged them — do NOT change to
+                         chain_area just because they don't work at a hotel.
 
 Respond with ONLY a JSON array, one entry per candidate (by idx):
 [
   {{"idx": 0, "priority": "P1", "reasoning": "...", "scope_correction": "hotel_specific"}},
   {{"idx": 1, "priority": "P4", "reasoning": "Former GM who left 2020.", "scope_correction": "chain_area"}},
+  {{"idx": 2, "priority": "P2", "reasoning": "Property owner / check-writer.", "scope_correction": "owner"}},
+  {{"idx": 3, "priority": "P1", "reasoning": "SVP Procurement at the operator (Crescent) — signs vendor contracts.", "scope_correction": "management_corporate"}},
   ...
 ]
 
@@ -2255,8 +2547,10 @@ CANDIDATES:
     resp = await ce._call_gemini(prompt)
     if not resp:
         logger.warning(
-            "[ITER 6/REASONING] Gemini returned nothing — priorities unchanged"
+            "[ITER 6/REASONING] Gemini returned nothing — falling back to "
+            "title-based priority (NO stale reasoning will be written)"
         )
+        _apply_iter6_fallback(state)
         return 0
 
     # Parse the response
@@ -2279,8 +2573,10 @@ CANDIDATES:
 
     if not verdicts:
         logger.warning(
-            f"[ITER 6/REASONING] Could not parse Gemini response: {str(resp)[:200]!r}"
+            f"[ITER 6/REASONING] Could not parse Gemini response: {str(resp)[:200]!r} "
+            f"— falling back to title-based priority"
         )
+        _apply_iter6_fallback(state)
         state.iterations_done = 6
         return 0
 
@@ -2311,7 +2607,13 @@ CANDIDATES:
             else:
                 # Append reasoning to preserve both prior evidence and new insight
                 contact["source_detail"] = f"{prior} · {reasoning}"
-        if scope_corr in ("hotel_specific", "chain_area", "chain_corporate"):
+        if scope_corr in (
+            "hotel_specific",
+            "chain_area",
+            "chain_corporate",
+            "management_corporate",
+            "owner",
+        ):
             contact["scope"] = scope_corr
 
         applied += 1
