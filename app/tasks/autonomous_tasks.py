@@ -375,7 +375,18 @@ def auto_enrich(self) -> Dict[str, Any]:
                         project_type_str=lead.hotel_type,
                     )
 
-                    if enrich_result and enrich_result.contacts:
+                    # Phase B: if researcher flagged as residences_only etc, reject the lead
+                    if enrich_result and enrich_result.should_reject:
+                        lead.status = "rejected"
+                        lead.rejection_reason = (
+                            enrich_result.rejection_reason or "auto_reject"
+                        )[:100]  # VARCHAR(100) guard
+                        results["rejected"] = results.get("rejected", 0) + 1
+                        logger.info(
+                            f"  {lead.hotel_name}: auto-rejected "
+                            f"({enrich_result.rejection_reason})"
+                        )
+                    elif enrich_result and enrich_result.contacts:
                         # FIX: Persist to lead_contacts table + flat lead fields.
                         # Previously this task called enrich_lead_contacts() but
                         # never wrote contacts to the DB, so the dashboard's
@@ -645,6 +656,7 @@ def recompute_timeline_labels(self) -> Dict[str, Any]:
             "leads_checked": 0,
             "labels_updated": 0,
             "newly_expired": 0,
+            "resurrected": 0,
             "by_label": {},
         }
         async with async_session() as session:
@@ -665,6 +677,25 @@ def recompute_timeline_labels(self) -> Dict[str, Any]:
                     if new_label == "EXPIRED" and lead.status not in ("expired",):
                         lead.status = "expired"
                         results["newly_expired"] += 1
+                    # RESURRECTION: lead's opening date moved forward, label is
+                    # now active again. If status was stuck at 'expired', reset
+                    # to 'new' so it reappears in the active pipeline tabs.
+                    # Without this, leads whose opening_date gets corrected or
+                    # pushed out (reopenings, rescheduled projects) stay
+                    # invisible in the Expired tab forever.
+                    elif (
+                        new_label in ("URGENT", "HOT", "WARM", "COOL")
+                        and lead.status == "expired"
+                    ):
+                        lead.status = "new"
+                        results["resurrected"] += 1
+                        logger.info(
+                            f"[RESURRECTION] Lead {lead.id} "
+                            f"{lead.hotel_name!r}: "
+                            f"timeline {old_label or 'NONE'} -> {new_label}, "
+                            f"status 'expired' -> 'new' "
+                            f"(opening={lead.opening_date})"
+                        )
                     key = f"{old_label or 'NONE'}->{new_label}"
                     results["by_label"][key] = results["by_label"].get(key, 0) + 1
             await session.commit()
@@ -672,7 +703,8 @@ def recompute_timeline_labels(self) -> Dict[str, Any]:
         logger.info(
             f"Recompute Timeline Labels: checked={results['leads_checked']}, "
             f"updated={results['labels_updated']}, "
-            f"newly_expired={results['newly_expired']}"
+            f"newly_expired={results['newly_expired']}, "
+            f"resurrected={results['resurrected']}"
         )
         if results["by_label"]:
             for transition, count in sorted(
