@@ -344,6 +344,9 @@ class EnrichmentResult:
         self.layers_tried: list[str] = []
         self.errors: list[str] = []
         self.metadata: dict = {}
+        # Phase B: project-type rejection flags (surfaced from ResearchState)
+        self.should_reject: bool = False
+        self.rejection_reason: Optional[str] = None
 
     @property
     def best_contact(self) -> Optional[dict]:
@@ -2768,11 +2771,15 @@ async def enrich_lead_contacts(
         project_type=project_type_str,
         search_name=search_name,
         former_names=former_names,
+        description=description,  # ← Phase B: flow DB description into classifier
     )
 
     # ── Run the iteration loop ──
     try:
         await run_iterative_research(research_state)
+        # Phase B: surface project-type rejection flags to caller
+        result.should_reject = research_state.should_reject
+        result.rejection_reason = research_state.rejection_reason
     except Exception as ex:
         logger.exception(f"Iterative researcher failed, falling back to v4: {ex}")
         return await _enrich_lead_contacts_v4_legacy(

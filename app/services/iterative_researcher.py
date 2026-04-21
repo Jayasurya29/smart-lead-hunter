@@ -58,6 +58,7 @@ class ResearchState:
     )
     search_name: Optional[str] = None  # Stripped name for queries ("Kali Hotel")
     former_names: Optional[list] = None  # Previous names ["Montage Kapalua Bay"]
+    description: Optional[str] = None  # DB description field — richer classifier input
 
     # ── Discovered facts (filled in as iterations run) ──
     operator_parent: Optional[str] = None  # "Hyatt Inclusive Collection"
@@ -84,6 +85,36 @@ class ResearchState:
     queries_run: list[str] = field(default_factory=list)
     urls_scraped: list[str] = field(default_factory=list)
     iterations_done: int = 0
+
+    # ── D1: Existing-hotels + GM-missing cascade flags ──
+    # Set to True when the researcher is invoked against an already-operating
+    # hotel (is_client=True SAP client, or a scraped existing hotel). When
+    # True, Iter 2 uses a slim 2-query set (skips appointment/rebrand noise
+    # that only applies to pre-opening leads).
+    is_existing_hotel: bool = False
+
+    # Flipped to True by Iter 2 when no GM was found AND the timeline bucket
+    # is HOT/URGENT/WARM (i.e. active pre-opening where a GM SHOULD exist).
+    # Triggers the cascade queries (DOSM, Dir Rev Mgmt, Area/Regional GM,
+    # Task Force for Marriott-family brands) and also reweights Iter 6's
+    # strategist prompt so corporate/regional VPs become P1 (not P2)
+    # because they own the vendor decision until a GM is hired.
+    gm_search_cascade_active: bool = False
+
+    # ── Phase B: Project-type classification (from project_type_intelligence) ──
+    # Set at the top of run_iterative_research(), BEFORE any iteration runs.
+    # Used to route iter 2/3/6 behaviour:
+    #   - residences_only → should_reject=True, skip all iterations
+    #   - reopening → Iter 2 targets corporate, skips property-GM hunt
+    #   - conversion → Iter 2 runs standard GM hunt but also targets operator corp
+    #   - renovation → Iter 2 starts with current GM (already on-site)
+    #   - new_opening → existing cascade (GM hunt → corporate fallback)
+    #   - rebrand → urgent uniform replacement, all phases relevant
+    project_confidence: Optional[str] = None  # high | medium | low
+    project_signals: list[str] = field(default_factory=list)
+    phase_reason: Optional[str] = None  # Human-readable routing explanation
+    should_reject: bool = False
+    rejection_reason: Optional[str] = None  # e.g. 'residences_only_not_hotel'
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -284,6 +315,28 @@ async def iteration_2_gm_hunt(state: ResearchState) -> int:
     # Short name for search (strips "Resort & Spa" etc.)
     short_name = state.search_name or _shorten_hotel_name(state.hotel_name)
 
+    # ── D1: SLIM BRANCH for already-operating hotels ──
+    # For existing hotels the GM (if any) is already named publicly on
+    # LinkedIn / TripAdvisor / hotel website. We don't need appointment
+    # press-release queries ("appointed", "hired") or former-name rebrand
+    # queries — those are noise on an open property and waste credits.
+    if state.is_existing_hotel:
+        queries = [
+            f'"{short_name}" "general manager"',
+            f'"{short_name}" "general manager" OR "hotel manager" site:linkedin.com',
+        ]
+
+        facts_before = _fact_count(state)
+        await _run_queries_and_extract(state, queries, ce, scrape_limit=5)
+
+        state.has_named_gm = any(
+            _looks_like_gm(n.get("title", "")) for n in state.discovered_names
+        )
+
+        state.iterations_done = 2
+        return _fact_count(state) - facts_before
+
+    # ── DEFAULT BRANCH — pre-opening leads (URGENT/HOT/WARM/COOL) ──
     queries = [
         # ── SIMPLE QUERY FIRST — the way a human would search ──
         # This is the #1 most important query. No qualifiers.
@@ -352,6 +405,46 @@ async def iteration_2_gm_hunt(state: ResearchState) -> int:
     state.has_named_gm = any(
         _looks_like_gm(n.get("title", "")) for n in state.discovered_names
     )
+
+    # ── D1: GM-MISSING CASCADE ──
+    # No GM found yet but timeline says one SHOULD be hired by now.
+    # Fire a second round of queries for the surrounding staff (DOSM,
+    # Revenue Director, Area/Regional GM) plus Task Force for
+    # Marriott-family brands. Also flip the cascade flag so Iter 6's
+    # strategist prompt reweights corporate/regional VPs to P1.
+    tl = (state.timeline_label or "").upper()
+    if (not state.has_named_gm) and tl in ("HOT", "URGENT", "WARM"):
+        cascade_queries = [
+            f'"{short_name}" "director of sales" OR "DOSM" OR "director of sales and marketing"',
+            f'"{short_name}" "director of revenue" OR "revenue management"',
+            f'"{short_name}" "area general manager" OR "regional general manager"',
+        ]
+
+        # Marriott-family brands use Task Force GMs for pre-opening.
+        # Check parent_company from brand registry.
+        is_marriott_family = False
+        try:
+            if state.brand:
+                bi = BrandRegistry.lookup(state.brand)
+                if bi and "marriott" in (bi.parent_company or "").lower():
+                    is_marriott_family = True
+        except Exception as ex:
+            logger.debug(f"[ITER 2 CASCADE] brand registry lookup failed: {ex}")
+
+        if is_marriott_family:
+            cascade_queries.append(
+                f'"{short_name}" "task force" "general manager" OR "task force GM"'
+            )
+
+        logger.info(
+            f"[ITER 2 CASCADE] No GM found for {state.hotel_name!r} "
+            f"(timeline={tl}). Firing {len(cascade_queries)} cascade queries "
+            f"(DOSM / Rev Mgmt / Area GM"
+            f"{' / Task Force' if is_marriott_family else ''})."
+        )
+
+        await _run_queries_and_extract(state, cascade_queries, ce, scrape_limit=3)
+        state.gm_search_cascade_active = True
 
     state.iterations_done = 2
     return _fact_count(state) - facts_before
@@ -1398,6 +1491,91 @@ async def iteration_6_reasoning_pass(state: ResearchState) -> int:
                 "Do NOT downgrade founders or C-suite as 'too senior' — they are P1.\n"
             )
 
+    # ── D1: GM-MISSING CASCADE CONTEXT ──
+    # Iter 2 flipped this flag because no GM was found despite timeline
+    # saying one SHOULD be hired by now. Tell the strategist to reweight
+    # corporate procurement + regional VPs UP (P1, not P2) because they
+    # own the vendor decision until the GM is hired. DOSM and Revenue
+    # Director are warm intro paths, not decision-makers — P3.
+    cascade_block = ""
+    if state.gm_search_cascade_active:
+        cascade_block = (
+            "\nGM-MISSING CASCADE ACTIVE (CRITICAL PRIORITY REWEIGHT):\n"
+            "No on-property GM has been announced for this property yet, but\n"
+            "the timeline says one SHOULD be hired by now. Iter 2 fired cascade\n"
+            "queries for DOSM, Revenue Director, and Area/Regional GM candidates.\n"
+            "\n"
+            "Reweight priorities as follows for this specific lead:\n"
+            "  • Corporate procurement directors = P1 (NOT P3). They own the\n"
+            "    vendor decision until the GM is hired and will sign the\n"
+            "    opening contract.\n"
+            "  • Regional VPs whose patch explicitly covers this property's\n"
+            "    region = P1 (NOT P2). Same reasoning — decision sits with\n"
+            "    them right now.\n"
+            "  • Area/Cluster/Regional GM candidates = P1. They are the\n"
+            "    interim decision-maker until a property GM is named.\n"
+            "  • Task Force GM (Marriott-family brands) = P1 if found.\n"
+            "  • DOSM (Director of Sales & Marketing) = P3. Warm intro path,\n"
+            "    NOT a buyer. They know the organization but don't sign.\n"
+            "  • Director of Revenue Management = P3. Same — not a buyer.\n"
+            "\n"
+            "This reweight only applies because the GM slot is unfilled. Do\n"
+            "NOT apply it in the reasoning for other leads.\n"
+        )
+
+    # ── Phase B: Project-type context block ──
+    # Tell the strategist what KIND of project this is, so contact
+    # prioritization reflects procurement reality (e.g. reopening →
+    # corporate wins, conversion → pre-opening GM + operator, etc.)
+    phase_b_block = ""
+    if state.project_type and state.project_type != "unknown":
+        ptype_advice = {
+            "reopening": (
+                "REOPENING CONTEXT: This property was previously operating, closed, and is now returning.\n"
+                "  → Property staff were redeployed or laid off; corporate owns the reopening procurement decision.\n"
+                "  → Regional VP Operations and corporate procurement execs are the REAL buyers → P1.\n"
+                "  → If a 'returning GM' is named (someone who ran this hotel before), P1 for them too.\n"
+                "  → New F&B concepts usually debut with reopenings (new bars, restaurants) = NEW uniform SKUs.\n"
+                "  → Don't over-index on property-level titles unless evidence says they're staying with THIS reopening."
+            ),
+            "conversion": (
+                "CONVERSION CONTEXT: An existing building is being gutted and re-flagged under a new brand.\n"
+                "  → Unlike a rebrand (staff retained), conversions rebuild operations: staff hired fresh, FF&E replaced.\n"
+                "  → Operator has existing corporate procurement team — regional VP Ops / Procurement → P1.\n"
+                "  → Pre-opening GM hired earlier than for ground-up new construction — if named, → P1.\n"
+                "  → Old operator's staff are IRRELEVANT — don't prioritize anyone from the former flag."
+            ),
+            "rebrand": (
+                "REBRAND CONTEXT: Existing hotel, SAME staff, new brand flag.\n"
+                "  → MANDATORY uniform replacement — highest urgency scenario.\n"
+                "  → Existing property team stays → on-site GM, Director of Housekeeping, HR, F&B = P1.\n"
+                "  → Contact immediately — no ramp-up time needed."
+            ),
+            "renovation": (
+                "RENOVATION-WHILE-OPERATING CONTEXT: Hotel stays open; phased updates.\n"
+                "  → Current GM is ON-SITE and involved in procurement → P1.\n"
+                "  → Dept heads (Housekeeping, F&B, HR) actively buying during the phased work → P1.\n"
+                "  → Corporate is supportive but not the primary decision-maker."
+            ),
+            "new_opening": (
+                "NEW-OPENING CONTEXT: Brand-new ground-up construction, no existing staff.\n"
+                "  → Phase depends on timeline — see timeline_hint above.\n"
+                "  → If HOT/URGENT: incoming GM (P1), dept heads being hired (P1/P2).\n"
+                "  → If WARM/COOL: management-company corporate procurement (P1) — GM not yet hired."
+            ),
+            "ownership_change": (
+                "OWNERSHIP-CHANGE CONTEXT: Property sold to new owner.\n"
+                "  → If management changes too → treat like new_opening.\n"
+                "  → If same management retained → existing GM is still the P1 buyer."
+            ),
+        }.get(state.project_type, "")
+
+        if ptype_advice:
+            phase_b_block = (
+                f"\nPROJECT-TYPE ROUTING (classifier confidence: {state.project_confidence or 'unknown'}):\n"
+                f"{ptype_advice}\n"
+            )
+
     prompt = f"""You are a senior hospitality sales strategist for JA Uniforms,
 a hotel uniform supplier. JA Uniforms needs 6 months of lead time to deliver
 uniforms for a new opening or major renovation. Current date: April 2026.
@@ -1409,11 +1587,12 @@ LEAD CONTEXT:
 - Opening: {state.opening_date or "unknown"}
 - Timeline label: {tl} — {timeline_hint}
 - Project stage: {state.project_stage or "unknown"} (greenfield / reopening / renovation / conversion)
+- Project TYPE (Phase A classifier): {state.project_type or "unknown"}
 - Operator parent: {state.operator_parent or "unknown"}
 - Owner company: {state.owner_company or "unknown"}
 - Verified-current companies: {', '.join(state.verified_current_companies) or 'none confirmed'}
 - Historical (skip) companies: {', '.join(state.historical_companies) or 'none'}
-{brand_tier_block}{brand_model_block}
+{phase_b_block}{brand_tier_block}{brand_model_block}{cascade_block}
 YOUR JOB:
 For each candidate below, decide (a) the FINAL priority and (b) a one-sentence
 reasoning. Think like a salesperson: who is ACTUALLY handling operations and
@@ -1599,11 +1778,75 @@ async def run_iterative_research(state: ResearchState) -> ResearchState:
     - We have 8+ contacts and basic LinkedIn coverage, OR
     - Last iteration produced no new facts (converged), OR
     - Hit max iterations.
+
+    PHASE B: Before running any iteration, classify the project type and
+    route accordingly. If the lead is rejected (residences_only), skip
+    all iterations and return immediately with rejection flags set.
     """
     logger.info(
         f"[ITER] Starting iterative research for: {state.hotel_name} "
         f"(brand={state.brand}, country={state.country})"
     )
+
+    # ══════════════════════════════════════════════════════════════
+    # PHASE B — Project-type classification (runs BEFORE any iteration)
+    # ══════════════════════════════════════════════════════════════
+    # Uses what we already know (hotel_name, brand, timeline_label) to
+    # decide:
+    #   - Should we research at all? (residences_only → reject)
+    #   - Should we hunt the property GM, or go straight to corporate?
+    #   - What's the "story" we'll tell sales about this lead?
+    try:
+        from app.config.project_type_intelligence import classify_project_type
+
+        # We don't have a description here — we only have what's on the lead.
+        # The classifier will use hotel_name + management_company and produce
+        # a sensible result. Better signals come in later when we have
+        # scraped text — but Iter 1 runs after this, so we classify now and
+        # optionally re-classify mid-flow if we want (not doing that yet).
+        classification = classify_project_type(
+            hotel_name=state.hotel_name or "",
+            description=state.description or "",  # ← PHASE B fix: use DB description
+            project_type=state.project_type or "",
+            source_text=state.description
+            or "",  # same — source_text AND description match
+            timeline_label=state.timeline_label or "",
+            management_company=state.management_company or state.brand or "",
+        )
+
+        # Persist on state for downstream access (Iter 6, sales narrative)
+        state.project_type = classification.project_type
+        state.project_confidence = classification.confidence
+        state.project_signals = classification.signals
+        state.phase_reason = classification.phase_reason
+        state.should_reject = classification.should_reject
+        state.rejection_reason = classification.rejection_reason
+
+        logger.info(
+            f"[PHASE B] Project type classified: {classification.project_type} "
+            f"(confidence={classification.confidence}, signals={classification.signals}) "
+            f"→ starting_phase={classification.starting_phase}, "
+            f"should_reject={classification.should_reject}"
+        )
+
+        # ── Early reject for residences_only ──
+        # Zero uniform opportunity. Don't waste Gemini/Serper cycles.
+        if classification.should_reject:
+            logger.warning(
+                f"[PHASE B REJECT] Skipping all iterations for {state.hotel_name} — "
+                f"reason={classification.rejection_reason}. "
+                f"The lead SHOULD be marked status='rejected' by the caller."
+            )
+            state.iterations_done = 0
+            return state
+
+    except Exception as exc:
+        # Defensive: if classification blows up, log and continue with the
+        # existing pipeline. Never block research on a classifier bug.
+        logger.warning(
+            f"[PHASE B] Project-type classification failed ({exc}); "
+            f"falling through to standard pipeline."
+        )
 
     # ── Iteration 1: discovery ──
     new_facts = await iteration_1_discovery(state)
@@ -2092,17 +2335,97 @@ def _guess_owner_from_state(state: ResearchState) -> Optional[str]:
 
 
 def _guess_stage_from_state(state: ResearchState) -> str:
-    """Infer project stage from URLs scraped + opening date."""
-    text_blob = " ".join(state.urls_scraped).lower()
-    if any(
-        k in text_blob for k in ("reopen", "post-hurricane", "renovation", "rebuild")
-    ):
-        return "reopening"
-    if any(k in text_blob for k in ("rebrand", "conversion", "joins")):
-        return "conversion"
-    if any(k in text_blob for k in ("renovation", "renovate")):
-        return "renovation"
-    return "greenfield"
+    """
+    Infer project stage from scraped URL evidence.
+
+    PHASE B: Now uses the full Phase A classifier (classify_project_type)
+    on the combined URL/query text. The classifier's output types map to
+    this function's historical outputs:
+        new_opening      → "greenfield"   (maintains legacy naming)
+        reopening        → "reopening"
+        conversion       → "conversion"
+        renovation       → "renovation"
+        rebrand          → "conversion"   (rebrand = brand conversion)
+        residences_only  → "greenfield"   (won't get here — rejected earlier)
+        ownership_change → "conversion"
+        unknown          → "greenfield"   (conservative default)
+
+    NOTE: Returns the legacy string names ("greenfield", "reopening",
+    "conversion", "renovation") because `state.project_stage` is used
+    elsewhere with those exact strings. The canonical Phase A type is
+    stored separately on `state.project_type`.
+    """
+    try:
+        from app.config.project_type_intelligence import classify_project_type
+
+        # Combine URL evidence + hotel metadata + description into a single text blob.
+        # Description is the richest input; URLs give additional signals from scraped articles.
+        url_text = " ".join(state.urls_scraped)
+        combined = (
+            (state.description or "")
+            + " "
+            + url_text
+            + " "
+            + " ".join(
+                filter(
+                    None,
+                    [
+                        state.hotel_name or "",
+                        state.brand or "",
+                        state.management_company or "",
+                    ],
+                )
+            )
+        )
+
+        r = classify_project_type(
+            hotel_name=state.hotel_name or "",
+            description=combined,
+            source_text=combined,
+            timeline_label=state.timeline_label or "",
+            management_company=state.management_company or state.brand or "",
+        )
+
+        # Update the richer fields too — re-classification after Iter 1 gives
+        # us a better picture than the initial top-of-run call.
+        state.project_type = r.project_type
+        state.project_confidence = r.confidence
+        state.project_signals = r.signals
+        state.phase_reason = r.phase_reason
+
+        logger.info(
+            f"[STAGE/phase_a] Re-classified after Iter 1: "
+            f"project_type={r.project_type}, confidence={r.confidence}, "
+            f"signals={r.signals[:3]}"
+        )
+
+        # Map to legacy project_stage strings
+        mapping = {
+            "reopening": "reopening",
+            "conversion": "conversion",
+            "renovation": "renovation",
+            "rebrand": "conversion",
+            "ownership_change": "conversion",
+            "new_opening": "greenfield",
+            "residences_only": "greenfield",  # shouldn't reach here
+            "unknown": "greenfield",
+        }
+        return mapping.get(r.project_type, "greenfield")
+
+    except Exception as exc:
+        # Defensive fallback to the old keyword heuristic
+        logger.debug(f"Phase A classifier failed in _guess_stage; fallback. {exc}")
+        text_blob = " ".join(state.urls_scraped).lower()
+        if any(
+            k in text_blob
+            for k in ("reopen", "post-hurricane", "renovation", "rebuild")
+        ):
+            return "reopening"
+        if any(k in text_blob for k in ("rebrand", "conversion", "joins")):
+            return "conversion"
+        if any(k in text_blob for k in ("renovation", "renovate")):
+            return "renovation"
+        return "greenfield"
 
 
 def _looks_like_gm(title: str) -> bool:
