@@ -159,23 +159,46 @@ async def iteration_1_discovery(state: ResearchState) -> int:
             bi = BrandRegistry.lookup(state.brand)
             if bi and bi.parent_company:
                 parent_clean = bi.parent_company.split("(")[0].strip()
-                # Always record the brand parent chain
-                if not state.brand_parent:
-                    state.brand_parent = parent_clean
-                # Only use brand_parent as operator_parent for chain-managed
-                # brands. Soft-brand collections (operating_model=="collection")
-                # are operated by independent management companies, not the
-                # brand parent — those get discovered from scraped articles.
-                operating_model = (bi.operating_model or "").lower()
-                is_soft_brand = operating_model in ("collection", "franchised")
-                if not state.operator_parent and not is_soft_brand:
-                    state.operator_parent = parent_clean
-                elif is_soft_brand:
+                # Guard against sentinel values that aren't real parent names.
+                # The brand_registry fallback entry for unrecognized brands has
+                # parent_company="Unknown" — if we copy that into operator_parent,
+                # downstream queries literally search for "Unknown" "VP Procurement"
+                # which returns garbage. Treat these sentinels as "no parent known".
+                _SENTINEL_PARENTS = {
+                    "unknown",
+                    "none",
+                    "n/a",
+                    "na",
+                    "tbd",
+                    "independent",
+                    "",
+                    "-",
+                    "not_applicable",
+                }
+                if parent_clean.lower().strip() in _SENTINEL_PARENTS:
                     logger.info(
-                        f"[ITER 1] {state.brand!r} is a soft brand "
-                        f"(operating_model={operating_model!r}) — leaving "
-                        f"operator_parent empty; brand_parent={parent_clean!r}"
+                        f"[ITER 1] Brand {state.brand!r} has sentinel parent "
+                        f"({parent_clean!r}) — treating as unknown, will rely "
+                        f"on article extraction for operator/owner"
                     )
+                else:
+                    # Always record the brand parent chain
+                    if not state.brand_parent:
+                        state.brand_parent = parent_clean
+                    # Only use brand_parent as operator_parent for chain-managed
+                    # brands. Soft-brand collections (operating_model=="collection")
+                    # are operated by independent management companies, not the
+                    # brand parent — those get discovered from scraped articles.
+                    operating_model = (bi.operating_model or "").lower()
+                    is_soft_brand = operating_model in ("collection", "franchised")
+                    if not state.operator_parent and not is_soft_brand:
+                        state.operator_parent = parent_clean
+                    elif is_soft_brand:
+                        logger.info(
+                            f"[ITER 1] {state.brand!r} is a soft brand "
+                            f"(operating_model={operating_model!r}) — leaving "
+                            f"operator_parent empty; brand_parent={parent_clean!r}"
+                        )
         except Exception:
             pass
 
@@ -1639,29 +1662,99 @@ async def iteration_5_verify_current_role(state: ResearchState) -> int:
                 for r in results[:3]
             ).lower()
 
-            left_signals = [
-                "former",
-                "previously",
-                "ex-",
-                "departed",
+            # ── DEPARTURE DETECTION — CONTEXT-AWARE ──
+            # The keyword "previously" is overloaded:
+            #   "previously Supervisor, now Director"  → promotion (KEEP)
+            #   "previously at Commonwealth"           → departure (FLAG)
+            # We distinguish by looking at what follows the signal word.
+            #
+            # STRONG signals (rarely have promotion meaning): definitive
+            # departure language. These trigger possibly_departed immediately.
+            strong_left_signals = [
                 "has left",
+                "departed",
+                "no longer",
+                "resigned",
+                "ex-",
+            ]
+            # WEAK signals (ambiguous): could be promotion or departure.
+            # These require additional proof — either company name nearby
+            # (indicating departure) or a current title at ANOTHER company.
+            weak_left_signals = [
+                "previously",
+                "formerly",
+                "former",
                 "moved to",
                 "joined",
                 "now at",
-                "no longer",
-                "vitro",
-                "resigned",
             ]
-            found_left = [s for s in left_signals if s in blob]
-            if found_left:
+
+            found_strong = [s for s in strong_left_signals if s in blob]
+            found_weak = [s for s in weak_left_signals if s in blob]
+
+            # Require COMPANY-level departure evidence — either a strong
+            # signal, or a weak signal ACCOMPANIED BY the operator's name
+            # in a "previously/formerly/left [Operator]" pattern.
+            # Raw "previously" alone = likely role promotion within same
+            # company = should NOT flag.
+            operator_lower = (operator or "").lower()
+            operator_first_word = operator_lower.split()[0] if operator_lower else ""
+
+            is_probable_departure = False
+            departure_reason = []
+
+            if found_strong:
+                is_probable_departure = True
+                departure_reason = found_strong
+
+            # For weak signals, require a company-context pattern.
+            # e.g. "previously at Commonwealth", "formerly Commonwealth"
+            elif found_weak and operator_first_word:
+                import re as _re
+
+                for weak in found_weak:
+                    # Pattern: "<weak signal> (at|with|of)? <operator name>"
+                    # Also catches "<weak signal> ... <operator>" within 50 chars
+                    idx = blob.find(weak)
+                    if idx < 0:
+                        continue
+                    # Look at text WITHIN 50 chars after the weak signal
+                    window = blob[idx : idx + 80]
+                    if operator_first_word in window:
+                        # Also check: is there a NEW company mentioned nearby?
+                        # "previously Commonwealth, now Aimbridge" — that's a real departure.
+                        # "previously Supervisor at Commonwealth" — role in same company, NOT.
+                        # We look for another company-ish word after the operator.
+                        role_after_operator = _re.search(
+                            r"\b(supervisor|manager|director|coordinator|assistant)\b",
+                            window,
+                        )
+                        if role_after_operator:
+                            # Role word near operator → most likely a PROMOTION
+                            # pattern like "previously Supervisor at Commonwealth, now Director"
+                            # Do not flag.
+                            continue
+                        is_probable_departure = True
+                        departure_reason.append(weak)
+
+            if is_probable_departure:
                 contact["source_detail"] = (
                     f"⚠ May have LEFT {operator}. "
-                    f"Signals: {', '.join(found_left[:3])}. Verify before outreach."
+                    f"Signals: {', '.join(departure_reason[:3])}. Verify before outreach."
                 )
                 contact["_verification_result"] = "possibly_departed"
                 logger.info(
                     f"[ITER 5] {name}: possibly left {operator} — "
-                    f"signals: {', '.join(found_left[:3])}"
+                    f"signals: {', '.join(departure_reason[:3])}"
+                )
+            elif found_weak:
+                # Has weak signals but no clear company-departure pattern.
+                # Likely a role change (promotion/demotion) within the same
+                # company. Don't flag as departed — but log for debugging.
+                logger.debug(
+                    f"[ITER 5] {name}: weak signals {found_weak} found but "
+                    f"no clear departure pattern from {operator} — "
+                    f"likely role change within company, NOT flagging"
                 )
 
     # ── TITLE-CURRENCY VERIFICATION (Bug #2 fix — 2026-04-22) ──
@@ -2197,8 +2290,21 @@ def _apply_iter6_fallback(state: ResearchState) -> None:
             # UNKNOWN tier — conservative default
             priority = "P3"
 
+        # Apply departed-employee override: if Iter 5 flagged them as
+        # former/departed, cap priority at P4 regardless of title.
+        if contact.get("_verification_result") in (
+            "former_employee",
+            "possibly_departed",
+        ) and priority in ("P1", "P2"):
+            priority = "P4"
+            contact["_final_reasoning"] = (
+                f"⚠ MAY HAVE LEFT — {contact.get('_verification_result')}. "
+                f"Title-based fallback demoted to P4. Verify before outreach."
+            )
+        else:
+            contact["_final_reasoning"] = SENTINEL
+
         contact["_final_priority"] = priority
-        contact["_final_reasoning"] = SENTINEL
         counts[priority] += 1
         applied += 1
 
@@ -2670,6 +2776,98 @@ CANDIDATES:
 
         applied += 1
 
+    # ── HARD ENFORCEMENT: former/departed contacts cannot be P1 or P2 ──
+    # Iter 5 detects "previously / formerly / former" language about contacts
+    # and sets _verification_result. But Iter 6 Gemini reads it as just one
+    # field among many and sometimes still assigns P1 (Amanda Vogelsang case).
+    # This rule OVERRIDES Gemini for clear ex-employee signals — no matter
+    # how relevant the role might seem on paper, if they've left, they're P4.
+    #
+    # Why not reject outright? Because "possibly_departed" is a signal, not
+    # proof. A P4 with a clear "may have left — verify before outreach"
+    # warning lets the sales team double-check. Rejecting would silently
+    # drop potentially-valid contacts.
+    #
+    # _verification_result values that trigger this:
+    #   - former_employee:    Iter 5's per-person check confirmed past role
+    #   - possibly_departed:  "previously/formerly" keyword seen near their name
+    _DEPARTED_VERIFICATION_VALUES = {"former_employee", "possibly_departed"}
+    demoted_departed = 0
+    for contact in state.discovered_names:
+        if contact.get(
+            "_verification_result"
+        ) in _DEPARTED_VERIFICATION_VALUES and contact.get("_final_priority") in (
+            "P1",
+            "P2",
+        ):
+            old_priority = contact.get("_final_priority")
+            contact["_final_priority"] = "P4"
+            # Prepend warning to reasoning so UI shows it prominently
+            original_reasoning = contact.get("_final_reasoning") or ""
+            contact["_final_reasoning"] = (
+                f"⚠ MAY HAVE LEFT — {contact.get('_verification_result')}. "
+                f"Demoted {old_priority}→P4 by departed-employee rule. "
+                f"Verify current employment before outreach. "
+                f"Original reasoning: {original_reasoning}"
+            )
+            demoted_departed += 1
+            logger.info(
+                f"[ITER 6/ENFORCEMENT] {contact.get('name')}: "
+                f"{old_priority}→P4 (verification={contact.get('_verification_result')})"
+            )
+    if demoted_departed:
+        logger.warning(
+            f"[ITER 6/ENFORCEMENT] Demoted {demoted_departed} contacts "
+            f"from P1/P2 to P4 due to departed-employee signals. These "
+            f"are still kept in the list for manual verification, not rejected."
+        )
+
+    # ── OWNER PRIORITY BOOST (pre-opening leads) ──
+    # For URGENT/HOT pre-opening leads, the property owner is the single
+    # most important early contact — they've signed the management
+    # agreement, are funding construction/FF&E/uniforms, and can
+    # introduce JA Uniforms to the operator. The default formula scores
+    # owner scope × 1.5 = P2, but for pre-opening that should be P1.
+    #
+    # Rule: if timeline is URGENT or HOT AND contact has scope=owner AND
+    # they're not already P1, promote to P1. Preserves owner's role as
+    # "first call" target for pre-opening leads.
+    # (Open/expired leads leave owner at P2 — on-property GM is primary.)
+    tl = (state.timeline_label or "").upper()
+    promoted_owners = 0
+    if tl in ("URGENT", "HOT"):
+        for contact in state.discovered_names:
+            if (contact.get("scope") or "").lower() == "owner" and contact.get(
+                "_final_priority"
+            ) in ("P2", "P3", "P4"):
+                # Don't boost owners who were demoted by departed-employee
+                # rule — those warnings stand.
+                if contact.get("_verification_result") in (
+                    "former_employee",
+                    "possibly_departed",
+                    "likely_former",
+                ):
+                    continue
+                old_priority = contact.get("_final_priority")
+                contact["_final_priority"] = "P1"
+                original_reasoning = contact.get("_final_reasoning") or ""
+                contact["_final_reasoning"] = (
+                    f"[Pre-opening owner boost — {tl} timeline] "
+                    f"Property owner / check-writer. First-call contact "
+                    f"for uniform vendor introduction during pre-opening "
+                    f"phase. Original reasoning: {original_reasoning}"
+                )
+                promoted_owners += 1
+                logger.info(
+                    f"[ITER 6/OWNER BOOST] {contact.get('name')}: "
+                    f"{old_priority}→P1 (owner of pre-opening {tl} lead)"
+                )
+    if promoted_owners:
+        logger.info(
+            f"[ITER 6/OWNER BOOST] Promoted {promoted_owners} owners to P1 "
+            f"for {tl} pre-opening lead"
+        )
+
     logger.info(
         f"[ITER 6/REASONING] Applied {applied}/{len(state.discovered_names)} verdicts. "
         f"P1={sum(1 for c in state.discovered_names if c.get('_final_priority') == 'P1')}, "
@@ -2680,6 +2878,196 @@ CANDIDATES:
 
     state.iterations_done = 6
     return applied
+
+
+# ═══════════════════════════════════════════════════════════════
+# ITERATION 6.5 — EMPLOYMENT VERIFICATION
+# Catches the "Brian Fry" problem: contact surfaced from old press
+# release, still appears current, but actually left the company.
+# Iter 5's "possibly_departed" keyword scan doesn't catch clean
+# transitions (no "previously" language in the original sources).
+# ═══════════════════════════════════════════════════════════════
+
+
+async def iteration_6_5_employment_verification(state: ResearchState) -> int:
+    """
+    Verify that each P1/P2 candidate is CURRENTLY employed at their
+    claimed company, not a former employee whose name still shows up
+    in old press releases.
+
+    Runs one Gemini call per P1/P2 candidate that hasn't already been
+    caught by Iter 5. Sends Gemini the contact + their known sources
+    and asks: is this person STILL at this company as of 2025-2026?
+
+    Actions:
+      - confirmed_current   → no change
+      - likely_former       → demote to P4 with warning reasoning
+      - uncertain           → demote to P3 with "verify before outreach"
+
+    Cost-bounded: only runs on P1/P2 candidates that have NOT been
+    flagged by Iter 5 already. Typical lead: 3-8 candidates.
+    """
+    from app.services import contact_enrichment as ce
+
+    # Candidates: P1/P2 contacts NOT already flagged as departed/former
+    candidates = []
+    for contact in state.discovered_names:
+        priority = contact.get("_final_priority")
+        if priority not in ("P1", "P2"):
+            continue
+        # Skip if Iter 5 already flagged — already handled by enforcement
+        if contact.get("_verification_result") in (
+            "former_employee",
+            "possibly_departed",
+        ):
+            continue
+        # Skip if no employer to verify against
+        org = (contact.get("organization") or "").strip()
+        if not org or len(org) < 3:
+            continue
+        candidates.append(contact)
+
+    if not candidates:
+        logger.info(
+            "[ITER 6.5/EMPLOYMENT] No P1/P2 candidates need employment "
+            "verification (Iter 5 already handled all flagged ones)"
+        )
+        return 0
+
+    logger.info(
+        f"[ITER 6.5/EMPLOYMENT] Verifying current employment for "
+        f"{len(candidates)} P1/P2 candidates"
+    )
+
+    demoted = 0
+    for contact in candidates:
+        name = (contact.get("name") or "").strip()
+        title = (contact.get("title") or "").strip()
+        org = (contact.get("organization") or "").strip()
+
+        # Run a focused Google search: "Name" "Company" 2024 OR 2025 OR 2026
+        query = f'"{name}" "{org}" 2024 OR 2025 OR 2026'
+        if query in state.queries_run:
+            continue
+        state.queries_run.append(query)
+
+        try:
+            results = await ce._search_web(query, max_results=5)
+        except Exception as ex:
+            logger.debug(f"[ITER 6.5] Search failed for {name}: {ex} — skipping")
+            continue
+
+        if not results:
+            # No recent hits = weak signal; demote to P3 with warning
+            logger.info(
+                f"[ITER 6.5] {name}: NO 2024+ mentions at {org} — "
+                f"demoting P1/P2 → P3 (no recent corroboration)"
+            )
+            contact["_final_priority"] = "P3"
+            contact["_final_reasoning"] = (
+                f"⚠ No 2024-2026 mentions found confirming {name} is still "
+                f"at {org}. Only older evidence available. "
+                f"Verify current employment before outreach. "
+                + (contact.get("_final_reasoning") or "")
+            )
+            contact["_verification_result"] = "no_recent_mentions"
+            demoted += 1
+            continue
+
+        # Build a small context block from the top results + ask Gemini
+        snippet_block = ""
+        for i, r in enumerate(results[:5]):
+            u = (r.get("url") or "").strip()
+            t = (r.get("title") or "").strip()
+            s = (r.get("snippet") or "").strip()
+            snippet_block += (
+                f"\n\nResult {i+1}:\n  URL: {u}\n  Title: {t}\n  Snippet: {s}"
+            )
+
+        prompt = f"""You are verifying whether a business contact is CURRENTLY employed at a specific company as of 2025-2026.
+
+CONTACT: {name}
+CLAIMED TITLE: {title}
+CLAIMED COMPANY: {org}
+
+Below are recent (2024+) search results mentioning this person. Decide based on the EVIDENCE:
+
+{snippet_block}
+
+Decide ONE of:
+- confirmed_current  : Evidence shows they are CURRENTLY at {org} (explicit 2024+ mention, still listed on company website, active in role)
+- likely_former      : Evidence shows they have LEFT — at a new company, founded their own firm, retired, or newer announcements name a different person in their old role
+- uncertain          : Evidence is ambiguous or only older references
+
+RULES:
+- If ANY 2024+ result says they're at a DIFFERENT company → likely_former
+- If results show they're still actively at {org} → confirmed_current
+- If all results are 2023 or older → uncertain
+- A single stale press release does not confirm_current — require fresh evidence
+- Founder of their own firm = likely_former from previous role
+
+Respond with ONLY JSON:
+{{"status": "confirmed_current" | "likely_former" | "uncertain", "evidence": "one-sentence justification", "current_employer": "where they actually are now if likely_former"}}"""
+
+        try:
+            resp = await ce._call_gemini(prompt, timeout=30)
+        except Exception as ex:
+            logger.debug(f"[ITER 6.5] Gemini verify failed for {name}: {ex}")
+            continue
+
+        if not resp or not isinstance(resp, dict):
+            continue
+
+        status = (resp.get("status") or "").lower().strip()
+        evidence = (resp.get("evidence") or "").strip()
+        current_employer = (resp.get("current_employer") or "").strip()
+
+        if status == "confirmed_current":
+            logger.info(
+                f"[ITER 6.5] {name}: CONFIRMED current at {org} — keeping "
+                f"{contact.get('_final_priority')}"
+            )
+            contact["_verification_result"] = "confirmed_current"
+            continue
+
+        if status == "likely_former":
+            old_priority = contact.get("_final_priority")
+            contact["_final_priority"] = "P4"
+            contact["_verification_result"] = "likely_former"
+            contact["_current_employer"] = current_employer or None
+            contact["_final_reasoning"] = (
+                f"⚠ LIKELY FORMER EMPLOYEE of {org}. "
+                + (f"Now at: {current_employer}. " if current_employer else "")
+                + f"Evidence: {evidence}. "
+                f"Demoted {old_priority}→P4 by employment verification. "
+                f"DO NOT outreach without confirming current role."
+            )
+            logger.warning(
+                f"[ITER 6.5] {name}: LIKELY FORMER — was P{old_priority[-1]}, "
+                f"now P4. Currently at: {current_employer or 'unknown'}. "
+                f"Evidence: {evidence[:100]}"
+            )
+            demoted += 1
+        elif status == "uncertain":
+            old_priority = contact.get("_final_priority")
+            if old_priority == "P1":
+                contact["_final_priority"] = "P3"
+                contact["_verification_result"] = "uncertain_current"
+                contact["_final_reasoning"] = (
+                    f"⚠ UNCERTAIN current employment at {org}. "
+                    f"Evidence: {evidence}. "
+                    f"Demoted P1→P3. Verify before outreach. "
+                    + (contact.get("_final_reasoning") or "")
+                )
+                logger.info(f"[ITER 6.5] {name}: UNCERTAIN — P1 → P3. {evidence[:100]}")
+                demoted += 1
+
+    logger.info(
+        f"[ITER 6.5/EMPLOYMENT] Verification complete: "
+        f"{demoted}/{len(candidates)} demoted "
+        f"(likely_former or uncertain)"
+    )
+    return demoted
 
 
 async def run_iterative_research(state: ResearchState) -> ResearchState:
@@ -2825,6 +3213,16 @@ async def run_iterative_research(state: ResearchState) -> ResearchState:
     # RIGHT NOW — and assigns final priorities (P1/P2/P3/P4) with reasoning.
     if state.discovered_names:
         await iteration_6_reasoning_pass(state)
+
+    # ── Iteration 6.5: EMPLOYMENT VERIFICATION (Brian Fry killer) ──
+    # After Iter 6 assigns priorities, verify that every P1/P2 contact
+    # is STILL at their claimed company. This catches contacts who surfaced
+    # from stale press releases but have since moved on (Brian Fry at
+    # Commonwealth — left Dec 2023, still surfacing as President).
+    # Running ONLY on P1/P2 keeps Gemini cost controlled — noise contacts
+    # (P3/P4) don't need this check, they're not outreach targets anyway.
+    if state.discovered_names:
+        await iteration_6_5_employment_verification(state)
 
     return state
 
@@ -3075,6 +3473,111 @@ If no contacts found, return {{"contacts": []}}
             f"[SNIPPET] Extracted {len(extracted)} contacts from snippets: "
             f"{', '.join(c.get('name', '?') for c in extracted)}"
         )
+
+    # ── EVIDENCE CAPTURE (2026-04-22) ──
+    # For each extracted contact, walk the original Serper results and
+    # attach every snippet that mentions their name (or a distinct last
+    # name) as an evidence item. This gives the UI actual quoted text +
+    # URL + source tier instead of a bare "View Evidence" link.
+    try:
+        from app.services.source_tier import (
+            classify_source_tier,
+            extract_year_from_url_or_snippet,
+            trust_score,
+        )
+        from datetime import datetime, timezone
+
+        captured_at = datetime.now(timezone.utc).isoformat()
+
+        for c in extracted:
+            name = (c.get("name") or "").strip()
+            if not name:
+                continue
+            # Build search tokens — we match evidence by first+last name,
+            # but with a twist: for distinctive last names, last-name-only
+            # match is enough; for common names, need both.
+            parts = name.split()
+            if len(parts) >= 2:
+                first_lower = parts[0].lower().rstrip(".,;:'\"")
+                last_lower = parts[-1].lower().rstrip(".,;:'\"")
+                # Strip titles
+                if first_lower in ("dr", "mr", "mrs", "ms", "miss", "prof"):
+                    first_lower = (
+                        parts[1].lower().rstrip(".,;:'\"") if len(parts) > 2 else ""
+                    )
+            else:
+                first_lower = name.lower()
+                last_lower = ""
+
+            evidence_items = []
+            seen_urls = set()
+            for item in snippets:
+                url = (item.get("url") or "").strip()
+                if not url or url in seen_urls:
+                    continue
+                title_text = (item.get("title") or "").strip()
+                snippet_text = (item.get("snippet") or "").strip()
+                haystack = f"{title_text} {snippet_text}".lower()
+
+                # Name-match rule: full name in haystack OR (first AND last)
+                # for 2+ token names. For single-word names, require full
+                # name present.
+                full_name_match = name.lower() in haystack
+                both_parts_match = (
+                    first_lower
+                    and last_lower
+                    and first_lower in haystack
+                    and last_lower in haystack
+                )
+                if not (full_name_match or both_parts_match):
+                    continue
+
+                seen_urls.add(url)
+                tier = classify_source_tier(url)
+                year = extract_year_from_url_or_snippet(url, snippet_text)
+
+                # Build a concise quote (prefer snippet, fallback to title)
+                quote = snippet_text or title_text
+                # Cap quote length — sales doesn't want a wall of text
+                if len(quote) > 300:
+                    quote = quote[:297] + "..."
+
+                # Extract bare domain for display (e.g. "commonwealthhotels.com")
+                domain = ""
+                if "://" in url:
+                    host = url.split("://", 1)[1].split("/", 1)[0]
+                    domain = host.removeprefix("www.")
+
+                evidence_items.append(
+                    {
+                        "quote": quote,
+                        "source_url": url,
+                        "source_title": title_text[:200],
+                        "source_domain": domain,
+                        "trust_tier": tier,
+                        "source_year": year,
+                        "captured_at": captured_at,
+                    }
+                )
+
+            # Sort evidence by trust tier (primary first), then by year (recent first)
+            evidence_items.sort(
+                key=lambda e: (
+                    -trust_score(e["trust_tier"]),
+                    -(e.get("source_year") or 0),
+                )
+            )
+            # Cap to 5 evidence items per contact — more than that is noise
+            c["_evidence_items"] = evidence_items[:5]
+
+            if evidence_items:
+                top = evidence_items[0]
+                logger.debug(
+                    f"[EVIDENCE] {name}: {len(evidence_items)} items, "
+                    f"top tier={top['trust_tier']} from {top['source_domain']}"
+                )
+    except Exception as ex:
+        logger.debug(f"[EVIDENCE] capture failed (non-fatal): {ex}")
 
     return extracted
 

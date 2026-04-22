@@ -65,6 +65,28 @@ class LeadContact(Base):
     # }
     score_breakdown = Column(JSONB, nullable=True)
 
+    # Per-contact evidence array (migration 014) — captures the actual
+    # quoted snippets and source URLs that proved this contact's identity
+    # and role. Populated by the iterative_researcher snippet-extraction
+    # pass, tagged with trust tier (primary/official/trade/aggregator/
+    # indirect/unknown) by source_tier.classify_source_tier().
+    # Shape: [
+    #   {
+    #     "quote": "Jon Gustin joins Commonwealth Hotels with...",
+    #     "source_url": "https://commonwealthhotels.com/our-team",
+    #     "source_title": "Our Team - Commonwealth Hotels",
+    #     "source_domain": "commonwealthhotels.com",
+    #     "trust_tier": "primary",
+    #     "source_year": 2025,
+    #     "captured_at": "2026-04-22T15:47:00Z"
+    #   },
+    #   ...
+    # ]
+    # Multiple items = corroborated. Highest tier = primary > official >
+    # trade > aggregator > indirect > unknown. UI renders each item as a
+    # distinct card with a colored trust badge.
+    evidence = Column(JSONB, nullable=True)
+
     # Strategist priority (from Iter 6 reasoning pass) — overrides algorithmic priority
     # when present. Values: "P1", "P2", "P3", "P4", or NULL when not yet reasoned.
     strategist_priority = Column(String(4))
@@ -185,6 +207,7 @@ class LeadContact(Base):
             "strategist_reasoning": self.strategist_reasoning,
             "has_strategist_verdict": bool(self.strategist_priority),
             "score_breakdown": self.score_breakdown,
+            "evidence": self.evidence or [],
         }
 
     def __repr__(self):

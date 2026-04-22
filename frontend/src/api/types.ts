@@ -86,6 +86,16 @@ export interface ContactScoreBreakdown {
   formula?: string
 }
 
+export interface ContactEvidenceItem {
+  quote: string
+  source_url: string
+  source_title?: string | null
+  source_domain?: string | null
+  trust_tier?: 'primary' | 'official' | 'trade' | 'aggregator' | 'indirect' | 'unknown' | string | null
+  source_year?: number | null
+  captured_at?: string | null
+}
+
 export interface Contact {
   id: number
   lead_id: number
@@ -100,6 +110,7 @@ export interface Contact {
   tier: string | null
   score: number
   score_breakdown: ContactScoreBreakdown | null
+  evidence: ContactEvidenceItem[] | null
   strategist_priority: string | null
   strategist_reasoning: string | null
   has_strategist_verdict: boolean | null

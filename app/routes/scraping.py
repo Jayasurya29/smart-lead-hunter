@@ -1723,12 +1723,51 @@ async def smart_fill_lead(lead_id: int, request: Request, _csrf=Depends(require_
                     f"opening_date refreshed to '{enriched['opening_date']}' "
                     f"(EXPIRED bucket)"
                 )
+        # ── Core hotel attributes — protect manual edits ──
+        # The user can manually set these via Edit → Save. Full Refresh
+        # should overwrite stale/empty values but MUST NOT trample a valid
+        # manually-set value with "unknown" or empty (e.g. Nickelodeon
+        # Hotels isn't in the brand registry, so Gemini returns tier
+        # "unknown" — without this guard, user's manual "tier2_luxury"
+        # gets blown away on every Full Refresh). Bug fixed 2026-04-22.
+        _INVALID_TIER_SENTINELS = {"", "unknown", "none", "n/a", "na", "tbd"}
+        _VALID_TIERS = {
+            "tier1_ultra_luxury",
+            "tier2_luxury",
+            "tier3_upper_upscale",
+            "tier4_upscale",
+            "tier5_upper_midscale",
+            "tier6_midscale",
+            "tier7_economy",
+        }
         if "brand_tier" in enriched:
-            lead.brand_tier = enriched["brand_tier"]
+            new_tier = (enriched.get("brand_tier") or "").strip().lower()
+            current_tier = (lead.brand_tier or "").strip().lower()
+            # Overwrite only if: new value is valid, OR current is empty/unknown
+            if new_tier in _VALID_TIERS:
+                lead.brand_tier = enriched["brand_tier"]
+            elif current_tier in _INVALID_TIER_SENTINELS and new_tier:
+                # Current is garbage — writing new (even "unknown") is fine
+                lead.brand_tier = enriched["brand_tier"]
+            # Else: current is manually set to a valid value. Preserve it.
         if "room_count" in enriched:
-            lead.room_count = enriched["room_count"]
+            new_rc = enriched.get("room_count")
+            # Only overwrite if new is a positive int AND (full mode OR empty current)
+            try:
+                new_rc_int = int(new_rc) if new_rc else 0
+            except (TypeError, ValueError):
+                new_rc_int = 0
+            if new_rc_int > 0:
+                if mode == "full" or not lead.room_count or lead.room_count <= 0:
+                    lead.room_count = new_rc_int
         if "brand" in enriched:
-            lead.brand = enriched["brand"]
+            new_brand = (enriched.get("brand") or "").strip()
+            current_brand = (lead.brand or "").strip()
+            # Same logic — valid new overrides; garbage new only fills empty
+            if new_brand and new_brand.lower() not in _INVALID_TIER_SENTINELS:
+                lead.brand = new_brand
+            elif not current_brand and new_brand:
+                lead.brand = new_brand
         if "city" in enriched:
             if mode == "full" or not lead.city:
                 lead.city = enriched["city"]
@@ -1757,6 +1796,13 @@ async def smart_fill_lead(lead_id: int, request: Request, _csrf=Depends(require_
         if "owner" in enriched:
             if mode == "full" or not lead.owner:
                 lead.owner = enriched["owner"]
+        # Developer — new in the upgraded Smart Fill prompt (2026-04-22).
+        # For pre-opening leads (HOT/URGENT timeline), the developer is often
+        # the best first-call contact, since they signed the management
+        # agreement and fund construction/FF&E/uniforms.
+        if "developer" in enriched:
+            if mode == "full" or not lead.developer:
+                lead.developer = enriched["developer"]
         if "former_names" in enriched:
             lead.former_names = enriched["former_names"]
 

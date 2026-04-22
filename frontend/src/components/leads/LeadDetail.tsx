@@ -589,6 +589,16 @@ function ContactsTab({ contacts, loading, leadId, onEnrich, enriching }: {
   const [showAdd, setShowAdd] = useState(false)
   const [addForm, setAddForm] = useState<Record<string, string>>({ scope: 'hotel_specific' })
   const [adding, setAdding] = useState(false)
+  // Which score-breakdown popover is currently open (null = none).
+  // Click the score badge to show, click again (or outside) to hide.
+  // MUST be declared BEFORE the early returns below — React's Rules of
+  // Hooks require every useState to run on every render, in the same
+  // order. A hook after an early return crashes with React error #310
+  // when the component switches between early-return and full-render paths.
+  const [openBreakdownId, setOpenBreakdownId] = useState<number | null>(null)
+  // Which evidence panel is currently expanded (null = none).
+  // Click "Evidence (N)" pill to expand, click again to collapse.
+  const [openEvidenceId, setOpenEvidenceId] = useState<number | null>(null)
 
   if (loading) {
     return <div className="space-y-2">{Array.from({ length: 3 }).map((_, i) => <div key={i} className="skeleton h-24 rounded-lg" />)}</div>
@@ -609,10 +619,6 @@ function ContactsTab({ contacts, loading, leadId, onEnrich, enriching }: {
       </div>
     )
   }
-
-  // Which score-breakdown popover is currently open (null = none).
-  // Click the score badge to show, click again (or outside) to hide.
-  const [openBreakdownId, setOpenBreakdownId] = useState<number | null>(null)
 
   async function handleSave(contactId: number) {
     await saveContact(leadId, contactId)
@@ -975,17 +981,127 @@ function ContactsTab({ contacts, loading, leadId, onEnrich, enriching }: {
                     </div>
                   )}
 
-                  {/* Row 6: Evidence link */}
-                  {c.evidence_url && typeof c.evidence_url === 'string' && (
-                    <a
-                      href={c.evidence_url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="flex items-center gap-1.5 mt-1.5 text-xs text-blue-600 hover:underline"
-                    >
-                      <ExternalLink className="w-3 h-3" /> View Evidence
-                    </a>
-                  )}
+                  {/* Row 6: Rich evidence panel (falls back to legacy single URL) */}
+                  {(() => {
+                    const ev = (c as any).evidence as Array<{
+                      quote: string
+                      source_url: string
+                      source_title?: string
+                      source_domain?: string
+                      trust_tier?: string
+                      source_year?: number | null
+                    }> | null | undefined
+
+                    // TIER STYLING — color-coded trust badges
+                    const tierStyles: Record<string, { label: string; cls: string }> = {
+                      primary:    { label: '🟢 PRIMARY',    cls: 'bg-emerald-50 text-emerald-700 border-emerald-200' },
+                      official:   { label: '🔵 OFFICIAL',   cls: 'bg-blue-50 text-blue-700 border-blue-200' },
+                      trade:      { label: '🟡 TRADE',      cls: 'bg-amber-50 text-amber-700 border-amber-200' },
+                      aggregator: { label: '🟠 AGGREGATOR', cls: 'bg-orange-50 text-orange-700 border-orange-200' },
+                      indirect:   { label: '🔴 INDIRECT',   cls: 'bg-red-50 text-red-700 border-red-200' },
+                      unknown:    { label: '⚪ UNKNOWN',    cls: 'bg-stone-50 text-stone-600 border-stone-200' },
+                    }
+
+                    // Staleness helper — 18mo threshold
+                    const currentYear = new Date().getFullYear()
+                    const isStale = (y: number | null | undefined) =>
+                      typeof y === 'number' && currentYear - y >= 2
+
+                    // NEW PATH: rich evidence array
+                    if (ev && Array.isArray(ev) && ev.length > 0) {
+                      // Check if all sources are stale
+                      const allStale = ev.every(e => isStale(e.source_year))
+                      const topTier = ev[0]?.trust_tier || 'unknown'
+                      const topStyle = tierStyles[topTier] || tierStyles.unknown
+
+                      return (
+                        <div className="mt-2.5">
+                          <button
+                            onClick={() => setOpenEvidenceId(openEvidenceId === c.id ? null : c.id)}
+                            className={cn(
+                              'inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium rounded-md border transition',
+                              'hover:ring-2 hover:ring-offset-1 hover:ring-stone-300',
+                              topStyle.cls,
+                            )}
+                          >
+                            <span>Evidence ({ev.length})</span>
+                            <span className="text-[10px] opacity-75">{topStyle.label}</span>
+                            {allStale && (
+                              <span className="text-[10px] text-red-600 font-bold">⚠ STALE</span>
+                            )}
+                            <span className="text-[9px] opacity-60">
+                              {openEvidenceId === c.id ? '▲' : '▼'}
+                            </span>
+                          </button>
+
+                          {openEvidenceId === c.id && (
+                            <div className="mt-2 space-y-2 border-l-2 border-stone-200 pl-3">
+                              {ev.map((item, i) => {
+                                const style = tierStyles[item.trust_tier || 'unknown'] || tierStyles.unknown
+                                const stale = isStale(item.source_year)
+                                return (
+                                  <div key={i} className="bg-stone-50 rounded-md p-2.5 border border-stone-100">
+                                    <div className="flex items-center gap-2 mb-1.5 flex-wrap">
+                                      <span className={cn(
+                                        'text-[10px] font-bold px-1.5 py-0.5 rounded border',
+                                        style.cls,
+                                      )}>
+                                        {style.label}
+                                      </span>
+                                      <span className="text-[10px] text-stone-500 font-medium">
+                                        {item.source_domain || 'unknown source'}
+                                      </span>
+                                      {item.source_year && (
+                                        <span className={cn(
+                                          'text-[10px]',
+                                          stale ? 'text-red-600 font-bold' : 'text-stone-400',
+                                        )}>
+                                          {item.source_year}{stale ? ' ⚠' : ''}
+                                        </span>
+                                      )}
+                                    </div>
+                                    {item.quote && (
+                                      <p className="text-xs text-stone-700 italic leading-relaxed mb-1.5">
+                                        "{item.quote}"
+                                      </p>
+                                    )}
+                                    <a
+                                      href={item.source_url}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      className="inline-flex items-center gap-1 text-[11px] text-blue-600 hover:underline"
+                                    >
+                                      <ExternalLink className="w-2.5 h-2.5" /> Open source
+                                    </a>
+                                  </div>
+                                )
+                              })}
+                            </div>
+                          )}
+                        </div>
+                      )
+                    }
+
+                    // LEGACY PATH: fall back to single evidence_url link
+                    // (For contacts created before migration 014. These show
+                    // just the URL — re-enrich the lead to get rich evidence.)
+                    if (c.evidence_url && typeof c.evidence_url === 'string') {
+                      return (
+                        <a
+                          href={c.evidence_url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="flex items-center gap-1.5 mt-1.5 text-xs text-stone-500 hover:text-blue-600 hover:underline"
+                        >
+                          <ExternalLink className="w-3 h-3" />
+                          View Evidence
+                          <span className="text-[10px] text-stone-400">(legacy — re-enrich for rich view)</span>
+                        </a>
+                      )
+                    }
+
+                    return null
+                  })()}
 
                   {/* Row 7: Action buttons */}
                   <div className="flex items-center gap-2 mt-2.5">

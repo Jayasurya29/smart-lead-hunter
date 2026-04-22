@@ -216,10 +216,49 @@ async def rescore_lead(lead_id: int, session: AsyncSession) -> Optional[Dict]:
     lead.score_breakdown = new_breakdown
 
     # Update brand_tier and location_type from fresh score
-    if score_result.get("brand_tier"):
+    # ── Respect manual edits (2026-04-22) ──
+    # The scorer returns "unknown" when it can't classify an unusual brand
+    # (e.g. Nickelodeon Hotels, Margaritaville Island Reserve). When a human
+    # has already set a valid tier, don't blow it away with "unknown".
+    # Only overwrite when:
+    #   1. Scorer returns a VALID tier (not empty, not unknown), OR
+    #   2. Current value is empty/unknown (nothing worth preserving)
+    new_tier = (score_result.get("brand_tier") or "").strip().lower()
+    current_tier = (lead.brand_tier or "").strip().lower()
+    VALID_TIERS = {
+        "tier1_ultra_luxury",
+        "tier2_luxury",
+        "tier3_upper_upscale",
+        "tier4_upscale",
+        "tier5_upper_midscale",
+        "tier6_midscale",
+        "tier7_economy",
+        "ultra_luxury",
+        "luxury",
+        "upper_upscale",
+        "upscale",
+        "upper_midscale",
+        "midscale",
+        "economy",
+    }
+    if new_tier in VALID_TIERS:
+        # Scorer found a valid classification — overwrite is fine
         lead.brand_tier = score_result["brand_tier"]
-    if score_result.get("location_type"):
+    elif not current_tier or current_tier == "unknown":
+        # Current value is empty/unknown — safe to write scorer's value
+        # (even if it's also empty/unknown — no information lost)
+        if new_tier:
+            lead.brand_tier = score_result["brand_tier"]
+    # Else: current tier is manually set to something valid. Preserve it.
+
+    # Same protection for location_type — human edits shouldn't be trampled
+    new_loc = (score_result.get("location_type") or "").strip()
+    current_loc = (lead.location_type or "").strip()
+    if new_loc and new_loc.lower() not in ("unknown", ""):
         lead.location_type = score_result["location_type"]
+    elif not current_loc or current_loc.lower() == "unknown":
+        if new_loc:
+            lead.location_type = score_result["location_type"]
 
     # Recalculate timeline label from opening date
     from app.services.utils import get_timeline_label

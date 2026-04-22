@@ -234,6 +234,7 @@ class LeadCreate(LeadBase):
 class LeadUpdate(BaseModel):
     """Schema for updating a lead — all fields optional."""
 
+    # Contact fields (already worked)
     status: Optional[str] = None
     contact_email: Optional[str] = None
     contact_phone: Optional[str] = None
@@ -242,6 +243,29 @@ class LeadUpdate(BaseModel):
     notes: Optional[str] = None
     lead_score: Optional[int] = None
     rejection_reason: Optional[str] = None
+
+    # Core hotel fields — must be editable via PATCH /leads/{id}.
+    # WITHOUT these, Pydantic silently drops them when the frontend PATCHes,
+    # so the edit form appears to save but the field never actually changes
+    # in the DB. User sees "Luxury" flash briefly, then frontend refetches
+    # the stale DB value and shows "unknown" again. (Bug fixed 2026-04-22.)
+    hotel_name: Optional[str] = None
+    brand: Optional[str] = None
+    brand_tier: Optional[str] = None
+    city: Optional[str] = None
+    state: Optional[str] = None
+    country: Optional[str] = None
+    room_count: Optional[int] = None
+    opening_date: Optional[str] = None
+    hotel_type: Optional[str] = None
+    # Management / ownership metadata (discovered during enrichment,
+    # but editable by humans for corrections)
+    management_company: Optional[str] = None
+    developer: Optional[str] = None
+    owner: Optional[str] = None
+    # Web presence
+    hotel_website: Optional[str] = None
+    source_url: Optional[str] = None
 
     @field_validator("status")
     @classmethod

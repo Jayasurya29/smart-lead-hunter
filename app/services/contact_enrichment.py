@@ -64,7 +64,19 @@ load_dotenv()
 
 logger = logging.getLogger(__name__)
 
-MAX_CONTACTS_TO_SAVE = 10
+MAX_CONTACTS_TO_SAVE = 6
+
+# Smart-distribution targets: desired mix of contacts in the final cap.
+# Fills in priority order — any unfilled slots get backfilled with the
+# best remaining contacts regardless of category. This ensures the
+# sales team always sees an owner/check-writer at the top if available,
+# plus a balanced mix of operator execs.
+_SMART_CAP_TARGETS = {
+    "owner": 1,  # Owner / check-writer — critical for pre-opening
+    "p1_operator": 2,  # Top 2 P1 at management_corporate / hotel_specific
+    "p2_operator": 2,  # Top 2 P2 at management_corporate / hotel_specific
+    "backfill": 1,  # Best remaining (any scope/priority)
+}
 
 # ═══════════════════════════════════════════════════════════════
 # SHARED HTTP CLIENT — connection pooling for Serper/Gemini
@@ -653,6 +665,438 @@ def _clean_title(raw_title: str) -> str:
         raw_title = raw_title[:80].rsplit(" ", 1)[0]
 
     return raw_title.strip()
+
+
+# ═══════════════════════════════════════════════════════════════
+# FUZZY NAME DEDUP — collapse Amanda/Mandy, Michael/Mike, etc.
+# ═══════════════════════════════════════════════════════════════
+
+
+# Canonical name → common nicknames. Keys are "true" names, values are
+# sets of nicknames that should collapse into the key when comparing
+# contacts for dedup. Used in _normalize_first_name() below.
+#
+# Two rules apply:
+#   1. If contact A's first name is a key and B's first name is in the
+#      value set (or vice-versa), AND last names match → likely same person.
+#   2. Typo/near-miss last names (Vogelsang vs Foglesong) handled by
+#      Levenshtein similarity check — see _likely_same_person().
+_NICKNAME_TO_CANONICAL = {
+    "mandy": "amanda",
+    "mandi": "amanda",
+    "mandie": "amanda",
+    "bob": "robert",
+    "rob": "robert",
+    "bobby": "robert",
+    "robbie": "robert",
+    "mike": "michael",
+    "mick": "michael",
+    "mikey": "michael",
+    "bill": "william",
+    "billy": "william",
+    "will": "william",
+    "willie": "william",
+    "jim": "james",
+    "jimmy": "james",
+    "jamie": "james",
+    "tom": "thomas",
+    "tommy": "thomas",
+    "dave": "david",
+    "davy": "david",
+    "nick": "nicholas",
+    "nickolas": "nicholas",
+    "dick": "richard",
+    "rich": "richard",
+    "richie": "richard",
+    "rick": "richard",
+    "ricky": "richard",
+    "joe": "joseph",
+    "joey": "joseph",
+    "jo": "joseph",
+    "tony": "anthony",
+    "ant": "anthony",
+    "chris": "christopher",
+    "kit": "christopher",
+    "dan": "daniel",
+    "danny": "daniel",
+    "ed": "edward",
+    "eddie": "edward",
+    "ted": "edward",
+    "teddy": "edward",
+    "jack": "john",
+    "johnny": "john",
+    "kate": "katherine",
+    "katie": "katherine",
+    "kathy": "katherine",
+    "cathy": "katherine",
+    "kathleen": "katherine",
+    "liz": "elizabeth",
+    "beth": "elizabeth",
+    "betty": "elizabeth",
+    "betsy": "elizabeth",
+    "lizzy": "elizabeth",
+    "eliza": "elizabeth",
+    "peg": "margaret",
+    "peggy": "margaret",
+    "meg": "margaret",
+    "maggie": "margaret",
+    "megan": "margaret",
+    "amy": "amelia",
+    "sam": "samuel",
+    "sammy": "samuel",
+    "tim": "timothy",
+    "timmy": "timothy",
+    "steve": "steven",
+    "stevie": "steven",
+    "matt": "matthew",
+    "matty": "matthew",
+    "andy": "andrew",
+    "drew": "andrew",
+    "alex": "alexander",
+    "lex": "alexander",
+    "ben": "benjamin",
+    "benny": "benjamin",
+    "jen": "jennifer",
+    "jenny": "jennifer",
+    "jenn": "jennifer",
+    "cindy": "cynthia",
+    "patty": "patricia",
+    "pat": "patricia",
+    "trish": "patricia",
+    "debbie": "deborah",
+    "deb": "deborah",
+    "sue": "susan",
+    "susie": "susan",
+    "suzy": "susan",
+    "dorothy": "dorothea",
+    "dotty": "dorothy",
+    "dot": "dorothy",
+    "don": "donald",
+    "donny": "donald",
+    "ron": "ronald",
+    "ronnie": "ronald",
+    "greg": "gregory",
+    "russ": "russell",
+    "doug": "douglas",
+    "phil": "philip",
+    "tracey": "tracy",
+}
+
+# Common title prefixes to strip when comparing names
+_NAME_TITLE_PREFIXES = {
+    "dr",
+    "dr.",
+    "mr",
+    "mr.",
+    "mrs",
+    "mrs.",
+    "ms",
+    "ms.",
+    "miss",
+    "prof",
+    "prof.",
+    "sir",
+    "madam",
+    "rev",
+    "rev.",
+}
+
+
+def _normalize_first_name(raw: str) -> str:
+    """Convert a first name to its canonical form (nickname → canonical)."""
+    if not raw:
+        return ""
+    token = raw.lower().strip().rstrip(".,;:'\"")
+    return _NICKNAME_TO_CANONICAL.get(token, token)
+
+
+def _strip_name_titles(name: str) -> list[str]:
+    """Return the name tokens with titles and initials stripped."""
+    if not name:
+        return []
+    raw_parts = name.split()
+    clean = []
+    for p in raw_parts:
+        low = p.lower().strip().rstrip(".,;:'\"")
+        if low in _NAME_TITLE_PREFIXES:
+            continue
+        # Drop single-letter initials like "P." (but keep real names)
+        cleaned_p = p.strip(".,;:'\"")
+        if len(cleaned_p) <= 1:
+            continue
+        clean.append(cleaned_p)
+    return clean
+
+
+def _levenshtein_ratio(a: str, b: str) -> float:
+    """
+    Simple string-similarity ratio 0..1. Pure-Python, no external deps.
+    Used to catch near-miss last names like Vogelsang vs Foglesong.
+    """
+    if not a or not b:
+        return 0.0
+    a, b = a.lower(), b.lower()
+    if a == b:
+        return 1.0
+    m, n = len(a), len(b)
+    if m < n:
+        a, b, m, n = b, a, n, m
+    # DP edit distance
+    prev = list(range(n + 1))
+    for i in range(1, m + 1):
+        curr = [i] + [0] * n
+        for j in range(1, n + 1):
+            cost = 0 if a[i - 1] == b[j - 1] else 1
+            curr[j] = min(
+                curr[j - 1] + 1,  # insertion
+                prev[j] + 1,  # deletion
+                prev[j - 1] + cost,  # substitution
+            )
+        prev = curr
+    edits = prev[n]
+    return 1.0 - (edits / max(m, n))
+
+
+def _likely_same_person(name_a: str, name_b: str) -> bool:
+    """
+    Returns True if name_a and name_b probably refer to the same person.
+
+    Rules:
+    1. Exact match (after lowercasing + title stripping).
+    2. One name is a substring of the other after title stripping
+       (e.g. "Kali Chaudhuri" within "Dr. Kali P. Chaudhuri").
+    3. Same first name (via nickname canonicalization) AND (any of):
+       a. Same last name.
+       b. One last name is a prefix of the other with min 4 chars shared
+          (Vogel↔Vogelsang, Smith↔Smithson).
+       c. Levenshtein similarity >= 0.70 on last names (catches typos +
+          phonetic variants like Vogelsang↔Foglesong).
+    4. Different first name (even after nickname normalization) → not same.
+    """
+    if not name_a or not name_b:
+        return False
+
+    a_lower = name_a.lower().strip()
+    b_lower = name_b.lower().strip()
+    if a_lower == b_lower:
+        return True
+
+    parts_a = _strip_name_titles(name_a)
+    parts_b = _strip_name_titles(name_b)
+    if not parts_a or not parts_b:
+        return False
+
+    # Rule 2: substring match (one is "Dr. Kali P. Chaudhuri", other "Kali Chaudhuri")
+    joined_a = " ".join(p.lower() for p in parts_a)
+    joined_b = " ".join(p.lower() for p in parts_b)
+    if joined_a in joined_b or joined_b in joined_a:
+        return True
+
+    # Rules 3 & 4: require usable first + last name for both
+    if len(parts_a) < 2 or len(parts_b) < 2:
+        return False
+
+    first_a = _normalize_first_name(parts_a[0])
+    first_b = _normalize_first_name(parts_b[0])
+    last_a = parts_a[-1].lower().rstrip(".,;:'\"")
+    last_b = parts_b[-1].lower().rstrip(".,;:'\"")
+
+    # Different first name (even after nickname normalization) → not same
+    if first_a != first_b:
+        return False
+
+    # Same first + same last → same person
+    if last_a == last_b:
+        return True
+
+    # Rule 3b: prefix match with min 4-char overlap catches short variants
+    # like "Vogel" (nickname/shortened) vs "Vogelsang" (full surname)
+    min_shared = 4
+    shorter, longer = (
+        (last_a, last_b) if len(last_a) <= len(last_b) else (last_b, last_a)
+    )
+    if len(shorter) >= min_shared and longer.startswith(shorter):
+        return True
+
+    # Rule 3c: overall Levenshtein similarity ≥ 0.70 catches typos
+    # (Vogelsang↔Foglesong, Johnson↔Johnsen, etc.)
+    if _levenshtein_ratio(last_a, last_b) >= 0.70:
+        return True
+
+    return False
+
+
+def _merge_contacts(primary: dict, secondary: dict) -> dict:
+    """
+    Merge two contact dicts representing the same person. Primary wins
+    on scalar fields where both are populated; secondary fills gaps.
+    Evidence arrays are concatenated and de-duped by URL.
+    """
+    merged = dict(primary)
+    # Scalar fields — fill if primary missing
+    for field in (
+        "title",
+        "email",
+        "phone",
+        "linkedin",
+        "organization",
+        "source_detail",
+        "_current_employer",
+        "_current_title",
+    ):
+        if not merged.get(field) and secondary.get(field):
+            merged[field] = secondary[field]
+
+    # Evidence — concatenate + dedupe by URL
+    primary_ev = merged.get("_evidence_items") or []
+    secondary_ev = secondary.get("_evidence_items") or []
+    if secondary_ev:
+        seen_urls = {e.get("source_url") for e in primary_ev if isinstance(e, dict)}
+        for ev in secondary_ev:
+            if ev.get("source_url") not in seen_urls:
+                primary_ev.append(ev)
+                seen_urls.add(ev.get("source_url"))
+        merged["_evidence_items"] = primary_ev
+
+    # Prefer the higher priority (P1 > P2 > P3 > P4)
+    _PRI_RANK = {"P1": 0, "P2": 1, "P3": 2, "P4": 3, None: 4}
+    p1 = _PRI_RANK.get(primary.get("_final_priority"), 4)
+    p2 = _PRI_RANK.get(secondary.get("_final_priority"), 4)
+    if p2 < p1:
+        merged["_final_priority"] = secondary.get("_final_priority")
+        merged["_final_reasoning"] = secondary.get("_final_reasoning")
+
+    return merged
+
+
+def _apply_smart_cap(contacts: list[dict], max_total: int = 6) -> list[dict]:
+    """
+    Cap the contact list to `max_total` using smart distribution instead
+    of pure top-N-by-score. Prevents the failure mode where 6 near-dup
+    management_corporate execs push the property owner off the list.
+
+    Filling order (each slot is a separate pass):
+      1. 1 slot for best OWNER (scope=owner) — check-writer priority
+      2. 2 slots for top P1 at operator/property (management_corporate,
+         hotel_specific, chain_area)
+      3. 2 slots for top P2 at operator/property
+      4. 1 slot for best remaining contact (any category)
+
+    If a slot's category has no candidates, it's left for backfill.
+    Result: always get owner if present, never all P1 dupes, balanced mix.
+
+    Assumes `contacts` is already sorted by priority/scope/score.
+    """
+    if not contacts or len(contacts) <= max_total:
+        return contacts
+
+    def _category(c: dict) -> str:
+        scope = (c.get("scope") or "").lower()
+        priority = c.get("_final_priority") or ""
+        if scope == "owner":
+            return "owner"
+        if priority == "P1" and scope in (
+            "hotel_specific",
+            "management_corporate",
+            "chain_area",
+        ):
+            return "p1_operator"
+        if priority == "P2" and scope in (
+            "hotel_specific",
+            "management_corporate",
+            "chain_area",
+        ):
+            return "p2_operator"
+        return "other"
+
+    buckets: dict[str, list[dict]] = {
+        "owner": [],
+        "p1_operator": [],
+        "p2_operator": [],
+        "other": [],
+    }
+    for c in contacts:
+        buckets[_category(c)].append(c)
+
+    kept: list[dict] = []
+    seen_names: set[str] = set()
+
+    def _add(contact: dict) -> bool:
+        nm = (contact.get("name") or "").lower().strip()
+        if not nm or nm in seen_names or len(kept) >= max_total:
+            return False
+        kept.append(contact)
+        seen_names.add(nm)
+        return True
+
+    targets = _SMART_CAP_TARGETS
+    for cat, count in [
+        ("owner", targets["owner"]),
+        ("p1_operator", targets["p1_operator"]),
+        ("p2_operator", targets["p2_operator"]),
+    ]:
+        taken = 0
+        for c in buckets[cat]:
+            if taken >= count or len(kept) >= max_total:
+                break
+            if _add(c):
+                taken += 1
+
+    # Backfill remaining slots with best-remaining in sort order
+    for c in contacts:
+        if len(kept) >= max_total:
+            break
+        _add(c)
+
+    return kept
+
+
+def _fuzzy_dedupe_contacts(contacts: list[dict]) -> list[dict]:
+    """
+    Collapse near-duplicate contacts (Amanda/Mandy variants, typo
+    last names, with-or-without-title-prefixes).
+
+    Algorithm: iterate contacts in score order (highest first); for each,
+    check if it's likely-same-as any already-kept contact. If yes, merge
+    into the kept one. Otherwise, keep as a new entry.
+    """
+    if not contacts:
+        return []
+
+    # Sort by score desc so the highest-quality copy wins when merging
+    sorted_contacts = sorted(
+        contacts,
+        key=lambda c: -(c.get("_validation_score") or c.get("score") or 0),
+    )
+
+    kept: list[dict] = []
+    merged_count = 0
+    for c in sorted_contacts:
+        name = (c.get("name") or "").strip()
+        if not name:
+            continue
+        match_idx = None
+        for i, k in enumerate(kept):
+            if _likely_same_person(name, k.get("name") or ""):
+                match_idx = i
+                break
+        if match_idx is not None:
+            merged = _merge_contacts(kept[match_idx], c)
+            logger.info(
+                f"[DEDUP] Collapsed '{c.get('name')}' into "
+                f"'{kept[match_idx].get('name')}' (likely same person)"
+            )
+            kept[match_idx] = merged
+            merged_count += 1
+        else:
+            kept.append(c)
+
+    if merged_count:
+        logger.info(
+            f"[DEDUP] Collapsed {merged_count} duplicate contacts "
+            f"({len(contacts)} → {len(kept)})"
+        )
+    return kept
 
 
 def _is_hotel_relevant_title(title: str) -> bool:
@@ -2631,6 +3075,51 @@ async def _verify_contacts_with_gemini(
             "═══════════════════════════════════════════════════════════════\n"
         )
 
+    # ── PRE-OPENING OWNER / DEVELOPER OVERRIDE ──
+    # CRITICAL for new-build leads before the operator has taken over.
+    # The property owner / developer SIGNS the management agreement and FUNDS
+    # construction, FF&E (furniture/fixtures/equipment) AND uniforms. They
+    # pre-commit to vendors BEFORE the hotel operator arrives. Gemini's
+    # default rejection logic treats "development company" as irrelevant,
+    # but for pre-opening leads these are P1 contacts.
+    #
+    # Real examples where this override matters:
+    #   Tony Birkla (Birkla Investment Group) → owner of Hyatt Centric Cincinnati
+    #   Zafir Rashid (Teramir Group / Everest Place) → owner of Nickelodeon Orlando
+    #   Khalid Muneer (Everest Place) → Managing Director, same project
+    #
+    # These are NOT construction contractors. They're the check-writers.
+    pre_opening_override = ""
+    # Trigger on new_opening project types. Also trigger when project_type is
+    # None/unknown (conservative default — better to include owner contacts
+    # for ambiguous leads than to wrongly reject them).
+    _PRE_OPENING_TYPES = {"new_opening", "greenfield", "", None}
+    if (
+        project_type or ""
+    ).strip().lower() in _PRE_OPENING_TYPES or project_type is None:
+        pre_opening_override = (
+            "\n═══════════════════════════════════════════════════════════════\n"
+            "PRE-OPENING OWNER / DEVELOPER OVERRIDE (new-build property)\n"
+            "═══════════════════════════════════════════════════════════════\n"
+            "This is a PRE-OPENING / new-build property. The owner/developer\n"
+            "entity is the PRIMARY uniform buyer during pre-opening phase\n"
+            "(signs management agreement, funds construction + FF&E + uniforms).\n\n"
+            "KEEP — do NOT reject these roles for pre-opening properties:\n"
+            "- Owner, Principal, Managing Partner at the ownership entity\n"
+            "- CEO, Managing Director, President at the OWNING / DEVELOPING company\n"
+            "  (Birkla Investment Group, Teramir Group, Everest Place, etc.)\n"
+            "- CFO / CIO at the ownership entity (controls budgets + FF&E spend)\n"
+            "- Development Director, VP Development AT THE OWNERSHIP ENTITY\n"
+            "  (these are the people signing the hotel into existence)\n\n"
+            "Key distinction: these roles at a DEVELOPMENT / INVESTMENT / OWNERSHIP\n"
+            "company are the CHECK-WRITERS for pre-opening procurement. Do NOT\n"
+            "confuse them with construction contractors (GC, subcontractors) or\n"
+            "unrelated real-estate professionals (realtors, brokers).\n\n"
+            "For these contacts: assign scope='owner' and priority=P1 (or P2 if\n"
+            "the role is finance/CFO rather than CEO/principal).\n"
+            "═══════════════════════════════════════════════════════════════\n"
+        )
+
     # ── INDEPENDENT / BOUTIQUE OVERRIDE ──
     # For independent hotels (no chain brand), the CEO/founder/principal
     # IS the uniform buyer. There's no corporate procurement layer.
@@ -2668,6 +3157,7 @@ async def _verify_contacts_with_gemini(
         hotel_status=hotel_status,
         procurement_guidance=procurement_guidance
         + conversion_override
+        + pre_opening_override
         + independent_override,
         contacts_json=json.dumps(contacts_for_verification, indent=2),
     )
@@ -2996,6 +3486,11 @@ async def enrich_lead_contacts(
                 "source_type": n.get("source_type", "trade_press"),
                 "source_detail": n.get("source_detail"),  # Rich evidence from Iter 5/6
                 "linkedin": n.get("linkedin"),
+                # Evidence array captured during snippet extraction —
+                # list of {quote, source_url, source_domain, trust_tier,
+                # source_year, ...} items. Rendered as per-contact
+                # evidence cards in the UI.
+                "_evidence_items": n.get("_evidence_items", []),
                 "_iteration_found": n.get("_iteration_found"),
                 "_verification_result": n.get("_verification_result"),
                 "_current_employer": n.get("_current_employer"),
@@ -3035,6 +3530,9 @@ async def enrich_lead_contacts(
             "_current_title": c.get("_current_title"),
             "_role_period": c.get("_role_period"),
             "_iteration_found": c.get("_iteration_found"),
+            # Preserve evidence — Gemini verification rebuilds contact dicts
+            # and wipes our capture, so we re-merge it after verification.
+            "_evidence_items": c.get("_evidence_items", []),
         }
 
     if result.contacts:
@@ -3087,15 +3585,11 @@ async def enrich_lead_contacts(
             f"surviving contacts after Gemini verification"
         )
 
-    # ── Final dedupe by name ──
-    seen = set()
-    deduped = []
-    for c in result.contacts:
-        key = (c.get("name") or "").lower().strip()
-        if key and key not in seen:
-            seen.add(key)
-            deduped.append(c)
-    result.contacts = deduped
+    # ── Fuzzy name dedupe ──
+    # Collapses Amanda/Mandy/Amy variants, "Dr. Kali Chaudhuri" vs
+    # "Kali Chaudhuri", "Michael T. George" vs "Michael Thomas George",
+    # etc. Keeps the contact with the highest score; merges evidence.
+    result.contacts = _fuzzy_dedupe_contacts(result.contacts)
 
     # ── Classify tier + score every contact (unified scoring module) ──
     # Single source of truth: app.services.contact_scoring.score_contact_dict
@@ -3129,6 +3623,20 @@ async def enrich_lead_contacts(
             -(c.get("_validation_score") or 0),
         )
     )
+
+    # ── SMART CAP: top 6 with distribution ──
+    # Without this, the cap would just take the top 6 by score — producing
+    # 6 near-duplicate management_corporate execs and pushing the owner
+    # (who has a lower base score but is THE most important pre-opening
+    # contact) off the list. This preserves variety: owner + 2 P1 + 2 P2 +
+    # 1 best-remaining = balanced outreach target list.
+    pre_cap = len(result.contacts)
+    result.contacts = _apply_smart_cap(result.contacts, MAX_CONTACTS_TO_SAVE)
+    if pre_cap > len(result.contacts):
+        logger.info(
+            f"[SMART CAP] {pre_cap} → {len(result.contacts)} contacts kept "
+            f"(dropped {pre_cap - len(result.contacts)} lower-value)"
+        )
 
     logger.info(
         f"Enrichment v5 complete for {hotel_name}: "
@@ -4233,6 +4741,39 @@ async def persist_enrichment_contacts(
                     existing.score_breakdown = new_breakdown
                     if "score_breakdown" not in filled:
                         filled.append("score_breakdown")
+                # Merge evidence (new items) — don't blow away existing
+                # evidence on re-enrichment, but DO add any new items we
+                # captured this run. Dedupe by source_url.
+                new_evidence = c.get("_evidence_items") or []
+                if new_evidence:
+                    existing_evidence = existing.evidence or []
+                    existing_urls = {
+                        e.get("source_url")
+                        for e in existing_evidence
+                        if isinstance(e, dict)
+                    }
+                    added = 0
+                    for ev in new_evidence:
+                        if ev.get("source_url") not in existing_urls:
+                            existing_evidence.append(ev)
+                            existing_urls.add(ev.get("source_url"))
+                            added += 1
+                    if added:
+                        # Re-sort by trust tier (highest first), then year
+                        try:
+                            from app.services.source_tier import trust_score as _ts
+
+                            existing_evidence.sort(
+                                key=lambda e: (
+                                    -_ts(e.get("trust_tier", "unknown")),
+                                    -(e.get("source_year") or 0),
+                                )
+                            )
+                        except Exception:
+                            pass
+                        # Cap to top 8 evidence items per contact
+                        existing.evidence = existing_evidence[:8]
+                        filled.append(f"evidence(+{added})")
                 # source_detail gets refreshed too when new rich evidence arrives
                 new_detail = c.get("source_detail")
                 if new_detail and new_detail != existing.source_detail:
@@ -4264,6 +4805,8 @@ async def persist_enrichment_contacts(
                     score_breakdown=c.get(
                         "_score_breakdown"
                     ),  # Unified scoring breakdown
+                    evidence=c.get("_evidence_items")
+                    or None,  # Evidence array from snippet extraction
                     # Iter 6 strategist verdict — authoritative priority + reasoning
                     strategist_priority=c.get("_final_priority"),
                     strategist_reasoning=c.get("_final_reasoning"),

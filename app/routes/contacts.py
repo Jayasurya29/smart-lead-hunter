@@ -267,6 +267,37 @@ async def enrich_lead(lead_id: int, _csrf=Depends(require_ajax)):
                             if new_scope and new_scope != ec.scope:
                                 filled.append(f"scope({ec.scope}->{new_scope})")
                                 ec.scope = new_scope
+                            # Merge new evidence items (dedupe by URL)
+                            new_evidence = c.get("_evidence_items") or []
+                            if new_evidence:
+                                existing_ev = ec.evidence or []
+                                existing_urls = {
+                                    e.get("source_url")
+                                    for e in existing_ev
+                                    if isinstance(e, dict)
+                                }
+                                added = 0
+                                for ev in new_evidence:
+                                    if ev.get("source_url") not in existing_urls:
+                                        existing_ev.append(ev)
+                                        existing_urls.add(ev.get("source_url"))
+                                        added += 1
+                                if added:
+                                    try:
+                                        from app.services.source_tier import (
+                                            trust_score as _ts,
+                                        )
+
+                                        existing_ev.sort(
+                                            key=lambda e: (
+                                                -_ts(e.get("trust_tier", "unknown")),
+                                                -(e.get("source_year") or 0),
+                                            )
+                                        )
+                                    except Exception:
+                                        pass
+                                    ec.evidence = existing_ev[:8]
+                                    filled.append(f"evidence(+{added})")
                             ec.last_enriched_at = local_now()
                             # source_detail refreshes when new evidence arrives
                             new_detail = c.get("source_detail")
@@ -293,6 +324,14 @@ async def enrich_lead(lead_id: int, _csrf=Depends(require_ajax)):
                         ),
                         tier=c.get("_buyer_tier"),
                         score=c.get("_validation_score", 0),
+                        # Unified scoring breakdown (migration 013)
+                        score_breakdown=c.get("_score_breakdown"),
+                        # Evidence array captured during snippet extraction (migration 014).
+                        # Without this line, new contacts insert with evidence=NULL even
+                        # though the capture ran — which is what happened on Hyatt Centric
+                        # run: the 4 survivors showed Ev=0 in the DB despite [EVIDENCE]
+                        # log lines showing items captured.
+                        evidence=c.get("_evidence_items") or None,
                         # Iter 6 strategist verdict — the authoritative priority
                         strategist_priority=c.get("_final_priority"),
                         strategist_reasoning=c.get("_final_reasoning"),
