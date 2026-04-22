@@ -134,7 +134,7 @@ async def _call_gemini(
         generation_config["responseSchema"] = response_schema
 
     try:
-        async with httpx.AsyncClient(timeout=30) as client:
+        async with httpx.AsyncClient(timeout=60) as client:
             resp = await client.post(
                 url,
                 headers=headers,
@@ -275,9 +275,11 @@ async def enrich_lead_data(
         logger.info(f"No search results for: {hotel_name}")
         return result
 
-    # Build Gemini prompt. Use up to 25 snippets now (was 10) — more context
-    # means better tier inference for unusual brands like Nickelodeon.
-    snippets_text = "\n".join(f"- {s}" for s in all_snippets[:25])
+    # Build Gemini prompt. Use up to 15 snippets — reduced from 25 to keep
+    # total prompt size small enough that Gemini responds within 30-60s.
+    # 15 snippets × ~300 chars = ~4,500 chars of search context, plenty
+    # for tier inference and entity extraction without choking the request.
+    snippets_text = "\n".join(f"- {s}" for s in all_snippets[:15])
 
     # Diagnostic: log snippet count + sample so we can see what context Gemini got.
     # If Gemini later returns None for operator/owner despite the hotel having clear
@@ -285,7 +287,7 @@ async def enrich_lead_data(
     # or prompt (snippets present but Gemini ignored them).
     logger.info(
         f"Smart Fill [{hotel_name}] search fed Gemini {len(all_snippets)} snippets "
-        f"(using top 25). First snippet: {all_snippets[0][:200] if all_snippets else 'NONE'!r}"
+        f"(using top 15). First snippet: {all_snippets[0][:200] if all_snippets else 'NONE'!r}"
     )
 
     # ── USER-EDIT AWARENESS ──
@@ -445,57 +447,30 @@ NAME INTELLIGENCE — ALWAYS EXTRACT THESE (regardless of mode):
    - "Secrets Macao Beach Punta Cana" → "Secrets Macao Beach"
    - "Royalton CHIC Jamaica Paradise Cove" → "Royalton CHIC Jamaica"
 
-3. management_company (the HOTEL OPERATOR):
-   The company that OPERATES/MANAGES the hotel day-to-day.
-   This is NOT the brand name. This is NOT the IP licensor. This is NOT the developer.
-   It IS the company with boots on the ground running hotel operations.
+3. management_company = HOTEL OPERATOR (runs day-to-day operations)
+   Look for: "operated by X", "managed by X", "X Hospitality"
+   ❌ NOT the brand ("Nickelodeon Hotels & Resorts" is brand, not operator)
+   ❌ NOT the IP licensor (Paramount licenses Nickelodeon — not operator)
+   ❌ NOT the brand parent (Marriott ≠ operator of every Autograph hotel)
+   ✅ Examples:
+   - Kali Hotel (Autograph) → "Crescent Hotels & Resorts"
+   - Nickelodeon Hotels & Resorts Orlando → "Lion Star Hospitality Inc."
+   - Hyatt Centric Cincinnati → "Commonwealth Hotels"
 
-   CRITICAL — DO NOT CONFUSE with these:
-   ❌ Brand name (e.g. "Nickelodeon Hotels & Resorts" is a BRAND, not an operator)
-   ❌ IP licensor (e.g. "Paramount" licenses Nickelodeon IP — NOT the operator)
-   ❌ Property developer (e.g. "Everest Place" develops the property — NOT the operator)
-   ❌ Brand parent (e.g. "Marriott" owns the Autograph brand — NOT the operator of every Autograph hotel)
+4. owner = PROPERTY OWNER (holds the real estate, check-writer for FF&E/uniforms)
+   For JVs, list ONLY the property-holding entity. Do NOT comma-separate.
+   ❌ NOT the IP licensor (Paramount owns Nickelodeon brand, NOT the hotel)
+   ❌ NOT the operator
+   ✅ Examples:
+   - Hyatt Centric Cincinnati → "Birkla Investment Group"
+   - Nickelodeon Orlando → "Teramir Group" (NOT Paramount, NOT Lion Star)
+   - Kali Hotel → "KPC Development Company"
 
-   ✅ Correct examples:
-   - Kali Hotel (Autograph Collection) → management_company = "Crescent Hotels & Resorts" (NOT "Marriott" and NOT "Autograph Collection")
-   - Dreams Rose Hall → management_company = "Hyatt Inclusive Collection"
-   - Royalton CHIC Jamaica → management_company = "Royalton Hotels & Resorts"
-   - Nickelodeon Hotels & Resorts Orlando → management_company = "Lion Star Hospitality Inc." (licensee of Karisma, NOT "Nickelodeon" and NOT "Paramount")
-   - Hyatt Centric Cincinnati → management_company = "Commonwealth Hotels" (NOT "Hyatt")
-
-   Look for exact phrases like "operated by", "managed by", "hotel management company",
-   "exclusive licensee for", "under management of". The operator name follows these phrases.
-
-4. owner (the PROPERTY OWNER — the entity holding the real estate):
-   The company/individual that OWNS THE PHYSICAL PROPERTY. This is the check-writer
-   for construction, FF&E, and uniforms during pre-opening.
-
-   CRITICAL — DO NOT CONFUSE with these:
-   ❌ IP licensor (e.g. "Paramount" owns the Nickelodeon brand — NOT the hotel property)
-   ❌ Hotel operator (e.g. "Lion Star" operates it — NOT the real estate owner)
-   ❌ Brand parent (e.g. "Hyatt" owns the Centric brand — NOT the Cincinnati property)
-
-   For joint ventures or partnerships, list ONLY the property-owning entity.
-   Do NOT concatenate multiple companies with commas.
-
-   ✅ Correct examples:
-   - Kali Hotel → owner = "KPC Development Company" (NOT "Marriott" and NOT "Autograph")
-   - Hyatt Centric Cincinnati → owner = "Birkla Investment Group" (NOT "Hyatt")
-   - Nickelodeon Hotels & Resorts Orlando → owner = "Teramir Group" (parent of Everest Place).
-     DO NOT include "Paramount" (IP licensor) or "Lion Star" (operator).
-   - Secrets Macao Beach → owner = "GSM Investissements Dominicana S.R.L."
-
-4a. developer (the entity BUILDING the property):
-    The development company/project responsible for constructing the hotel.
-    Often SAME as owner for new builds, but sometimes separate (e.g. hired developer).
-    Use the DEVELOPMENT entity name, not the operator or IP licensor.
-
-    ✅ Correct examples:
-    - Nickelodeon Hotels & Resorts Orlando → developer = "Everest Place" (Teramir's development brand)
-    - Hyatt Centric Cincinnati → developer = "Birkla Investment Group" (same as owner)
-    - Kali Hotel → developer = "KPC Development Company"
-
-    DO NOT include the operator (Lion Star, Commonwealth Hotels) in developer field.
+4a. developer = the BUILDING entity (often same as owner for new builds)
+    ✅ Examples:
+    - Nickelodeon Orlando → "Everest Place" (or Teramir Group)
+    - Hyatt Centric Cincinnati → "Birkla Investment Group"
+    DO NOT include operator (Lion Star, Commonwealth) in developer field.
 
 5. former_names: JSON array of any PREVIOUS names this property had, if it was
    rebranded or converted. Empty array [] if it's a new build.
@@ -503,18 +478,6 @@ NAME INTELLIGENCE — ALWAYS EXTRACT THESE (regardless of mode):
    - St. Regis Kapalua Bay → ["Montage Kapalua Bay", "The Residences at Kapalua Bay"]
    - Dreams Rose Hall → ["Hilton Rose Hall Resort & Spa"]
    - Kali Hotel → [] (new build)
-
-FOUR-ROLE SEPARATION CHECKLIST (before you finalize):
-For each entity mentioned in the press releases, classify it into EXACTLY ONE role:
-  - BRAND (goes in 'brand' field) → e.g. "Nickelodeon Hotels & Resorts", "Autograph Collection"
-  - OPERATOR (goes in 'management_company') → the company running operations
-  - OWNER (goes in 'owner') → the property-holding entity
-  - DEVELOPER (goes in 'developer') → the construction/development entity
-  - IP LICENSOR (do NOT assign anywhere) → e.g. "Paramount" licenses Nickelodeon but owns no hotels
-
-When a single entity plays multiple roles (e.g. owner-operated Hyatt properties),
-list it in each applicable field. When entities are distinct, keep them in their
-own fields. NEVER comma-separate multiple entities into a single field.
 
 ═══════════════════════════════════════════════════════════════
 
