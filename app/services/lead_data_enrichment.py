@@ -595,7 +595,10 @@ async def batch_smart_fill(limit: int = 10, mode: str = "smart") -> Dict:
                 if mode == "full" or not lead.description:
                     lead.description = enriched["description"]
 
-            # Recalculate score with new data
+            # Recalculate score + breakdown via rescore_lead so both stay
+            # in sync. Previously this only updated lead_score, leaving
+            # score_breakdown stale — the UI "Why this score?" would show
+            # pre-SmartFill component points against the new total.
             from app.services.scorer import calculate_lead_score
 
             score_result = calculate_lead_score(
@@ -611,7 +614,17 @@ async def batch_smart_fill(limit: int = 10, mode: str = "smart") -> Dict:
                 brand=lead.brand,
             )
             if score_result.get("should_save", True):
-                lead.lead_score = score_result["total_score"]
+                try:
+                    from app.services.rescore import rescore_lead
+
+                    await rescore_lead(lead.id, session)
+                except Exception as rescore_err:
+                    logger.warning(
+                        f"rescore after lead_data_enrichment failed for "
+                        f"{lead.id}: {rescore_err} — falling back to direct "
+                        f"score write"
+                    )
+                    lead.lead_score = score_result["total_score"]
 
             stats["enriched"] += 1
             stats["details"].append(

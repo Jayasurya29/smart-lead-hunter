@@ -17,6 +17,7 @@ from sqlalchemy import (
     String,
     Text,
 )
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import relationship
 
 from app.database import Base
@@ -48,10 +49,21 @@ class LeadContact(Base):
     # Classification
     scope = Column(
         String(50), default="unknown"
-    )  # hotel_specific, chain_area, chain_corporate
+    )  # hotel_specific, chain_area, chain_corporate, management_corporate, owner
     confidence = Column(String(20), default="medium")  # high, medium, low
     tier = Column(String(50))  # TIER1_UNIFORM_DIRECT, TIER2_PURCHASING, etc.
     score = Column(Integer, default=0)
+    # Per-contact score breakdown (migration 013) — explains why this
+    # contact has the score it has. Populated by contact_scoring.score_contact().
+    # Shape: {
+    #   "title": {"value": "...", "tier": "TIER2_PURCHASING", "base_points": 15},
+    #   "scope": {"value": "management_corporate", "multiplier": 1.5},
+    #   "title_score": 22,
+    #   "strategist": {"priority": "P1", "floor": 28, "applied": true},
+    #   "final_score": 28,
+    #   "formula": "TIER2_PURCHASING (15) × management_corporate (×1.5) = 22, ..."
+    # }
+    score_breakdown = Column(JSONB, nullable=True)
 
     # Strategist priority (from Iter 6 reasoning pass) — overrides algorithmic priority
     # when present. Values: "P1", "P2", "P3", "P4", or NULL when not yet reasoned.
@@ -172,6 +184,7 @@ class LeadContact(Base):
             "strategist_priority": self.strategist_priority,
             "strategist_reasoning": self.strategist_reasoning,
             "has_strategist_verdict": bool(self.strategist_priority),
+            "score_breakdown": self.score_breakdown,
         }
 
     def __repr__(self):

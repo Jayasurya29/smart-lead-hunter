@@ -3097,50 +3097,21 @@ async def enrich_lead_contacts(
             deduped.append(c)
     result.contacts = deduped
 
-    # ── Classify tier + score every contact (so dashboard sort works) ──
-    # The legacy v4 pipeline did this via contact_validator.filter_and_rank.
-    # The iterative pipeline bypasses that, so contacts arrived at the
-    # dashboard with no tier/score → no proper priority ordering.
+    # ── Classify tier + score every contact (unified scoring module) ──
+    # Single source of truth: app.services.contact_scoring.score_contact_dict
+    # Same formula used by: manual add, edit contact, toggle scope.
+    # Changes to scoring logic live in ONE place now.
     #
-    # When Iter 6 (reasoning pass) has assigned a final_priority (P1-P4),
-    # we use THAT as the primary signal and boost/floor the score accordingly.
-    # Title classification is the fallback when Gemini didn't decide.
-    _FINAL_PRIORITY_SCORE_FLOOR = {
-        "P1": 28,  # Higher than the old "tier 1 hotel_specific" ceiling
-        "P2": 18,
-        "P3": 10,
-        "P4": 2,
-    }
-    for c in result.contacts:
-        title = c.get("title") or ""
-        try:
-            classification = title_classifier.classify(title)
-            c["_buyer_tier"] = classification.tier.name
-            # Base score from tier + scope multiplier (matches legacy pattern)
-            base = title_classifier.TIER_SCORES.get(classification.tier, 3)
-            scope_mult = {
-                "hotel_specific": 3.0,
-                "chain_area": 2.0,
-                "management_corporate": 1.5,
-                "chain_corporate": 1.2,
-                "owner": 1.5,
-                "unknown": 1.0,
-            }.get(c.get("scope") or "unknown", 1.0)
-            c["_validation_score"] = int(base * scope_mult)
-        except Exception as ex:
-            logger.debug(f"Title classification failed for {title!r}: {ex}")
-            c["_buyer_tier"] = "UNKNOWN"
-            c["_validation_score"] = 5
+    # Writes these keys onto each contact dict (consumed by
+    # persist_enrichment_contacts and routes/contacts.py):
+    #   _validation_score       → final int score
+    #   _buyer_tier             → BuyerTier enum name
+    #   _validation_confidence  → "high" | "medium" | "low"
+    #   _score_breakdown        → JSONB breakdown for score_breakdown column
+    from app.services.contact_scoring import score_contact_dict
 
-        # Apply Iter 6 final priority — it overrides title-based scoring when
-        # present. The strategist sees the whole picture (timeline, stage,
-        # company verification, role verification) and its verdict wins.
-        fp = c.get("_final_priority")
-        if fp in _FINAL_PRIORITY_SCORE_FLOOR:
-            floor = _FINAL_PRIORITY_SCORE_FLOOR[fp]
-            # Score = max(title-based, priority floor). So a P1 is always >=28
-            # even if the title wasn't a classic buyer role.
-            c["_validation_score"] = max(c["_validation_score"], floor)
+    for c in result.contacts:
+        score_contact_dict(c)
 
     # ── Sort contacts: by Iter 6 final priority first (P1→P4), then score ──
     _PRIORITY_RANK = {"P1": 0, "P2": 1, "P3": 2, "P4": 3}
@@ -4228,6 +4199,40 @@ async def persist_enrichment_contacts(
                     existing.strategist_priority = c["_final_priority"]
                 if c.get("_final_reasoning"):
                     existing.strategist_reasoning = c["_final_reasoning"]
+                # ── Always refresh classification fields on re-enrichment
+                #    (bug fix 2026-04-22). Previously these stayed frozen
+                #    from the first insert — so a contact scored as P1/5
+                #    on day 1 would keep score=5 forever, even after the
+                #    pipeline ranked them P1/28 on day N. The routes path
+                #    got this fix already; the Celery auto_enrich path
+                #    (which calls persist_enrichment_contacts) kept the
+                #    bug until now.
+                new_score = c.get("_validation_score")
+                if new_score is not None and new_score != existing.score:
+                    filled.append(f"score({existing.score}->{new_score})")
+                    existing.score = new_score
+                new_tier = c.get("_buyer_tier")
+                if new_tier and new_tier != existing.tier:
+                    filled.append("tier")
+                    existing.tier = new_tier
+                new_confidence = c.get("_validation_confidence") or c.get("confidence")
+                if new_confidence and new_confidence != existing.confidence:
+                    filled.append("confidence")
+                    existing.confidence = new_confidence
+                # Scope may shift if Iter 6 or verifier reclassified
+                # (e.g. chain_corporate -> management_corporate, or
+                # chain_area -> owner)
+                new_scope = c.get("scope")
+                if new_scope and new_scope != existing.scope:
+                    filled.append(f"scope({existing.scope}->{new_scope})")
+                    existing.scope = new_scope
+                # Always refresh score_breakdown so the "why this score?"
+                # UI stays in sync with the current scoring logic
+                new_breakdown = c.get("_score_breakdown")
+                if new_breakdown:
+                    existing.score_breakdown = new_breakdown
+                    if "score_breakdown" not in filled:
+                        filled.append("score_breakdown")
                 # source_detail gets refreshed too when new rich evidence arrives
                 new_detail = c.get("source_detail")
                 if new_detail and new_detail != existing.source_detail:
@@ -4256,6 +4261,9 @@ async def persist_enrichment_contacts(
                     ),
                     tier=c.get("_buyer_tier"),
                     score=c.get("_validation_score", 0),
+                    score_breakdown=c.get(
+                        "_score_breakdown"
+                    ),  # Unified scoring breakdown
                     # Iter 6 strategist verdict — authoritative priority + reasoning
                     strategist_priority=c.get("_final_priority"),
                     strategist_reasoning=c.get("_final_reasoning"),

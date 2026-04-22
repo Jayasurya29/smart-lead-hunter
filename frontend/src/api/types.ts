@@ -77,6 +77,15 @@ export interface DashboardStats {
 
 /* ── Contacts ── */
 
+export interface ContactScoreBreakdown {
+  title?: { value: string | null; tier: string; base_points: number }
+  scope?: { value: string; multiplier: number }
+  title_score?: number
+  strategist?: { priority: string | null; floor: number | null; applied: boolean }
+  final_score?: number
+  formula?: string
+}
+
 export interface Contact {
   id: number
   lead_id: number
@@ -90,6 +99,12 @@ export interface Contact {
   confidence: string | null
   tier: string | null
   score: number
+  score_breakdown: ContactScoreBreakdown | null
+  strategist_priority: string | null
+  strategist_reasoning: string | null
+  has_strategist_verdict: boolean | null
+  priority_label: string | null
+  priority_reason: string | null
   is_primary: boolean
   is_saved: boolean
   source_detail: string | null

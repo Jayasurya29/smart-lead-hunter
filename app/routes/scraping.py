@@ -1837,8 +1837,23 @@ async def smart_fill_lead(lead_id: int, request: Request, _csrf=Depends(require_
             contact_phone=lead.contact_phone,
             brand=lead.brand,
         )
+        # Refresh the lead's score + breakdown in lockstep.
+        # Previously this only set lead.lead_score from calculate_lead_score,
+        # leaving lead.score_breakdown stale from the pre-SmartFill state —
+        # so the UI's "Why this score?" would show the wrong component
+        # breakdown after SmartFill. rescore_lead() writes both in one shot
+        # using the same unified formula.
         if score_result.get("should_save", True):
-            lead.lead_score = score_result["total_score"]
+            try:
+                from app.services.rescore import rescore_lead
+
+                await rescore_lead(lead_id, session)
+            except Exception as rescore_err:
+                logger.warning(
+                    f"rescore after SmartFill failed for {lead_id}: {rescore_err} "
+                    f"— falling back to direct score write"
+                )
+                lead.lead_score = score_result["total_score"]
 
         await session.commit()
 

@@ -570,7 +570,7 @@ function WizaEmailButton({ contactId, leadId, onEmailFound }: {
     <button
       onClick={handleClick}
       disabled={loading}
-      title="Find email via Wiza (costs 1 credit)"
+      title="Find email via Wiza (costs 2 credits if found, free if not)"
       className="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium text-violet-700 bg-violet-50 rounded-md hover:bg-violet-100 border border-violet-200 transition disabled:opacity-50"
     >
       {loading ? <Loader2 className="w-3 h-3 animate-spin" /> : <Mail className="w-3 h-3" />}
@@ -610,6 +610,10 @@ function ContactsTab({ contacts, loading, leadId, onEnrich, enriching }: {
     )
   }
 
+  // Which score-breakdown popover is currently open (null = none).
+  // Click the score badge to show, click again (or outside) to hide.
+  const [openBreakdownId, setOpenBreakdownId] = useState<number | null>(null)
+
   async function handleSave(contactId: number) {
     await saveContact(leadId, contactId)
     qc.invalidateQueries({ queryKey: ['contacts', leadId] })
@@ -621,7 +625,16 @@ function ContactsTab({ contacts, loading, leadId, onEnrich, enriching }: {
   }
 
   async function handleToggleScope(contactId: number, currentScope: string) {
-    const cycle = ['hotel_specific', 'chain_area', 'chain_corporate']
+    // Cycle through all 5 valid scopes. Matches the unified taxonomy in
+    // contact_scoring.py: hotel_specific → chain_area → management_corporate
+    // → chain_corporate → owner → (back to hotel_specific).
+    const cycle = [
+      'hotel_specific',
+      'chain_area',
+      'management_corporate',
+      'chain_corporate',
+      'owner',
+    ]
     const idx = cycle.indexOf(currentScope)
     const next = cycle[(idx + 1) % cycle.length]
     await toggleContactScope(leadId, contactId, next)
@@ -803,8 +816,14 @@ function ContactsTab({ contacts, loading, leadId, onEnrich, enriching }: {
                     <div className="flex items-center gap-2 ml-auto">
                       <PriorityBadge label={(c as any).priority_label} reason={(c as any).priority_reason} />
                       {c.score > 0 && (
-                        <div className="flex flex-col items-end">
-                          <span className="text-sm font-bold text-navy-900">{c.score}</span>
+                        <div className="flex flex-col items-end relative">
+                          <button
+                            onClick={() => setOpenBreakdownId(openBreakdownId === c.id ? null : c.id)}
+                            title="Click to see how this score was calculated"
+                            className="text-sm font-bold text-navy-900 hover:text-blue-700 transition cursor-pointer underline-offset-2 hover:underline"
+                          >
+                            {c.score}
+                          </button>
                           {c.confidence && (
                             <span className={cn(
                               'text-2xs font-bold uppercase',
@@ -813,6 +832,76 @@ function ContactsTab({ contacts, loading, leadId, onEnrich, enriching }: {
                             )}>
                               {c.confidence}
                             </span>
+                          )}
+                          {/* Score breakdown popover */}
+                          {openBreakdownId === c.id && (c as any).score_breakdown && (
+                            <div
+                              className="absolute top-full right-0 mt-1 z-20 w-80 bg-white border border-stone-200 rounded-lg shadow-lg p-3 text-left"
+                              onClick={(e) => e.stopPropagation()}
+                            >
+                              <div className="flex items-center justify-between mb-2 pb-2 border-b border-stone-100">
+                                <span className="text-xs font-bold text-navy-900 uppercase tracking-wide">Why this score?</span>
+                                <button
+                                  onClick={() => setOpenBreakdownId(null)}
+                                  className="text-stone-400 hover:text-stone-700 text-xs"
+                                  aria-label="Close"
+                                >
+                                  ✕
+                                </button>
+                              </div>
+                              {(() => {
+                                const b = (c as any).score_breakdown as Record<string, any>
+                                return (
+                                  <div className="space-y-2 text-xs">
+                                    <div className="flex justify-between">
+                                      <span className="text-stone-500">Title tier:</span>
+                                      <span className="font-semibold text-navy-900">
+                                        {b.title?.tier || 'UNKNOWN'} ({b.title?.base_points ?? '?'} pts)
+                                      </span>
+                                    </div>
+                                    <div className="flex justify-between">
+                                      <span className="text-stone-500">Scope:</span>
+                                      <span className="font-semibold text-navy-900">
+                                        {(b.scope?.value || 'unknown').replace(/_/g, ' ')} (×{b.scope?.multiplier ?? '?'})
+                                      </span>
+                                    </div>
+                                    <div className="flex justify-between border-t border-stone-100 pt-2">
+                                      <span className="text-stone-500">Title score:</span>
+                                      <span className="font-semibold text-navy-900">{b.title_score ?? '?'}</span>
+                                    </div>
+                                    {b.strategist?.priority && (
+                                      <div className="flex justify-between">
+                                        <span className="text-stone-500">Strategist {b.strategist.priority} floor:</span>
+                                        <span className={cn(
+                                          'font-semibold',
+                                          b.strategist.applied ? 'text-emerald-700' : 'text-stone-400',
+                                        )}>
+                                          {b.strategist.floor ?? '?'} {b.strategist.applied ? '(applied)' : '(not needed)'}
+                                        </span>
+                                      </div>
+                                    )}
+                                    <div className="flex justify-between border-t border-stone-100 pt-2">
+                                      <span className="text-stone-900 font-bold">Final score:</span>
+                                      <span className="font-bold text-blue-700 text-sm">{b.final_score ?? c.score}</span>
+                                    </div>
+                                    {b.formula && (
+                                      <p className="text-[10px] text-stone-400 italic pt-2 leading-relaxed">{b.formula}</p>
+                                    )}
+                                  </div>
+                                )
+                              })()}
+                            </div>
+                          )}
+                          {openBreakdownId === c.id && !(c as any).score_breakdown && (
+                            <div className="absolute top-full right-0 mt-1 z-20 w-64 bg-white border border-stone-200 rounded-lg shadow-lg p-3 text-left">
+                              <div className="flex items-center justify-between mb-2">
+                                <span className="text-xs font-bold text-navy-900">Why this score?</span>
+                                <button onClick={() => setOpenBreakdownId(null)} className="text-stone-400 text-xs">✕</button>
+                              </div>
+                              <p className="text-xs text-stone-500">
+                                Score breakdown not yet available for this contact. Re-run enrichment or edit the contact to populate it.
+                              </p>
+                            </div>
                           )}
                         </div>
                       )}
@@ -864,10 +953,20 @@ function ContactsTab({ contacts, loading, leadId, onEnrich, enriching }: {
                             'text-2xs font-bold px-2 py-0.5 rounded-full uppercase flex-shrink-0 cursor-pointer transition hover:ring-2 hover:ring-offset-1',
                             c.scope === 'hotel_specific' ? 'bg-emerald-50 text-emerald-600 hover:ring-emerald-300' :
                             c.scope === 'chain_area' ? 'bg-amber-50 text-amber-600 hover:ring-amber-300' :
+                            c.scope === 'management_corporate' ? 'bg-blue-50 text-blue-700 hover:ring-blue-300' :
+                            c.scope === 'chain_corporate' ? 'bg-stone-100 text-stone-500 hover:ring-stone-300' :
+                            c.scope === 'owner' ? 'bg-purple-50 text-purple-700 hover:ring-purple-300' :
                             'bg-stone-100 text-stone-500 hover:ring-stone-300',
                           )}
                         >
-                          {c.scope === 'hotel_specific' ? 'Hotel Specific' : c.scope === 'chain_area' ? 'Chain/Area' : c.scope.replace(/_/g, ' ')}
+                          {
+                            c.scope === 'hotel_specific' ? 'Hotel Specific' :
+                            c.scope === 'chain_area' ? 'Chain/Area' :
+                            c.scope === 'management_corporate' ? 'Management Corporate' :
+                            c.scope === 'chain_corporate' ? 'Chain Corporate' :
+                            c.scope === 'owner' ? 'Owner' :
+                            c.scope.replace(/_/g, ' ')
+                          }
                         </button>
                       )}
                       {c.source_detail && typeof c.source_detail === 'string' && (
@@ -1170,7 +1269,11 @@ function SourcesTab({ lead }: { lead: Lead }) {
             {Object.entries(lead.score_breakdown).map(([key, val]) => {
               const obj = (val && typeof val === 'object') ? val as Record<string, any> : null
               const points = obj?.points !== undefined ? String(obj.points) : null
-              const reason = (typeof obj?.reason === 'string') ? obj.reason
+              // Backend writes 'tier' as the human label (scorer.py),
+              // but older pipelines used 'reason' / 'label' / 'detail'.
+              // Accept any of them so both old and new breakdowns render.
+              const reason = (typeof obj?.tier === 'string') ? obj.tier
+                           : (typeof obj?.reason === 'string') ? obj.reason
                            : (typeof obj?.label === 'string') ? obj.label
                            : (typeof obj?.detail === 'string') ? obj.detail
                            : null

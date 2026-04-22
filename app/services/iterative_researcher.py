@@ -1324,40 +1324,92 @@ async def iteration_4_linkedin_lookup(state: ResearchState) -> int:
 
                     context_tokens = _build_context_tokens()
 
+                    # ── ALSO add the contact's own role tokens ──
+                    # A random "Adam Butts" elsewhere on LinkedIn (accountant,
+                    # doctor, plumber) won't have "procurement" or "supply
+                    # chain" in their headline. The contact's KNOWN title from
+                    # enrichment + their hospitality scope IS powerful proof
+                    # we're on the right profile, even when the SERP snippet
+                    # doesn't literally show the company name.
+                    _ROLE_STOPWORDS = {
+                        "the",
+                        "and",
+                        "of",
+                        "for",
+                        "at",
+                        "a",
+                        "an",
+                        "&",
+                        "in",
+                        "on",
+                        "to",
+                        "by",
+                        "or",
+                        "senior",
+                        "junior",
+                        "assistant",
+                        "associate",
+                        "head",
+                        "chief",
+                        "executive",
+                        "manager",  # too generic alone
+                    }
+
+                    contact_title = (contact.get("title") or "").lower()
+                    role_tokens = set()
+                    for w in __import__("re").split(r"[^a-z0-9]+", contact_title):
+                        if len(w) >= 4 and w not in _ROLE_STOPWORDS:
+                            role_tokens.add(w)
+                    # Tokens like: procurement, purchasing, housekeeping,
+                    # hospitality, operations, culinary, banquet, sales.
+                    # These rarely appear in profiles of unrelated people.
+
                     haystack = (
                         (r.get("snippet") or "") + " " + (r.get("title") or "")
                     ).lower()
 
-                    # If no distinctive context tokens exist, fall back
-                    # to accepting the slug-match result (rare — only if
-                    # hotel/mgmt/brand/owner are all generic or blank).
-                    if context_tokens and not any(
+                    # A candidate passes the SERP verification if EITHER:
+                    #   (a) any company-context token appears (crescent, kpc, kali)
+                    #   (b) any distinctive role token from the contact's
+                    #       known title appears (procurement, housekeeping)
+                    # If neither, reject as possible wrong-person match.
+                    context_hit = context_tokens and any(
                         t in haystack for t in context_tokens
+                    )
+                    role_hit = role_tokens and any(t in haystack for t in role_tokens)
+
+                    # Only fail the check if we had tokens to check AND none matched.
+                    if (context_tokens or role_tokens) and not (
+                        context_hit or role_hit
                     ):
                         logger.debug(
                             f"LinkedIn URL rejected for {name}: slug "
-                            f"{slug!r} passed token check but SERP "
-                            f"snippet/title lacks any context token "
-                            f"(sampled: {sorted(context_tokens)[:5]}). "
-                            f"Likely wrong person (common name)."
+                            f"{slug!r} passed token check but SERP snippet/"
+                            f"title matched NEITHER a company token "
+                            f"(sampled: {sorted(context_tokens)[:5]}) nor a "
+                            f"role token from the contact's known title "
+                            f"(sampled: {sorted(role_tokens)[:5]}). "
+                            f"Likely wrong person."
                         )
                         continue
 
                     contact["linkedin"] = r_url
-                    matched = (
-                        [t for t in context_tokens if t in haystack][:3]
-                        if context_tokens
-                        else []
-                    )
-                    if matched:
+                    matched_context = [t for t in context_tokens if t in haystack][:3]
+                    matched_roles = [t for t in role_tokens if t in haystack][:3]
+                    if matched_context or matched_roles:
+                        hints = []
+                        if matched_context:
+                            hints.append(f"company: {matched_context}")
+                        if matched_roles:
+                            hints.append(f"role: {matched_roles}")
                         logger.info(
                             f"LinkedIn URL found for {name}: {r_url} "
-                            f"(SERP context: {matched})"
+                            f"(SERP match via {', '.join(hints)})"
                         )
                     else:
                         logger.info(
                             f"LinkedIn URL found for {name}: {r_url} "
-                            f"(slug match, no context tokens to verify)"
+                            f"(slug match, no context/role tokens to verify)"
                         )
                     found_url = True
                     break

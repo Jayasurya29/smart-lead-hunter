@@ -224,11 +224,30 @@ async def dashboard_edit_lead(
             manual_points = tier_points_map.get(data["brand_tier"], 0)
             lead.lead_score = lead.lead_score - auto_points + manual_points
             lead.brand_tier = data["brand_tier"]
+            # Keep score_breakdown in sync with the manual override so the
+            # UI "Why this score?" reflects the true tier points — not the
+            # stale auto-calculated ones.
+            bd = dict(lead.score_breakdown or {})
+            brand_bd = dict(bd.get("brand") or {})
+            brand_bd["points"] = manual_points
+            brand_bd["tier"] = data["brand_tier"]
+            brand_bd["manual_override"] = True
+            bd["brand"] = brand_bd
+            lead.score_breakdown = bd
     elif "brand_tier" in data and data["brand_tier"]:
         old_points = tier_points_map.get(lead.brand_tier or "unknown", 0)
         new_points = tier_points_map.get(data["brand_tier"], 0)
         lead.lead_score = (lead.lead_score or 0) - old_points + new_points
         lead.brand_tier = data["brand_tier"]
+        # Same fix when no other scoring fields changed — still sync the
+        # breakdown so the UI reflects the manual tier override.
+        bd = dict(lead.score_breakdown or {})
+        brand_bd = dict(bd.get("brand") or {})
+        brand_bd["points"] = new_points
+        brand_bd["tier"] = data["brand_tier"]
+        brand_bd["manual_override"] = True
+        bd["brand"] = brand_bd
+        lead.score_breakdown = bd
 
     lead.updated_at = local_now()
 

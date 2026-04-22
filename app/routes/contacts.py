@@ -395,38 +395,15 @@ async def save_contact(
     contact.is_saved = True
     contact.updated_at = local_now()
 
-    # Auto-enrich email via Wiza if contact has LinkedIn but no email
-    wiza_result = None
-    if contact.linkedin and not contact.email:
-        try:
-            from app.services.wiza_enrichment import enrich_contact_email
-
-            wiza_result = await enrich_contact_email(
-                linkedin_url=contact.linkedin,
-                contact_name=contact.name,
-            )
-            if wiza_result:
-                contact.email = wiza_result["email"]
-                contact.found_via = f"wiza_{wiza_result['email_status']}"
-                # If this is the primary contact, sync email back to lead
-                if contact.is_primary:
-                    lead_res = await db.execute(
-                        select(PotentialLead).where(PotentialLead.id == lead_id)
-                    )
-                    lead = lead_res.scalar_one_or_none()
-                    if lead:
-                        lead.contact_email = contact.email
-        except Exception as e:
-            logger.warning(
-                f"Wiza enrichment failed on save for contact {contact_id}: {e}"
-            )
+    # NOTE: Wiza email enrichment is intentionally NOT auto-triggered on Save.
+    # Wiza costs 2 credits per found email — we only spend those when the user
+    # explicitly clicks the "Find Email" button for a specific contact they
+    # actually plan to outreach. Saving a contact should be free.
 
     await db.commit()
     return {
         "status": "saved",
         "contact_id": contact_id,
-        "email_found": wiza_result["email"] if wiza_result else None,
-        "email_status": wiza_result["email_status"] if wiza_result else None,
     }
 
 
@@ -519,22 +496,20 @@ async def update_contact(
             lead.contact_phone = contact.phone
             lead.updated_at = local_now()
 
-    # Rescore contact based on updated title/scope
-    from app.config.sap_title_classifier import title_classifier
+    # Rescore contact via unified scoring module (single source of truth).
+    # The edit may have changed title AND/OR scope implicitly (e.g. setting
+    # a title that clearly puts them in a different tier). We always
+    # rescore using current scope + current strategist_priority so the
+    # priority floor is respected — editing a P1 contact's email should
+    # NEVER drop their score to 5.
+    from app.services.contact_scoring import apply_score_to_contact
 
-    if contact.title:
-        classification = title_classifier.classify(contact.title)
-        scope = contact.scope or "unknown"
-        if scope == "hotel_specific":
-            contact.score = 30 if classification.tier.value <= 5 else 8
-            contact.confidence = "high"
-        elif scope == "chain_area":
-            contact.score = 12 if classification.tier.value <= 5 else 5
-            contact.confidence = "medium"
-        else:
-            contact.score = 5
-            contact.confidence = "low"
-        contact.tier = classification.tier.name
+    apply_score_to_contact(
+        contact,
+        title=contact.title,
+        scope=contact.scope,
+        strategist_priority=contact.strategist_priority,
+    )
     contact.updated_at = local_now()
     await db.flush()
     try:
@@ -555,8 +530,24 @@ async def toggle_contact_scope(
 ):
     body = await request.json()
     new_scope = body.get("scope", "")
-    if new_scope not in ("hotel_specific", "chain_area", "chain_corporate"):
-        raise HTTPException(status_code=400, detail="Invalid scope")
+    # All scope values the enrichment pipeline + Iter 6 verifier can produce.
+    # Previously only accepted {hotel_specific, chain_area, chain_corporate},
+    # rejecting management_corporate (added for operator corporate like
+    # Crescent/Aimbridge/Highgate) and owner (added for check-writers
+    # like Dr. Chaudhuri/KPC Development). Sales flipping a contact to
+    # these scopes via UI would get 400 errors.
+    _VALID_SCOPES = (
+        "hotel_specific",
+        "chain_area",
+        "management_corporate",
+        "chain_corporate",
+        "owner",
+    )
+    if new_scope not in _VALID_SCOPES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid scope. Must be one of: {', '.join(_VALID_SCOPES)}",
+        )
     result = await db.execute(
         select(LeadContact).where(
             LeadContact.id == contact_id, LeadContact.lead_id == lead_id
@@ -566,31 +557,20 @@ async def toggle_contact_scope(
     if not contact:
         raise HTTPException(status_code=404, detail="Contact not found")
     contact.scope = new_scope
-    # Rescore: base score depends on scope
-    if contact.tier in (
-        "TIER1_HSKP",
-        "TIER2_PURCH",
-        "TIER3_GM_OPS",
-        "TIER4_FB",
-        "TIER5_HR",
-    ):
-        if new_scope == "hotel_specific":
-            contact.score = 30
-            contact.confidence = "high"
-        elif new_scope == "chain_area":
-            contact.score = 12
-            contact.confidence = "medium"
-        else:
-            contact.score = 5
-            contact.confidence = "low"
 
-    # Preserve strategist priority floor — P1=28, P2=18, P3=10, P4=2
-    # Without this, toggling scope on a P1 contact drops 28→12
-    _PRIORITY_FLOOR = {"P1": 28, "P2": 18, "P3": 10, "P4": 2}
-    if contact.strategist_priority and contact.strategist_priority in _PRIORITY_FLOOR:
-        floor = _PRIORITY_FLOOR[contact.strategist_priority]
-        if contact.score < floor:
-            contact.score = floor
+    # Rescore via unified scoring module (single source of truth).
+    # Previously had a broken tier check — hardcoded "TIER1_HSKP" /
+    # "TIER2_PURCH" strings that never matched the real enum values
+    # ("TIER1_UNIFORM_DIRECT" / "TIER2_PURCHASING"), meaning scope toggles
+    # on tier-1/2 contacts silently did nothing. Now it always rescores.
+    from app.services.contact_scoring import apply_score_to_contact
+
+    apply_score_to_contact(
+        contact,
+        title=contact.title,
+        scope=new_scope,
+        strategist_priority=contact.strategist_priority,
+    )
     contact.updated_at = local_now()
     await db.flush()
     try:
@@ -622,23 +602,27 @@ async def add_contact(
     if not lead:
         raise HTTPException(status_code=404, detail="Lead not found")
 
-    # Score the contact
-    from app.config.sap_title_classifier import title_classifier
+    # Score the contact via unified scoring module (single source of truth)
+    from app.services.contact_scoring import score_contact
 
     title = (body.get("title") or "").strip()
     scope = body.get("scope", "hotel_specific")
-    score = 5
-    confidence = "low"
-    tier_name = "UNKNOWN"
-    if title:
-        classification = title_classifier.classify(title)
-        tier_name = classification.tier.name
-        if scope == "hotel_specific":
-            score = 30 if classification.tier.value <= 5 else 8
-            confidence = "high"
-        elif scope == "chain_area":
-            score = 12 if classification.tier.value <= 5 else 5
-            confidence = "medium"
+    _VALID_SCOPES = (
+        "hotel_specific",
+        "chain_area",
+        "management_corporate",
+        "chain_corporate",
+        "owner",
+        "unknown",
+    )
+    if scope not in _VALID_SCOPES:
+        scope = "unknown"
+
+    score_result = score_contact(
+        title=title,
+        scope=scope,
+        strategist_priority=None,  # Manual add — no strategist verdict yet
+    )
 
     contact = LeadContact(
         lead_id=lead_id,
@@ -649,9 +633,10 @@ async def add_contact(
         linkedin=(body.get("linkedin") or "").strip() or None,
         organization=(body.get("organization") or "").strip() or None,
         scope=scope,
-        confidence=confidence,
-        tier=tier_name,
-        score=score,
+        confidence=score_result["confidence"],
+        tier=score_result["tier"],
+        score=score_result["score"],
+        score_breakdown=score_result["breakdown"],
         is_primary=False,
         is_saved=True,
         found_via="manual",
@@ -674,7 +659,7 @@ async def add_contact(
     except Exception:
         pass
     await db.commit()
-    return {"status": "created", "contact_id": contact.id, "score": score}
+    return {"status": "created", "contact_id": contact.id, "score": contact.score}
 
 
 @router.post("/api/dashboard/leads/{lead_id}/contacts/{contact_id}/set-primary")
@@ -730,7 +715,8 @@ async def enrich_contact_email_route(
 ):
     """
     Manually trigger Wiza email enrichment for a specific contact.
-    Requires contact to have a LinkedIn URL. Costs 1 Wiza credit if email found.
+    Requires contact to have a LinkedIn URL. Costs 2 Wiza credits if email found.
+    Failed lookups are free.
     """
     from app.services.wiza_enrichment import enrich_contact_email
 
@@ -784,30 +770,62 @@ async def enrich_contact_email_route(
         "email": wiza_result["email"],
         "email_status": wiza_result["email_status"],
         "confidence": wiza_result["confidence"],
-        "credits_used": wiza_result.get("credits_used", 1),
+        "credits_used": wiza_result.get("credits_used", 2),
     }
+
+
+# Hard safety limits for bulk Wiza enrichment — enforced regardless
+# of what the caller passes. Prevents runaway drain.
+BULK_ENRICH_MAX_LIMIT = 10  # Hard cap: never process more than 10 per call
+BULK_ENRICH_DEFAULT_LIMIT = 5  # Default if caller doesn't specify
+BULK_ENRICH_MIN_CREDITS = 30  # Refuse to run if fewer than this remain
+BULK_ENRICH_ABORT_CREDITS = 20  # Mid-batch abort if we drop below this
 
 
 @router.post("/api/contacts/bulk-enrich-email")
 async def bulk_enrich_emails(
     db: AsyncSession = Depends(get_db),
-    limit: int = 50,
+    limit: int = BULK_ENRICH_DEFAULT_LIMIT,
 ):
     """
-    Bulk enrich emails for all saved contacts that have a LinkedIn URL but no email.
-    Processes up to `limit` contacts per call. Run multiple times to process all.
+    Bulk enrich emails for saved contacts that have a LinkedIn URL but no email.
 
-    Cost: up to `limit` Wiza credits (only charged when email is found).
+    SAFETY (2026-04-22 — tightened after 2 credits/email discovery):
+      - Default limit: 5 contacts (max 10 credits if all hit)
+      - Hard cap: 10 contacts per call (max 20 credits) — enforced even if
+        the caller passes limit=999
+      - Requires 30+ credits to start (prevents draining to zero)
+      - Aborts mid-batch if credits drop below 20 during the run
+
+    Cost: 2 Wiza credits per found email (failed lookups are free).
+    Worst case with limit=10 and all hit: 20 credits.
+
+    Run the endpoint multiple times to process more saved contacts in
+    controlled batches instead of one big drain.
     """
     from app.services.wiza_enrichment import enrich_contact_email, check_wiza_credits
 
-    # Check credits first
+    # ── Clamp requested limit to hard cap ────────────────────────
+    original_limit = limit
+    limit = max(1, min(limit, BULK_ENRICH_MAX_LIMIT))
+    if limit != original_limit:
+        logger.info(
+            f"Bulk enrich: clamped limit {original_limit} -> {limit} "
+            f"(hard cap {BULK_ENRICH_MAX_LIMIT})"
+        )
+
+    # ── Pre-flight credit check ──────────────────────────────────
     credits = await check_wiza_credits()
-    if credits and credits.get("credits_remaining", 999) < 5:
+    credits_remaining = (credits or {}).get("credits_remaining")
+    if credits_remaining is not None and credits_remaining < BULK_ENRICH_MIN_CREDITS:
         return {
             "status": "insufficient_credits",
-            "credits_remaining": credits.get("credits_remaining"),
-            "message": "Low Wiza credits — purchase more at wiza.co/app/settings/api",
+            "credits_remaining": credits_remaining,
+            "message": (
+                f"Low Wiza credits ({credits_remaining}) — "
+                f"need at least {BULK_ENRICH_MIN_CREDITS} to run a bulk batch. "
+                "Purchase more at wiza.co/app/settings/api"
+            ),
         }
 
     # Find saved contacts with LinkedIn but no email
@@ -836,8 +854,23 @@ async def bulk_enrich_emails(
     found = 0
     not_found = 0
     errors = 0
+    credits_used_total = 0
+    aborted_reason = None
 
-    for contact in contacts:
+    for i, contact in enumerate(contacts):
+        # ── Mid-batch abort: re-check credits every 3 contacts ───
+        # Guards against exhausting to zero during a runaway batch.
+        if i > 0 and i % 3 == 0:
+            mid_check = await check_wiza_credits()
+            mid_remaining = (mid_check or {}).get("credits_remaining")
+            if mid_remaining is not None and mid_remaining < BULK_ENRICH_ABORT_CREDITS:
+                aborted_reason = (
+                    f"credits dropped to {mid_remaining} "
+                    f"(below abort threshold {BULK_ENRICH_ABORT_CREDITS})"
+                )
+                logger.warning(f"Bulk Wiza aborted: {aborted_reason}")
+                break
+
         try:
             wiza_result = await enrich_contact_email(
                 linkedin_url=contact.linkedin,
@@ -847,6 +880,7 @@ async def bulk_enrich_emails(
                 contact.email = wiza_result["email"]
                 contact.found_via = f"wiza_{wiza_result['email_status']}"
                 contact.updated_at = local_now()
+                credits_used_total += wiza_result.get("credits_used", 2)
 
                 # Sync to lead primary contact if applicable
                 if contact.is_primary:
@@ -861,7 +895,9 @@ async def bulk_enrich_emails(
                 await db.commit()
                 found += 1
                 logger.info(
-                    f"Bulk Wiza [{found + not_found}/{len(contacts)}]: {contact.name} → {wiza_result['email']}"
+                    f"Bulk Wiza [{found + not_found}/{len(contacts)}]: "
+                    f"{contact.name} → {wiza_result['email']} "
+                    f"(running total: {credits_used_total} credits)"
                 )
             else:
                 not_found += 1
@@ -870,15 +906,21 @@ async def bulk_enrich_emails(
             logger.warning(f"Bulk Wiza error for {contact.name}: {e}")
 
     return {
-        "status": "complete",
-        "processed": len(contacts),
+        "status": "aborted" if aborted_reason else "complete",
+        "processed": found + not_found + errors,
+        "total_queued": len(contacts),
         "found": found,
         "not_found": not_found,
         "errors": errors,
-        "credits_used": found,
-        "message": "Run again to process more"
-        if len(contacts) == limit
-        else "All contacts processed",
+        "credits_used": credits_used_total,  # Actual credits spent (2 per found)
+        "aborted_reason": aborted_reason,
+        "message": (
+            f"Bulk batch aborted: {aborted_reason}"
+            if aborted_reason
+            else "Run again to process more"
+            if len(contacts) == limit
+            else "All contacts processed"
+        ),
     }
 
 
