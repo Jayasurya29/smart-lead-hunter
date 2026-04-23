@@ -127,14 +127,16 @@ export default function LeadDetail({ leadId, tab, onClose }: Props) {
             {timeline}
           </span>
           {/* Project type badge */}
-          {lead.hotel_type && (() => {
+          {lead.project_type && (() => {
             const typeMap: Record<string, { label: string; color: string }> = {
-              new_opening:      { label: 'New',        color: 'bg-emerald-100 text-emerald-700' },
+              new_opening:      { label: 'New Build',  color: 'bg-emerald-100 text-emerald-700' },
               renovation:       { label: 'Reopening',  color: 'bg-blue-100 text-blue-700' },
               rebrand:          { label: 'Rebrand',    color: 'bg-purple-100 text-purple-700' },
               ownership_change: { label: 'New Owner',  color: 'bg-amber-100 text-amber-700' },
+              reopening:        { label: 'Reopening',  color: 'bg-blue-100 text-blue-700' },
+              conversion:       { label: 'Conversion', color: 'bg-orange-100 text-orange-700' },
             }
-            const t = typeMap[lead.hotel_type]
+            const t = typeMap[lead.project_type]
             return t ? (
               <span className={cn('inline-flex px-2 py-0.5 rounded text-xs font-bold', t.color)}>
                 {t.label}

@@ -8,6 +8,7 @@ export interface Lead {
   brand_name?: string | null
   brand_tier: string | null
   hotel_type: string | null
+  project_type: string | null
   hotel_website: string | null
   website_verified: string | null
   latitude: number | null

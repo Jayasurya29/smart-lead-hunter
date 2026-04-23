@@ -105,6 +105,7 @@ class TestLeadResponseSchema:
         lead.country = "USA"
         lead.opening_date = "Q3 2027"
         lead.hotel_type = None
+        lead.project_type = None
         lead.brand = "Test"
         lead.brand_tier = "tier2_luxury"
         lead.location_type = "florida"
