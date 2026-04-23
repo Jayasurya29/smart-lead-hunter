@@ -216,13 +216,16 @@ async def rescore_lead(lead_id: int, session: AsyncSession) -> Optional[Dict]:
     lead.score_breakdown = new_breakdown
 
     # Update brand_tier and location_type from fresh score
-    # ── Respect manual edits (2026-04-22) ──
-    # The scorer returns "unknown" when it can't classify an unusual brand
-    # (e.g. Nickelodeon Hotels, Margaritaville Island Reserve). When a human
-    # has already set a valid tier, don't blow it away with "unknown".
-    # Only overwrite when:
-    #   1. Scorer returns a VALID tier (not empty, not unknown), OR
-    #   2. Current value is empty/unknown (nothing worth preserving)
+    # ── Respect existing valid tiers (2026-04-23) ──
+    # The legacy scorer uses a simple brand-registry lookup that doesn't
+    # understand themed resorts (Nickelodeon=tier2), all-inclusive brands
+    # (Sandals=tier2), or manual user edits. If the lead already has a
+    # valid tier set (by Smart Fill with better context, or by a human),
+    # we do NOT overwrite it with the scorer's static classification.
+    #
+    # Only write the scorer's tier when:
+    #   1. Current value is empty, unknown, or a sentinel, AND
+    #   2. Scorer has a non-empty value to offer
     new_tier = (score_result.get("brand_tier") or "").strip().lower()
     current_tier = (lead.brand_tier or "").strip().lower()
     VALID_TIERS = {
@@ -241,24 +244,25 @@ async def rescore_lead(lead_id: int, session: AsyncSession) -> Optional[Dict]:
         "midscale",
         "economy",
     }
-    if new_tier in VALID_TIERS:
-        # Scorer found a valid classification — overwrite is fine
+    _SENTINELS = {"", "unknown", "none", "n/a", "tbd"}
+
+    if current_tier in _SENTINELS and new_tier:
+        # Current is garbage — write scorer's value (even if scorer's is also weak)
         lead.brand_tier = score_result["brand_tier"]
-    elif not current_tier or current_tier == "unknown":
-        # Current value is empty/unknown — safe to write scorer's value
-        # (even if it's also empty/unknown — no information lost)
-        if new_tier:
-            lead.brand_tier = score_result["brand_tier"]
-    # Else: current tier is manually set to something valid. Preserve it.
+    elif current_tier not in VALID_TIERS and new_tier in VALID_TIERS:
+        # Current is invalid, scorer has valid — write it
+        lead.brand_tier = score_result["brand_tier"]
+    # Else: current tier is valid. PRESERVE IT.
+    # This protects Smart Fill's "tier2_luxury" for Sandals Montego Bay from
+    # being reverted to scorer's "tier4_upscale" during rescore.
 
     # Same protection for location_type — human edits shouldn't be trampled
     new_loc = (score_result.get("location_type") or "").strip()
     current_loc = (lead.location_type or "").strip()
-    if new_loc and new_loc.lower() not in ("unknown", ""):
-        lead.location_type = score_result["location_type"]
-    elif not current_loc or current_loc.lower() == "unknown":
+    if not current_loc or current_loc.lower() in _SENTINELS:
         if new_loc:
             lead.location_type = score_result["location_type"]
+    # Else: preserve existing location_type
 
     # Recalculate timeline label from opening date
     from app.services.utils import get_timeline_label

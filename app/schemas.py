@@ -258,6 +258,12 @@ class LeadUpdate(BaseModel):
     room_count: Optional[int] = None
     opening_date: Optional[str] = None
     hotel_type: Optional[str] = None
+    # Project type — sales uses this to understand deal context (new build vs
+    # renovation reopening vs rebrand). Also read by contact enrichment
+    # (new_opening/renovation → pre-opening owner boost for Tony Birkla-type
+    # check-writers). Valid values: new_opening, renovation, rebrand, reopening,
+    # conversion, ownership_change, residences_only.
+    project_type: Optional[str] = None
     # Management / ownership metadata (discovered during enrichment,
     # but editable by humans for corrections)
     management_company: Optional[str] = None
@@ -311,6 +317,9 @@ class LeadResponse(LeadBase):
     lead_score: Optional[int] = None
     score_breakdown: Optional[dict] = None
     timeline_label: Optional[str] = None
+    # Deal context for sales — distinguishes new build vs renovation reopening.
+    # Also drives contact enrichment (pre-opening owner boost uses this).
+    project_type: Optional[str] = None
     status: str
     rejection_reason: Optional[str] = None
     latitude: Optional[float] = None

@@ -151,7 +151,7 @@ class RequestIDMiddleware:
 
 
 _rate_limit_store: dict = defaultdict(lambda: {"count": 0, "reset": 0.0})
-_RATE_LIMIT_MAX = 60
+_RATE_LIMIT_MAX = 200
 _RATE_LIMIT_WINDOW = 60.0
 _RATE_LIMIT_MAX_ENTRIES = 10000
 _rate_limit_last_cleanup = 0.0

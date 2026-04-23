@@ -1697,7 +1697,37 @@ async def smart_fill_lead(lead_id: int, request: Request, _csrf=Depends(require_
             return {"status": "no_data", "message": "No new data found", "changes": []}
 
         # Auto-expire if hotel already opened
-        if enriched.get("already_opened"):
+        # ── Already-opened / reopening handling ──
+        # If Gemini says the hotel already opened, we usually expire the lead.
+        # BUT for REOPENING projects (renovation, rebrand, reopening,
+        # conversion, ownership_change) with a FUTURE reopening date, we
+        # want to treat it as a LIVE lead with the future reopening date.
+        #
+        # Example: Sandals Montego Bay — open since 1981, closed for $200M
+        # renovation, reopening Dec 18, 2026. This is a HOT pre-opening
+        # uniform opportunity, not an expired lead. The 1981 "opened_date"
+        # is historical context, not the relevant date for sales.
+        #
+        # Project types that count as live reopenings (have future reopen date):
+        _REOPENING_TYPES = {
+            "renovation",
+            "rebrand",
+            "reopening",
+            "conversion",
+            "ownership_change",
+        }
+        proj_type = (enriched.get("project_type") or "").strip().lower()
+        is_live_reopening = proj_type in _REOPENING_TYPES and enriched.get(
+            "reopening_date"
+        )
+
+        # Save project_type to the lead regardless of path — surfaces in UI
+        # so sales knows what kind of deal this is (new build vs reno vs rebrand)
+        if proj_type and (mode == "full" or not lead.project_type):
+            lead.project_type = proj_type
+
+        if enriched.get("already_opened") and not is_live_reopening:
+            # Standard case — hotel is open and operating. Expire it.
             lead.status = "expired"
             lead.opening_date = enriched.get("opened_date", lead.opening_date)
             lead.timeline_label = "EXPIRED"
@@ -1708,7 +1738,21 @@ async def smart_fill_lead(lead_id: int, request: Request, _csrf=Depends(require_
                 "changes": ["status"],
             }
 
-        if "opening_date" in enriched:
+        # Live-reopening path: treat as live lead at the reopening date
+        if is_live_reopening:
+            reopening = enriched["reopening_date"]
+            lead.opening_date = reopening
+            lead.timeline_label = get_timeline_label(reopening)
+            lead.project_type = proj_type
+            logger.info(
+                f"Full Refresh: {lead.hotel_name} is a {proj_type} — "
+                f"opening_date set to {reopening!r} (timeline: {lead.timeline_label}), "
+                f"NOT expiring (live reopening leads stay active)"
+            )
+            # Don't return — continue the rest of the Full Refresh flow
+            # (update brand_tier, mgmt_company, owner, etc.)
+
+        if "opening_date" in enriched and not is_live_reopening:
             lead.opening_date = enriched["opening_date"]
             new_label = get_timeline_label(enriched["opening_date"])
             lead.timeline_label = new_label

@@ -331,7 +331,7 @@ function OverviewTab({ lead, leadId, contactList, onEnrich, enriching, onSmartFi
   lead: Lead; leadId: number; contactList: Contact[]; onEnrich: () => void; enriching: boolean
   onSmartFill: (mode: 'smart' | 'full') => void; smartFilling: boolean; smartFillResult?: { status: string; changes?: string[]; confidence?: string }
 }) {
-  const hasMissing = !lead.brand_tier || lead.brand_tier === 'unknown' || !lead.opening_date || !lead.room_count
+  const hasMissing = !lead.brand_tier || lead.brand_tier === 'unknown' || !lead.opening_date || !lead.room_count || !lead.management_company || !lead.owner || !lead.developer
   const qc = useQueryClient()
   const [geoEnriching, setGeoEnriching] = useState(false)
   const [geoResult, setGeoResult] = useState<{website?: string; lat?: number; lng?: number} | null>(null)

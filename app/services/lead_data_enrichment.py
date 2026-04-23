@@ -23,6 +23,7 @@ import logging
 import os
 import re
 from typing import Dict, Optional
+import asyncio as _asyncio
 
 import httpx
 
@@ -134,7 +135,7 @@ async def _call_gemini(
         generation_config["responseSchema"] = response_schema
 
     try:
-        async with httpx.AsyncClient(timeout=60) as client:
+        async with httpx.AsyncClient(timeout=75) as client:
             resp = await client.post(
                 url,
                 headers=headers,
@@ -143,6 +144,17 @@ async def _call_gemini(
                     "generationConfig": generation_config,
                 },
             )
+            if resp.status_code == 429:
+                logger.warning("Gemini 429 rate limit — retrying in 8s...")
+                await _asyncio.sleep(8)
+                resp = await client.post(
+                    url,
+                    headers=headers,
+                    json={
+                        "contents": [{"role": "user", "parts": [{"text": prompt}]}],
+                        "generationConfig": generation_config,
+                    },
+                )
             if resp.status_code != 200:
                 logger.warning(f"Gemini error {resp.status_code}: {resp.text[:200]}")
                 return None
@@ -150,11 +162,981 @@ async def _call_gemini(
             data = resp.json()
             return data["candidates"][0]["content"]["parts"][0]["text"]
     except Exception as e:
-        logger.warning(f"Gemini call failed: {e}")
+        logger.warning(f"Gemini call failed [{type(e).__name__}]: {e}", exc_info=True)
         return None
 
 
 async def enrich_lead_data(
+    hotel_name: str,
+    city: str = "",
+    state: str = "",
+    brand: str = "",
+    current_opening_date: str = "",
+    current_brand_tier: str = "",
+    current_room_count: int = 0,
+    mode: str = "smart",
+    search_name: str = "",
+) -> Dict:
+    """
+    REDESIGNED 2026-04-23 — two-stage enrichment:
+      1. CLASSIFY: one small focused call determines project_type
+         (new_opening, renovation, rebrand, reopening, conversion,
+         ownership_change) from the hotel name + a quick search.
+      2. EXTRACT: branched queries + branched prompt tailored to the
+         project type, pulling the RIGHT dates and entities.
+
+    Why this works better than one-shot:
+      - Old approach: one big prompt tried to handle all cases, got confused
+        between "original opening date" vs "reopening date" vs "rebrand date"
+      - New approach: classifier decides the type FIRST, then extraction
+        runs with context-specific instructions
+
+    Returns dict with any fields found:
+    {
+        "project_type": "renovation",
+        "opening_date": "December 18, 2026",   # reopening date for renovations
+        "reopening_date": "December 18, 2026", # same, flagged for route handler
+        "brand_tier": "tier2_luxury",
+        "management_company": "Sandals Resorts International",
+        "owner": "...",
+        "developer": "...",
+        "room_count": 272,
+        "brand": "Sandals",
+        "already_opened": True,  # hotel was open pre-closure
+        "confidence": "high",
+        "changes": [...],
+        "source_url": "..."
+    }
+    """
+    result: Dict = {
+        "changes": [],
+        "confidence": "low",
+        "source_url": None,
+    }
+    location = ", ".join(filter(None, [city, state]))
+
+    # ── STAGE 1: PROJECT TYPE CLASSIFICATION ──
+    # One fast Gemini call using 2-3 targeted snippets to decide:
+    #   new_opening | renovation | rebrand | reopening | conversion | ownership_change
+    # This drives the subsequent query strategy and extraction prompt.
+    project_type = await _classify_project_type(
+        hotel_name=hotel_name,
+        location=location,
+        current_opening_date=current_opening_date,
+    )
+    if project_type:
+        result["project_type"] = project_type
+        result["changes"].append("project_type")
+        logger.info(
+            f"Smart Fill [{hotel_name}] classified as project_type={project_type!r}"
+        )
+    else:
+        # If classifier fails, default to new_opening — most leads in SLH
+        # are genuine greenfield builds, so this is the conservative guess.
+        project_type = "new_opening"
+        logger.info(
+            f"Smart Fill [{hotel_name}] project_type unclassified — "
+            f"defaulting to new_opening"
+        )
+
+    # ── STAGE 2: BRANCHED QUERY BUILDING ──
+    # Different project types need different searches. A renovation
+    # reopening needs "$200 million renovation reopen 2026" queries, not
+    # "hotel opening 2025 2026 2027" queries that return stale 1981 info.
+    queries, missing = _build_queries_for_project_type(
+        hotel_name=hotel_name,
+        location=location,
+        project_type=project_type,
+        mode=mode,
+        current_city=city,
+        current_state=state,
+        current_opening_date=current_opening_date,
+        current_brand_tier=current_brand_tier,
+        current_room_count=current_room_count,
+        current_brand=brand,
+        search_name=search_name,
+    )
+    if mode == "smart" and not missing:
+        # Nothing to fetch in smart mode — all fields already populated
+        return result
+
+    # ── STAGE 3: SEARCH ──
+    all_snippets: list[str] = []
+    all_urls: list[str] = []
+    for q in queries[:5]:  # cap at 5 queries to manage Serper quota
+        results = await _search_web(q, max_results=6)
+        for r in results:
+            snippet = f"{r['title']}. {r['snippet']}"
+            all_snippets.append(snippet)
+            if r["url"]:
+                all_urls.append(r["url"])
+
+    if not all_snippets:
+        logger.info(f"Smart Fill [{hotel_name}]: no search results")
+        return result
+
+    logger.info(
+        f"Smart Fill [{hotel_name}] fed Gemini {len(all_snippets)} snippets "
+        f"(project_type={project_type}, queries={len(queries)})"
+    )
+
+    # ── STAGE 4: SPLIT EXTRACTION (data fields + entities sequential) ──
+    import asyncio as _asyncio
+
+    data_extraction = await _extract_fields_for_project_type(
+        hotel_name=hotel_name,
+        location=location,
+        project_type=project_type,
+        snippets=all_snippets[:15],
+        missing=[
+            f for f in missing if f not in ("management_company", "owner", "developer")
+        ],
+        mode=mode,
+        current_brand=brand,
+        current_opening_date=current_opening_date,
+        current_brand_tier=current_brand_tier,
+        current_room_count=current_room_count,
+    )
+    await _asyncio.sleep(2)
+    entity_extraction = await _extract_entities(
+        hotel_name=hotel_name,
+        location=location,
+        snippets=all_snippets[:15],
+    )
+    # Merge entity results into data extraction
+    extraction = data_extraction or {}
+    if entity_extraction:
+        _ENTITY_BLOCKLIST_KEYWORDS = {
+            "water and sewerage",
+            "wasa",
+            "government",
+            "ministry",
+            "municipality",
+            "sewage",
+            "utility",
+            "utilities",
+            "alg vacations corp",
+            "apple leisure group",
+            "paramount",
+            "disney",
+            "nbcuniversal",
+            "viacom",
+            "warner bros",
+        }
+        for field in ("management_company", "owner", "developer"):
+            val = entity_extraction.get(field)
+            if not val:
+                continue
+            val_lower = val.lower().strip()
+            blocked = any(kw in val_lower for kw in _ENTITY_BLOCKLIST_KEYWORDS)
+            if not blocked:
+                extraction[field] = val
+    if not extraction:
+        logger.warning(f"Smart Fill [{hotel_name}]: extraction returned nothing")
+        return result
+
+    logger.info(f"Smart Fill [{hotel_name}] raw Gemini: {extraction}")
+
+    # ── STAGE 5: MAP extraction to result dict ──
+    _map_extraction_to_result(
+        extraction=extraction,
+        result=result,
+        project_type=project_type,
+        mode=mode,
+        current_brand=brand,
+        current_opening_date=current_opening_date,
+        current_brand_tier=current_brand_tier,
+        current_room_count=current_room_count,
+    )
+
+    result["confidence"] = extraction.get("confidence", "medium")
+    result["source_url"] = all_urls[0] if all_urls else None
+
+    if result["changes"]:
+        logger.info(
+            f"Smart Fill ({mode}): {hotel_name} -> {', '.join(result['changes'])} "
+            f"(confidence: {result['confidence']}, project_type={project_type})"
+        )
+
+    return result
+
+
+async def _classify_project_type(
+    hotel_name: str,
+    location: str,
+    current_opening_date: str = "",
+) -> Optional[str]:
+    """
+    Stage 1: Quick classification call.
+
+    Runs a single focused Gemini call on 2-3 generic search results to decide
+    which project type we're dealing with. Cheap (small prompt, small response)
+    and high-value (drives every downstream decision).
+
+    Returns one of: new_opening, renovation, rebrand, reopening, conversion,
+    ownership_change, or None if classification fails.
+    """
+    # One general query for initial context
+    query = f'"{hotel_name}" {location} hotel news 2025 2026'
+    results = await _search_web(query, max_results=4)
+    if not results:
+        return None
+
+    # Compact snippet block — we don't need 25 snippets to classify
+    snippet_lines = [f"- {r['title']}. {r['snippet'][:200]}" for r in results[:4]]
+    snippets_text = "\n".join(snippet_lines)
+
+    prompt = f"""Classify this hotel project by reading the search snippets.
+
+HOTEL: {hotel_name}
+LOCATION: {location}
+KNOWN OPENING/REOPENING DATE: {current_opening_date or "(unknown)"}
+
+SNIPPETS:
+{snippets_text}
+
+Classify the project as ONE of:
+  - "new_opening"       = greenfield; property never existed before. Look for: "slated to open", "will open", "construction", "new-build"
+  - "renovation"        = existing hotel, closed for refurbishment, reopening. Look for: "closed for renovation", "$X million renovation", "reopen after"
+  - "rebrand"           = existing hotel, changing brand affiliation. Look for: "formerly Hilton", "converts to", "rebranded as", "now operating as"
+  - "reopening"         = reopening after hurricane / seasonal closure / other. Look for: "reopens after hurricane", "post-closure", "resumes operations"
+  - "conversion"        = changing hotel type (e.g. residences → hotel). Look for: "converted from", "transformed into"
+  - "ownership_change"  = sold to new owner, same brand/operator. Look for: "acquired by", "new owner", "sold to"
+
+Return JSON only:
+{{"project_type": "<one of above>", "confidence": "high|medium|low", "evidence": "one-sentence quote from snippet"}}
+
+If snippets don't clearly indicate, use your best inference. Default to "new_opening" if truly ambiguous.
+"""
+
+    classify_schema = {
+        "type": "object",
+        "properties": {
+            "project_type": {
+                "type": "string",
+                "enum": [
+                    "new_opening",
+                    "renovation",
+                    "rebrand",
+                    "reopening",
+                    "conversion",
+                    "ownership_change",
+                ],
+            },
+            "confidence": {
+                "type": "string",
+                "enum": ["high", "medium", "low"],
+            },
+            "evidence": {"type": "string"},
+        },
+        "required": ["project_type"],
+    }
+    try:
+        resp = await _call_gemini(
+            prompt, temperature=0.1, response_schema=classify_schema
+        )
+        if not resp:
+            return None
+        parsed = json.loads(resp)
+        pt = parsed.get("project_type")
+        if pt:
+            logger.debug(
+                f"Classifier for {hotel_name}: {pt} "
+                f"(conf={parsed.get('confidence')}, ev={parsed.get('evidence','')[:80]!r})"
+            )
+        return pt
+    except Exception as ex:
+        logger.debug(f"Classifier failed for {hotel_name}: {ex}")
+        return None
+
+
+def _build_queries_for_project_type(
+    hotel_name: str,
+    location: str,
+    project_type: str,
+    mode: str,
+    current_city: str,
+    current_state: str,
+    current_opening_date: str,
+    current_brand_tier: str,
+    current_room_count: int,
+    current_brand: str,
+    search_name: str = "",
+) -> tuple[list[str], list[str]]:
+    """
+    Stage 2: Branched query building.
+
+    Returns (queries, missing_fields). Each project type gets queries
+    tuned to the kind of evidence that actually exists for it.
+
+    For renovations: we want press about the renovation (re-open dates,
+    $$$ scope, operator continuation). For new openings: we want
+    developer/owner press + room count + opening announcements.
+    For rebrands: we want flag-change press + old/new brand names.
+    """
+    hn = hotel_name
+    hn = search_name.strip() if search_name and search_name.strip() else hotel_name
+    loc = location
+
+    # Determine what's missing (smart mode only hits missing fields)
+    missing: list[str] = []
+    if mode == "full":
+        missing = [
+            "opening_date",
+            "brand_tier",
+            "room_count",
+            "brand",
+            "management_company",
+            "owner",
+            "developer",
+            "description",
+        ]
+    else:
+        if not current_city:
+            missing.append("city")
+        if not current_state:
+            missing.append("state")
+        if not current_opening_date:
+            missing.append("opening_date")
+        if not current_room_count:
+            missing.append("room_count")
+        if not current_brand_tier or current_brand_tier in ("unknown", ""):
+            missing.append("brand_tier")
+        if not current_brand:
+            missing.append("brand")
+        # These are almost always worth re-fetching in both modes since the
+        # pipeline downstream depends on them heavily.
+        missing.append("management_company")
+        missing.append("owner")
+        missing.append("developer")
+
+    # ── Branch on project type ──
+    if project_type == "renovation":
+        queries = [
+            # Authoritative renovation announcement
+            f'"{hn}" {loc} renovation reopen 2026 (site:prnewswire.com OR site:businesswire.com OR site:hospitalitynet.org)',
+            # Scope and dollar figures
+            f'"{hn}" "$" million renovation refurbishment',
+            # Operator continuation during reno
+            f'"{hn}" {loc} "operated by" OR "managed by" OR "management"',
+            # Owner/investment entity behind the refresh
+            f'"{hn}" owner OR "ownership group" OR "investment"',
+            # Reopening-specific date search
+            f'"{hn}" reopening date November December 2026',
+        ]
+    elif project_type == "rebrand":
+        queries = [
+            f'"{hn}" {loc} rebrand OR converted OR "formerly" OR "now operating as"',
+            f'"{hn}" "will become" OR "will convert" OR "changes brand"',
+            f'"{hn}" {loc} "operated by" OR "managed by"',
+            f'"{hn}" owner OR "investment group"',
+            f'"{hn}" {loc} announcement 2025 2026',
+        ]
+    elif project_type == "reopening":
+        queries = [
+            f'"{hn}" {loc} reopen hurricane damage recovery',
+            f'"{hn}" reopening date 2025 2026',
+            f'"{hn}" {loc} "operated by" OR "managed by"',
+            f'"{hn}" {loc}',
+        ]
+    elif project_type == "conversion":
+        queries = [
+            f'"{hn}" {loc} conversion converted transformation',
+            f'"{hn}" "becomes" OR "transformed into"',
+            f'"{hn}" {loc} "operated by" OR "managed by"',
+            f'"{hn}" owner OR developer',
+        ]
+    elif project_type == "ownership_change":
+        queries = [
+            f'"{hn}" {loc} acquired sold new owner',
+            f'"{hn}" "acquired by" OR "purchased by" OR "new ownership"',
+            f'"{hn}" {loc} "operated by"',
+        ]
+    else:  # new_opening (default)
+        queries = [
+            # Opening date — official source first
+            f'"{hn}" opening date',
+            # Developer / owner hunt — no location restriction
+            f'"{hn}" owner OR developer OR "owned by" OR "developed by"',
+            # Operator (may differ from brand for soft brands)
+            f'"{hn}" {loc} "managed by" OR "operated by" OR "management company"',
+            # Authoritative announcement
+            f'"{hn}" {loc} opening (site:prnewswire.com OR site:businesswire.com OR site:hospitalitynet.org)',
+            # Tier positioning + rooms
+            f'"{hn}" {loc} "rooms" OR "keys" OR "suites" luxury boutique upscale',
+        ]
+
+    return queries, missing
+
+
+async def _extract_fields_for_project_type(
+    hotel_name: str,
+    location: str,
+    project_type: str,
+    snippets: list[str],
+    missing: list[str],
+    mode: str,
+    current_brand: str,
+    current_opening_date: str,
+    current_brand_tier: str,
+    current_room_count: int,
+) -> Optional[dict]:
+    """
+    Stage 4: Branched extraction.
+
+    Sends Gemini a project-type-specific prompt. Each branch explains
+    WHICH dates and entities matter for that project type — so Gemini
+    extracts the right things.
+
+    Uses structured output (enum-locked brand_tier) + response_schema
+    so the return is clean JSON.
+    """
+    snippets_text = "\n".join(f"- {s}" for s in snippets)
+
+    # ── Per-type guidance block ──
+    # Tells Gemini EXACTLY what to look for based on classification.
+    if project_type == "renovation":
+        type_guidance = """
+PROJECT TYPE: RENOVATION / REFURBISHMENT
+This hotel EXISTS and is CLOSED for renovation. You need:
+  - opening_date: the FUTURE REOPENING date (e.g. "December 18, 2026"), NOT the original opening year
+  - reopening_date: same as opening_date — explicit flag for renovation cases
+  - already_opened: true  (hotel was open before closure; reopening is the relevant date)
+  - management_company: the CURRENT operator (usually same as before closure)
+  - owner: the CURRENT property owner
+  - developer: typically empty for pure renovations (unless it's a major expansion)
+
+IMPORTANT: Do NOT return the original 1970s/1980s/1990s opening year as opening_date.
+The search snippets will likely mention the old date — IGNORE it for opening_date.
+The RELEVANT date is the reopening after the current renovation."""
+    elif project_type == "rebrand":
+        type_guidance = """
+PROJECT TYPE: REBRAND
+This existing hotel is switching brand affiliation. You need:
+  - opening_date: the date of the brand change / reflag
+  - brand: the NEW brand (e.g. "Autograph Collection" not the old brand)
+  - former_names: the OLD name(s) before rebrand
+  - management_company: the CURRENT or INCOMING operator
+  - owner: the property owner (usually unchanged during a rebrand)
+  - already_opened: true  (property was open under old brand)
+"""
+    elif project_type == "reopening":
+        type_guidance = """
+PROJECT TYPE: REOPENING (post-closure, hurricane, seasonal)
+This hotel closed due to an event and is reopening. You need:
+  - opening_date: the reopening date (future)
+  - already_opened: true
+  - management_company: the operator (usually same as pre-closure)
+  - owner: the owner
+"""
+    elif project_type == "conversion":
+        type_guidance = """
+PROJECT TYPE: CONVERSION (changing hotel type, e.g. residences→hotel)
+  - opening_date: when it opens AS A HOTEL
+  - brand: new brand after conversion
+  - management_company: incoming operator
+  - owner: property owner
+"""
+    elif project_type == "ownership_change":
+        type_guidance = """
+PROJECT TYPE: OWNERSHIP CHANGE (sold to new owner, brand/operator may stay)
+  - opening_date: typically not relevant (hotel stayed open)
+  - already_opened: true
+  - management_company: usually unchanged unless sale includes operator change
+  - owner: the NEW owner (the acquiring entity)
+"""
+    else:  # new_opening
+        type_guidance = """
+PROJECT TYPE: NEW OPENING (greenfield, first-ever opening)
+This is a brand-new hotel being built. You need:
+  - opening_date: the FIRST EVER opening date (e.g. "Q3 2026", "December 2026")
+  - already_opened: false  (hotel doesn't exist yet)
+  - management_company: the operator signed to run the hotel
+  - owner: the REAL ESTATE owner (often the developer, may be separate)
+  - developer: the entity building the property
+  - room_count: the total planned room count
+
+CRITICAL for pre-opening: the developer/owner is often the single most
+valuable contact (signs vendor contracts before operator takes over).
+Look for "developed by", "owner", "investment group", "ownership group".
+"""
+
+    # ── User-verified fields (SMART MODE ONLY) ──
+    # In smart mode: user manually set values that we should preserve unless
+    # snippets clearly contradict. In full mode: user explicitly asked to
+    # re-verify everything, so we pass NO preservation hints — let Gemini
+    # return its best understanding of all fields.
+    #
+    # Without this mode guard, passing "brand_tier = tier4_upscale" to Gemini
+    # causes it to conservatively omit every field adjacent to the user-set
+    # one (brand, brand_tier, mgmt_company, owner) even when snippets have
+    # clear evidence. Observed on Sandals Montego Bay where full refresh
+    # returned only 4/9 fields instead of 9/9 when user_edits_block was shown.
+    user_verified_block = ""
+    user_verified: list[str] = []
+    _SENTINELS = {"", "unknown", "none", "n/a", "tbd"}
+    if current_brand_tier and current_brand_tier.strip().lower() not in _SENTINELS:
+        user_verified.append(f"brand_tier = {current_brand_tier}")
+    if current_brand and current_brand.strip().lower() not in _SENTINELS:
+        user_verified.append(f"brand = {current_brand}")
+    if current_room_count and current_room_count > 0:
+        user_verified.append(f"room_count = {current_room_count}")
+    if user_verified:
+        user_verified_block = (
+            "\nCURRENT VALUES IN DB (use as context; update if snippets have better evidence):\n  "
+            + "; ".join(user_verified)
+            + "\n"
+        )
+    # ── Compact role definitions ──
+    role_defs = """
+ROLE DEFINITIONS:
+  brand            = flag/name displayed (e.g. "Sandals", "Hyatt Centric", "Nickelodeon Hotels & Resorts")
+  management_company = day-to-day operator (e.g. "Sandals Resorts International", "Commonwealth Hotels", "Lion Star Hospitality Inc.")
+  owner            = real-estate holder (e.g. "Birkla Investment Group", "Teramir Group"). For owner-operated chains (Sandals, many Hyatts), same as operator.
+  developer        = entity building/developing (often same as owner for new builds)
+  IGNORE: IP licensors like Paramount/Disney/Viacom that license brand names but don't run hotels
+  IGNORE: Corporate parents/holding companies (ALG Vacations Corp, Apple Leisure Group, Marriott International HQ)
+          Use the OPERATING brand instead (Royalton Luxury Resorts, not ALG Vacations Corp)
+"""
+
+    # ── Tier rules (compact) ──
+    tier_rules = """
+TIER RULES:
+  tier1_ultra_luxury: Ritz-Carlton, Four Seasons, Aman, Rosewood, Faena, St. Regis, Pendry, Auberge
+  tier2_luxury: Sandals, Royalton, Nickelodeon, Margaritaville, themed/experiential resorts, JW Marriott, Conrad, Kimpton
+  tier3_upper_upscale: Marriott, Hilton, Westin, Sheraton, Hyatt Regency, Hyatt Centric
+  tier4_upscale: Courtyard, Hilton Garden Inn, Hyatt Place, AC Hotels
+  tier5_upper_midscale: Hampton Inn, Holiday Inn Express
+  tier6_midscale: La Quinta, Wingate
+  tier7_economy: Motel 6, Days Inn
+"""
+
+    # Location rules — Caribbean leads often confuse Gemini (city vs parish vs country)
+    location_rules = """
+LOCATION RULES (critical for Caribbean):
+  - state = the administrative division (Florida, California, St. Ann Parish, Westmoreland)
+    NOT the city. "Montego Bay" is a CITY in Jamaica, not a state.
+  - For Caribbean islands: country = island name (Jamaica, Turks and Caicos, Barbados, etc.)
+    state = parish or administrative region (St. Ann, St. James, Westmoreland, etc.)
+  - For Puerto Rico / US Virgin Islands: country = "USA", state = territory name
+  - For mainland USA: country = "USA", state = full state name (Florida, not FL)
+  - City = the specific municipality (Montego Bay, Kissimmee, San Juan)
+
+Examples:
+  - Sandals Montego Bay → city: "Montego Bay", state: "St. James", country: "Jamaica"
+  - Hard Rock San Juan → city: "San Juan", state: "Puerto Rico", country: "USA"
+  - Hyatt Centric Cincinnati → city: "Cincinnati", state: "Ohio", country: "USA"
+  - Royalton CHIC Montego Bay → city: "Montego Bay", state: "St. James", country: "Jamaica"
+  - Royalton Vessence Barbados → city: "Holetown", state: "Saint James", country: "Barbados"
+  - Sandals Royal Barbados → city: "Hastings", state: "Christ Church", country: "Barbados"
+"""
+
+    data_fields = [
+        f for f in missing if f not in ("management_company", "owner", "developer")
+    ]
+
+    prompt = f"""You are extracting facts about a specific hotel from search snippets.
+
+HOTEL: {hotel_name}
+LOCATION: {location}
+{type_guidance}
+{user_verified_block}{role_defs}
+{tier_rules}
+{location_rules}
+
+STRUCTURED FIELDS TO EXTRACT: {', '.join(data_fields) if data_fields else 'none'}
+
+ENTITY FIELDS (scan every snippet for company names — these are mandatory):
+  management_company: who operates/manages this hotel day-to-day
+  owner: who owns the real estate
+  developer: who is building/developing the property
+SEARCH SNIPPETS ({len(snippets)} results):
+{snippets_text}
+
+INSTRUCTIONS:
+- Read all snippets carefully
+- Fill fields when snippets provide evidence (even from one snippet)
+- For enums (brand_tier, project_type), use ONE of the valid values or omit
+- For comma-concatenated entities (e.g. "Lion Star, Paramount, Teramir"), split
+  them and put EACH in its correct role field — do not return the whole list
+- For owner-operated chains (Sandals, many Hyatts), same company can be both
+  management_company AND owner — that's fine, list it in both
+- If snippets describe a joint venture, list ONLY the property-owning entity
+  in owner (ignore IP licensors like Paramount for Nickelodeon)
+- Omit fields you truly cannot infer from snippets
+
+Return JSON:
+"""
+
+    schema = {
+        "type": "object",
+        "properties": {
+            "opening_date": {"type": "string"},
+            "reopening_date": {"type": "string"},
+            "opened_date": {"type": "string"},
+            "already_opened": {"type": "boolean"},
+            "brand_tier": {
+                "type": "string",
+                "enum": [
+                    "tier1_ultra_luxury",
+                    "tier2_luxury",
+                    "tier3_upper_upscale",
+                    "tier4_upscale",
+                    "tier5_upper_midscale",
+                    "tier6_midscale",
+                    "tier7_economy",
+                ],
+            },
+            "room_count": {"type": "integer"},
+            "brand": {"type": "string"},
+            "official_name": {"type": "string"},
+            "search_name": {"type": "string"},
+            "management_company": {"type": "string"},
+            "owner": {"type": "string"},
+            "developer": {"type": "string"},
+            "city": {"type": "string"},
+            "state": {"type": "string"},
+            "country": {"type": "string"},
+            "description": {"type": "string"},
+            "former_names": {"type": "array", "items": {"type": "string"}},
+            "confidence": {
+                "type": "string",
+                "enum": ["high", "medium", "low"],
+            },
+        },
+    }
+
+    try:
+        resp = await _call_gemini(prompt, temperature=0.1, response_schema=schema)
+        if not resp:
+            return None
+        parsed = json.loads(resp)
+        return parsed if isinstance(parsed, dict) else None
+    except Exception as ex:
+        logger.warning(f"Extraction failed for {hotel_name}: {ex}")
+        return None
+
+
+async def _extract_entities(
+    hotel_name: str,
+    location: str,
+    snippets: list[str],
+) -> Optional[dict]:
+    """
+    Focused entity extraction — management_company, owner, developer only.
+    Runs in parallel with _extract_fields_for_project_type so entities
+    never compete with date/tier/rooms for Gemini's attention.
+    """
+    snippets_text = "\n".join(f"- {s}" for s in snippets)
+
+    prompt = f"""You are identifying the operator, owner, and developer of a hotel from search snippets.
+
+HOTEL: {hotel_name}
+LOCATION: {location}
+
+ROLE DEFINITIONS:
+  management_company = day-to-day hotel operator (e.g. "Lion Star Hospitality Inc.", "Commonwealth Hotels")
+  owner              = real estate holder (e.g. "Teramir Group", "Birkla Investment Group")
+  developer          = entity building the property (e.g. "Everest Place", often same as owner)
+
+RULES:
+  - IGNORE IP licensors: Paramount, Disney, Viacom, NBCUniversal — they license brand names, NOT hotel owners
+  - IGNORE corporate holding parents: ALG Vacations Corp, Apple Leisure Group — use the operating brand instead
+  - IGNORE government utilities, water authorities, sewage authorities, municipal services
+  - IGNORE entities only mentioned in legal disputes, complaints, or infrastructure context
+  - For comma-separated lists — assign each to the correct role
+  - Owner-operated chains (Sandals, Blue Diamond, Hyatt): same entity can be both management_company AND owner
+  - owner = the hotel real estate owner/investor, NOT a utility or government body
+
+SEARCH SNIPPETS:
+{snippets_text}
+
+Return JSON with only the fields you can find evidence for:
+"""
+
+    schema = {
+        "type": "object",
+        "properties": {
+            "management_company": {"type": "string"},
+            "owner": {"type": "string"},
+            "developer": {"type": "string"},
+        },
+    }
+
+    try:
+        resp = await _call_gemini(prompt, temperature=0.1, response_schema=schema)
+        if not resp:
+            return None
+        parsed = json.loads(resp)
+        return parsed if isinstance(parsed, dict) else None
+    except Exception as ex:
+        logger.warning(f"Entity extraction failed for {hotel_name}: {ex}")
+        return None
+
+
+def _map_extraction_to_result(
+    extraction: dict,
+    result: dict,
+    project_type: str,
+    mode: str,
+    current_brand: str,
+    current_opening_date: str,
+    current_brand_tier: str,
+    current_room_count: int,
+) -> None:
+    """
+    Stage 5: Copy extracted fields into the result dict.
+
+    Handles:
+      - Entity cleanup (strip comma-concat, remove IP licensor noise)
+      - Project-type-aware date handling (reopening vs opening)
+      - User-edit protection (don't overwrite user's valid manual value
+        with a guess)
+      - Brand/operator deduplication (exact-match only, so
+        "Sandals Resorts International" passes for brand="Sandals")
+
+    Mutates `result` in place. Appends field names to result['changes'].
+    """
+    # IP licensors that should never appear as mgmt/owner/developer
+    IP_LICENSORS = {
+        "paramount",
+        "paramount global",
+        "paramount studios",
+        "disney",
+        "walt disney",
+        "warner bros",
+        "warner media",
+        "nbcuniversal",
+        "comcast",
+        "sony pictures",
+        "viacom",
+        "viacomcbs",
+        "nickelodeon",
+        "alg vacations corp",
+        "apple leisure group",
+        # Utilities, government bodies, municipal services
+        "water and sewerage authority",
+        "wasa",
+        "government",
+        "ministry",
+        "municipality",
+        "authority",
+        "sewage",
+        "utility",
+        "utilities",
+    }
+
+    def _clean_entity(raw, hotel_brand):
+        """Clean up entity: split commas, drop licensors, reject exact brand."""
+        if not raw or not isinstance(raw, str):
+            return ""
+        parts = [p.strip() for p in raw.split(",") if p.strip()]
+        brand_l = (hotel_brand or "").strip().lower()
+        for part in parts:
+            pl = part.lower().strip()
+            if pl in IP_LICENSORS:
+                continue
+            if (
+                brand_l
+                and pl == brand_l
+                and not any(
+                    chain in brand_l
+                    for chain in (
+                        "six senses",
+                        "sandals",
+                        "beaches",
+                        "aman",
+                        "four seasons",
+                        "rosewood",
+                        "auberge",
+                        "hyatt",
+                        "marriott",
+                        "hilton",
+                    )
+                )
+            ):
+                continue
+            return part
+        return ""
+
+    # ── Post-extraction reclassification ──
+    # The classifier runs on 2-3 generic snippets and can fail (rate limits,
+    # ambiguous early signal). The extraction runs on 15 focused snippets
+    # and often has clearer evidence. If extraction reveals this is a
+    # reopening (already_opened=True + future reopening_date), override the
+    # classifier's guess REGARDLESS of what it originally said.
+    #
+    # Real case caught: Sandals Montego Bay — classifier 429-errored,
+    # defaulted to new_opening. Extraction returned already_opened=True,
+    # reopening_date='December 2026'. Without this override, the code would
+    # expire the lead using opened_date=1981 (the 1981 first-opening year).
+    REOPENING_TYPES = {
+        "renovation",
+        "rebrand",
+        "reopening",
+        "conversion",
+        "ownership_change",
+    }
+    reopening_signal = (extraction.get("reopening_date") or "").strip()
+    already_opened_signal = bool(extraction.get("already_opened"))
+
+    # If classifier said new_opening BUT extraction shows reopening evidence,
+    # upgrade to "renovation" (the safest default reopening type).
+    if (
+        project_type not in REOPENING_TYPES
+        and reopening_signal
+        and already_opened_signal
+    ):
+        logger.info(
+            f"Smart Fill: extraction evidence overrides classifier. "
+            f"Was project_type={project_type!r} but extraction returned "
+            f"already_opened=True + reopening_date={reopening_signal!r} → "
+            f"reclassifying as 'renovation'"
+        )
+        project_type = "renovation"
+        result["project_type"] = "renovation"
+        if "project_type" not in result["changes"]:
+            result["changes"].append("project_type")
+
+    # ── opening_date / reopening_date handling (project-type aware) ──
+    # For reopening-type projects, prefer reopening_date if available
+    if project_type in REOPENING_TYPES:
+        reopening = (extraction.get("reopening_date") or "").strip()
+        opening = (extraction.get("opening_date") or "").strip()
+        effective_date = reopening or opening
+        if effective_date:
+            result["opening_date"] = effective_date
+            result["reopening_date"] = effective_date
+            result["timeline_label"] = get_timeline_label(effective_date)
+            if "opening_date" not in result["changes"]:
+                result["changes"].append("opening_date")
+            if "reopening_date" not in result["changes"]:
+                result["changes"].append("reopening_date")
+    else:
+        # new_opening: straight opening_date
+        opening = (extraction.get("opening_date") or "").strip()
+        if opening and opening.lower() not in ("unknown", "tbd", "n/a"):
+            if mode == "full" or not current_opening_date:
+                result["opening_date"] = opening
+                result["timeline_label"] = get_timeline_label(opening)
+                if "opening_date" not in result["changes"]:
+                    result["changes"].append("opening_date")
+
+    # ── already_opened flag ──
+    # For reopening types, this flag is not actionable for the UI route
+    # handler — we've already routed via is_live_reopening above. Only set
+    # the flag when it's a genuinely-opened lead (not a reopening).
+    if project_type not in REOPENING_TYPES:
+        if extraction.get("already_opened") is not None:
+            result["already_opened"] = bool(extraction["already_opened"])
+    # else: skip setting already_opened so scraping.py doesn't hit
+    # the expire-lead branch. reopening_date above handles routing.
+    opened_date = (extraction.get("opened_date") or "").strip()
+    if opened_date:
+        result["opened_date"] = opened_date
+
+    # ── brand_tier (enum-forced) ──
+    # Full mode: Gemini's answer wins (this is an intentional refresh)
+    # Smart mode: only fill if current is empty/unknown (don't touch user values)
+    VALID_TIERS = {
+        "tier1_ultra_luxury",
+        "tier2_luxury",
+        "tier3_upper_upscale",
+        "tier4_upscale",
+        "tier5_upper_midscale",
+        "tier6_midscale",
+        "tier7_economy",
+    }
+    INVALID_TIER_SENTINELS = {"", "unknown", "none", "n/a", "tbd"}
+    new_tier = (extraction.get("brand_tier") or "").strip().lower()
+    current_tier_l = (current_brand_tier or "").strip().lower()
+    if new_tier in VALID_TIERS:
+        if mode == "full":
+            # Full Refresh = trust Gemini's latest classification
+            result["brand_tier"] = extraction["brand_tier"]
+            if "brand_tier" not in result["changes"]:
+                result["changes"].append("brand_tier")
+        elif current_tier_l in INVALID_TIER_SENTINELS:
+            # Smart mode: only fill if current is empty/unknown
+            result["brand_tier"] = extraction["brand_tier"]
+            if "brand_tier" not in result["changes"]:
+                result["changes"].append("brand_tier")
+        # else: smart mode + current is valid → preserve existing
+
+    # ── room_count ──
+    try:
+        new_rc = int(extraction.get("room_count") or 0)
+    except (TypeError, ValueError):
+        new_rc = 0
+    if new_rc > 0:
+        if mode == "full" or not current_room_count or current_room_count <= 0:
+            result["room_count"] = new_rc
+            if "room_count" not in result["changes"]:
+                result["changes"].append("room_count")
+
+    # ── brand ──
+    new_brand = (extraction.get("brand") or "").strip()
+    if new_brand and new_brand.lower() not in ("unknown", "n/a", "none"):
+        if mode == "full" or not current_brand:
+            result["brand"] = new_brand
+            if "brand" not in result["changes"]:
+                result["changes"].append("brand")
+
+    # ── city / state / country ──
+    for loc_field in ("city", "state", "country"):
+        val = (extraction.get(loc_field) or "").strip()
+        if val and val.lower() not in ("unknown", "n/a", ""):
+            result[loc_field] = val
+            if loc_field not in result["changes"]:
+                result["changes"].append(loc_field)
+
+    # ── management_company / owner / developer (cleaned) ──
+    # These use _clean_entity to handle comma-concat and IP licensors.
+    # The brand value we pass in is whatever Gemini returned (or user had).
+    cleaning_brand = result.get("brand") or current_brand or ""
+    for entity_field in ("management_company", "owner", "developer"):
+        raw = extraction.get(entity_field)
+        if not raw:
+            continue
+        cleaned = _clean_entity(raw, cleaning_brand)
+        if cleaned:
+            result[entity_field] = cleaned
+            if entity_field not in result["changes"]:
+                result["changes"].append(entity_field)
+        else:
+            logger.warning(
+                f"Smart Fill cleaned {entity_field} to empty: "
+                f"raw={raw!r} brand={cleaning_brand!r} (all parts were "
+                f"licensors or exact brand match)"
+            )
+
+    # ── description ──
+    desc = (extraction.get("description") or "").strip()
+    if desc:
+        result["description"] = desc[:500]
+        if "description" not in result["changes"]:
+            result["changes"].append("description")
+
+    # ── official_name / search_name / former_names ──
+    for name_field in ("official_name", "search_name"):
+        val = (extraction.get(name_field) or "").strip()
+        if val:
+            result[name_field] = val
+            if name_field not in result["changes"]:
+                result["changes"].append(name_field)
+    fn = extraction.get("former_names")
+    if isinstance(fn, list) and fn:
+        result["former_names"] = fn
+        result["changes"].append("former_names")
+
+
+# ═══════════════════════════════════════════════════════════════
+# LEGACY / DEPRECATED: _enrich_lead_data_legacy  (kept for reference)
+# The new enrich_lead_data above is the active implementation.
+# ═══════════════════════════════════════════════════════════════
+
+
+async def _enrich_lead_data_legacy(
     hotel_name: str,
     city: str = "",
     state: str = "",
@@ -699,20 +1681,40 @@ Confidence levels: "high" (multiple sources agree), "medium" (one source), "low"
         result["opened_date"] = parsed.get("opened_date", "")
         result["changes"].append("already_opened")
 
-        # If it's a renovation/hurricane closure, capture the reopening date
-        # and project type — do NOT use the date as an opening_date
-        if parsed.get("project_type") == "renovation":
-            result["project_type"] = "renovation"
-            result["changes"].append("project_type")
+        # If it's a renovation / rebrand / reopening, capture the reopening
+        # date and project type. Surfaces both `opening_date` (for timeline
+        # calc) AND `reopening_date` (for scraping.py's is_live_reopening
+        # check that decides whether to expire or keep the lead live).
+        _REOPENING_PROJECT_TYPES = {
+            "renovation",
+            "rebrand",
+            "reopening",
+            "conversion",
+            "ownership_change",
+        }
+        parsed_proj_type = (parsed.get("project_type") or "").strip().lower()
+        if parsed_proj_type in _REOPENING_PROJECT_TYPES:
+            result["project_type"] = parsed_proj_type
+            if "project_type" not in result["changes"]:
+                result["changes"].append("project_type")
             # Use reopening_date as the opening_date so the lead shows
-            # the correct date but is classified as renovation
-            reopening = parsed.get("reopening_date", "")
-            if reopening and "opening_date" not in result:
-                result["opening_date"] = reopening
-                result["changes"].append("opening_date")
+            # the correct date but is classified as a reopening.
+            reopening = parsed.get("reopening_date", "").strip()
+            if reopening:
+                # CRITICAL: expose reopening_date on result so the route
+                # handler (scraping.py) can detect this is a live reopening
+                # and avoid the expire-the-lead branch.
+                result["reopening_date"] = reopening
+                if "reopening_date" not in result["changes"]:
+                    result["changes"].append("reopening_date")
+                # Also write opening_date if nothing else claimed it
+                if "opening_date" not in result:
+                    result["opening_date"] = reopening
+                    result["changes"].append("opening_date")
             logger.info(
-                f"Renovation/closure detected for {hotel_name} — "
-                f"reopening: {reopening}. Classified as renovation, not new build."
+                f"Reopening-type project ({parsed_proj_type}) detected for "
+                f"{hotel_name} — reopening_date={reopening!r}. "
+                f"Classified as reopening, not new build."
             )
 
     # ── NAME INTELLIGENCE — always extracted ──
@@ -727,35 +1729,43 @@ Confidence levels: "high" (multiple sources agree), "medium" (one source), "low"
         result["search_name"] = str(parsed["search_name"]).strip()
         result["changes"].append("search_name")
 
-    # Known IP licensors / brand companies that should NEVER appear as
-    # management_company or owner values. Gemini occasionally conflates
-    # the IP licensor (e.g. Paramount for Nickelodeon brand) with the
-    # actual property owner. This blocklist catches that.
+    # Known IP licensors — media/entertainment companies that license their
+    # brand/characters to hotel operators but do NOT own or operate hotels.
+    # These should NEVER appear as management_company, owner, or developer.
+    #
+    # Real case: Nickelodeon Hotels & Resorts is branded with Paramount IP,
+    # operated by Lion Star Hospitality, owned by Teramir Group. Gemini
+    # occasionally lists Paramount as owner — that's wrong because Paramount
+    # licenses the Nickelodeon brand but has no hotel real estate.
+    #
+    # NOTE: We deliberately DO NOT include hotel brand parents like Marriott,
+    # Hilton, Hyatt, IHG here. Those brands legitimately own and operate many
+    # of their properties (e.g. Hyatt Regency Waikiki IS owned+operated by
+    # Hyatt). The earlier version of this list was over-aggressive and
+    # filtered out correct answers like "Sandals Resorts International" for
+    # Sandals-owned properties. Let Gemini's classification stand for those.
     _IP_LICENSOR_NAMES = {
         "paramount",
         "paramount global",
         "paramount studios",
+        "paramount pictures",
         "disney",
         "walt disney",
+        "walt disney company",
         "warner bros",
         "warner media",
+        "warner bros. discovery",
         "nbcuniversal",
-        "universal",
-        "nickelodeon",
-        "viacom",
+        "nbc universal",
+        "comcast",
         "sony pictures",
         "columbia pictures",
         "fox",
-        "marriott international",
-        "marriott",  # brand parent — not hotel owner
-        "hilton worldwide",
-        "hilton",
-        "hyatt hotels corporation",
-        "hyatt",
-        "ihg hotels & resorts",
-        "ihg",
-        "accor",
-        "accor hotels",
+        "viacom",
+        "viacomcbs",
+        # Nickelodeon is the brand itself — included for cases where Gemini
+        # returns it as mgmt_company instead of brand.
+        "nickelodeon",
     }
 
     def _clean_entity_field(raw: str, field_name: str, hotel_brand: str = "") -> str:
@@ -764,7 +1774,14 @@ Confidence levels: "high" (multiple sources agree), "medium" (one source), "low"
         - Strips comma-concatenated lists (Gemini sometimes returns
           "Lion Star, Everest Place, Paramount" — nonsense)
         - Removes IP licensor names (Paramount, Disney, etc.)
-        - Rejects the brand name itself (if Gemini confused brand with operator)
+        - Rejects the brand name itself (if Gemini literally returned the
+          brand where operator should be)
+
+        IMPORTANT: The brand-check uses EXACT equality, not substring match.
+        "Sandals Resorts International" is a legit operator even though it
+        contains "Sandals" as substring. Same for "Royalton Hotels & Resorts",
+        "Marriott Vacations Worldwide" (different from just "Marriott"), etc.
+        Only reject when Gemini returned literally the brand name unchanged.
         """
         if not raw:
             return ""
@@ -773,12 +1790,14 @@ Confidence levels: "high" (multiple sources agree), "medium" (one source), "low"
         brand_lower = (hotel_brand or "").strip().lower()
         for part in parts:
             pl = part.lower().strip()
-            # Reject IP licensors and brand matches
+            # Reject IP licensors (Paramount, Disney, media companies)
             if pl in _IP_LICENSOR_NAMES:
                 continue
-            if brand_lower and (pl == brand_lower or brand_lower in pl):
-                # e.g. rejecting "Nickelodeon Hotels & Resorts" as mgmt_company
-                # when brand IS "Nickelodeon Hotels & Resorts"
+            # Reject ONLY exact brand match — "Sandals Resorts International"
+            # is a VALID operator that happens to contain "Sandals" (brand).
+            # Same for "Royalton Hotels & Resorts", "Playa Hotels & Resorts",
+            # "Marriott International", etc. Substring match was over-eager.
+            if brand_lower and pl == brand_lower:
                 continue
             # Accept the first clean entity we find
             return part
@@ -920,6 +1939,7 @@ async def batch_smart_fill(limit: int = 10, mode: str = "smart") -> Dict:
                 current_brand_tier=lead.brand_tier or "",
                 current_room_count=lead.room_count or 0,
                 mode=mode,
+                search_name=lead.search_name or "",
             )
 
             if not enriched.get("changes"):

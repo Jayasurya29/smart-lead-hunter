@@ -66,6 +66,13 @@ class PotentialLead(Base):
     timeline_label = Column(
         String(10)
     )  # HOT, URGENT, WARM, COOL, LATE, EXPIRED, TBD (computed on save/rescore)
+    # Project type (migration 015) — distinguishes how the property is coming
+    # to market. Drives whether timeline is based on opening_date (new_opening,
+    # greenfield) or reopening_date (renovation, rebrand, reopening). Also
+    # surfaced in UI so sales knows what kind of deal this is.
+    # Values: new_opening | renovation | rebrand | reopening | conversion |
+    #         ownership_change | residences_only | "" (unknown)
+    project_type = Column(String(30))
     room_count = Column(Integer)
     revenue_opening = Column(Float)  # Pre-calculated: new opening JA addressable
     revenue_annual = Column(Float)  # Pre-calculated: annual recurring JA addressable
@@ -158,6 +165,7 @@ class PotentialLead(Base):
             "opening_date": self.opening_date,
             "opening_year": self.opening_year,
             "timeline_label": self.timeline_label,
+            "project_type": self.project_type,  # new_opening, renovation, rebrand, etc.
             "room_count": self.room_count,
             "description": self.description,
             # Key Insights - THE IMPORTANT STUFF!
