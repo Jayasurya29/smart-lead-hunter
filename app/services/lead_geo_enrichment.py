@@ -390,6 +390,8 @@ async def geocode_hotel(
     city: Optional[str],
     state: Optional[str],
     country: Optional[str],
+    address: Optional[str] = None,
+    zip_code: Optional[str] = None,
 ) -> Optional[tuple[float, float]]:
     """
     Geocode a hotel lead using Geoapify structured search + strict validation.
@@ -452,7 +454,32 @@ async def geocode_hotel(
             logger.warning(f"Geoapify query failed for '{text}': {e}")
             return None
 
-    # Attempt 1: Structured — city + state + country (most precise for US)
+    # Attempt 0: Full street address (pinpoint building-level accuracy)
+    if address and address.strip():
+        parts = [address.strip()]
+        if zip_code:
+            parts.append(zip_code.strip())
+        elif city and state_clean:
+            parts.extend([city, state_clean])
+        q = ", ".join(parts) + f", {country_norm}"
+        result = await _try_query(q)
+        if result:
+            logger.info(
+                f"Geocoded (address): '{hotel_name}' → ({result[0]:.4f}, {result[1]:.4f})"
+            )
+            return result
+
+    # Attempt 1: Hotel name + city + state (most precise — finds actual building)
+    if city and state_clean:
+        q = f"{hotel_name}, {city}, {state_clean}, {country_norm}"
+        result = await _try_query(q)
+        if result:
+            logger.info(
+                f"Geocoded (name+city): '{hotel_name}' → ({result[0]:.4f}, {result[1]:.4f})"
+            )
+            return result
+
+    # Attempt 2: City + state + country (fallback to city level for US)
     if city and state_clean:
         q = f"{city}, {state_clean}, {country_norm}"
         result = await _try_query(q)
@@ -495,6 +522,8 @@ async def enrich_lead_geo(
     country: Optional[str],
     brand: Optional[str] = None,
     existing_website: Optional[str] = None,
+    address: Optional[str] = None,
+    zip_code: Optional[str] = None,
 ) -> dict:
     """
     Run both website discovery and geocoding for a lead.
@@ -511,7 +540,7 @@ async def enrich_lead_geo(
         if not existing_website
         else _noop(existing_website)
     )
-    coords_coro = geocode_hotel(hotel_name, city, state, country)
+    coords_coro = geocode_hotel(hotel_name, city, state, country, address, zip_code)
 
     website_result, coords_result = await asyncio.gather(
         website_coro, coords_coro, return_exceptions=True

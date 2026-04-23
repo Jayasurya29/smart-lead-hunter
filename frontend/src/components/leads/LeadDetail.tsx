@@ -126,7 +126,12 @@ export default function LeadDetail({ leadId, tab, onClose }: Props) {
           <span className={cn('inline-flex px-2 py-0.5 rounded text-xs font-bold', getTimelineColor(timeline))}>
             {timeline}
           </span>
-          {/* Project type badge */}
+          {/* hotel and Project type badge */}
+          {lead.hotel_type && (
+            <span className="inline-flex px-2 py-0.5 rounded text-xs font-bold bg-stone-100 text-stone-600 capitalize">
+              {lead.hotel_type}
+            </span>
+          )}
           {lead.project_type && (() => {
             const typeMap: Record<string, { label: string; color: string }> = {
               new_opening:      { label: 'New Build',  color: 'bg-emerald-100 text-emerald-700' },
@@ -333,7 +338,7 @@ function OverviewTab({ lead, leadId, contactList, onEnrich, enriching, onSmartFi
   lead: Lead; leadId: number; contactList: Contact[]; onEnrich: () => void; enriching: boolean
   onSmartFill: (mode: 'smart' | 'full') => void; smartFilling: boolean; smartFillResult?: { status: string; changes?: string[]; confidence?: string }
 }) {
-  const hasMissing = !lead.brand_tier || lead.brand_tier === 'unknown' || !lead.opening_date || !lead.room_count || !lead.management_company || !lead.owner || !lead.developer
+  const hasMissing = !lead.brand_tier || lead.brand_tier === 'unknown' || !lead.opening_date || !lead.room_count || !lead.management_company || !lead.owner || !lead.developer || !lead.address
   const qc = useQueryClient()
   const [geoEnriching, setGeoEnriching] = useState(false)
   const [geoResult, setGeoResult] = useState<{website?: string; lat?: number; lng?: number} | null>(null)
@@ -350,6 +355,7 @@ function OverviewTab({ lead, leadId, contactList, onEnrich, enriching, onSmartFi
           {lead.management_company && <Field icon={Building2} label="Mgmt Co."   value={lead.management_company} />}
           {lead.developer         && <Field icon={Building2} label="Developer"   value={lead.developer} />}
           {lead.owner             && <Field icon={User}      label="Owner"       value={lead.owner} />}
+          {lead.address           && <Field icon={MapPin}    label="Address"     value={lead.address + (lead.zip_code ? ` ${lead.zip_code}` : '')} />}
         </div>
 
         {/* Smart Fill + Full Refresh — compact action row */}
@@ -1224,6 +1230,8 @@ function EditTab({ lead, leadId }: { lead: Lead; leadId: number }) {
     management_company: lead.management_company || '',
     developer:          lead.developer || '',
     owner:              lead.owner || '',
+    address:            lead.address || '',
+    zip_code:           lead.zip_code || '',
   })
 
   function handleChange(key: string, val: string) {
@@ -1262,6 +1270,8 @@ function EditTab({ lead, leadId }: { lead: Lead; leadId: number }) {
         <EditField label="Mgmt Co."   value={form.management_company} onChange={(v) => handleChange('management_company', v)} span={2} />
         <EditField label="Developer"  value={form.developer}     onChange={(v) => handleChange('developer', v)} />
         <EditField label="Owner"      value={form.owner}         onChange={(v) => handleChange('owner', v)} />
+        <EditField label="Address"    value={form.address}       onChange={(v) => handleChange('address', v)} span={2} />
+        <EditField label="Zip Code"   value={form.zip_code}      onChange={(v) => handleChange('zip_code', v)} />
       </div>
 
       <div className="flex items-center gap-3 pt-2">

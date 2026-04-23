@@ -269,6 +269,8 @@ class LeadUpdate(BaseModel):
     management_company: Optional[str] = None
     developer: Optional[str] = None
     owner: Optional[str] = None
+    address: Optional[str] = None
+    zip_code: Optional[str] = None
     # Web presence
     hotel_website: Optional[str] = None
     source_url: Optional[str] = None

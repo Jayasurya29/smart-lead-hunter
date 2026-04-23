@@ -668,6 +668,8 @@ async def save_lead_to_db(
             country=lead.country,
             brand=lead.brand,
             existing_website=lead.hotel_website,
+            address=getattr(lead, "address", None),
+            zip_code=getattr(lead, "zip_code", None),
         )
         if geo.get("latitude") or geo.get("hotel_website"):
             await session.execute(

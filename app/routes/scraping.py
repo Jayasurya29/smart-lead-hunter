@@ -1847,6 +1847,12 @@ async def smart_fill_lead(lead_id: int, request: Request, _csrf=Depends(require_
         if "developer" in enriched:
             if mode == "full" or not lead.developer:
                 lead.developer = enriched["developer"]
+        if "address" in enriched:
+            if mode == "full" or not lead.address:
+                lead.address = enriched["address"]
+        if "zip_code" in enriched:
+            if mode == "full" or not lead.zip_code:
+                lead.zip_code = enriched["zip_code"]
         if "former_names" in enriched:
             lead.former_names = enriched["former_names"]
 

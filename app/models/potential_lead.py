@@ -89,6 +89,8 @@ class PotentialLead(Base):
     # Name intelligence (filled by SmartFill)
     search_name = Column(String(255))  # Stripped name for search queries ("Kali Hotel")
     former_names = Column(JSONB)  # Previous hotel names ["Montage Kapalua Bay"]
+    address = Column(Text)  # Street address (e.g. "3001 Turtle Creek Blvd")
+    zip_code = Column(String(20))  # Postal code for precise geocoding
 
     # Scoring (0-100)
     lead_score = Column(
@@ -175,6 +177,8 @@ class PotentialLead(Base):
             "developer": self.developer,
             "owner": self.owner,
             "search_name": self.search_name,
+            "address": self.address,
+            "zip_code": self.zip_code,
             "former_names": self.former_names,
             # Contact
             "contact_name": self.contact_name,

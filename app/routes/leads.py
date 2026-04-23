@@ -396,8 +396,9 @@ async def enrich_lead_geo_route(
         country=lead.country,
         brand=lead.brand,
         existing_website=lead.hotel_website,
+        address=lead.address,
+        zip_code=lead.zip_code,
     )
-
     await db.execute(
         sql_update(PotentialLead)
         .where(PotentialLead.id == lead_id)
