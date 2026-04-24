@@ -113,6 +113,8 @@ class TestLeadResponseSchema:
         lead.management_company = "Test Management"
         lead.developer = "Test Developer"
         lead.owner = "Test Owner"
+        lead.address = "1435 Brickell Ave"
+        lead.zip_code = "33131"
         lead.description = None
         lead.notes = None
         lead.timeline_label = "HOT"
