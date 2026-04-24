@@ -756,16 +756,12 @@ PROJECT TYPE: NEW OPENING (greenfield, first-ever opening)
             + "\n"
         )
 
-    tier_rules = """
-TIER RULES:
-  tier1_ultra_luxury: Ritz-Carlton, Four Seasons, Aman, Rosewood, Faena, St. Regis, Pendry, Auberge
-  tier2_luxury: Sandals, Royalton, Nickelodeon, Margaritaville, themed/experiential resorts, JW Marriott, Conrad, Kimpton, all-inclusive luxury
-  tier3_upper_upscale: Marriott, Hilton, Westin, Sheraton, Hyatt Regency, Hyatt Centric
-  tier4_upscale: Courtyard, Hilton Garden Inn, Hyatt Place, AC Hotels
-  tier5_upper_midscale: Hampton Inn, Holiday Inn Express
-  tier6_midscale: La Quinta, Wingate
-  tier7_economy: Motel 6, Days Inn
-"""
+    # TIER RULES generated from canonical_tiers.py (STR 2024 + CBRE-derived).
+    # Previously this was hardcoded and conflicted with scorer.py + brand_registry.py.
+    # All three sources now share the same tier truth via canonical_tiers.CANONICAL_TIERS.
+    from app.config.canonical_tiers import build_tier_rules_prompt_block
+
+    tier_rules = "\n" + build_tier_rules_prompt_block()
 
     location_rules = """
 LOCATION RULES:

@@ -1496,7 +1496,12 @@ async def discovery_stream(request: Request):
         try:
             while True:
                 if await request.is_disconnected():
-                    break
+                    logger.info(
+                        f"Discovery stream client disconnected "
+                        f"(discovery_id={discovery_id}). "
+                        f"Background task continues."
+                    )
+                    return
 
                 # Send any new messages since last cursor position
                 while cursor < len(messages):
@@ -1518,7 +1523,21 @@ async def discovery_stream(request: Request):
 
                 await asyncio.sleep(0.5)
 
+        except asyncio.CancelledError:
+            # Client closed the tab/modal/browser. This is normal, NOT an
+            # error. The background discovery task keeps running. Don't
+            # log as error, don't send a fake "Stream error" complete
+            # message to the UI — the UI has already disconnected anyway.
+            logger.info(
+                f"Discovery stream cancelled by client "
+                f"(discovery_id={discovery_id}). "
+                f"Background task continues in the background."
+            )
+            raise  # Re-raise so the ASGI layer finalizes cleanly
         except BaseException as e:
+            # A real error in the stream handler itself (not a disconnect).
+            # Log as error and try to notify the UI if the connection is
+            # still up.
             logger.error(f"Discovery stream error: {e}")
             try:
                 yield f"data: {json.dumps({'type': 'complete', 'message': f'Stream error: {safe_error(e)}', 'stats': {}})}\n\n"

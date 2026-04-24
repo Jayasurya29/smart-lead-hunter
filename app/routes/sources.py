@@ -184,3 +184,98 @@ async def get_scrape_logs(
         log_response.source_name = src_name
         response_list.append(log_response)
     return response_list
+
+
+# -----------------------------------------------------------------------------
+# Discovery Query Intelligence
+# -----------------------------------------------------------------------------
+
+
+@router.get("/discovery/queries", tags=["Discovery"])
+async def list_discovery_queries(
+    status_filter: Optional[str] = Query(
+        None, description="Filter by status: gold | maybe | junk | paused"
+    ),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Return all tracked discovery queries with their learning state.
+
+    Used by the Sources page 'Queries' tab to show which search queries are
+    earning their keep vs. wasting Serper credits.
+    """
+    from app.models.discovery_query_stat import DiscoveryQueryStat
+    from sqlalchemy import desc
+
+    query = select(DiscoveryQueryStat)
+    if status_filter:
+        query = query.where(DiscoveryQueryStat.status == status_filter)
+    query = query.order_by(
+        desc(DiscoveryQueryStat.total_new_leads),
+        desc(DiscoveryQueryStat.total_new_sources),
+        desc(DiscoveryQueryStat.total_runs),
+    )
+
+    result = await db.execute(query)
+    rows = result.scalars().all()
+
+    return [
+        {
+            "query_text": r.query_text,
+            "status": r.status,
+            "total_runs": r.total_runs,
+            "total_new_sources": r.total_new_sources,
+            "total_new_leads": r.total_new_leads,
+            "total_duplicates": r.total_duplicates,
+            "consecutive_zero_runs": r.consecutive_zero_runs,
+            "first_run_at": r.first_run_at.isoformat() if r.first_run_at else None,
+            "last_run_at": r.last_run_at.isoformat() if r.last_run_at else None,
+            "last_success_at": r.last_success_at.isoformat()
+            if r.last_success_at
+            else None,
+            "paused_until": r.paused_until.isoformat() if r.paused_until else None,
+            "last_run_detail": r.last_run_detail,
+        }
+        for r in rows
+    ]
+
+
+@router.get("/discovery/queries/stats", tags=["Discovery"])
+async def discovery_query_summary(db: AsyncSession = Depends(get_db)):
+    """
+    Aggregate summary stats for the Sources > Queries tab header cards.
+    """
+    from app.models.discovery_query_stat import DiscoveryQueryStat
+    from sqlalchemy import func
+
+    result = await db.execute(
+        select(
+            DiscoveryQueryStat.status,
+            func.count().label("count"),
+            func.sum(DiscoveryQueryStat.total_new_sources).label("total_sources"),
+            func.sum(DiscoveryQueryStat.total_new_leads).label("total_leads"),
+        ).group_by(DiscoveryQueryStat.status)
+    )
+    rows = result.all()
+
+    by_status = {
+        r.status: {
+            "count": r.count,
+            "sources": r.total_sources or 0,
+            "leads": r.total_leads or 0,
+        }
+        for r in rows
+    }
+    total_queries = sum(r["count"] for r in by_status.values())
+    total_sources = sum(r["sources"] for r in by_status.values())
+    total_leads = sum(r["leads"] for r in by_status.values())
+
+    return {
+        "total_queries": total_queries,
+        "gold": by_status.get("gold", {"count": 0, "sources": 0, "leads": 0}),
+        "maybe": by_status.get("maybe", {"count": 0, "sources": 0, "leads": 0}),
+        "junk": by_status.get("junk", {"count": 0, "sources": 0, "leads": 0}),
+        "paused": by_status.get("paused", {"count": 0, "sources": 0, "leads": 0}),
+        "total_new_sources_ever": total_sources,
+        "total_new_leads_ever": total_leads,
+    }

@@ -10,6 +10,7 @@ from app.models.user import User, PendingRegistration
 from app.models.audit_log import AuditLog
 from app.models.lead_contact import LeadContact
 from app.models.existing_hotel import ExistingHotel
+from app.models.discovery_query_stat import DiscoveryQueryStat
 
 __all__ = [
     "PotentialLead",
@@ -21,4 +22,5 @@ __all__ = [
     "AuditLog",
     "LeadContact",
     "ExistingHotel",
+    "DiscoveryQueryStat",
 ]

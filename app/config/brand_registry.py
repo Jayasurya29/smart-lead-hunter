@@ -1021,7 +1021,7 @@ BRAND_REGISTRY: dict[str, BrandInfo] = {
     ),
     "doubletree by hilton": BrandInfo(
         parent_company="Hilton",
-        tier="tier3_upper_upscale",
+        tier="tier4_upscale",
         operating_model="franchised",
         typical_model_note="Full-service upscale brand. Majority franchised.",
         procurement_model="owner_managed",
@@ -1179,7 +1179,7 @@ BRAND_REGISTRY: dict[str, BrandInfo] = {
     ),
     "grand hyatt": BrandInfo(
         parent_company="Hyatt",
-        tier="tier3_upper_upscale",
+        tier="tier2_luxury",
         operating_model="managed",
         typical_model_note="Large convention/resort properties. Mostly managed.",
         procurement_model="brand_managed",
@@ -1241,7 +1241,7 @@ BRAND_REGISTRY: dict[str, BrandInfo] = {
     ),
     "the unbound collection by hyatt": BrandInfo(
         parent_company="Hyatt",
-        tier="tier3_upper_upscale",
+        tier="tier2_luxury",
         operating_model="collection",
         typical_model_note="Soft brand collection of unique properties.",
         procurement_model="owner_managed",
@@ -1316,7 +1316,7 @@ BRAND_REGISTRY: dict[str, BrandInfo] = {
     ),
     "dreams resorts": BrandInfo(
         parent_company="Hyatt Inclusive Collection (formerly AMResorts/AMR Collection)",
-        tier="tier3_upper_upscale",
+        tier="tier2_luxury",
         operating_model="all_inclusive",
         typical_model_note="Family all-inclusive brand. Part of Hyatt Inclusive Collection (~150 resorts) post-Playa acquisition June 2025. Many former Playa-managed properties (Rose Hall, Cap Cana, etc.) rebranded under Dreams.",
         procurement_model="brand_managed",
@@ -1375,7 +1375,7 @@ BRAND_REGISTRY: dict[str, BrandInfo] = {
     ),
     "hyatt vivid hotels": BrandInfo(
         parent_company="Hyatt Inclusive Collection",
-        tier="tier3_upper_upscale",
+        tier="tier2_luxury",
         operating_model="all_inclusive",
         typical_model_note="Hyatt's newer all-inclusive lifestyle brand for younger travelers. Launched in Cancun April 2024; second property opening Punta Cana 2026.",
         procurement_model="brand_managed",
@@ -1403,7 +1403,7 @@ BRAND_REGISTRY: dict[str, BrandInfo] = {
     ),
     "hyatt vivid hotels & resorts": BrandInfo(
         parent_company="Hyatt Inclusive Collection",
-        tier="tier3_upper_upscale",
+        tier="tier2_luxury",
         operating_model="all_inclusive",
         typical_model_note="Same as Hyatt Vivid Hotels.",
         procurement_model="brand_managed",
@@ -1481,7 +1481,7 @@ BRAND_REGISTRY: dict[str, BrandInfo] = {
     ),
     "regent hotels": BrandInfo(
         parent_company="IHG",
-        tier="tier1_ultra_luxury",
+        tier="tier2_luxury",
         operating_model="managed",
         typical_model_note="IHG ultra-luxury brand.",
         procurement_model="brand_managed",
@@ -1543,7 +1543,7 @@ BRAND_REGISTRY: dict[str, BrandInfo] = {
     ),
     "vignette collection": BrandInfo(
         parent_company="IHG",
-        tier="tier3_upper_upscale",
+        tier="tier2_luxury",
         operating_model="collection",
         typical_model_note="IHG's soft brand collection of independent luxury hotels.",
         procurement_model="owner_managed",
@@ -1558,7 +1558,7 @@ BRAND_REGISTRY: dict[str, BrandInfo] = {
     ),
     "crowne plaza": BrandInfo(
         parent_company="IHG",
-        tier="tier3_upper_upscale",
+        tier="tier4_upscale",
         operating_model="franchised",
         typical_model_note="Business hotel brand. Mostly franchised.",
         procurement_model="owner_managed",
@@ -2143,7 +2143,7 @@ BRAND_REGISTRY: dict[str, BrandInfo] = {
     ),
     "auberge resorts collection": BrandInfo(
         parent_company="Auberge Resorts Collection",
-        tier="tier2_luxury",
+        tier="tier1_ultra_luxury",
         operating_model="managed",
         typical_model_note="Luxury resort collection focused on sense of place.",
         procurement_model="owner_managed",
@@ -2172,7 +2172,7 @@ BRAND_REGISTRY: dict[str, BrandInfo] = {
     ),
     "auberge collection": BrandInfo(
         parent_company="Auberge Resorts Collection",
-        tier="tier2_luxury",
+        tier="tier1_ultra_luxury",
         operating_model="managed",
         typical_model_note="Same as Auberge Resorts Collection.",
         procurement_model="owner_managed",
@@ -2260,7 +2260,7 @@ BRAND_REGISTRY: dict[str, BrandInfo] = {
     ),
     "trailborn": BrandInfo(
         parent_company="Trailborn Hotels & Resorts (Independent)",
-        tier="tier3_upper_upscale",
+        tier="tier2_luxury",
         operating_model="independent",
         typical_model_note="New independent adventure/outdoor lifestyle brand. Pre-opening.",
         procurement_model="fully_open",
@@ -2433,7 +2433,7 @@ BRAND_REGISTRY: dict[str, BrandInfo] = {
     # ──────────────────────────────────────────────────────────────────────────
     "sandals": BrandInfo(
         parent_company="Sandals Resorts International",
-        tier="tier3_upper_upscale",
+        tier="tier2_luxury",
         operating_model="all_inclusive",
         typical_model_note="Caribbean all-inclusive brand. Owner-operated by the Stewart family (founded by Gordon 'Butch' Stewart). Beaches is the family-friendly sister brand.",
         procurement_model="brand_managed",
@@ -2910,7 +2910,7 @@ _ADDITIONAL_BRANDS: dict[str, BrandInfo] = {
     ),
     "delta hotels": BrandInfo(
         parent_company="Marriott",
-        tier="tier3_upper_upscale",
+        tier="tier4_upscale",
         operating_model="franchised",
         typical_model_note="Upper upscale brand primarily in Canada.",
         procurement_model="avendra_gpo",
@@ -2952,7 +2952,7 @@ _ADDITIONAL_BRANDS: dict[str, BrandInfo] = {
     ),
     "ac hotels": BrandInfo(
         parent_company="Marriott",
-        tier="tier3_upper_upscale",
+        tier="tier4_upscale",
         operating_model="franchised",
         typical_model_note="European-design lifestyle brand. Mostly franchised.",
         procurement_model="owner_managed",
@@ -3175,7 +3175,7 @@ _ADDITIONAL_BRANDS: dict[str, BrandInfo] = {
     ),
     "now resorts": BrandInfo(
         parent_company="Hyatt Inclusive Collection (formerly AMResorts/AMR Collection)",
-        tier="tier3_upper_upscale",
+        tier="tier2_luxury",
         operating_model="all_inclusive",
         typical_model_note="Unlimited luxury all-inclusive brand within Hyatt Inclusive Collection.",
         procurement_model="brand_managed",
@@ -3198,7 +3198,7 @@ _ADDITIONAL_BRANDS: dict[str, BrandInfo] = {
     ),
     "breathless resorts": BrandInfo(
         parent_company="Hyatt Inclusive Collection (formerly AMResorts/AMR Collection)",
-        tier="tier3_upper_upscale",
+        tier="tier2_luxury",
         operating_model="all_inclusive",
         typical_model_note="Adults-only lively all-inclusive within Hyatt Inclusive Collection.",
         procurement_model="brand_managed",
@@ -3222,7 +3222,7 @@ _ADDITIONAL_BRANDS: dict[str, BrandInfo] = {
     ),
     "impression by secrets": BrandInfo(
         parent_company="Hyatt Inclusive Collection (formerly AMResorts/AMR Collection)",
-        tier="tier1_ultra_luxury",
+        tier="tier2_luxury",
         operating_model="all_inclusive",
         typical_model_note="Ultra-luxury all-inclusive within Secrets brand family.",
         procurement_model="brand_managed",
@@ -3279,7 +3279,7 @@ _ADDITIONAL_BRANDS: dict[str, BrandInfo] = {
     # ──────────────────────────────────────────────────────────────────────────
     "voco": BrandInfo(
         parent_company="IHG",
-        tier="tier3_upper_upscale",
+        tier="tier4_upscale",
         operating_model="franchised",
         typical_model_note="IHG conversion-friendly upscale brand.",
         procurement_model="owner_managed",
@@ -3843,7 +3843,7 @@ _ADDITIONAL_BRANDS: dict[str, BrandInfo] = {
     ),
     "outbound hotels": BrandInfo(
         parent_company="Outbound Hotels (Independent)",
-        tier="tier3_upper_upscale",
+        tier="tier4_upscale",
         operating_model="independent",
         typical_model_note="Adventure/outdoor lifestyle hotel brand.",
         procurement_model="fully_open",
@@ -3858,7 +3858,7 @@ _ADDITIONAL_BRANDS: dict[str, BrandInfo] = {
     ),
     "under canvas": BrandInfo(
         parent_company="Under Canvas (KSL Capital)",
-        tier="tier3_upper_upscale",
+        tier="tier4_upscale",
         operating_model="managed",
         typical_model_note="Glamping/luxury outdoor experience brand.",
         procurement_model="brand_managed",
@@ -3903,7 +3903,7 @@ _ADDITIONAL_BRANDS: dict[str, BrandInfo] = {
     ),
     "citizenm": BrandInfo(
         parent_company="citizenM Hotels (Independent)",
-        tier="tier3_upper_upscale",
+        tier="tier4_upscale",
         operating_model="managed",
         typical_model_note="Dutch affordable luxury brand. Tech-forward.",
         procurement_model="brand_managed",
@@ -3918,7 +3918,7 @@ _ADDITIONAL_BRANDS: dict[str, BrandInfo] = {
     ),
     "sonder": BrandInfo(
         parent_company="Sonder Holdings (Public)",
-        tier="tier3_upper_upscale",
+        tier="tier4_upscale",
         operating_model="managed",
         typical_model_note="Tech-enabled hospitality company. Apartments + hotels.",
         procurement_model="brand_managed",
@@ -3933,7 +3933,7 @@ _ADDITIONAL_BRANDS: dict[str, BrandInfo] = {
     ),
     "sonesta": BrandInfo(
         parent_company="Sonesta International Hotels (Independent)",
-        tier="tier3_upper_upscale",
+        tier="tier4_upscale",
         operating_model="franchised",
         typical_model_note="Mid-size independent hotel company.",
         procurement_model="owner_managed",
@@ -3975,7 +3975,7 @@ _ADDITIONAL_BRANDS: dict[str, BrandInfo] = {
     ),
     "radisson": BrandInfo(
         parent_company="Radisson Hotel Group (Choice Hotels)",
-        tier="tier3_upper_upscale",
+        tier="tier4_upscale",
         operating_model="franchised",
         typical_model_note="Global mid-size hotel brand.",
         procurement_model="owner_managed",
@@ -4181,7 +4181,7 @@ _ADDITIONAL_BRANDS: dict[str, BrandInfo] = {
     ),
     "iberostar": BrandInfo(
         parent_company="Iberostar Group (Spanish Independent)",
-        tier="tier3_upper_upscale",
+        tier="tier4_upscale",
         operating_model="managed",
         typical_model_note="Spanish family-owned resort group. Strong Caribbean presence.",
         procurement_model="brand_managed",
@@ -4200,7 +4200,7 @@ _ADDITIONAL_BRANDS: dict[str, BrandInfo] = {
     ),
     "riu": BrandInfo(
         parent_company="RIU Hotels & Resorts (Spanish Independent)",
-        tier="tier3_upper_upscale",
+        tier="tier4_upscale",
         operating_model="managed",
         typical_model_note="Spanish family-owned chain. All-inclusive Caribbean/Mexico.",
         procurement_model="brand_managed",
@@ -4223,7 +4223,7 @@ _ADDITIONAL_BRANDS: dict[str, BrandInfo] = {
     ),
     "barcelo": BrandInfo(
         parent_company="Barceló Hotel Group (Spanish Independent)",
-        tier="tier3_upper_upscale",
+        tier="tier4_upscale",
         operating_model="managed",
         typical_model_note="Spanish family hotel group. Caribbean presence.",
         procurement_model="brand_managed",
@@ -4246,7 +4246,7 @@ _ADDITIONAL_BRANDS: dict[str, BrandInfo] = {
     ),
     "karisma": BrandInfo(
         parent_company="Karisma Hotels & Resorts (Independent)",
-        tier="tier2_luxury",
+        tier="tier4_upscale",
         operating_model="managed",
         typical_model_note="Gourmet all-inclusive luxury brand. Caribbean/Mexico.",
         procurement_model="brand_managed",
@@ -4265,7 +4265,7 @@ _ADDITIONAL_BRANDS: dict[str, BrandInfo] = {
     ),
     "playa resorts": BrandInfo(
         parent_company="Playa Hotels & Resorts (Public)",
-        tier="tier3_upper_upscale",
+        tier="tier4_upscale",
         operating_model="managed",
         typical_model_note="Caribbean/Mexico resort operator. Partners with Hyatt/Hilton brands.",
         procurement_model="brand_managed",
@@ -4303,7 +4303,7 @@ _ADDITIONAL_BRANDS: dict[str, BrandInfo] = {
     ),
     "royalton": BrandInfo(
         parent_company="Royalton Hotels & Resorts (formerly Blue Diamond Resorts)",
-        tier="tier3_upper_upscale",
+        tier="tier2_luxury",
         operating_model="all_inclusive",
         typical_model_note="Owner-operated Caribbean all-inclusive. Marriott Autograph Collection affiliation. Centralized procurement.",
         procurement_model="brand_managed",
@@ -4440,7 +4440,7 @@ _ADDITIONAL_BRANDS: dict[str, BrandInfo] = {
     ),
     "divi resorts": BrandInfo(
         parent_company="Divi Resorts (Independent)",
-        tier="tier3_upper_upscale",
+        tier="tier4_upscale",
         operating_model="managed",
         typical_model_note="Caribbean beach resort collection. Aruba/Bonaire/Barbados.",
         procurement_model="brand_managed",
@@ -4459,7 +4459,7 @@ _ADDITIONAL_BRANDS: dict[str, BrandInfo] = {
     ),
     "club med": BrandInfo(
         parent_company="Club Med (Fosun Tourism)",
-        tier="tier2_luxury",
+        tier="tier4_upscale",
         operating_model="managed",
         typical_model_note="All-inclusive resort brand. Mostly managed.",
         procurement_model="brand_managed",

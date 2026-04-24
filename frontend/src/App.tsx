@@ -9,7 +9,8 @@ import { Loader2 } from 'lucide-react'
 import UsersPage from '@/pages/Users'
 import ExistingHotels from '@/pages/ExistingHotels'
 import SourcesPage from '@/pages/SourcesPage'
-import ClientIntelligence from '@/pages/ClientIntelligence'
+// HIDDEN 2026-04-24 — re-enable by uncommenting
+// import ClientIntelligence from '@/pages/ClientIntelligence'
 import MapPage from '@/pages/MapPage'
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
@@ -88,6 +89,7 @@ export default function AppRouter() {
               </ProtectedRoute>
             }
           />
+          {/* HIDDEN 2026-04-24 — re-enable by uncommenting
           <Route
             path="/clients"
             element={
@@ -96,6 +98,7 @@ export default function AppRouter() {
               </ProtectedRoute>
             }
           />
+          */}
           <Route
             path="/outreach"
             element={

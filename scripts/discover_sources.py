@@ -56,53 +56,215 @@ load_dotenv()
 # SEARCH QUERIES
 # ═══════════════════════════════════════════════════════════════════════════════
 
-SEARCH_QUERIES = [
-    # ── Core (wide net) ──
-    "new hotel opening 2026 United States",
-    "new luxury hotel opening 2026 USA",
-    "new hotel opening 2027 United States",
-    "new resort opening 2026 2027",
-    # ── Brand-Specific (luxury + upper-upscale) ──
-    "Hilton new hotel opening 2026 2027",
-    "Marriott new hotel resort opening 2026",
-    "Hyatt new hotel opening 2026 2027",
-    "Four Seasons new hotel 2026 2027",
-    "IHG new hotel opening USA 2026",
-    "Ritz-Carlton Waldorf Astoria new hotel 2026",
-    "Rosewood Montage Peninsula hotel opening 2026",
-    "Accor Fairmont Sofitel new hotel Americas 2026",
-    # ── Major US Markets (by region) ──
-    # Southeast
-    "new hotel Miami Fort Lauderdale 2026",
-    "new hotel Orlando resort opening 2026",
-    "new hotel Palm Beach Naples Florida 2026",
-    "new hotel Atlanta Nashville Charlotte 2026",
-    # Northeast
-    "new hotel opening New York City 2026",
-    "new hotel Boston Washington DC Philadelphia 2026",
-    # West
-    "new hotel opening Los Angeles San Diego 2026",
-    "new hotel San Francisco Seattle Portland 2026",
-    "new hotel Las Vegas Phoenix Scottsdale 2026",
-    "new hotel resort Hawaii 2026",
-    # South / Central
-    "new hotel Dallas Houston Austin Texas 2026",
-    "new hotel Chicago Denver 2026",
-    "new hotel New Orleans Charleston Savannah 2026",
-    # ── Caribbean & Latin America ──
-    "new resort Dominican Republic Punta Cana 2026",
-    "new hotel Bahamas opening 2026 2027",
-    "new hotel Aruba Cayman Islands 2026",
-    "new resort Jamaica Turks Caicos 2026",
-    "new hotel Puerto Rico Costa Rica 2026",
-    # ── Renovations & Conversions (new uniforms!) ──
-    "hotel renovation rebranding conversion 2026",
-    "hotel flag change conversion USA 2026",
-    # ── Industry Pipeline ──
-    "hotel groundbreaking construction announcement 2026",
-    "all inclusive resort opening 2026 2027",
-    "upper upscale hotel opening announcement 2026",
-]
+def _month_to_season(month: int) -> str:
+    """Return the season a month falls in. News writers alternate between
+    season-relative ('summer 2027') and quarter-relative ('Q3 2027') language,
+    so we generate both for any target month."""
+    if month in (12, 1, 2):   return "winter"
+    if month in (3, 4, 5):    return "spring"
+    if month in (6, 7, 8):    return "summer"
+    if month in (9, 10, 11):  return "fall"
+    return ""
+
+
+def _month_to_quarter(month: int) -> str:
+    """Return fiscal quarter label for a month (Q1 = Jan-Mar, etc.)."""
+    return f"Q{(month - 1) // 3 + 1}"
+
+
+def _month_to_partofyear(month: int) -> str:
+    """Position-within-year label used in hotel announcements:
+       'early 2027' (Jan-Mar), 'mid 2027' (Apr-Sep), 'late 2027' (Oct-Dec)."""
+    if month in (1, 2, 3):    return "early"
+    if month in (4, 5, 6, 7, 8, 9): return "mid"
+    if month in (10, 11, 12): return "late"
+    return ""
+
+
+def _window_period_labels(today: "datetime", months_ahead_start: int, months_ahead_end: int) -> list[str]:
+    """
+    Generate the distinct time-period labels covering a target window.
+
+    Example: called with today=April 2026, start=6, end=11 → target window
+    is October 2026 through March 2027. Returns:
+        ['Q4 2026', 'Q1 2027', 'late 2026', 'early 2027',
+         'fall 2026', 'winter 2026', 'winter 2027', 'spring 2027']
+
+    Six months later (today=October 2026), same window becomes March-August
+    2027 and the labels slide forward to 'spring 2027', 'summer 2027',
+    'Q2 2027', 'Q3 2027', 'mid 2027'. Never stale.
+    """
+    from datetime import timedelta
+    labels: set[str] = set()
+    for months_ahead in range(months_ahead_start, months_ahead_end + 1):
+        target = today + timedelta(days=months_ahead * 30)
+        y, m = target.year, target.month
+        labels.add(f"{_month_to_quarter(m)} {y}")
+        labels.add(f"{_month_to_partofyear(m)} {y}")
+        labels.add(f"{_month_to_season(m)} {y}")
+    return sorted(labels)
+
+
+def _build_search_queries() -> list[str]:
+    """
+    Generate time-relevant search queries using SLIDING-WINDOW logic.
+
+    Instead of hardcoded years, we compute the actual sales windows from
+    today's date and generate queries that describe THOSE specific calendar
+    slices using language actual news articles use.
+
+    Re-evaluated every time the discovery script runs — no stale references
+    ever, regardless of whether you're running this in April 2026, October
+    2026, or January 2028.
+
+    Window definitions match JA's locked timeline buckets (utils.get_timeline_label):
+        URGENT    3-6 months out    (tight, still sellable — small but important batch)
+        HOT       6-12 months out   (sweet spot — most of the query budget goes here)
+        WARM      12-18 months out  (planning phase, worth watching)
+        COOL      18-30 months out  (pipeline tracking, construction announcements)
+    """
+    from datetime import datetime
+    today = datetime.now()
+
+    urgent_labels = _window_period_labels(today, 3, 5)    # 3-6 mo out
+    hot_labels    = _window_period_labels(today, 6, 11)   # 6-12 mo out (sweet spot)
+    warm_labels   = _window_period_labels(today, 12, 17)  # 12-18 mo out
+    cool_labels   = _window_period_labels(today, 18, 30)  # 18+ mo out
+
+    # Year reference for brand-specific queries (no specific window — just "next year")
+    next_year = today.year + 1 if today.month >= 7 else today.year + 1
+    # NOTE: For Jun+ of current year, "next year" queries are basically identical
+    # to WARM window targeting. We use next_year as a simple integer reference
+    # for brand queries since most brand press releases say "opening 2027"
+    # without a season qualifier.
+
+    queries: list[str] = []
+
+    # ── URGENT window (3-6 mo out): tight but still sellable ──────
+    # Smaller query batch — these hotels are closer to opening so there's
+    # less news churn. One query per distinct period label, general phrasing.
+    for period in urgent_labels:
+        queries.append(f"hotel opening {period}")
+        queries.append(f"hotel opens {period}")
+
+    # ── HOT window (6-12 mo out): the sweet spot ──────────────────
+    # Biggest query batch — this is where uniform decisions are being made.
+    # Three variations per label to cast a wider net.
+    for period in hot_labels:
+        queries.append(f"hotel opening {period}")
+        queries.append(f"luxury hotel opening {period}")
+        queries.append(f"hotel set to debut {period}")
+
+    # ── WARM window (12-18 mo out): planning phase ────────────────
+    for period in warm_labels[:6]:
+        queries.append(f"new hotel opening {period}")
+        queries.append(f"resort opening {period}")
+
+    # ── COOL pipeline (18+ mo): announcement-style ────────────────
+    for period in cool_labels[:4]:
+        queries.append(f"hotel slated to open {period}")
+        queries.append(f"hotel pipeline announcement {period}")
+
+    # ── Always-on signal queries (date-agnostic) ──────────────────
+    queries.extend([
+        "hotel announces opening date",
+        "hotel nearing completion",
+        "hotel groundbreaking ceremony",
+        "hotel topping off",
+        "hotel construction complete",
+        "pre-opening general manager",
+        "hotel rebrand flag change",
+        "hotel reopening after renovation",
+        "post-hurricane hotel reopening Caribbean",
+        "resort reopens after major renovation",
+    ])
+
+    # ── Brand-specific — targets brands our seed list may miss ────
+    # Ultra-luxury (tier1): one brand per query, targets next_year in headlines
+    queries.extend([
+        f"Four Seasons new hotel {next_year}",
+        f"Ritz-Carlton opening {next_year}",
+        f"Rosewood opening {next_year}",
+        f"Aman new resort {next_year}",
+        f"Auberge new property {next_year}",
+        f"Montage new hotel {next_year}",
+        f"Peninsula hotel opening {next_year}",
+        f"Mandarin Oriental opening {next_year}",
+        f"Waldorf Astoria new property {next_year}",
+        f"St. Regis opening {next_year}",
+    ])
+
+    # Luxury chains (tier2): grouped for breadth
+    queries.extend([
+        f"JW Marriott W Hotels Edition Conrad opening {next_year}",
+        f"Fairmont Sofitel InterContinental new hotel {next_year}",
+        f"Andaz Thompson Grand Hyatt opening {next_year}",
+        f"1 Hotels Nobu Pendry opening {next_year}",
+    ])
+
+    # Upper-upscale chains (tier3): high-volume brands
+    queries.extend([
+        f"Hilton new hotel opening {next_year}",
+        f"Marriott new hotel opening {next_year}",
+        f"Hyatt new hotel opening {next_year}",
+        f"IHG Accor new hotel Americas {next_year}",
+    ])
+
+    # All-inclusive luxury (Caribbean — tier2 per STR)
+    queries.extend([
+        f"Sandals Royalton new resort {next_year}",
+        f"Hyatt Ziva Zilara Secrets Dreams opening {next_year}",
+        f"Palace Moon Palace Grand Palladium {next_year}",
+        f"Breathless Now Paradisus opening {next_year}",
+    ])
+
+    # ── Regional coverage ────────────────────────────────────────
+    # One query per distinct "regional press market" to minimize overlap.
+    queries.extend([
+        # USA regions
+        f"new hotel Florida opening {next_year}",
+        f"new hotel New York City Boston {next_year}",
+        f"new hotel Washington DC Philadelphia {next_year}",
+        f"new hotel California Hawaii {next_year}",
+        f"new hotel Las Vegas Phoenix Scottsdale {next_year}",
+        f"new hotel Texas Nashville {next_year}",
+        f"new hotel Atlanta Charlotte {next_year}",
+        f"new hotel Chicago Denver {next_year}",
+        f"new hotel New Orleans Charleston {next_year}",
+
+        # Caribbean — Jamaica/Bahamas/DR are biggest markets
+        f"new hotel Caribbean opening {next_year}",
+        f"new resort Dominican Republic Punta Cana {next_year}",
+        f"new hotel Jamaica {next_year}",
+        f"new hotel Bahamas {next_year}",
+        f"new hotel Turks Caicos Cayman {next_year}",
+        f"new hotel Puerto Rico {next_year}",
+        f"new hotel Aruba Curacao {next_year}",
+        f"new resort Saint Lucia Barbados Antigua {next_year}",
+    ])
+
+    # ── High-signal curated lists ────────────────────────────────
+    queries.extend([
+        f"most anticipated hotel openings {next_year}",
+        f"best new hotels opening {next_year}",
+        f"Conde Nast Traveler hotels {next_year}",
+        f"Travel Leisure new hotels {next_year}",
+        f"Robb Report luxury hotels {next_year}",
+    ])
+
+    # Dedupe — some period labels can overlap between adjacent windows
+    seen = set()
+    deduped = []
+    for q in queries:
+        if q not in seen:
+            seen.add(q)
+            deduped.append(q)
+    return deduped
+
+
+# Module-level list rebuilt each time the script runs.
+# Never stale — sliding-window logic regenerates period labels from today.
+SEARCH_QUERIES = _build_search_queries()
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -370,7 +532,13 @@ class SearchBackend:
 
 
 class DuckDuckGoSearch(SearchBackend):
-    """DuckDuckGo via duckduckgo-search library (handles anti-bot internally)."""
+    """DuckDuckGo via duckduckgo-search library (handles anti-bot internally).
+
+    DEMOTED to fallback-only as of 2026-04-24 — DDG has been rate-limiting
+    discovery runs aggressively ('202 Ratelimit' after 2-3 queries). Use
+    SerperSearch as primary. This class stays as a last-resort backup in
+    case Serper hits budget exhaustion or outage.
+    """
 
     async def search(self, query: str) -> list[dict]:
         results = []
@@ -391,6 +559,115 @@ class DuckDuckGoSearch(SearchBackend):
         except Exception as e:
             logger.warning(f"DuckDuckGo error: {e}")
         return results[:15]
+
+
+class SerperSearch(SearchBackend):
+    """Google Search via Serper API (https://serper.dev).
+
+    Primary search backend as of 2026-04-24 — replaced DuckDuckGo which
+    was rate-limiting discovery after 2-3 queries. Serper's free tier is
+    2,500 queries/month; paid tier starts at $50/month for 50K queries.
+    JA already pays for Serper (used by Smart Fill's `_search_web`), so
+    no new cost to use it here too.
+
+    Returns same shape as other backends: [{"url", "domain", "engine", "title"}]
+    """
+
+    def __init__(self):
+        super().__init__()
+        self.api_key = os.getenv("SERPER_API_KEY", "").strip()
+        if not self.api_key:
+            logger.warning(
+                "SERPER_API_KEY not set — SerperSearch will return empty. "
+                "Falls back to DuckDuckGo/Google News RSS if other engines configured."
+            )
+
+    async def search(self, query: str) -> list[dict]:
+        if not self.api_key:
+            return []
+
+        results = []
+        seen = set()
+        try:
+            # num=10 keeps us at 1 Serper credit per query (num>10 = 2 credits).
+            # 10 unique domains per query is already more than we can downstream-
+            # test + Gemini-classify in any reasonable time budget, so raising
+            # to 20 would double the cost with zero practical upside.
+            resp = await self.client.post(
+                "https://google.serper.dev/search",
+                headers={"X-API-KEY": self.api_key, "Content-Type": "application/json"},
+                json={"q": query, "num": 10, "gl": "us", "hl": "en"},
+            )
+            if resp.status_code != 200:
+                logger.warning(
+                    f"Serper returned HTTP {resp.status_code} for query '{query}': "
+                    f"{resp.text[:200]}"
+                )
+                return []
+
+            data = resp.json()
+
+            # Organic results first (the main hits)
+            for r in data.get("organic", [])[:10]:
+                url = r.get("link", "")
+                if not url:
+                    continue
+                domain = self.clean_domain(url)
+                if not domain or domain in seen:
+                    continue
+                seen.add(domain)
+                results.append(
+                    {
+                        "url": url,
+                        "domain": domain,
+                        "engine": "serper",
+                        "title": r.get("title", ""),
+                        "snippet": r.get("snippet", ""),
+                    }
+                )
+
+            # Knowledge graph (if present — often the hotel's own site)
+            kg = data.get("knowledgeGraph", {}) or {}
+            kg_url = kg.get("website") or ""
+            if kg_url:
+                domain = self.clean_domain(kg_url)
+                if domain and domain not in seen:
+                    seen.add(domain)
+                    results.append(
+                        {
+                            "url": kg_url,
+                            "domain": domain,
+                            "engine": "serper_kg",
+                            "title": kg.get("title", ""),
+                            "snippet": kg.get("description", ""),
+                        }
+                    )
+
+            # "People also ask" can surface adjacent topics with useful sources
+            for paa in (data.get("peopleAlsoAsk", []) or [])[:5]:
+                url = paa.get("link", "")
+                if not url:
+                    continue
+                domain = self.clean_domain(url)
+                if not domain or domain in seen:
+                    continue
+                seen.add(domain)
+                results.append(
+                    {
+                        "url": url,
+                        "domain": domain,
+                        "engine": "serper_paa",
+                        "title": paa.get("title", ""),
+                        "snippet": paa.get("snippet", ""),
+                    }
+                )
+
+        except httpx.TimeoutException:
+            logger.warning(f"Serper timeout on query: {query}")
+        except Exception as e:
+            logger.warning(f"Serper error for query '{query}': {e}")
+
+        return results[:10]
 
 
 class GoogleNewsRSS(SearchBackend):
@@ -978,10 +1255,24 @@ class WebDiscoveryEngine:
         self.min_quality = min_quality
         self.sources_only = sources_only
 
+        # Search backends in priority order. Serper (paid, reliable) is
+        # primary. Google News RSS is a free-tier complement (good for
+        # breaking news). DuckDuckGo is ONLY hit as a last-resort fallback
+        # because it aggressively rate-limits scraping (202 Ratelimit after
+        # ~2 queries), and when it hits the limit it poisons subsequent
+        # retries for minutes.
         self.engines = [
-            ("DuckDuckGo", DuckDuckGoSearch()),
+            ("Serper", SerperSearch()),
             ("Google News", GoogleNewsRSS()),
         ]
+        # Only add DDG as a fallback if Serper isn't configured — otherwise
+        # it's dead weight that slows runs down and breaks at rate limits.
+        if not os.getenv("SERPER_API_KEY", "").strip():
+            logger.warning(
+                "SERPER_API_KEY missing — falling back to DuckDuckGo. "
+                "Expect rate limits. Add SERPER_API_KEY to .env for reliable discovery."
+            )
+            self.engines.append(("DuckDuckGo (fallback)", DuckDuckGoSearch()))
         self.tester = DomainTester()
         self.pipeline = DiscoveryLeadExtractor()
 
@@ -1044,10 +1335,27 @@ class WebDiscoveryEngine:
         if max_queries:
             queries = queries[:max_queries]
 
+        # ── QueryIntelligence: filter out queries we know are junk ────
+        # Any query with status=junk and cooldown active gets skipped.
+        # Junk queries whose cooldown has expired get re-armed as a retry
+        # (they show up in `active_queries` with status=paused for this run).
+        from app.database import async_session
+        from app.services.query_intelligence import (
+            filter_active_queries,
+            QueryIntelligence,
+            QueryRunResult,
+        )
+
+        qi_skip_stats = {"active": len(queries), "skipped_junk": 0, "paused_retries": 0}
+        async with async_session() as qi_session:
+            queries, qi_skip_stats = await filter_active_queries(qi_session, queries)
+
         print("═" * 70)
-        print("  🌐  W E B   D I S C O V E R Y   E N G I N E   v5.1")
+        print("  🌐  W E B   D I S C O V E R Y   E N G I N E   v5.2")
         print("═" * 70)
-        print(f"  Search queries : {len(queries)}")
+        print(f"  Search queries : {len(queries)} active "
+              f"({qi_skip_stats['skipped_junk']} junk skipped, "
+              f"{qi_skip_stats['paused_retries']} paused retries)")
         print(f"  Known sources  : {len(self.known_domains)}")
         print(f"  Search engines : {', '.join(name for name, _ in self.engines)}")
         print(f"  Min quality    : {self.min_quality}")
@@ -1063,6 +1371,10 @@ class WebDiscoveryEngine:
             f"\n📡 Phase 1: Searching ({len(queries)} queries × {len(self.engines)} engines)..."
         )
         all_results = {}
+        # Per-query tracking: which unique domains did each query surface?
+        # This is what QueryIntelligence uses to learn.
+        domains_per_query: dict[str, set] = {q: set() for q in queries}
+
         for i, query in enumerate(queries, 1):
             print(f"  [{i:2d}/{len(queries)}] {query}")
             for engine_name, engine in self.engines:
@@ -1072,22 +1384,36 @@ class WebDiscoveryEngine:
                         domain = r["domain"]
                         if not domain:
                             continue
+                        # Record that THIS query surfaced THIS domain —
+                        # regardless of whether the domain is new or already
+                        # known. New vs known is decided below in Phase 2.
+                        domains_per_query[query].add(domain)
+
                         existing = all_results.get(domain)
                         if existing is None:
                             all_results[domain] = r
+                            # First-query-that-surfaced-it gets credit
+                            all_results[domain]["_first_query"] = query
                         else:
                             new_path = urlparse(r["url"]).path.strip("/")
                             old_path = urlparse(existing["url"]).path.strip("/")
                             if len(new_path) > len(old_path):
                                 title = existing.get("title") or r.get("title", "")
+                                first_q = existing.get("_first_query", query)
                                 all_results[domain] = r
+                                all_results[domain]["_first_query"] = first_q
                                 if title:
                                     all_results[domain]["title"] = title
-                    await asyncio.sleep(2.5)  # Increased delay to avoid DDG rate limits
+                    await asyncio.sleep(0.3)  # Serper tolerates ~200 QPS
                 except Exception as e:
                     logger.debug(f"{engine_name} error on query '{query}': {e}")
 
         self.stats["search_results"] = len(all_results)
+        # Keep these as instance attrs, NOT in self.stats, because _save_log
+        # JSON-serializes self.stats and sets aren't JSON-friendly. These
+        # intermediates are only needed for Phase 6 within the same run.
+        self._domains_per_query = domains_per_query
+        self._qi_skip_stats = qi_skip_stats
         print(f"  → {len(all_results)} unique domains found across all engines")
 
         # ── Phase 2: Filter ──
@@ -1346,8 +1672,117 @@ class WebDiscoveryEngine:
             if qualified_articles:
                 print(f"  → {len(qualified_articles)} one-off articles (leads only)")
 
+        # ── Phase 6: Record query intelligence ──────────────────────
+        # For each query that ran this cycle, count the unique NEW sources
+        # (domains that didn't match known_domains) + NEW leads (leads from
+        # those domains that got saved to potential_leads, not duplicates).
+        # Update QueryIntelligence stats — this is the learning step.
+        if not self.dry_run:
+            await self._record_query_intelligence(
+                domains_per_query=getattr(self, "_domains_per_query", {}),
+                qualified_sources=qualified_sources,
+                qualified_articles=qualified_articles,
+                extracted_leads=self.extracted_leads,
+            )
+
         self._print_report(qualified_sources, qualified_articles)
         self._save_log(qualified_sources, qualified_articles)
+
+    async def _record_query_intelligence(
+        self,
+        domains_per_query: dict,
+        qualified_sources: list,
+        qualified_articles: list,
+        extracted_leads: list,
+    ) -> None:
+        """
+        Record per-query learning results. Called at end of Phase 5.
+
+        For each query, counts:
+          - new_sources: domains that this query surfaced AND passed
+                         signal/Gemini testing (appear in qualified_sources or
+                         qualified_articles) AND aren't already known.
+          - new_leads:   leads extracted from those domains, saved to DB
+                         (not duplicates).
+          - duplicates:  leads we would have extracted but matched existing.
+
+        Writes via QueryIntelligence. Queries with zero yield N runs in a row
+        eventually become "junk" and get skipped on future runs.
+        """
+        from app.database import async_session
+        from app.services.query_intelligence import (
+            QueryIntelligence,
+            QueryRunResult,
+        )
+
+        if not domains_per_query:
+            return  # No queries ran (probably max_queries=0 or all skipped)
+
+        # Build a fast lookup: domain → (was_qualified, lead_count)
+        qualified_domains = {
+            src["domain"]: src
+            for src in (qualified_sources + qualified_articles)
+        }
+
+        # Count extracted leads per source domain for the "new_leads" metric
+        leads_per_domain: dict[str, int] = {}
+        for lead in extracted_leads:
+            src_url = (
+                lead.get("source_url")
+                if isinstance(lead, dict)
+                else getattr(lead, "source_url", None)
+            )
+            if not src_url:
+                continue
+            try:
+                d = urlparse(src_url).netloc.lower().replace("www.", "")
+                leads_per_domain[d] = leads_per_domain.get(d, 0) + 1
+            except Exception:
+                pass
+
+        # Now persist per-query stats
+        recorded = 0
+        async with async_session() as session:
+            for query, domain_set in domains_per_query.items():
+                new_sources = 0
+                new_leads = 0
+                sample_domains = []
+
+                for domain in domain_set:
+                    # Only count domains that were NOT already known AND
+                    # survived the qualification gauntlet (Phase 3+4).
+                    if self._is_known(domain):
+                        continue
+                    if domain in qualified_domains:
+                        new_sources += 1
+                        if len(sample_domains) < 5:
+                            sample_domains.append(domain)
+                        new_leads += leads_per_domain.get(domain, 0)
+
+                # Also credit leads from one-off articles even if the domain
+                # wasn't flagged "recurring source"
+                for article in qualified_articles:
+                    if article["domain"] in domain_set:
+                        # already counted via qualified_domains check above
+                        pass
+
+                result = QueryRunResult(
+                    new_sources=new_sources,
+                    new_leads=new_leads,
+                    duplicates=0,  # The save layer tracks global duplicates;
+                                   # attributing them per-query is noisy.
+                                   # We record new_sources + new_leads only.
+                    sample_domains=sample_domains,
+                )
+
+                qi = await QueryIntelligence.load_or_create(session, query)
+                qi.record_run(result)
+                await qi.save(session)
+                recorded += 1
+
+            await session.commit()
+
+        print(f"\n🧠 Phase 6: Query intelligence recorded for {recorded} queries")
 
     # ─── Domain failure tracking ─────────────────────────────────────────────
     async def _record_domain_failure(

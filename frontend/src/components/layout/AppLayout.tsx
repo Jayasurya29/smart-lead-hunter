@@ -20,7 +20,8 @@ interface NavItem {
 const NAV_ITEMS: NavItem[] = [
   { to: '/new-hotels',        label: 'New Hotels',        icon: LayoutDashboard },
   { to: '/existing-hotels',  label: 'Existing Hotels',  icon: Building2 },
-  { to: '/clients',          label: 'Clients',          icon: Users },
+  // HIDDEN 2026-04-24 — re-enable by uncommenting
+  // { to: '/clients',          label: 'Clients',          icon: Users },
   { to: '/map',              label: 'Map',              icon: Map },
   { to: '/sources',          label: 'Sources',          icon: Radar },
   { to: '/users',            label: 'Team',             icon: Shield },

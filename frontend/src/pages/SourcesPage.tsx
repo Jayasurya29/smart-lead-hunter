@@ -89,6 +89,7 @@ function HealthBadge({ status }: { status: string }) {
    ═══════════════════════════════════════════════════ */
 
 export default function SourcesPage() {
+  const [viewMode, setViewMode] = useState<'sources' | 'queries'>('sources')
   const [search, setSearch] = useState('')
   const [filter, setFilter] = useState<string>('')
   const [selectedId, setSelectedId] = useState<number | null>(null)
@@ -174,6 +175,40 @@ export default function SourcesPage() {
         </div>
       </div>
 
+      {/* Sources ↔ Queries tab toggle */}
+      <div className="px-4 pb-2 flex-shrink-0">
+        <div className="inline-flex rounded-lg border border-stone-200 bg-white p-0.5 shadow-sm">
+          <button
+            onClick={() => setViewMode('sources')}
+            className={cn(
+              'px-4 h-8 text-xs font-semibold rounded-md transition flex items-center gap-1.5',
+              viewMode === 'sources'
+                ? 'bg-navy-900 text-white'
+                : 'text-stone-500 hover:text-stone-700',
+            )}
+          >
+            <Globe className="w-3.5 h-3.5" />
+            Sources
+          </button>
+          <button
+            onClick={() => setViewMode('queries')}
+            className={cn(
+              'px-4 h-8 text-xs font-semibold rounded-md transition flex items-center gap-1.5',
+              viewMode === 'queries'
+                ? 'bg-navy-900 text-white'
+                : 'text-stone-500 hover:text-stone-700',
+            )}
+          >
+            <Search className="w-3.5 h-3.5" />
+            Discovery Queries
+          </button>
+        </div>
+      </div>
+
+      {viewMode === 'queries' ? (
+        <QueriesPanel />
+      ) : (
+        <>
       {/* Filters */}
       <div className="px-4 pb-2 flex-shrink-0">
         <div className="flex items-center gap-3">
@@ -301,7 +336,270 @@ export default function SourcesPage() {
           </div>
         )}
       </div>
+        </>
+      )}
     </div>
+  )
+}
+
+/* ═══════════════════════════════════════════════════
+   QUERIES PANEL — Discovery query intelligence tab
+   ═══════════════════════════════════════════════════ */
+
+interface QueryStat {
+  query_text: string
+  status: 'gold' | 'maybe' | 'junk' | 'paused'
+  total_runs: number
+  total_new_sources: number
+  total_new_leads: number
+  total_duplicates: number
+  consecutive_zero_runs: number
+  first_run_at: string | null
+  last_run_at: string | null
+  last_success_at: string | null
+  paused_until: string | null
+  last_run_detail: Record<string, unknown> | null
+}
+
+interface QuerySummary {
+  total_queries: number
+  gold: { count: number; sources: number; leads: number }
+  maybe: { count: number; sources: number; leads: number }
+  junk: { count: number; sources: number; leads: number }
+  paused: { count: number; sources: number; leads: number }
+  total_new_sources_ever: number
+  total_new_leads_ever: number
+}
+
+function QueriesPanel() {
+  const [statusFilter, setStatusFilter] = useState<string>('')
+  const [search, setSearch] = useState('')
+
+  const { data: summary } = useQuery<QuerySummary>({
+    queryKey: ['discovery-query-summary'],
+    queryFn: async () => (await api.get('/discovery/queries/stats')).data,
+    refetchInterval: 60_000,
+  })
+
+  const { data: queries = [], isLoading } = useQuery<QueryStat[]>({
+    queryKey: ['discovery-queries', statusFilter],
+    queryFn: async () => {
+      const params = statusFilter ? `?status_filter=${statusFilter}` : ''
+      return (await api.get(`/discovery/queries${params}`)).data
+    },
+    refetchInterval: 60_000,
+  })
+
+  const filtered = queries.filter(q =>
+    !search || q.query_text.toLowerCase().includes(search.toLowerCase()),
+  )
+
+  const statusBadge = (status: string) => {
+    const map: Record<string, { bg: string; text: string; label: string }> = {
+      gold: { bg: 'bg-amber-100', text: 'text-amber-700', label: '🥇 Gold' },
+      maybe: { bg: 'bg-sky-100', text: 'text-sky-700', label: 'Learning' },
+      junk: { bg: 'bg-red-100', text: 'text-red-600', label: '🗑️ Junk' },
+      paused: { bg: 'bg-violet-100', text: 'text-violet-700', label: '⏸ Paused' },
+    }
+    const m = map[status] || { bg: 'bg-stone-100', text: 'text-stone-600', label: status }
+    return (
+      <span className={cn('px-2 py-0.5 rounded-full text-2xs font-semibold', m.bg, m.text)}>
+        {m.label}
+      </span>
+    )
+  }
+
+  return (
+    <>
+      {/* Query Summary Cards */}
+      <div className="px-4 pb-2 flex-shrink-0">
+        <div className="grid grid-cols-6 gap-2">
+          <StatCard
+            label="Total Queries"
+            value={summary?.total_queries || 0}
+            icon={Search}
+            bg="bg-navy-50"
+            text="text-navy-600"
+          />
+          <StatCard
+            label="Gold"
+            value={summary?.gold.count || 0}
+            icon={CheckCircle2}
+            bg="bg-amber-50"
+            text="text-amber-600"
+          />
+          <StatCard
+            label="Learning"
+            value={summary?.maybe.count || 0}
+            icon={Activity}
+            bg="bg-sky-50"
+            text="text-sky-600"
+          />
+          <StatCard
+            label="Paused"
+            value={summary?.paused.count || 0}
+            icon={Timer}
+            bg="bg-violet-50"
+            text="text-violet-600"
+          />
+          <StatCard
+            label="Junk"
+            value={summary?.junk.count || 0}
+            icon={XCircle}
+            bg="bg-red-50"
+            text="text-red-500"
+          />
+          <StatCard
+            label="Leads Ever"
+            value={summary?.total_new_leads_ever || 0}
+            icon={BarChart3}
+            bg="bg-emerald-50"
+            text="text-emerald-600"
+          />
+        </div>
+      </div>
+
+      {/* Query Filters */}
+      <div className="px-4 pb-2 flex-shrink-0">
+        <div className="flex items-center gap-3">
+          <div className="relative flex-1 max-w-sm">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-stone-400" />
+            <input
+              type="text"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search query text..."
+              className="w-full h-9 pl-9 pr-9 text-sm bg-white border border-stone-200 rounded-lg outline-none focus:border-navy-400 focus:ring-2 focus:ring-navy-100 transition placeholder:text-stone-400"
+            />
+            {search && (
+              <button
+                onClick={() => setSearch('')}
+                className="absolute right-2.5 top-1/2 -translate-y-1/2 p-0.5 text-stone-400 hover:text-stone-600 rounded transition"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            )}
+          </div>
+
+          {['', 'gold', 'maybe', 'paused', 'junk'].map(f => (
+            <button
+              key={f}
+              onClick={() => setStatusFilter(f)}
+              className={cn(
+                'h-9 px-3 text-xs font-semibold rounded-lg border transition',
+                statusFilter === f
+                  ? 'bg-navy-900 text-white border-navy-900'
+                  : 'bg-white text-stone-500 border-stone-200 hover:bg-stone-50',
+              )}
+            >
+              {f === '' ? 'All' : f.charAt(0).toUpperCase() + f.slice(1)}
+            </button>
+          ))}
+
+          <span className="text-xs text-stone-400 ml-auto">{filtered.length} queries</span>
+        </div>
+      </div>
+
+      {/* Query Table */}
+      <div className="flex-1 overflow-hidden px-4 pb-3">
+        <div className="bg-white rounded-xl border border-slate-200/80 shadow-sm overflow-hidden flex flex-col h-full">
+          {isLoading ? (
+            <div className="flex items-center justify-center py-20">
+              <Loader2 className="w-8 h-8 animate-spin text-navy-400" />
+            </div>
+          ) : filtered.length === 0 ? (
+            <div className="flex items-center justify-center py-20 text-stone-400 text-sm">
+              No queries tracked yet. Run discovery first:{' '}
+              <code className="ml-2 px-2 py-0.5 bg-stone-100 rounded text-xs">
+                python -m scripts.discover_sources
+              </code>
+            </div>
+          ) : (
+            <div className="flex-1 overflow-y-auto">
+              <table className="w-full">
+                <thead className="sticky top-0 z-10">
+                  <tr className="bg-slate-50/90 backdrop-blur-sm border-b border-slate-100">
+                    <th className="px-3 py-2.5 text-left text-[11px] font-bold text-slate-400 uppercase tracking-wider">
+                      Query
+                    </th>
+                    <th className="px-3 py-2.5 text-left text-[11px] font-bold text-slate-400 uppercase tracking-wider w-24">
+                      Status
+                    </th>
+                    <th className="px-3 py-2.5 text-left text-[11px] font-bold text-slate-400 uppercase tracking-wider w-20">
+                      Runs
+                    </th>
+                    <th className="px-3 py-2.5 text-left text-[11px] font-bold text-slate-400 uppercase tracking-wider w-24">
+                      New Sources
+                    </th>
+                    <th className="px-3 py-2.5 text-left text-[11px] font-bold text-slate-400 uppercase tracking-wider w-20">
+                      Leads
+                    </th>
+                    <th className="px-3 py-2.5 text-left text-[11px] font-bold text-slate-400 uppercase tracking-wider w-28">
+                      Last Run
+                    </th>
+                    <th className="px-3 py-2.5 text-left text-[11px] font-bold text-slate-400 uppercase tracking-wider w-28">
+                      Last Success
+                    </th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100/80">
+                  {filtered.map((q) => (
+                    <tr key={q.query_text} className="hover:bg-slate-50/60 transition">
+                      <td className="px-3 py-2.5">
+                        <div className="text-[13px] font-semibold text-navy-900 leading-snug truncate max-w-[500px]">
+                          {q.query_text}
+                        </div>
+                        {q.consecutive_zero_runs > 0 && q.status !== 'junk' && (
+                          <div className="text-2xs text-amber-600 leading-snug mt-0.5">
+                            {q.consecutive_zero_runs} consecutive zero-yield runs
+                          </div>
+                        )}
+                      </td>
+                      <td className="px-3 py-2.5">{statusBadge(q.status)}</td>
+                      <td className="px-3 py-2.5">
+                        <span className="text-sm font-semibold text-navy-800 tabular-nums">
+                          {q.total_runs}
+                        </span>
+                      </td>
+                      <td className="px-3 py-2.5">
+                        <span
+                          className={cn(
+                            'text-sm font-bold tabular-nums',
+                            q.total_new_sources > 0 ? 'text-emerald-600' : 'text-stone-300',
+                          )}
+                        >
+                          {q.total_new_sources}
+                        </span>
+                      </td>
+                      <td className="px-3 py-2.5">
+                        <span
+                          className={cn(
+                            'text-sm font-bold tabular-nums',
+                            q.total_new_leads > 0 ? 'text-emerald-600' : 'text-stone-300',
+                          )}
+                        >
+                          {q.total_new_leads}
+                        </span>
+                      </td>
+                      <td className="px-3 py-2.5 text-xs text-stone-500">
+                        {q.last_run_at
+                          ? formatDistanceToNow(new Date(q.last_run_at), { addSuffix: true })
+                          : 'never'}
+                      </td>
+                      <td className="px-3 py-2.5 text-xs text-stone-500">
+                        {q.last_success_at
+                          ? formatDistanceToNow(new Date(q.last_success_at), { addSuffix: true })
+                          : 'never'}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      </div>
+    </>
   )
 }
 

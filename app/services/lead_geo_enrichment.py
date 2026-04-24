@@ -515,6 +515,47 @@ async def geocode_hotel(
     # "Sandals Whitehouse"). Require it in any amenity match.
     hotel_distinguishing_token = hotel_tokens[-1] if hotel_tokens else ""
 
+    # ── Brand-conflict detection using canonical tiers ───────────────
+    # The 60% token-match check isn't enough when tokens are location
+    # words. Example: "Sandals Montego Bay" vs "Hotel Riu Montego Bay"
+    # — both contain "montego" and "bay" (2/3 = 67%, passes), but the
+    # brand is completely different. The canonical_tiers.py dictionary
+    # gives us a list of known brand names we can use to detect this:
+    # if the hotel name we asked about contains brand X (e.g. "sandals")
+    # and the returned result contains brand Y (e.g. "riu") where Y != X,
+    # the result is a wrong-property match.
+    _KNOWN_BRANDS: set[str] = set()
+    try:
+        from app.config.canonical_tiers import CANONICAL_TIERS
+
+        _KNOWN_BRANDS = set(CANONICAL_TIERS.keys())
+    except Exception as e:
+        logger.debug(f"Could not load canonical_tiers for brand-conflict check: {e}")
+
+    def _find_brand_marker(text: str) -> Optional[str]:
+        """Find the longest canonical brand name that appears as a whole
+        word/phrase in the text. Returns None if no canonical brand found.
+
+        Longest-match-wins so 'hotel xcaret' beats 'xcaret' when both fit.
+        Short brand names (≤4 chars, e.g. 'riu', 'aman') use word-boundary
+        matching to avoid substring false positives ('riu' inside 'ritual').
+        """
+        if not _KNOWN_BRANDS or not text:
+            return None
+        t = text.lower()
+        # Try longest brand names first
+        for brand in sorted(_KNOWN_BRANDS, key=len, reverse=True):
+            if len(brand) <= 4:
+                # Short name — require word boundaries
+                if _re.search(rf"\b{_re.escape(brand)}\b", t):
+                    return brand
+            else:
+                if brand in t:
+                    return brand
+        return None
+
+    query_brand = _find_brand_marker(hotel_name)
+
     # ── City-center coord for proximity sanity check ─────────────────
     # Before running hotel queries, geocode the city alone. Any amenity
     # result that lands >30 miles from the city center is almost
@@ -662,6 +703,23 @@ async def geocode_hotel(
             # a hotel-name-based query, so the returned amenity should
             # actually be THIS hotel).
             if verify_name and priority >= 5:
+                # BRAND CONFLICT CHECK (strongest signal): if the query
+                # hotel has a canonical brand (e.g. "sandals") and the
+                # returned result has a DIFFERENT canonical brand
+                # (e.g. "riu"), this is a wrong-property match. The
+                # token-similarity heuristic alone misses this because
+                # location words like "Montego" and "Bay" can match
+                # 60%+ of tokens between different hotels in the same
+                # city.
+                if query_brand:
+                    result_brand = _find_brand_marker(formatted)
+                    if result_brand and result_brand != query_brand:
+                        logger.debug(
+                            f"Rejected [brand-conflict] for '{hotel_name}' "
+                            f"'{text}': got '{formatted}' — query brand "
+                            f"{query_brand!r} != result brand {result_brand!r}"
+                        )
+                        continue
                 if not _name_matches(formatted):
                     logger.debug(
                         f"Rejected [name-mismatch] for '{hotel_name}' "

@@ -40,60 +40,71 @@ if str(_PROJECT_ROOT) not in sys.path:
 # ══════════════════════════════════════════════════════════════════════
 
 STR_LUXURY = {  # = JA tier1 OR tier2 (JA splits STR Luxury into two)
+    # Ultra-luxury flagships
     "aman", "four seasons", "ritz-carlton", "ritz carlton", "rosewood",
     "mandarin oriental", "peninsula", "st. regis", "st regis",
     "waldorf astoria", "waldorf-astoria", "park hyatt", "montage",
     "auberge", "one & only", "one&only", "pendry", "capella",
     "raffles", "six senses", "cheval blanc", "como hotels",
     "corinthia", "dorchester collection", "kempinski", "regent",
-    "oetker collection", "rocco forte", "belmond", "bulgari",
+    "oetker collection", "rocco forte", "belmond", "bulgari", "bvlgari",
     "faena", "lxr", "edition", "jw marriott", "w hotels", "w hotel",
     "conrad", "fairmont", "sofitel", "luxury collection",
     "the luxury collection", "ritz-carlton reserve", "langham",
-    "nobu hotel", "viceroy", "thompson", "andaz",
+    "nobu hotel", "viceroy", "thompson", "andaz", "alila",
+    "taj", "shangri-la", "armani hotel", "oberoi",
+    # STR 2024 explicitly confirmed Luxury (verified from STR spreadsheet):
+    "grand hyatt", "intercontinental", "miraval", "design hotels",
+    "delano", "mondrian", "sls", "banyan tree", "signia by hilton",
+    "vignette collection", "virgin hotels", "unbound collection",
+    "the unbound collection by hyatt", "1 hotel", "1 hotels", "1hotel",
+    # STR 2024 Luxury all-inclusives (verified from STR spreadsheet):
+    "sandals", "beaches", "royalton", "breathless resorts",
+    "dreams resorts", "secrets resorts", "now resorts", "zoetry",
+    "hyatt zilara", "hyatt ziva", "palace resorts", "moon palace",
+    "grand palladium", "iberostar grand", "iberostar grand collection",
+    "paradisus", "hyatt vivid hotels", "hyatt vivid hotels & resorts",
     # Caribbean/US luxury independents
     "acqualina", "baha mar", "baker's bay", "fontainebleau",
-    "grand wailea", "greenbrier", "grand hyatt", "intercontinental",
-    "hamilton princess", "kamalame cay", "musha cay", "nemacolin",
-    "newbury boston", "sea island", "the biltmore", "the breakers",
-    "the broadmoor", "the setai", "the surf club", "grace bay club",
+    "grand wailea", "greenbrier", "hamilton princess",
+    "kamalame cay", "musha cay", "nemacolin", "newbury boston",
+    "sea island", "the biltmore", "the breakers", "the broadmoor",
+    "the setai", "the surf club", "grace bay club",
     "sanctuary cap cana", "tucker's point", "vidanta", "wynn",
-    "zemi beach", "dorado beach", "hualuxe",
-    # Collection brands at luxury level
-    "design hotels", "sh hotels", "1 hotels", "1hotel",
+    "zemi beach", "dorado beach", "hualuxe", "boca raton resort",
+    "canyon ranch", "equinox hotel", "mr. c", "cap juluca",
 }
 
 STR_UPPER_UPSCALE = {  # = JA tier3
     "marriott", "marriott hotels", "marriott marquis", "sheraton",
-    "westin", "hyatt regency", "hyatt centric", "hilton hotels",
-    "hard rock hotel", "renaissance hotels", "renaissance",
-    "loews", "le meridien", "delta hotels", "embassy suites",
-    "embassy suites by hilton", "doubletree by hilton", "doubletree",
+    "westin", "hyatt regency", "hyatt centric", "hilton hotels", "hilton",
+    "hard rock hotel", "hard rock", "renaissance hotels", "renaissance",
+    "loews", "le meridien", "delta hotels",  # Delta is Upscale in STR 2023 - flagged separately
+    "embassy suites", "embassy suites by hilton",
     "autograph collection", "tribute portfolio", "curio collection",
     "curio collection by hilton", "canopy by hilton", "kimpton",
-    "hotel indigo", "crowne plaza", "gaylord", "omni",
+    "hotel indigo", "gaylord", "omni",
     "hilton tapestry collection", "tapestry collection by hilton",
     "mgallery", "pullman", "movenpick", "swissotel", "radisson",
-    "hoxton", "ace hotel", "graduate hotels", "signia by hilton",
-    "wyndham grand", "barcelo", "iberostar", "riu", "sandals",
-    "royalton", "margaritaville", "moon palace", "palace resorts",
-    "club med", "hyatt vivid hotels", "hyatt vivid hotels & resorts",
-    "hyatt zilara", "hyatt ziva", "secrets resorts", "dreams resorts",
-    "now resorts", "breathless resorts", "karisma", "playa resorts",
-    "hoxton", "the hoxton", "25hours", "outrigger", "sonesta",
-    "caribe hilton", "jdv by hyatt", "destination by hyatt",
-    "the unbound collection by hyatt", "unscripted by hyatt",
-    "vignette collection", "voco", "citizenm", "sonder",
+    "hoxton", "ace hotel", "graduate hotels", "graduate",
+    "wyndham grand", "margaritaville",  # STR 2023 confirmed Upper Upscale
+    "outrigger", "sonesta", "caribe hilton",
+    "jdv by hyatt", "destination by hyatt", "bunkhouse",
+    "unscripted by hyatt", "dream hotel", "life house",
 }
 
 STR_UPSCALE = {  # = JA tier4
-    "ac hotels", "aloft", "courtyard", "hilton garden inn",
+    "ac hotels", "ac hotel", "aloft", "courtyard", "hilton garden inn",
     "hyatt place", "hyatt house", "four points", "element",
-    "residence inn", "springhill suites", "towneplace suites",
-    "hampton inn", "homewood suites", "home2", "moxy",
-    "caption by hyatt", "motto by hilton", "spark by hilton",
-    "tempo by hilton", "mercure", "novotel", "holiday inn",
-    "garner",
+    "residence inn", "springhill suites", "home2", "homewood suites",
+    "moxy", "holiday inn", "caption by hyatt", "motto by hilton",
+    "spark by hilton", "tempo by hilton", "mercure", "novotel",
+    "garner", "cambria", "cambria hotels", "voco",
+    # STR 2023 explicitly Upscale (moved down from Upper Upscale):
+    "crowne plaza", "doubletree", "doubletree by hilton",
+    "delta hotels", "delta hotel", "citizenm",
+    "iberostar", "riu", "barcelo", "karisma", "club med",
+    "playa resorts", "divi resorts", "compass by margaritaville",
 }
 
 
@@ -231,6 +242,22 @@ def audit():
     prompt = load_prompt_tier_rules()
     scorer = load_scorer_tiers()
 
+    # Load canonical as well — it's the new source of truth that scorer and
+    # prompt derive from. Brands in canonical are considered "covered
+    # everywhere" even if scorer/prompt no longer have their own lists.
+    canonical: dict[str, str] = {}
+    try:
+        import importlib.util
+        spec = importlib.util.spec_from_file_location(
+            "_canonical_audit",
+            str(_PROJECT_ROOT / "app/config/canonical_tiers.py"),
+        )
+        ct = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(ct)
+        canonical = ct.CANONICAL_TIERS
+    except Exception as e:
+        print(f"  ⚠️  Could not load canonical_tiers.py: {e}")
+
     print("═" * 90)
     print("  BRAND TIER AUDIT — 3-way consistency check")
     print("═" * 90)
@@ -238,36 +265,47 @@ def audit():
     print(f"  Registry:  {len(registry):>4} brands")
     print(f"  Prompt:    {len(prompt):>4} brands (TIER RULES in Smart Fill)")
     print(f"  Scorer:    {len(scorer):>4} brands (TIER1/2/3/4/5 lists)")
+    if canonical:
+        print(f"  Canonical: {len(canonical):>4} brands (single source of truth)")
     print()
 
-    # Gather ALL brands mentioned anywhere
-    all_brands = set(registry.keys()) | set(prompt.keys()) | set(scorer.keys())
+    # Gather ALL brands mentioned anywhere (including canonical)
+    all_brands = (
+        set(registry.keys())
+        | set(prompt.keys())
+        | set(scorer.keys())
+        | set(canonical.keys())
+    )
 
     # Find conflicts
-    hard_conflicts = []   # HIGH: registry vs prompt OR registry vs scorer disagree
+    hard_conflicts = []   # HIGH: registry vs prompt OR registry vs scorer OR vs canonical disagree
     str_conflicts = []    # HIGH: any source disagrees with STR industry standard
-    coverage_gaps = []    # LOW: brand only in one source
+    coverage_gaps = []    # LOW: brand only in one source AND not in canonical
 
     for brand in sorted(all_brands):
         r = registry.get(brand)
         p = prompt.get(brand)
         s = scorer.get(brand)
+        c = canonical.get(brand)
         str_label = str_tier_for(brand)
 
-        # Internal conflict (our 3 sources disagree)
-        tiers_declared = {t for t in (r, p, s) if t}
+        # Internal conflict — any two declared tiers disagree
+        tiers_declared = {t for t in (r, p, s, c) if t}
         if len(tiers_declared) > 1:
             hard_conflicts.append({
                 "brand": brand,
                 "registry": r or "—",
                 "prompt": p or "—",
                 "scorer": s or "—",
+                "canonical": c or "—",
                 "str": str_label or "—",
             })
             continue
 
         # STR conflict (a declared tier contradicts STR industry standard)
-        for source, tier in (("registry", r), ("prompt", p), ("scorer", s)):
+        for source, tier in (
+            ("registry", r), ("prompt", p), ("scorer", s), ("canonical", c),
+        ):
             if tier and not tier_compatible_with_str(tier, str_label):
                 str_conflicts.append({
                     "brand": brand,
@@ -276,11 +314,19 @@ def audit():
                     "str_says": str_label,
                 })
 
-        # Coverage gap — brand only in one source
-        sources_with = sum(1 for t in (r, p, s) if t)
-        if sources_with == 1 and (r or p or s):
-            where = "registry" if r else ("prompt" if p else "scorer")
-            coverage_gaps.append({"brand": brand, "only_in": where, "tier": r or p or s})
+        # Coverage gap — brand declared in only ONE source, excluding canonical.
+        # If it's in canonical, scorer+prompt reach it transitively, so
+        # not-being-in-scorer-or-prompt is NOT a gap — that's the whole
+        # point of the single-source-of-truth refactor.
+        sources_declaring = sum(
+            1 for t in (r, p, s, c) if t
+        )
+        if sources_declaring == 1 and r and not c:
+            # Brand is in registry but not in canonical → real gap
+            # (scorer/prompt won't know about it)
+            coverage_gaps.append(
+                {"brand": brand, "only_in": "registry", "tier": r}
+            )
 
     # ═══ REPORT ═══
     print("─" * 90)
