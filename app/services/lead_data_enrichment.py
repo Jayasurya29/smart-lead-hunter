@@ -312,31 +312,50 @@ async def enrich_lead_data(
     current_room_count: int = 0,
     mode: str = "smart",
     search_name: str = "",
+    progress_callback=None,
 ) -> Dict:
     """
-    Three-stage enrichment:
-      1. CLASSIFY project_type
-      2. EXTRACT data fields (date, tier, rooms, brand, location)
-      3. EXTRACT entities (mgmt co, owner, developer) + address — separate call
+    Six-stage enrichment pipeline. Stages are always the same regardless of
+    what's missing — the `missing` list only changes WHAT each stage looks
+    for, not WHICH stages run.
+
+      1. CLASSIFY project_type        (Gemini mini-call)
+      2. BUILD queries                (free, based on project_type + missing)
+      3. SEARCH                       (Serper × 5)
+      4. EXTRACT data fields          (Gemini: date, tier, rooms, brand, location)
+      5. EXTRACT entities             (Gemini: mgmt co, owner, developer)
+      6. EXTRACT address              (Gemini: country-aware address parser)
 
     `country` is the lead's KNOWN country from the DB. It flows into the
     location context for every stage, and critically into the address
     extractor's country detection so Caribbean / international properties
     get the right country-specific rules even when Gemini doesn't re-return
     `country` in its extraction.
+
+    progress_callback (optional): async callable invoked at the start of
+    each stage as `await cb(stage_num, total_stages, label)`. Used by the
+    SSE endpoint to push live progress to the UI. Passing None (the default)
+    preserves the old fire-and-forget behavior for Celery + batch jobs.
     """
+    _TOTAL = 6
+
+    async def _emit(stage: int, label: str):
+        if progress_callback is None:
+            return
+        try:
+            await progress_callback(stage, _TOTAL, label)
+        except Exception as e:
+            logger.debug(f"Smart Fill progress callback failed (non-fatal): {e}")
+
     result: Dict = {
         "changes": [],
         "confidence": "low",
         "source_url": None,
     }
-    # Include country in location so the address extractor and the
-    # project-type classifier both see it. Previously this was just
-    # "{city}, {state}" which made Caribbean country detection fail
-    # whenever Gemini omitted `country` from its response.
     location = ", ".join(filter(None, [city, state, country]))
 
     # ── STAGE 1: PROJECT TYPE CLASSIFICATION ──
+    await _emit(1, "Classifying project type")
     project_type = await _classify_project_type(
         hotel_name=hotel_name,
         location=location,
@@ -355,6 +374,7 @@ async def enrich_lead_data(
         )
 
     # ── STAGE 2: BRANCHED QUERY BUILDING ──
+    await _emit(2, "Building targeted queries")
     queries, missing = _build_queries_for_project_type(
         hotel_name=hotel_name,
         location=location,
@@ -369,9 +389,12 @@ async def enrich_lead_data(
         search_name=search_name,
     )
     if mode == "smart" and not missing:
+        # Nothing missing — emit complete and bail out
+        await _emit(_TOTAL, "Nothing to fill — already complete")
         return result
 
     # ── STAGE 3: SEARCH ──
+    await _emit(3, f"Searching web ({min(len(queries), 5)} queries)")
     all_snippets: list[str] = []
     all_urls: list[str] = []
     for q in queries[:5]:
@@ -384,6 +407,7 @@ async def enrich_lead_data(
 
     if not all_snippets:
         logger.info(f"Smart Fill [{hotel_name}]: no search results")
+        await _emit(_TOTAL, "No search results found")
         return result
 
     logger.info(
@@ -391,7 +415,8 @@ async def enrich_lead_data(
         f"(project_type={project_type}, queries={len(queries)})"
     )
 
-    # ── STAGE 4a: DATA FIELD EXTRACTION ──
+    # ── STAGE 4: DATA FIELD EXTRACTION ──
+    await _emit(4, "Extracting data fields")
     data_extraction = await _extract_fields_for_project_type(
         hotel_name=hotel_name,
         location=location,
@@ -410,7 +435,8 @@ async def enrich_lead_data(
         current_room_count=current_room_count,
     )
 
-    # ── STAGE 4b: ENTITY EXTRACTION (sequential, 2s gap) ──
+    # ── STAGE 5: ENTITY EXTRACTION (sequential, 2s gap) ──
+    await _emit(5, "Extracting mgmt / owner / developer")
     await _asyncio.sleep(2)
     entity_extraction = await _extract_entities(
         hotel_name=hotel_name,
@@ -418,7 +444,8 @@ async def enrich_lead_data(
         snippets=all_snippets[:15],
     )
 
-    # ── STAGE 4c: ADDRESS EXTRACTION (sequential, 2s gap) ──
+    # ── STAGE 6: ADDRESS EXTRACTION (sequential, 2s gap) ──
+    await _emit(6, "Extracting street address")
     await _asyncio.sleep(2)
     # Country detection precedence for the address extractor:
     #   1. Gemini's fresh extraction (data_extraction['country']) — most up-to-date

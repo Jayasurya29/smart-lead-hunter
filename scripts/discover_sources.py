@@ -1330,7 +1330,22 @@ class WebDiscoveryEngine:
             return True
         return False
 
-    async def run(self, max_queries: int = None, skip_queries: int = 0):
+    async def run(
+        self,
+        max_queries: int = None,
+        skip_queries: int = 0,
+        filter_gold_only: bool = False,
+    ):
+        """
+        Run a discovery cycle.
+
+        Args:
+            max_queries: limit the run to the first N queries (None = all)
+            skip_queries: skip the first N queries (resume-support)
+            filter_gold_only: only run queries already classified as 'gold'
+                by QueryIntelligence (proven performers). Ignored if no
+                queries have hit gold status yet (falls back to full list).
+        """
         queries = SEARCH_QUERIES[skip_queries:]
         if max_queries:
             queries = queries[:max_queries]
@@ -1345,9 +1360,29 @@ class WebDiscoveryEngine:
             QueryIntelligence,
             QueryRunResult,
         )
+        from app.models.discovery_query_stat import DiscoveryQueryStat
+        from sqlalchemy import select
 
         qi_skip_stats = {"active": len(queries), "skipped_junk": 0, "paused_retries": 0}
         async with async_session() as qi_session:
+            # Gold-only filtering happens BEFORE the junk filter. If the
+            # user selected "Gold Only" in the UI, we only keep queries
+            # whose current status is 'gold'. If no gold queries exist
+            # yet, we silently fall back to the full list (with a log
+            # message) so a UI click never produces an empty discovery run.
+            if filter_gold_only:
+                result = await qi_session.execute(
+                    select(DiscoveryQueryStat.query_text).where(
+                        DiscoveryQueryStat.status == "gold"
+                    )
+                )
+                gold_queries = {row[0] for row in result.all()}
+                if gold_queries:
+                    queries = [q for q in queries if q in gold_queries]
+                    print(f"  🥇 Gold-only filter: {len(queries)} queries kept")
+                else:
+                    print("  ⚠️  No gold queries yet — running full list instead")
+
             queries, qi_skip_stats = await filter_active_queries(qi_session, queries)
 
         print("═" * 70)

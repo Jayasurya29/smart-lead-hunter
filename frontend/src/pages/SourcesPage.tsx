@@ -98,13 +98,15 @@ export default function SourcesPage() {
   const { data: sources = [], isLoading } = useQuery<Source[]>({
     queryKey: ['sources'],
     queryFn: async () => (await api.get('/sources')).data,
-    refetchInterval: 30_000,
+    refetchInterval: 60_000,
+    staleTime: 30_000,
   })
 
   const { data: logs = [] } = useQuery<ScrapeLog[]>({
     queryKey: ['scrape-logs'],
     queryFn: async () => (await api.get('/scrape/logs')).data,
-    refetchInterval: 30_000,
+    refetchInterval: 60_000,
+    staleTime: 30_000,
   })
 
   const toggleMut = useMutation({

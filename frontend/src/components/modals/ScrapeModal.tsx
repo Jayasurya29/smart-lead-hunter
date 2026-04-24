@@ -21,6 +21,7 @@ export default function ScrapeModal({ onClose }: Props) {
   const [logs, setLogs] = useState<string[]>([])
   const [sources, setSources] = useState<any[]>([])
   const [selectedSources, setSelectedSources] = useState<number[]>([])
+  const [sourceSearch, setSourceSearch] = useState('')
   const [extractUrl, setExtractUrl] = useState('')
   const logRef = useRef<HTMLDivElement>(null)
   const esRef = useRef<EventSource | null>(null)
@@ -35,6 +36,10 @@ export default function ScrapeModal({ onClose }: Props) {
   const receivedDataRef = useRef(false)    // true once first SSE message arrives
   const elapsedRef = useRef(0)
   const elapsedTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
+
+  // ── Log batching to prevent UI freeze from rapid SSE messages ──
+  const logBufferRef = useRef<string[]>([])
+  const logFlushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   // Keep statusRef in sync with state
   useEffect(() => { statusRef.current = status }, [status])
@@ -52,6 +57,7 @@ export default function ScrapeModal({ onClose }: Props) {
       esRef.current?.close()
       if (retryTimerRef.current) clearTimeout(retryTimerRef.current)
       if (elapsedTimerRef.current) clearInterval(elapsedTimerRef.current)
+      if (logFlushTimerRef.current) clearTimeout(logFlushTimerRef.current)
     }
   }, [])
 
@@ -66,9 +72,27 @@ export default function ScrapeModal({ onClose }: Props) {
     )
   }
 
-  const addLog = useCallback((msg: string) => {
-    setLogs((prev) => [...prev, msg])
+  // Log batching — prevents React re-rendering on every SSE message when
+  // hundreds arrive per second, which was freezing the UI.
+  const flushLogs = useCallback(() => {
+    if (logBufferRef.current.length === 0) return
+    const batch = logBufferRef.current
+    logBufferRef.current = []
+    setLogs((prev) => {
+      const next = [...prev, ...batch]
+      return next.length > 500 ? next.slice(-500) : next
+    })
   }, [])
+
+  const addLog = useCallback((msg: string) => {
+    logBufferRef.current.push(msg)
+    if (!logFlushTimerRef.current) {
+      logFlushTimerRef.current = setTimeout(() => {
+        logFlushTimerRef.current = null
+        flushLogs()
+      }, 250)
+    }
+  }, [flushLogs])
 
   /* ── SSE connection with retry (matches old Alpine.js behavior) ── */
 
@@ -96,6 +120,7 @@ export default function ScrapeModal({ onClose }: Props) {
           bg.addEvent()
         }
         if (data.type === 'complete' || data.done || data.status === 'complete') {
+          flushLogs()  // Ensure all buffered messages render before "done" state
           setStatus('done')
           closedRef.current = true
           es.close()
@@ -321,7 +346,7 @@ export default function ScrapeModal({ onClose }: Props) {
 
           {/* Source list (smart/full mode) */}
           {mode !== 'url' && status === 'idle' && (
-            <div className="space-y-2" style={{ maxHeight: '320px', overflowY: 'auto' }}>
+            <div className="space-y-2">
               {mode === 'full' && (
                 <div className="bg-gold-50 border border-gold-200 rounded-lg p-3 mb-2">
                   <p className="text-[11px] font-semibold text-gold-700">
@@ -332,43 +357,113 @@ export default function ScrapeModal({ onClose }: Props) {
               )}
               {mode === 'smart' && sources.length === 0 && (
                 <div className="text-center py-8 text-stone-400">
-                  <p className="text-sm font-medium">Loading sources...</p>
+                  <Loader2 className="w-5 h-5 animate-spin mx-auto mb-2" />
+                  <p className="text-[12px] font-medium">Loading sources...</p>
                 </div>
               )}
-              {mode === 'smart' && sources.length > 0 && (
-                <>
-                  <p className="text-[10px] text-stone-400 font-medium">
-                    {selectedSources.length > 0
-                      ? `${selectedSources.length} source${selectedSources.length !== 1 ? 's' : ''} selected`
-                      : 'Select specific sources or start to scrape all due sources'}
-                  </p>
-                  {sources.filter((s) => s.is_active !== false).map((s) => (
-                    <label
-                      key={s.id}
-                      className={cn(
-                        'flex items-center gap-3 px-3 py-2 rounded-lg border cursor-pointer transition',
-                        selectedSources.includes(s.id)
-                          ? 'border-navy-300 bg-navy-50'
-                          : 'border-stone-100 hover:border-stone-200',
-                      )}
-                    >
-                      <input
-                        type="checkbox"
-                        checked={selectedSources.includes(s.id)}
-                        onChange={() => toggleSource(s.id)}
-                        className="w-3.5 h-3.5 rounded border-stone-300 text-navy-600 focus:ring-navy-500"
-                      />
-                      <div className="flex-1 min-w-0">
-                        <p className="text-[12px] font-semibold text-navy-900 truncate">{s.name}</p>
-                        {s.url && <p className="text-[10px] text-stone-400 truncate">{s.url}</p>}
+              {mode === 'smart' && sources.length > 0 && (() => {
+                const active = sources.filter((s) => s.is_active !== false)
+                const filtered = sourceSearch
+                  ? active.filter((s) =>
+                      (s.name || '').toLowerCase().includes(sourceSearch.toLowerCase()) ||
+                      (s.base_url || s.url || '').toLowerCase().includes(sourceSearch.toLowerCase()),
+                    )
+                  : active
+                const activeIds = active.map((s) => s.id)
+                const filteredIds = filtered.map((s) => s.id)
+                const allFilteredSelected =
+                  filteredIds.length > 0 && filteredIds.every((id) => selectedSources.includes(id))
+
+                return (
+                  <>
+                    {/* Search + quick actions bar */}
+                    <div className="space-y-2 pb-2 border-b border-stone-100">
+                      <div className="relative">
+                        <input
+                          type="text"
+                          value={sourceSearch}
+                          onChange={(e) => setSourceSearch(e.target.value)}
+                          placeholder={`Search ${active.length} sources...`}
+                          className="w-full h-8 px-3 text-[11.5px] bg-stone-50 border border-stone-200 rounded-md outline-none focus:border-navy-400 focus:ring-1 focus:ring-navy-200 transition"
+                        />
                       </div>
-                      {s.gold_url_count > 0 && (
-                        <span className="text-[10px] text-gold-600 font-medium">⭐ {s.gold_url_count}</span>
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <button
+                          onClick={() => setSelectedSources(activeIds)}
+                          className="px-2 h-6 text-[10px] font-semibold text-navy-700 bg-navy-50 border border-navy-200 rounded-md hover:bg-navy-100 transition"
+                        >
+                          Select all ({active.length})
+                        </button>
+                        <button
+                          onClick={() => setSelectedSources(
+                            allFilteredSelected
+                              ? selectedSources.filter((id) => !filteredIds.includes(id))
+                              : [...new Set([...selectedSources, ...filteredIds])]
+                          )}
+                          disabled={filtered.length === 0 || filtered.length === active.length}
+                          className="px-2 h-6 text-[10px] font-semibold text-navy-700 bg-white border border-navy-200 rounded-md hover:bg-navy-50 transition disabled:opacity-40"
+                        >
+                          {allFilteredSelected ? 'Unselect' : 'Select'} visible ({filtered.length})
+                        </button>
+                        <button
+                          onClick={() => setSelectedSources([])}
+                          disabled={selectedSources.length === 0}
+                          className="px-2 h-6 text-[10px] font-semibold text-stone-600 bg-white border border-stone-200 rounded-md hover:bg-stone-50 transition disabled:opacity-40"
+                        >
+                          Clear
+                        </button>
+                        <span className="ml-auto text-[10px] text-stone-500 tabular-nums">
+                          {selectedSources.length > 0
+                            ? `${selectedSources.length} selected`
+                            : 'none selected → scrape all due'}
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Scrollable source list */}
+                    <div className="space-y-1.5 overflow-y-auto" style={{ maxHeight: '280px' }}>
+                      {filtered.length === 0 ? (
+                        <p className="text-center py-8 text-[11px] text-stone-400">
+                          No sources match "{sourceSearch}"
+                        </p>
+                      ) : (
+                        filtered.slice(0, 100).map((s) => (
+                          <label
+                            key={s.id}
+                            className={cn(
+                              'flex items-center gap-2.5 px-2.5 py-1.5 rounded-md border cursor-pointer transition',
+                              selectedSources.includes(s.id)
+                                ? 'border-navy-300 bg-navy-50'
+                                : 'border-stone-100 hover:border-stone-200',
+                            )}
+                          >
+                            <input
+                              type="checkbox"
+                              checked={selectedSources.includes(s.id)}
+                              onChange={() => toggleSource(s.id)}
+                              className="w-3.5 h-3.5 rounded border-stone-300 text-navy-600 focus:ring-navy-500"
+                            />
+                            <div className="flex-1 min-w-0">
+                              <p className="text-[11.5px] font-semibold text-navy-900 truncate">{s.name}</p>
+                              {(s.url || s.base_url) && (
+                                <p className="text-[9.5px] text-stone-400 truncate">{s.url || s.base_url}</p>
+                              )}
+                            </div>
+                            {s.gold_url_count > 0 && (
+                              <span className="text-[9.5px] text-gold-600 font-medium">⭐ {s.gold_url_count}</span>
+                            )}
+                          </label>
+                        ))
                       )}
-                    </label>
-                  ))}
-                </>
-              )}
+                      {filtered.length > 100 && (
+                        <p className="text-center py-2 text-[10px] text-stone-400">
+                          Showing first 100 — refine search to see more
+                        </p>
+                      )}
+                    </div>
+                  </>
+                )
+              })()}
             </div>
           )}
 

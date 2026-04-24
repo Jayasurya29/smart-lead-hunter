@@ -1511,6 +1511,20 @@ async def _scrape_url(url: str) -> Optional[str]:
         "careers.",
         "jobs.",
         "wikipedia.org",
+        # Social/auth-gated sites — always return HTTP 4xx to unauth
+        # scrapers. No point burning time + Crawl4AI retries on them.
+        # Empirically observed returning 400/403 on every attempt.
+        "facebook.com",
+        "fb.com",
+        "instagram.com",
+        "twitter.com",
+        "x.com",
+        "tiktok.com",
+        "youtube.com",
+        "youtu.be",
+        "threads.net",
+        "pinterest.com",
+        "reddit.com",
     ]
     url_lower = url.lower()
     for skip in skip_domains:
@@ -3411,6 +3425,7 @@ async def enrich_lead_contacts(
     project_type_str: Optional[str] = None,
     search_name: Optional[str] = None,
     former_names: Optional[list] = None,
+    progress_callback=None,
 ) -> EnrichmentResult:
     """
     Main enrichment entry (v5 — iterative researcher).
@@ -3422,6 +3437,12 @@ async def enrich_lead_contacts(
 
     Output shape is identical to v4 (EnrichmentResult), so all callers
     (routes, Celery tasks) keep working unchanged.
+
+    progress_callback (optional): async callable invoked at the start of
+    each iteration as `await cb(stage_num, total_stages, label)`. Used by
+    the SSE endpoint to push live progress to the UI. Passing None (the
+    default) preserves the old fire-and-forget behavior for Celery and
+    batch jobs.
 
     If iterative researcher fails for any reason, falls back to v4 legacy
     pipeline so enrichment never returns nothing.
@@ -3452,7 +3473,10 @@ async def enrich_lead_contacts(
 
     # ── Run the iteration loop ──
     try:
-        await run_iterative_research(research_state)
+        await run_iterative_research(
+            research_state,
+            progress_callback=progress_callback,
+        )
         # Phase B: surface project-type rejection flags to caller
         result.should_reject = research_state.should_reject
         result.rejection_reason = research_state.rejection_reason
@@ -3516,6 +3540,19 @@ async def enrich_lead_contacts(
     # by name BEFORE calling it, then re-merge them onto the survivors AFTER.
     # Without this, strategist_priority is NULL in the DB and priority badges
     # fall back to algorithmic values.
+    #
+    # Progress: the iterations emitted events 1-9. This Gemini scope-check
+    # is a real, user-visible stage (can take 30-60s under 429 backoff), so
+    # we expose it as "stage 10" even though _TOTAL=9 in run_iterative_research.
+    # The progress bar will cap at ~95% here — honest signal that work is
+    # still happening.
+    if progress_callback is not None:
+        try:
+            # Emit as a fractional stage — tells the UI "past 9, not yet done"
+            await progress_callback(10, 11, "Verifying contact scope (Gemini)")
+        except Exception as e:
+            logger.debug(f"Post-iter progress callback failed (non-fatal): {e}")
+
     strategist_verdicts_by_name: dict = {}
     for c in result.contacts:
         nm = (c.get("name") or "").strip().lower()
@@ -3637,6 +3674,14 @@ async def enrich_lead_contacts(
             f"[SMART CAP] {pre_cap} → {len(result.contacts)} contacts kept "
             f"(dropped {pre_cap - len(result.contacts)} lower-value)"
         )
+
+    # Final stage event before returning — tells the UI all work is done,
+    # contacts are sorted + capped + ready to render.
+    if progress_callback is not None:
+        try:
+            await progress_callback(11, 11, "Saving & scoring contacts")
+        except Exception as e:
+            logger.debug(f"Final progress callback failed (non-fatal): {e}")
 
     logger.info(
         f"Enrichment v5 complete for {hotel_name}: "

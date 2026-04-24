@@ -1,6 +1,8 @@
 import { useState, useEffect } from 'react'
 import { useLead, useContacts, useApproveLead, useRejectLead, useRestoreLead, useDeleteLead, useEnrichLead, useSmartFill } from '@/hooks/useLeads'
 import RevenuePotential from './RevenuePotential'
+import EnrichProgress from './EnrichProgress'
+import SmartFillProgress from './SmartFillProgress'
 import ConfirmDialog from '../ui/ConfirmDialog'
 import { editLead, saveContact, setPrimaryContact, deleteContact, updateContact, toggleContactScope, addContact } from '@/api/leads'
 import api from '@/api/client'
@@ -64,6 +66,22 @@ export default function LeadDetail({ leadId, tab, onClose }: Props) {
   const [editingReason, setEditingReason] = useState(false)
   const [reasonValue, setReasonValue] = useState('')
   const [savingReason, setSavingReason] = useState(false)
+  // Enrich Contacts: tracks WHICH lead the live enrichment is running for,
+  // not just "is something enriching". This prevents the progress card
+  // from leaking across lead changes — if user starts enrichment on lead
+  // 1273 and clicks lead 1275, the 1275 panel shows its own (static) state.
+  // The enrichment on 1273 keeps running in the backend; when user returns
+  // to 1273 they'll see the final contacts (as long as they wait for the
+  // SSE complete event to fire).
+  const [enrichingLeadId, setEnrichingLeadId] = useState<number | null>(null)
+  const [smartFillLeadId, setSmartFillLeadId] = useState<number | null>(null)
+  const [smartFillMode, setSmartFillMode] = useState<'smart' | 'full'>('smart')
+
+  // Derive the "is this lead live" booleans from the ID-tracked state.
+  // Consumers of the old enrichingLive/smartFillLive API still get the
+  // same semantics, just scoped to the currently-viewed lead.
+  const enrichingLive = enrichingLeadId === leadId
+  const smartFillLive = smartFillLeadId === leadId ? smartFillMode : null
 
   const approveMut = useApproveLead()
   const rejectMut  = useRejectLead()
@@ -172,8 +190,8 @@ export default function LeadDetail({ leadId, tab, onClose }: Props) {
 
       {/* ═══ TAB CONTENT — scrollable ═══ */}
       <div className="flex-1 overflow-y-auto p-5">
-        {activeTab === 'overview'  && <OverviewTab lead={lead} leadId={leadId} contactList={contactList} onEnrich={() => enrichMut.mutate(leadId)} enriching={enrichMut.isPending} onSmartFill={(mode: 'smart' | 'full') => smartFillMut.mutate({ id: leadId, mode })} smartFilling={smartFillMut.isPending} smartFillResult={smartFillMut.data} />}
-        {activeTab === 'contacts'  && <ContactsTab contacts={contactList} loading={contactsLoading} leadId={leadId} onEnrich={() => enrichMut.mutate(leadId)} enriching={enrichMut.isPending} />}
+        {activeTab === 'overview'  && <OverviewTab lead={lead} leadId={leadId} contactList={contactList} onEnrich={() => setEnrichingLeadId(leadId)} enriching={enrichingLive} onSmartFill={(mode: 'smart' | 'full') => { setSmartFillMode(mode); setSmartFillLeadId(leadId); }} smartFilling={smartFillLive !== null} smartFillResult={smartFillMut.data} enrichingLive={enrichingLive} onEnrichComplete={() => setEnrichingLeadId(null)} smartFillLive={smartFillLive} onSmartFillComplete={() => setSmartFillLeadId(null)} />}
+        {activeTab === 'contacts'  && <ContactsTab contacts={contactList} loading={contactsLoading} leadId={leadId} onEnrich={() => setEnrichingLeadId(leadId)} enriching={enrichingLive} enrichingLive={enrichingLive} onEnrichComplete={() => setEnrichingLeadId(null)} />}
         {activeTab === 'edit'      && <EditTab lead={lead} leadId={leadId} />}
         {activeTab === 'sources'   && <SourcesTab lead={lead} />}
       </div>
@@ -334,9 +352,11 @@ export default function LeadDetail({ leadId, tab, onClose }: Props) {
 /* ═══════════════════════════════════════════════════
    OVERVIEW TAB — Details on top, Revenue below
    ═══════════════════════════════════════════════════ */
-function OverviewTab({ lead, leadId, contactList, onEnrich, enriching, onSmartFill, smartFilling, smartFillResult }: {
+function OverviewTab({ lead, leadId, contactList, onEnrich, enriching, onSmartFill, smartFilling, smartFillResult, enrichingLive, onEnrichComplete, smartFillLive, onSmartFillComplete }: {
   lead: Lead; leadId: number; contactList: Contact[]; onEnrich: () => void; enriching: boolean
   onSmartFill: (mode: 'smart' | 'full') => void; smartFilling: boolean; smartFillResult?: { status: string; changes?: string[]; confidence?: string }
+  enrichingLive?: boolean; onEnrichComplete?: () => void
+  smartFillLive?: null | 'smart' | 'full'; onSmartFillComplete?: () => void
 }) {
   const hasMissing = !lead.brand_tier || lead.brand_tier === 'unknown' || !lead.opening_date || !lead.room_count || !lead.management_company || !lead.owner || !lead.developer || !lead.address
   const qc = useQueryClient()
@@ -370,7 +390,26 @@ function OverviewTab({ lead, leadId, contactList, onEnrich, enriching, onSmartFi
           {lead.owner             && <Field icon={User}      label="Owner"       value={lead.owner} />}
         </div>
 
-        {/* Smart Fill + Full Refresh — compact action row */}
+        {/* Live progress card — rendered when user clicked Smart Fill or
+            Full Refresh. Replaces the static button row while running. */}
+        {smartFillLive && (
+          <div className="mt-3 pt-3 border-t border-stone-100">
+            <SmartFillProgress
+              leadId={leadId}
+              mode={smartFillLive}
+              onComplete={() => {
+                qc.invalidateQueries({ queryKey: ['lead', leadId] })
+                qc.invalidateQueries({ queryKey: ['leads'] })
+                qc.invalidateQueries({ queryKey: ['revenue-estimate', leadId] })
+                onSmartFillComplete?.()
+              }}
+              onCancel={() => onSmartFillComplete?.()}
+            />
+          </div>
+        )}
+
+        {/* Smart Fill + Full Refresh — compact action row (hidden while progress is showing) */}
+        {!smartFillLive && (
         <div className="flex items-center gap-2 mt-3 pt-3 border-t border-stone-100">
           {hasMissing && (
             <button
@@ -408,6 +447,7 @@ function OverviewTab({ lead, leadId, contactList, onEnrich, enriching, onSmartFi
             </span>
           )}
         </div>
+        )}
       </Section>
 
       {/* ── Revenue Potential ── */}
@@ -599,8 +639,9 @@ function WizaEmailButton({ contactId, leadId, onEmailFound }: {
   )
 }
 
-function ContactsTab({ contacts, loading, leadId, onEnrich, enriching }: {
+function ContactsTab({ contacts, loading, leadId, onEnrich, enriching, enrichingLive, onEnrichComplete }: {
   contacts: Contact[]; loading: boolean; leadId: number; onEnrich: () => void; enriching: boolean
+  enrichingLive?: boolean; onEnrichComplete?: () => void
 }) {
   const qc = useQueryClient()
   const [editingId, setEditingId] = useState<number | null>(null)
@@ -609,16 +650,30 @@ function ContactsTab({ contacts, loading, leadId, onEnrich, enriching }: {
   const [showAdd, setShowAdd] = useState(false)
   const [addForm, setAddForm] = useState<Record<string, string>>({ scope: 'hotel_specific' })
   const [adding, setAdding] = useState(false)
-  // Which score-breakdown popover is currently open (null = none).
-  // Click the score badge to show, click again (or outside) to hide.
-  // MUST be declared BEFORE the early returns below — React's Rules of
-  // Hooks require every useState to run on every render, in the same
-  // order. A hook after an early return crashes with React error #310
-  // when the component switches between early-return and full-render paths.
   const [openBreakdownId, setOpenBreakdownId] = useState<number | null>(null)
-  // Which evidence panel is currently expanded (null = none).
-  // Click "Evidence (N)" pill to expand, click again to collapse.
   const [openEvidenceId, setOpenEvidenceId] = useState<number | null>(null)
+
+  // ── Live enrichment progress ──
+  // When user clicked "Run Enrichment" / "Enrich" button, enrichingLive
+  // flips to true and we show the SSE-driven progress card INSTEAD of
+  // the regular contact list. When it completes, we refetch contacts +
+  // hide the progress card.
+  if (enrichingLive) {
+    return (
+      <div className="animate-fadeIn">
+        <EnrichProgress
+          leadId={leadId}
+          onComplete={(summary) => {
+            qc.invalidateQueries({ queryKey: ['contacts', leadId] })
+            qc.invalidateQueries({ queryKey: ['lead', leadId] })
+            qc.invalidateQueries({ queryKey: ['leads'] })
+            onEnrichComplete?.()
+          }}
+          onCancel={() => onEnrichComplete?.()}
+        />
+      </div>
+    )
+  }
 
   if (loading) {
     return <div className="space-y-2">{Array.from({ length: 3 }).map((_, i) => <div key={i} className="skeleton h-24 rounded-lg" />)}</div>

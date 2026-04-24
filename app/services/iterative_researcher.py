@@ -3070,7 +3070,10 @@ Respond with ONLY JSON:
     return demoted
 
 
-async def run_iterative_research(state: ResearchState) -> ResearchState:
+async def run_iterative_research(
+    state: ResearchState,
+    progress_callback=None,
+) -> ResearchState:
     """
     Run the 4-iteration research loop. Stops early if:
     - We have 8+ contacts and basic LinkedIn coverage, OR
@@ -3080,6 +3083,11 @@ async def run_iterative_research(state: ResearchState) -> ResearchState:
     PHASE B: Before running any iteration, classify the project type and
     route accordingly. If the lead is rejected (residences_only), skip
     all iterations and return immediately with rejection flags set.
+
+    progress_callback (optional): called at the START of each iteration as
+        await progress_callback(stage: int, total: int, label: str)
+    Lets the endpoint layer emit SSE progress events without this module
+    needing to know anything about HTTP.
     """
     logger.info(
         f"[ITER] Starting iterative research for: {state.hotel_name} "
@@ -3146,7 +3154,22 @@ async def run_iterative_research(state: ResearchState) -> ResearchState:
             f"falling through to standard pipeline."
         )
 
+    # ── Helper: emit progress safely (callback failures never block research) ──
+    # Total stages = 9 iterations (some are skippable but we account for them
+    # in the denominator so the bar doesn't jump around).
+    _TOTAL_STAGES = 9
+
+    async def _emit_progress(stage: int, label: str):
+        if progress_callback is None:
+            return
+        try:
+            await progress_callback(stage, _TOTAL_STAGES, label)
+        except Exception as e:
+            # Progress emission must never break research
+            logger.debug(f"Progress callback failed (non-fatal): {e}")
+
     # ── Iteration 1: discovery ──
+    await _emit_progress(1, "Iter 1 · Discovery")
     new_facts = await iteration_1_discovery(state)
     logger.info(
         f"[ITER 1/DISCOVERY] +{new_facts} facts. "
@@ -3156,6 +3179,7 @@ async def run_iterative_research(state: ResearchState) -> ResearchState:
 
     # ── Iteration 2: GM hunt ──
     if _should_continue(state):
+        await _emit_progress(2, "Iter 2 · GM hunt")
         new_facts = await iteration_2_gm_hunt(state)
         logger.info(
             f"[ITER 2/GM_HUNT] +{new_facts} facts. "
@@ -3168,6 +3192,7 @@ async def run_iterative_research(state: ResearchState) -> ResearchState:
     # Only runs for HOT/URGENT/EXPIRED leads (skipped for WARM/COOL where
     # these dept heads aren't hired yet).
     if _should_continue(state):
+        await _emit_progress(3, "Iter 2.5 · Department heads")
         new_facts = await iteration_2_5_property_staff(state)
         logger.info(
             f"[ITER 2.5/STAFF] +{new_facts} facts. Names={len(state.discovered_names)}"
@@ -3175,6 +3200,7 @@ async def run_iterative_research(state: ResearchState) -> ResearchState:
 
     # ── Iteration 3: corporate / owner hunt ──
     if _should_continue(state):
+        await _emit_progress(4, "Iter 3 · Corporate hunt")
         new_facts = await iteration_3_corporate_hunt(state)
         logger.info(
             f"[ITER 3/CORPORATE] +{new_facts} facts. Names={len(state.discovered_names)}"
@@ -3182,6 +3208,7 @@ async def run_iterative_research(state: ResearchState) -> ResearchState:
 
     # ── Iteration 4: linkedin lookup (always run if we have any names) ──
     if state.discovered_names:
+        await _emit_progress(5, "Iter 4 · LinkedIn lookup")
         await iteration_4_linkedin_lookup(state)
         with_linkedin = sum(1 for n in state.discovered_names if n.get("linkedin"))
         logger.info(
@@ -3190,6 +3217,7 @@ async def run_iterative_research(state: ResearchState) -> ResearchState:
 
     # ── Iteration 5: verify current role (prevents stale hotel_specific tags) ──
     if state.discovered_names:
+        await _emit_progress(6, "Iter 5 · Verify current role")
         await iteration_5_verify_current_role(state)
         downgraded = sum(
             1
@@ -3205,6 +3233,7 @@ async def run_iterative_research(state: ResearchState) -> ResearchState:
 
     # ── Iteration 5.5: regional fit verification for ambiguous-region titles ──
     if state.discovered_names:
+        await _emit_progress(7, "Iter 5.5 · Regional fit")
         await iteration_5_5_regional_fit(state)
 
     # ── Iteration 6: REASONING PASS (Shift D) ──
@@ -3212,6 +3241,7 @@ async def run_iterative_research(state: ResearchState) -> ResearchState:
     # running operations for this specific property, in this specific phase,
     # RIGHT NOW — and assigns final priorities (P1/P2/P3/P4) with reasoning.
     if state.discovered_names:
+        await _emit_progress(8, "Iter 6 · Gemini strategist")
         await iteration_6_reasoning_pass(state)
 
     # ── Iteration 6.5: EMPLOYMENT VERIFICATION (Brian Fry killer) ──
@@ -3222,6 +3252,7 @@ async def run_iterative_research(state: ResearchState) -> ResearchState:
     # Running ONLY on P1/P2 keeps Gemini cost controlled — noise contacts
     # (P3/P4) don't need this check, they're not outreach targets anyway.
     if state.discovered_names:
+        await _emit_progress(9, "Iter 6.5 · Employment verify")
         await iteration_6_5_employment_verification(state)
 
     return state

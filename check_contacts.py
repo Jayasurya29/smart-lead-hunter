@@ -12,11 +12,11 @@ async def go():
                strategist_priority, strategist_reasoning,
                created_at, updated_at
         FROM lead_contacts
-        WHERE lead_id = 1225
+        WHERE lead_id = 1273
         ORDER BY created_at
         """
     )
-    print(f"\n{len(rows)} contacts for lead 1225:\n")
+    print(f"\n{len(rows)} contacts for lead 1273:\n")
     for r in rows:
         sp = r["strategist_priority"] or "NULL"
         created = r["created_at"].strftime("%m-%d %H:%M") if r["created_at"] else "?"

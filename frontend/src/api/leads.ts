@@ -164,8 +164,17 @@ export async function triggerExtractUrl(url: string): Promise<any> {
    DISCOVERY
    ════════════════════════════════════════ */
 
-export async function triggerDiscovery(mode: string = 'full', extractLeads: boolean = true): Promise<any> {
-  const { data } = await api.post('/api/dashboard/discovery/start', { mode, extract_leads: extractLeads })
+export async function triggerDiscovery(
+  mode: string = 'full',
+  extractLeads: boolean = true,
+  extraPayload?: Record<string, unknown>,
+): Promise<any> {
+  const payload = {
+    mode,
+    extract_leads: extractLeads,
+    ...(extraPayload || {}),
+  }
+  const { data } = await api.post('/api/dashboard/discovery/start', payload)
   return data
 }
 

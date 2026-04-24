@@ -1283,10 +1283,25 @@ async def discovery_start(request: Request, _csrf=Depends(require_ajax)):
         mode = body.get("mode", "full")
         extract_leads = body.get("extract_leads", True)
         dry_run = body.get("dry_run", False)
+        # New in v5.2 UI: allow explicit count + gold-only filtering
+        #   max_queries: limit the run to N queries (None = all)
+        #   filter_gold: only run queries already classified as "gold"
+        # These override the legacy quick/full binary modes.
+        explicit_max = body.get("max_queries")
+        filter_gold = bool(body.get("filter_gold", False))
 
         discovery_id = str(uuid.uuid4())
 
-        max_queries = 5 if mode == "quick" else None
+        # Precedence:
+        #   explicit max_queries wins
+        #   else mode=quick  -> 5
+        #   else no cap      -> None (all)
+        if isinstance(explicit_max, int) and explicit_max > 0:
+            max_queries = explicit_max
+        elif mode == "quick":
+            max_queries = 5
+        else:
+            max_queries = None
         start_time = local_now()
 
         # Message list — task appends, SSE reader tracks position.
@@ -1402,7 +1417,10 @@ async def discovery_start(request: Request, _csrf=Depends(require_ajax)):
 
                 try:
                     with contextlib.redirect_stdout(_ProgressWriter()):
-                        await eng.run(max_queries=max_queries)
+                        await eng.run(
+                            max_queries=max_queries,
+                            filter_gold_only=filter_gold,
+                        )
                 finally:
                     # Always detach the handler so it doesn't leak between runs
                     root_logger.removeHandler(dashboard_handler)
@@ -2021,3 +2039,349 @@ async def batch_smart_fill_endpoint(_csrf=Depends(require_ajax)):
 
     result = await batch_smart_fill(limit=10)
     return result
+
+
+# ═══════════════════════════════════════════════════════════════
+# SMART FILL — SSE STREAM WITH PROGRESS
+# ═══════════════════════════════════════════════════════════════
+# Streaming version of POST /api/leads/{id}/smart-fill. Yields progress
+# events as the 6-stage enrich_lead_data pipeline runs, then applies the
+# field updates and emits a `complete` event.
+#
+# Both "Smart Fill" (mode=smart, only fill missing fields) and "Full
+# Refresh" (mode=full, overwrite existing too) use this same endpoint —
+# the mode query param determines which.
+#
+# Event shapes:
+#   {"type": "stage", "stage": 3, "total": 8, "label": "Searching web",
+#    "pct": 38, "elapsed_s": 12.3}
+#   {"type": "complete", "pct": 100, "summary": {"changes": [...], ...}}
+#   {"type": "error", "message": "..."}
+#
+# Stage numbering:
+#   1-6: within enrich_lead_data (classify, build, search, extract × 3)
+#   7: apply field changes to lead
+#   8: rescore + recalc revenue
+
+
+@router.get("/api/leads/{lead_id}/smart-fill-stream", tags=["Leads"])
+async def smart_fill_stream(lead_id: int, request: Request, mode: str = "smart"):
+    """SSE streaming version of POST /smart-fill."""
+    from app.models.potential_lead import PotentialLead
+    from app.services.lead_data_enrichment import enrich_lead_data
+    from app.services.utils import get_timeline_label, normalize_hotel_name
+    from app.services.scorer import calculate_lead_score
+
+    # Verify lead exists up-front (fail fast)
+    async with async_session() as session:
+        result = await session.execute(
+            select(PotentialLead).where(PotentialLead.id == lead_id)
+        )
+        lead = result.scalar_one_or_none()
+        if not lead:
+            raise HTTPException(status_code=404, detail="Lead not found")
+        lead_snapshot = {
+            "hotel_name": lead.hotel_name,
+            "city": lead.city or "",
+            "state": lead.state or "",
+            "country": lead.country or "",
+            "brand": lead.brand or "",
+            "opening_date": lead.opening_date or "",
+            "brand_tier": lead.brand_tier or "",
+            "room_count": lead.room_count or 0,
+            "search_name": getattr(lead, "search_name", None) or "",
+        }
+
+    # ── Total stages = 8: 6 inside enrich_lead_data + save + rescore ──
+    TOTAL_STAGES = 8
+    event_queue: asyncio.Queue = asyncio.Queue()
+    start_time = time.monotonic()
+
+    async def progress_callback(stage: int, total: int, label: str):
+        """enrich_lead_data emits stages 1-6; we rescale to 1-6 of our 8."""
+        elapsed = round(time.monotonic() - start_time, 1)
+        pct = min(100, round((stage / TOTAL_STAGES) * 100))
+        await event_queue.put(
+            {
+                "type": "stage",
+                "stage": stage,
+                "total": TOTAL_STAGES,
+                "label": label,
+                "pct": pct,
+                "elapsed_s": elapsed,
+            }
+        )
+
+    async def emit_stage(stage: int, label: str):
+        """Direct emit for the save + rescore stages that happen in this endpoint."""
+        elapsed = round(time.monotonic() - start_time, 1)
+        pct = min(100, round((stage / TOTAL_STAGES) * 100))
+        await event_queue.put(
+            {
+                "type": "stage",
+                "stage": stage,
+                "total": TOTAL_STAGES,
+                "label": label,
+                "pct": pct,
+                "elapsed_s": elapsed,
+            }
+        )
+
+    async def run_smart_fill():
+        try:
+            # Stages 1-6: enrich_lead_data emits via progress_callback
+            enriched = await enrich_lead_data(
+                hotel_name=lead_snapshot["hotel_name"],
+                city=lead_snapshot["city"],
+                state=lead_snapshot["state"],
+                country=lead_snapshot["country"],
+                brand=lead_snapshot["brand"],
+                current_opening_date=lead_snapshot["opening_date"],
+                current_brand_tier=lead_snapshot["brand_tier"],
+                current_room_count=lead_snapshot["room_count"],
+                mode=mode,
+                search_name=lead_snapshot["search_name"],
+                progress_callback=progress_callback,
+            )
+
+            if not enriched.get("changes"):
+                await event_queue.put(
+                    {
+                        "type": "complete",
+                        "pct": 100,
+                        "summary": {
+                            "status": "no_data",
+                            "message": "No new data found",
+                            "changes": [],
+                        },
+                    }
+                )
+                return
+
+            # ── Stage 7: apply field changes to lead ──
+            await emit_stage(7, "Saving changes to database")
+            async with async_session() as session:
+                result = await session.execute(
+                    select(PotentialLead).where(PotentialLead.id == lead_id)
+                )
+                lead = result.scalar_one_or_none()
+                if not lead:
+                    await event_queue.put(
+                        {
+                            "type": "error",
+                            "message": "Lead disappeared during enrichment",
+                        }
+                    )
+                    return
+
+                # Apply field changes — mirrors the merge logic in the POST
+                # smart_fill_lead endpoint. Kept in sync manually; see the
+                # POST endpoint for the authoritative version with comments.
+                _apply_enrichment_to_lead(lead, enriched, mode, get_timeline_label)
+
+                lead.hotel_name_normalized = normalize_hotel_name(lead.hotel_name)
+
+                # ── Stage 8: rescore + revenue ──
+                await emit_stage(8, "Rescoring lead")
+                try:
+                    from app.services.rescore import rescore_lead
+
+                    await rescore_lead(lead_id, session)
+                except Exception as e:
+                    logger.warning(f"Rescore after SmartFill failed: {e}")
+                    try:
+                        score_result = calculate_lead_score(
+                            hotel_name=lead.hotel_name,
+                            city=lead.city,
+                            state=lead.state,
+                            country=lead.country,
+                            opening_date=lead.opening_date,
+                            room_count=lead.room_count,
+                            contact_name=lead.contact_name,
+                            contact_email=lead.contact_email,
+                            contact_phone=lead.contact_phone,
+                            brand=lead.brand,
+                        )
+                        lead.lead_score = score_result["total_score"]
+                    except Exception as scoring_err:
+                        logger.error(f"Fallback scoring also failed: {scoring_err}")
+
+                await session.commit()
+
+                # Revenue update if room_count/brand_tier/brand changed
+                revenue_fields = {"room_count", "brand_tier", "brand"}
+                if set(enriched.get("changes", [])) & revenue_fields:
+                    try:
+                        from app.services.revenue_updater import update_lead_revenue
+
+                        await update_lead_revenue(lead_id)
+                    except Exception as e:
+                        logger.warning(f"Revenue update failed: {e}")
+
+            # ── Final complete event ──
+            duration = round(time.monotonic() - start_time, 1)
+            await event_queue.put(
+                {
+                    "type": "complete",
+                    "pct": 100,
+                    "elapsed_s": duration,
+                    "summary": {
+                        "status": "enriched",
+                        "changes": enriched.get("changes", []),
+                        "confidence": enriched.get("confidence", "unknown"),
+                        "duration_s": duration,
+                    },
+                }
+            )
+
+        except Exception as e:
+            logger.exception(f"Smart Fill SSE failed for lead {lead_id}: {e}")
+            await event_queue.put(
+                {
+                    "type": "error",
+                    "message": f"Smart Fill failed: {str(e)[:200]}",
+                }
+            )
+
+    task = asyncio.create_task(run_smart_fill())
+
+    async def event_stream():
+        yield f'data: {json.dumps({"type": "started", "total": TOTAL_STAGES})}\n\n'
+        try:
+            while True:
+                if await request.is_disconnected():
+                    task.cancel()
+                    return
+                try:
+                    event = await asyncio.wait_for(event_queue.get(), timeout=10.0)
+                except asyncio.TimeoutError:
+                    yield f'data: {json.dumps({"type": "ping"})}\n\n'
+                    if task.done() and event_queue.empty():
+                        return
+                    continue
+                yield f"data: {json.dumps(event)}\n\n"
+                if event["type"] in ("complete", "error"):
+                    return
+        except asyncio.CancelledError:
+            task.cancel()
+            raise
+        except Exception as e:
+            logger.error(f"Smart Fill stream error (lead {lead_id}): {e}")
+            try:
+                yield f'data: {json.dumps({"type": "error", "message": str(e)[:200]})}\n\n'
+            except Exception:
+                pass
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache, no-transform",
+            "X-Accel-Buffering": "no",
+            "Connection": "keep-alive",
+        },
+    )
+
+
+def _apply_enrichment_to_lead(lead, enriched: dict, mode: str, get_timeline_label):
+    """Apply fields from an enrich_lead_data result onto a lead ORM object.
+
+    Mirrors the merge logic in the POST /smart-fill endpoint. Keep in sync
+    manually — when one changes, the other should too. We accept the light
+    duplication to avoid refactoring the 350-line POST endpoint and risking
+    a regression this close to the production deadline.
+
+    Rules (preserving user-verified manual edits):
+      - opening_date:  always update; recompute timeline_label
+      - brand_tier:    valid-only overwrite; keep manual values intact
+      - room_count:    positive-only; only overwrite existing in 'full' mode
+      - brand:         valid-only overwrite
+      - city/state/country/description:  'full' mode overwrites, 'smart' fills gaps
+      - management_company/owner/developer: same pattern
+      - address/zip_code: same pattern
+      - official_name/search_name/former_names: always update
+    """
+    _INVALID = {"", "unknown", "none", "n/a", "na", "tbd"}
+    _VALID_TIERS = {
+        "tier1_ultra_luxury",
+        "tier2_luxury",
+        "tier3_upper_upscale",
+        "tier4_upscale",
+        "tier5_upper_midscale",
+        "tier6_midscale",
+        "tier7_economy",
+    }
+    _REOPENING_TYPES = {
+        "renovation",
+        "rebrand",
+        "reopening",
+        "conversion",
+        "ownership_change",
+    }
+
+    proj_type = (enriched.get("project_type") or "").strip().lower()
+    is_live_reopening = proj_type in _REOPENING_TYPES and enriched.get("reopening_date")
+
+    if proj_type and (mode == "full" or not lead.project_type):
+        lead.project_type = proj_type
+
+    if enriched.get("already_opened") and not is_live_reopening:
+        lead.status = "expired"
+        lead.opening_date = enriched.get("opened_date", lead.opening_date)
+        lead.timeline_label = "EXPIRED"
+        return
+
+    if is_live_reopening:
+        reopening = enriched["reopening_date"]
+        lead.opening_date = reopening
+        lead.timeline_label = get_timeline_label(reopening)
+        lead.project_type = proj_type
+        if lead.status == "expired" and lead.timeline_label not in ("EXPIRED", "LATE"):
+            lead.status = "new"
+
+    if "opening_date" in enriched and not is_live_reopening:
+        lead.opening_date = enriched["opening_date"]
+        new_label = get_timeline_label(enriched["opening_date"])
+        lead.timeline_label = new_label
+        if new_label == "EXPIRED":
+            lead.status = "expired"
+
+    if "brand_tier" in enriched:
+        new_tier = (enriched.get("brand_tier") or "").strip().lower()
+        current_tier = (lead.brand_tier or "").strip().lower()
+        if new_tier in _VALID_TIERS:
+            lead.brand_tier = enriched["brand_tier"]
+        elif current_tier in _INVALID and new_tier:
+            lead.brand_tier = enriched["brand_tier"]
+
+    if "room_count" in enriched:
+        try:
+            new_rc = int(enriched.get("room_count") or 0)
+        except (TypeError, ValueError):
+            new_rc = 0
+        if new_rc > 0 and (
+            mode == "full" or not lead.room_count or lead.room_count <= 0
+        ):
+            lead.room_count = new_rc
+
+    if "brand" in enriched:
+        new_brand = (enriched.get("brand") or "").strip()
+        if new_brand and new_brand.lower() not in _INVALID:
+            lead.brand = new_brand
+        elif not (lead.brand or "").strip() and new_brand:
+            lead.brand = new_brand
+
+    for field in ("city", "state", "country", "description"):
+        if field in enriched and (mode == "full" or not getattr(lead, field, None)):
+            setattr(lead, field, enriched[field])
+
+    if "official_name" in enriched:
+        lead.hotel_name = enriched["official_name"]
+    if "search_name" in enriched:
+        lead.search_name = enriched["search_name"]
+    if "former_names" in enriched:
+        lead.former_names = enriched["former_names"]
+
+    for field in ("management_company", "owner", "developer", "address", "zip_code"):
+        if field in enriched and (mode == "full" or not getattr(lead, field, None)):
+            setattr(lead, field, enriched[field])

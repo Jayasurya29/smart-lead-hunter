@@ -987,3 +987,258 @@ async def get_wiza_credits():
         "configured": True,
         "credits_remaining": credits.get("credits_remaining"),
     }
+
+
+# ═══════════════════════════════════════════════════════════════
+# ENRICH CONTACTS — SSE STREAM WITH PROGRESS
+# ═══════════════════════════════════════════════════════════════
+# Server-Sent Events endpoint that runs the same enrich_lead_contacts()
+# flow as the POST /enrich endpoint but yields progress events at each
+# of the 9 research iterations. The UI subscribes to this stream and
+# renders a real-time progress bar + stage checklist.
+#
+# Why SSE vs WebSocket: one-directional (server -> client), auto-reconnect
+# in the browser, simpler auth (cookie on the initial GET works), no
+# separate upgrade handshake. Same pattern used for scraping + discovery.
+
+
+@router.get(
+    "/api/dashboard/leads/{lead_id}/enrich-stream",
+    tags=["Dashboard"],
+)
+async def enrich_lead_stream(lead_id: int, request: Request):
+    """
+    SSE streaming version of POST /enrich.
+
+    Event shapes (all wrapped in `data: {json}\\n\\n`):
+
+      {"type": "stage", "stage": 3, "total": 9,
+       "label": "Iter 2.5 · Department heads", "pct": 28, "elapsed_s": 12.3}
+
+      {"type": "complete", "pct": 100,
+       "summary": {"contacts_saved": 6, "contacts_rejected": 3, "duration_s": 118.4}}
+
+      {"type": "error", "message": "..."}
+
+    Progress math:
+      pct = min(100, round((stage / total) * 100))
+
+    The stream keeps pings alive every 10 seconds during long stages
+    (Iter 6 Gemini strategist can take 60s+ with no other events).
+    """
+    import asyncio
+    import json
+    import time
+    from fastapi.responses import StreamingResponse
+
+    # ── Verify the lead exists up-front (fail fast before streaming) ──
+    async with async_session() as session:
+        result = await session.execute(
+            select(PotentialLead).where(PotentialLead.id == lead_id)
+        )
+        lead = result.scalar_one_or_none()
+        if not lead:
+            raise HTTPException(status_code=404, detail="Lead not found")
+
+        # Snapshot the lead facts needed by enrichment
+        lead_facts = {
+            "hotel_name": lead.hotel_name,
+            "brand": lead.brand or "",
+            "city": lead.city or "",
+            "state": lead.state or "",
+            "country": lead.country or "USA",
+            "management_company": lead.management_company or "",
+            "opening_date": lead.opening_date or "",
+            "timeline_label": lead.timeline_label or "",
+            "description": lead.description or "",
+            "project_type_str": lead.hotel_type or "",
+            "search_name": getattr(lead, "search_name", None) or "",
+            "former_names": getattr(lead, "former_names", None) or [],
+        }
+
+    # ── Queue + task orchestration ──
+    # We run enrichment as a background task. The progress_callback pushes
+    # events onto a queue, and the generator below drains the queue and
+    # yields SSE-formatted events. When the task completes, we emit a final
+    # `complete` event and close the stream.
+    event_queue: asyncio.Queue = asyncio.Queue()
+    start_time = time.monotonic()
+
+    async def progress_callback(stage: int, total: int, label: str):
+        elapsed = round(time.monotonic() - start_time, 1)
+        pct = min(100, round((stage / total) * 100))
+        await event_queue.put(
+            {
+                "type": "stage",
+                "stage": stage,
+                "total": total,
+                "label": label,
+                "pct": pct,
+                "elapsed_s": elapsed,
+            }
+        )
+
+    async def run_enrichment():
+        """Run enrichment in the background + persist + emit complete/error."""
+        try:
+            from app.services.contact_enrichment import (
+                enrich_lead_contacts,
+                persist_enrichment_contacts,
+            )
+
+            # ── Run the 11-stage enrichment pipeline ──
+            enrichment_result = await enrich_lead_contacts(
+                lead_id=lead_id,
+                **lead_facts,
+                progress_callback=progress_callback,
+            )
+
+            # ── Phase B early-rejection path (residences_only etc.) ──
+            # If project-type classifier flagged this lead for rejection,
+            # mark it rejected and skip contact persistence (there's nothing
+            # to save — discovered_names is empty).
+            if getattr(enrichment_result, "should_reject", False):
+                try:
+                    async with async_session() as rej_session:
+                        rej_result = await rej_session.execute(
+                            select(PotentialLead).where(PotentialLead.id == lead_id)
+                        )
+                        rej_lead = rej_result.scalar_one_or_none()
+                        if rej_lead:
+                            rej_lead.status = "rejected"
+                            rej_lead.rejection_reason = (
+                                enrichment_result.rejection_reason or "auto_reject"
+                            )[:100]
+                            await rej_session.commit()
+                except Exception as ex:
+                    logger.error(f"Failed to mark lead {lead_id} rejected: {ex}")
+
+                duration = round(time.monotonic() - start_time, 1)
+                await event_queue.put(
+                    {
+                        "type": "complete",
+                        "pct": 100,
+                        "elapsed_s": duration,
+                        "summary": {
+                            "contacts_saved": 0,
+                            "contacts_rejected": 0,
+                            "duration_s": duration,
+                            "should_reject": True,
+                            "rejection_reason": enrichment_result.rejection_reason,
+                        },
+                    }
+                )
+                return
+
+            # ── Persist contacts to DB (THIS WAS MISSING) ──
+            # enrich_lead_contacts just returns contacts in memory — it does
+            # NOT save them. The helper below handles:
+            #   - MERGE on normalized name into lead_contacts table
+            #   - Update flat potential_leads fields (contact_*, mgmt_co, etc.)
+            #   - Rescore the lead based on new primary contact
+            persist_summary: dict = {
+                "contacts_added": 0,
+                "contacts_updated": 0,
+            }
+            try:
+                async with async_session() as persist_session:
+                    persist_summary = await persist_enrichment_contacts(
+                        lead_id=lead_id,
+                        enrichment_result=enrichment_result,
+                        session=persist_session,
+                    )
+                    await persist_session.commit()
+            except Exception as ex:
+                logger.exception(
+                    f"Persist failed for lead {lead_id} (enrichment data lost): {ex}"
+                )
+                await event_queue.put(
+                    {
+                        "type": "error",
+                        "message": f"Save failed: {str(ex)[:200]}",
+                    }
+                )
+                return
+
+            duration = round(time.monotonic() - start_time, 1)
+            contacts_added = persist_summary.get("contacts_added", 0)
+            contacts_updated = persist_summary.get("contacts_updated", 0)
+            total_saved = contacts_added + contacts_updated
+
+            await event_queue.put(
+                {
+                    "type": "complete",
+                    "pct": 100,
+                    "elapsed_s": duration,
+                    "summary": {
+                        "contacts_saved": total_saved,
+                        "contacts_added": contacts_added,
+                        "contacts_updated": contacts_updated,
+                        "duration_s": duration,
+                        "should_reject": False,
+                        "rejection_reason": None,
+                    },
+                }
+            )
+        except Exception as e:
+            logger.exception(f"Enrichment SSE failed for lead {lead_id}: {e}")
+            await event_queue.put(
+                {
+                    "type": "error",
+                    "message": f"Enrichment failed: {str(e)[:200]}",
+                }
+            )
+
+    # Kick off the enrichment task
+    task = asyncio.create_task(run_enrichment())
+
+    async def event_stream():
+        """Drain the queue + send keepalive pings during silent stretches."""
+        # Initial "started" event so the UI knows connection is live
+        yield f'data: {json.dumps({"type": "started", "total": 9})}\n\n'
+
+        try:
+            while True:
+                # Bail out if the client disconnected
+                if await request.is_disconnected():
+                    task.cancel()
+                    return
+
+                # Wait for the next event with a 10s timeout (keepalive budget)
+                try:
+                    event = await asyncio.wait_for(event_queue.get(), timeout=10.0)
+                except asyncio.TimeoutError:
+                    # No event in 10s — send keepalive ping so the browser's
+                    # EventSource doesn't time out on silent long stages.
+                    yield f'data: {json.dumps({"type": "ping"})}\n\n'
+                    # If the task is done and queue empty, exit
+                    if task.done() and event_queue.empty():
+                        return
+                    continue
+
+                yield f"data: {json.dumps(event)}\n\n"
+
+                # Exit the loop on terminal events
+                if event["type"] in ("complete", "error"):
+                    return
+
+        except asyncio.CancelledError:
+            # Normal client disconnect — don't treat as error
+            task.cancel()
+            raise
+        except Exception as e:
+            logger.error(f"Enrich stream error (lead {lead_id}): {e}")
+            try:
+                yield f'data: {json.dumps({"type": "error", "message": str(e)[:200]})}\n\n'
+            except Exception:
+                pass
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache, no-transform",
+            "X-Accel-Buffering": "no",  # Disable nginx buffering if behind one
+            "Connection": "keep-alive",
+        },
+    )
