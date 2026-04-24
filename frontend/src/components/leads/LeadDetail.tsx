@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useLead, useContacts, useApproveLead, useRejectLead, useRestoreLead, useDeleteLead, useEnrichLead, useSmartFill } from '@/hooks/useLeads'
 import RevenuePotential from './RevenuePotential'
 import ConfirmDialog from '../ui/ConfirmDialog'
@@ -352,10 +352,22 @@ function OverviewTab({ lead, leadId, contactList, onEnrich, enriching, onSmartFi
           <Field icon={MapPin}    label="Location"   value={formatLocation(lead)} />
           <Field icon={Building2} label="Rooms"      value={lead.room_count ? `${lead.room_count} rooms` : '—'} />
           <Field icon={Layers}    label="Brand Tier"  value={getTierLabel(lead.brand_tier)} />
+          {/* Address: always shown with '—' fallback so the user can see at a
+              glance whether Smart Fill populated it. Mgmt Co / Developer / Owner
+              stay conditional because they're less critical and leaving the
+              grid sparser looks cleaner for new/unenriched leads. */}
+          <Field
+            icon={MapPin}
+            label="Address"
+            value={
+              lead.address
+                ? lead.address + (lead.zip_code ? ` ${lead.zip_code}` : '')
+                : '—'
+            }
+          />
           {lead.management_company && <Field icon={Building2} label="Mgmt Co."   value={lead.management_company} />}
           {lead.developer         && <Field icon={Building2} label="Developer"   value={lead.developer} />}
           {lead.owner             && <Field icon={User}      label="Owner"       value={lead.owner} />}
-          {lead.address           && <Field icon={MapPin}    label="Address"     value={lead.address + (lead.zip_code ? ` ${lead.zip_code}` : '')} />}
         </div>
 
         {/* Smart Fill + Full Refresh — compact action row */}
@@ -1233,6 +1245,31 @@ function EditTab({ lead, leadId }: { lead: Lead; leadId: number }) {
     address:            lead.address || '',
     zip_code:           lead.zip_code || '',
   })
+
+  // Re-sync form state whenever the lead record is updated server-side
+  // (Smart Fill / Full Refresh / external edit). Without this the form
+  // inputs stay frozen at their mount-time values and the user sees
+  // "empty Address" even after Gemini populated it. Keyed on updated_at
+  // so the effect only fires on actual server-side changes — not on every
+  // keystroke the user makes in the form.
+  useEffect(() => {
+    setForm({
+      hotel_name:         lead.hotel_name || '',
+      brand:              lead.brand || lead.brand_name || '',
+      brand_tier:         lead.brand_tier || '',
+      city:               lead.city || '',
+      state:              lead.state || '',
+      country:            lead.country || '',
+      opening_date:       lead.opening_date || '',
+      room_count:         lead.room_count ? String(lead.room_count) : '',
+      management_company: lead.management_company || '',
+      developer:          lead.developer || '',
+      owner:              lead.owner || '',
+      address:            lead.address || '',
+      zip_code:           lead.zip_code || '',
+    })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lead.id, lead.updated_at])
 
   function handleChange(key: string, val: string) {
     setForm((prev) => ({ ...prev, [key]: val }))

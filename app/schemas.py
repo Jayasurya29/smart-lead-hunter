@@ -139,6 +139,17 @@ class LeadBase(BaseModel):
     management_company: Optional[str] = None
     developer: Optional[str] = None
     owner: Optional[str] = None
+    # Street address + postal code — populated by Smart Fill's address
+    # extractor (country-aware; handles US ZIPs and Caribbean-style
+    # district addresses). Must be declared HERE (not only in LeadUpdate)
+    # so LeadResponse — which inherits from LeadBase — includes them in
+    # the serialized JSON. Without these declarations the DB had the
+    # values but every GET /leads response silently dropped them, making
+    # the dashboard show Address as empty even after Full Refresh.
+    # Same class of bug as the 2026-04-22 brand_tier PATCH fix, just on
+    # the response side.
+    address: Optional[str] = None
+    zip_code: Optional[str] = None
     description: Optional[str] = None
     notes: Optional[str] = None
 

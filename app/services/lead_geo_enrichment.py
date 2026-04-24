@@ -394,12 +394,45 @@ async def geocode_hotel(
     zip_code: Optional[str] = None,
 ) -> Optional[tuple[float, float]]:
     """
-    Geocode a hotel lead using Geoapify structured search + strict validation.
-    Returns (latitude, longitude) or None.
+    Geocode a hotel lead using Geoapify. Country-aware query ordering +
+    result_type-based candidate selection.
 
-    Uses structured city/state/country params (not free text) for precision,
-    then validates results against state-level bounding boxes to prevent
-    cross-state false matches (e.g. Rogers MN for Rogers AR).
+    STRATEGY (empirically tuned against Jamaican resorts, 2026-04-24):
+
+      For USA / Puerto Rico / USVI (specific street grid, addresses precise):
+        1. address + city + state + country     (building-level)
+        2. hotel_name + city + state + country  (POI fallback)
+        3. city + state + country               (city center, last resort)
+
+      For Caribbean / other international:
+        1. hotel_name + city + state + country  (POI lookup — PARISH IS CRITICAL)
+        2. address + city + state + country     (district-level if address is rich)
+        3. hotel_name + city + country          (POI without parish — risky)
+        4. city + state + country               (city center, last resort)
+
+    KEY FINDINGS that drive this design:
+
+      - Geoapify's `confidence` score is unreliable for Caribbean POI lookups.
+        Wrong matches frequently return confidence=1.0; correct matches
+        sometimes return 0.0. We IGNORE confidence and rank by result_type.
+
+      - Parish/state is essential for Caribbean POI disambiguation.
+        "Sandals, Montego Bay, Jamaica" returned Sandals WHITEHOUSE (29 mi
+        wrong, different parish). Adding "Saint James" made it return the
+        correct resort (0.95 mi away).
+
+      - `result_type` hierarchy (most to least precise):
+          amenity    → named POI (best — a specific business/landmark)
+          building   → specific building
+          address    → house-level address (US)
+          street     → street centroid (approximate)
+          suburb     → neighborhood center
+          city/town  → city center (last-resort fallback)
+
+    We always prefer a higher-tier result_type, even from a later attempt,
+    over a lower-tier result from an earlier attempt.
+
+    Returns (latitude, longitude) or None.
     """
     api_key = os.getenv("GEOAPIFY_API_KEY", "").strip()
     if not api_key:
@@ -419,12 +452,175 @@ async def geocode_hotel(
 
     country_key = country_norm.lower()
     country_code = _ISO_CODES.get(country_key, "us")
-    state_clean = (state or "").strip()
 
-    async def _try_query(
-        text: str, use_filter: bool = True
-    ) -> Optional[tuple[float, float]]:
-        """Run one Geoapify geocode query and validate result."""
+    # ── Normalize state/parish string for Caribbean queries ──────────
+    # Gemini returns Jamaica parishes variously as "Saint James",
+    # "St. James", or "Saint James Parish". Geoapify hits vary by format
+    # — "Saint James Parish" caused a 55-mile wrong match (Sandals Royal
+    # *Plantation* in St. Ann instead of Sandals Royal *Caribbean* in
+    # St. James). Strip the "Parish" suffix so queries normalize to
+    # "Saint James" regardless of DB casing.
+    state_clean = (state or "").strip()
+    _PARISH_SUFFIXES = (" parish", " county", " district")
+    state_lower = state_clean.lower()
+    for suffix in _PARISH_SUFFIXES:
+        if state_lower.endswith(suffix):
+            state_clean = state_clean[: -len(suffix)].strip()
+            break
+
+    is_us_family = country_key in (
+        "united states",
+        "puerto rico",
+        "u.s. virgin islands",
+        "usvi",
+    )
+
+    # ── Hotel-name token set for name-match verification ─────────────
+    # Geoapify fuzzy-matches "Sandals Royal Caribbean" and happily
+    # returns "Sandals Royal Plantation" (55 mi wrong) because both
+    # start with "Sandals Royal". We need to verify that the returned
+    # amenity's name actually contains the DISTINGUISHING tokens of
+    # the hotel we asked for, not just a common prefix.
+    #
+    # Strategy: extract all significant tokens (≥3 chars, alphanumeric,
+    # case-insensitive) from the hotel name. When we get back an amenity
+    # result, its `formatted` or `name` must share ≥60% of those tokens
+    # AND must include the most-specific token (the last significant
+    # token, which is usually the distinguishing one like "Caribbean"
+    # vs "Plantation" vs "Whitehouse").
+    import re as _re
+
+    _STOP_WORDS = {
+        "the",
+        "and",
+        "of",
+        "at",
+        "in",
+        "by",
+        "hotel",
+        "resort",
+        "spa",
+        "inn",
+        "suites",
+        "villa",
+        "resorts",
+    }
+    hotel_tokens = [
+        t.lower()
+        for t in _re.findall(r"[A-Za-z0-9]+", hotel_name)
+        if len(t) >= 3 and t.lower() not in _STOP_WORDS
+    ]
+    # The last significant token is usually the distinguishing one
+    # ("Caribbean" in "Sandals Royal Caribbean", "Whitehouse" in
+    # "Sandals Whitehouse"). Require it in any amenity match.
+    hotel_distinguishing_token = hotel_tokens[-1] if hotel_tokens else ""
+
+    # ── City-center coord for proximity sanity check ─────────────────
+    # Before running hotel queries, geocode the city alone. Any amenity
+    # result that lands >30 miles from the city center is almost
+    # certainly a wrong property (a different sibling in the same
+    # brand, a different town with the same name, etc.). This catches
+    # both the Sandals Whitehouse 29-mile error and the Sandals Royal
+    # Plantation 55-mile error.
+    MAX_AMENITY_MILES_FROM_CITY = 25.0
+
+    async def _haversine_miles(lat1, lon1, lat2, lon2) -> float:
+        import math
+
+        R = 3958.8
+        lat1r, lat2r = math.radians(lat1), math.radians(lat2)
+        dlat = math.radians(lat2 - lat1)
+        dlon = math.radians(lon2 - lon1)
+        a = (
+            math.sin(dlat / 2) ** 2
+            + math.cos(lat1r) * math.cos(lat2r) * math.sin(dlon / 2) ** 2
+        )
+        return 2 * R * math.asin(math.sqrt(a))
+
+    # result_type → priority. Higher = more specific = preferred.
+    _TYPE_PRIORITY = {
+        "amenity": 6,  # Named POI (hotel as a business)
+        "building": 6,  # Specific building
+        "address": 5,  # House-level address
+        "street": 3,  # Street centroid
+        "suburb": 2,  # Neighborhood
+        "locality": 1,  # Town
+        "city": 1,  # City center
+        "town": 1,  # Town
+        "county": 0,  # County/parish
+        "state": 0,
+        "country": 0,
+    }
+
+    # Pre-geocode the city to establish a proximity anchor.
+    # If this fails, we skip proximity checks entirely (don't want to
+    # reject valid matches just because the city lookup failed).
+    city_anchor: Optional[tuple[float, float]] = None
+    if city:
+        anchor_text = (
+            f"{city}, {state_clean}, {country_norm}"
+            if state_clean
+            else f"{city}, {country_norm}"
+        )
+        try:
+            anchor_params = {
+                "text": anchor_text,
+                "apiKey": api_key,
+                "limit": 1,
+                "format": "json",
+                "lang": "en",
+            }
+            if country_code:
+                anchor_params["filter"] = f"countrycode:{country_code}"
+            async with httpx.AsyncClient(timeout=10) as client:
+                anchor_resp = await client.get(
+                    "https://api.geoapify.com/v1/geocode/search",
+                    params=anchor_params,
+                )
+            if anchor_resp.status_code == 200:
+                anchor_results = anchor_resp.json().get("results", [])
+                if anchor_results:
+                    city_anchor = (
+                        float(anchor_results[0]["lat"]),
+                        float(anchor_results[0]["lon"]),
+                    )
+                    logger.debug(
+                        f"City anchor for '{hotel_name}': {anchor_text} "
+                        f"→ ({city_anchor[0]:.4f}, {city_anchor[1]:.4f})"
+                    )
+        except Exception as e:
+            logger.debug(f"City anchor lookup failed: {e}")
+
+    def _name_matches(formatted: str) -> bool:
+        """
+        Verify a returned amenity's formatted string contains the
+        distinguishing tokens of the hotel we asked for — not just a
+        prefix match. Prevents "Sandals Royal Caribbean" → "Sandals
+        Royal Plantation" false matches.
+        """
+        if not hotel_tokens:
+            return True  # Can't verify — don't block
+        fmt_lower = (formatted or "").lower()
+        # The distinguishing token (last significant word) must be present
+        if hotel_distinguishing_token and hotel_distinguishing_token not in fmt_lower:
+            return False
+        # And ≥60% of significant tokens must appear overall
+        matches = sum(1 for t in hotel_tokens if t in fmt_lower)
+        return matches / len(hotel_tokens) >= 0.6
+
+    async def _try_query(text: str, verify_name: bool = False) -> Optional[dict]:
+        """
+        Run one Geoapify geocode query. Returns the highest-priority
+        valid result as a dict, or None.
+
+        When `verify_name=True` (used for name-based queries), amenity
+        results are checked against the hotel's distinguishing tokens.
+        Wrong-sibling matches get rejected even if Geoapify gave them
+        priority 6.
+
+        Proximity: amenity/building results >25 miles from the city
+        anchor are rejected — almost certainly wrong property.
+        """
         params: dict = {
             "text": text,
             "apiKey": api_key,
@@ -432,7 +628,7 @@ async def geocode_hotel(
             "format": "json",
             "lang": "en",
         }
-        if use_filter and country_code:
+        if country_code:
             params["filter"] = f"countrycode:{country_code}"
 
         try:
@@ -444,75 +640,205 @@ async def geocode_hotel(
             if resp.status_code != 200:
                 return None
             results = resp.json().get("results", [])
-            for r in results:
-                lat = float(r["lat"])
-                lon = float(r["lon"])
-                if _validate_coords(lat, lon, country_norm, state_clean):
-                    return (lat, lon)
-            return None
         except Exception as e:
             logger.warning(f"Geoapify query failed for '{text}': {e}")
             return None
 
-    # Attempt 0: Full street address (pinpoint building-level accuracy)
-    if address and address.strip():
-        parts = [address.strip()]
-        if zip_code:
-            parts.append(zip_code.strip())
-        elif city and state_clean:
-            parts.extend([city, state_clean])
-        q = ", ".join(parts) + f", {country_norm}"
-        result = await _try_query(q)
-        if result:
-            logger.info(
-                f"Geocoded (address): '{hotel_name}' → ({result[0]:.4f}, {result[1]:.4f})"
-            )
-            return result
+        best: Optional[dict] = None
+        for r in results:
+            try:
+                lat = float(r["lat"])
+                lon = float(r["lon"])
+            except (KeyError, ValueError, TypeError):
+                continue
+            if not _validate_coords(lat, lon, country_norm, state_clean):
+                continue
+            rtype = (r.get("result_type") or "").lower()
+            priority = _TYPE_PRIORITY.get(rtype, 0)
+            formatted = r.get("formatted", "")
 
-    # Attempt 1: Hotel name + city + state (most precise — finds actual building)
-    if city and state_clean:
-        q = f"{hotel_name}, {city}, {state_clean}, {country_norm}"
-        result = await _try_query(q)
-        if result:
-            logger.info(
-                f"Geocoded (name+city): '{hotel_name}' → ({result[0]:.4f}, {result[1]:.4f})"
-            )
-            return result
+            # ── Name-match verification for amenity/building results ─
+            # Only applied when the caller asked for it (i.e. this was
+            # a hotel-name-based query, so the returned amenity should
+            # actually be THIS hotel).
+            if verify_name and priority >= 5:
+                if not _name_matches(formatted):
+                    logger.debug(
+                        f"Rejected [name-mismatch] for '{hotel_name}' "
+                        f"'{text}': got '{formatted}' — missing "
+                        f"distinguishing token {hotel_distinguishing_token!r}"
+                    )
+                    continue
 
-    # Attempt 2: City + state + country (fallback to city level for US)
-    if city and state_clean:
-        q = f"{city}, {state_clean}, {country_norm}"
-        result = await _try_query(q)
-        if result:
-            logger.info(
-                f"Geocoded: '{hotel_name}' → ({result[0]:.4f}, {result[1]:.4f})"
-            )
-            return result
+            # ── Proximity sanity check ───────────────────────────────
+            # Amenity/building >25 mi from city anchor = wrong property.
+            # City-level results (priority 1) are expected to be at the
+            # city centroid, so we skip proximity checks for them.
+            if priority >= 5 and city_anchor is not None:
+                dist = await _haversine_miles(lat, lon, city_anchor[0], city_anchor[1])
+                if dist > MAX_AMENITY_MILES_FROM_CITY:
+                    logger.debug(
+                        f"Rejected [too-far] for '{hotel_name}' '{text}': "
+                        f"got '{formatted}' at {dist:.1f} mi from "
+                        f"{city} (limit {MAX_AMENITY_MILES_FROM_CITY})"
+                    )
+                    continue
 
-    # Attempt 2: City + country (Caribbean/international often no state)
-    if city:
-        q = f"{city}, {country_norm}"
-        result = await _try_query(q)
-        if result:
-            logger.info(
-                f"Geocoded: '{hotel_name}' → ({result[0]:.4f}, {result[1]:.4f})"
-            )
-            return result
+            candidate = {
+                "lat": lat,
+                "lng": lon,
+                "type": rtype,
+                "priority": priority,
+                "formatted": formatted,
+            }
+            if best is None or candidate["priority"] > best["priority"]:
+                best = candidate
 
-    # Attempt 3: State + country (last resort for US)
-    if state_clean:
-        q = f"{state_clean}, {country_norm}"
-        result = await _try_query(q)
-        if result:
-            logger.info(
-                f"Geocoded: '{hotel_name}' → ({result[0]:.4f}, {result[1]:.4f})"
-            )
-            return result
+        return best
 
-    logger.warning(
-        f"Could not geocode: {hotel_name} / {city}, {state_clean}, {country_norm}"
-    )
-    return None
+    # ── Build attempt list (country-aware) ───────────────────────────
+    attempts: list[tuple[str, str]] = []
+
+    if is_us_family:
+        # USA: street addresses are precise — try address first
+        if address and address.strip():
+            parts = [address.strip()]
+            if zip_code and zip_code.strip():
+                parts.append(zip_code.strip())
+            elif city and state_clean:
+                parts.extend([city, state_clean])
+            attempts.append(("address", ", ".join(parts) + f", {country_norm}"))
+        if city and state_clean:
+            attempts.append(
+                (
+                    "name+city+state",
+                    f"{hotel_name}, {city}, {state_clean}, {country_norm}",
+                )
+            )
+        if city and state_clean:
+            attempts.append(("city+state", f"{city}, {state_clean}, {country_norm}"))
+        if city:
+            attempts.append(("city", f"{city}, {country_norm}"))
+    else:
+        # Caribbean / international: POI lookup WITH PARISH first.
+        # Empirically: adding the state/parish cut "Sandals Royal Caribbean"
+        # distance error from 29 miles to 0.95 miles.
+        if city and state_clean:
+            attempts.append(
+                (
+                    "name+city+state",
+                    f"{hotel_name}, {city}, {state_clean}, {country_norm}",
+                )
+            )
+        # Address-based fallback for Caribbean: EXTRACT each district-like
+        # piece of the address and try it alone with country only.
+        #
+        # Empirical finding (2026-04-24): "Mahoe Bay, Montego Bay, St. James,
+        # Jamaica" returns WRONG STREET (Mahoe Close, 3.27 mi away) because
+        # Geoapify's parser chokes on over-specified Caribbean addresses.
+        # But "Mahoe Bay, Jamaica" alone returns the correct DISTRICT as an
+        # amenity 1.20 mi away. So we split the address on commas and try
+        # each piece individually as "{piece}, {country}".
+        #
+        # Filter pieces: must be ≥5 chars, not purely numeric, not a plain
+        # street type suffix ("Avenue", "Road") — we want named districts.
+        if address and address.strip():
+            addr_pieces = [p.strip() for p in address.split(",") if p.strip()]
+            _STREET_TYPE_ALONE = {
+                "avenue",
+                "ave",
+                "street",
+                "st",
+                "road",
+                "rd",
+                "drive",
+                "dr",
+                "boulevard",
+                "blvd",
+                "lane",
+                "ln",
+                "way",
+                "highway",
+                "hwy",
+                "court",
+                "ct",
+                "place",
+                "pl",
+            }
+            for i, piece in enumerate(addr_pieces):
+                pl = piece.lower()
+                if (
+                    len(piece) >= 5
+                    and not piece.replace(" ", "").isdigit()
+                    and pl not in _STREET_TYPE_ALONE
+                ):
+                    attempts.append((f"addr_part_{i}", f"{piece}, {country_norm}"))
+        # POI without parish — risky but sometimes works
+        if city:
+            attempts.append(("name+city", f"{hotel_name}, {city}, {country_norm}"))
+        # City center last resort
+        if city and state_clean:
+            attempts.append(("city+state", f"{city}, {state_clean}, {country_norm}"))
+        if city:
+            attempts.append(("city", f"{city}, {country_norm}"))
+        if state_clean:
+            attempts.append(("state", f"{state_clean}, {country_norm}"))
+
+    # ── Run attempts; keep best-priority result across all ───────────
+    # We don't stop at the first attempt — a later attempt might return
+    # a higher-priority result_type. We collect them all and pick the
+    # single best candidate.
+    #
+    # For attempts that include the hotel name, we enable name-match
+    # verification so Geoapify can't silently return a different
+    # property with a similar prefix (e.g., "Sandals Royal Caribbean"
+    # → "Sandals Royal Plantation" 55 mi away).
+    best_overall: Optional[dict] = None
+    best_label: str = ""
+    for label, query in attempts:
+        # Enable name-match verification on any attempt that includes
+        # the hotel name in the query. These are the attempts where
+        # Geoapify might return a wrong-sibling amenity.
+        verify = label.startswith("name+")
+        r = await _try_query(query, verify_name=verify)
+        if r is None:
+            continue
+        logger.debug(
+            f"Geocode attempt [{label}] for '{hotel_name}': "
+            f"type={r['type']} prio={r['priority']} @ ({r['lat']:.4f}, {r['lng']:.4f}) "
+            f"→ {r['formatted']!r}"
+        )
+        if best_overall is None or r["priority"] > best_overall["priority"]:
+            best_overall = r
+            best_label = label
+            # Early exit: if we got a POI/building/address match, that's
+            # about as good as it gets — no need to try more
+            if r["priority"] >= 5:
+                break
+
+    if best_overall is None:
+        logger.warning(
+            f"Could not geocode: {hotel_name} / {city}, {state_clean}, {country_norm}"
+        )
+        return None
+
+    # Extra guard: if the best we got is a city-level fallback AND we had
+    # specific data (address or name + parish), that's a red flag worth
+    # logging but we still return the coords as a best-effort answer.
+    if best_overall["priority"] <= 1 and (address or (hotel_name and state_clean)):
+        logger.warning(
+            f"Geocoded [{best_label}] '{hotel_name}' to city-level only "
+            f"({best_overall['type']}): ({best_overall['lat']:.4f}, "
+            f"{best_overall['lng']:.4f}) — could not find building/POI match"
+        )
+    else:
+        logger.info(
+            f"Geocoded [{best_label}] '{hotel_name}' as {best_overall['type']}: "
+            f"({best_overall['lat']:.4f}, {best_overall['lng']:.4f}) — "
+            f"{best_overall['formatted']}"
+        )
+
+    return (best_overall["lat"], best_overall["lng"])
 
 
 async def enrich_lead_geo(

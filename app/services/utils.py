@@ -213,6 +213,23 @@ def parse_month_from_text(text: str, default: int = 6) -> int:
     """
     text_lower = text.lower().strip()
 
+    # FIX: Parse numeric month from ISO-ish formats FIRST.
+    # Critical because Gemini returns ISO dates (e.g. "2026-12-18") from
+    # the Smart Fill extractor prompt, and without this check the month-name
+    # fallback treats them as "no month → default=6 (June)", silently
+    # bucketing every December opening as 8 months earlier than reality.
+    # Handles: YYYY-MM-DD, YYYY/MM/DD, YYYY.MM.DD, MM-DD-YYYY, MM/DD/YYYY.
+    iso_match = re.search(r"20\d{2}[-/\.](\d{1,2})[-/\.]\d{1,2}", text_lower)
+    if iso_match:
+        m = int(iso_match.group(1))
+        if 1 <= m <= 12:
+            return m
+    us_match = re.search(r"\b(\d{1,2})[-/](\d{1,2})[-/]20\d{2}\b", text_lower)
+    if us_match:
+        m = int(us_match.group(1))
+        if 1 <= m <= 12:
+            return m
+
     # Try full/abbreviated month names first
     for name, num in _MONTH_NAMES.items():
         if name in text_lower:

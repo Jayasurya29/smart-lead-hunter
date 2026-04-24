@@ -1686,6 +1686,7 @@ async def smart_fill_lead(lead_id: int, request: Request, _csrf=Depends(require_
             hotel_name=lead.hotel_name,
             city=lead.city or "",
             state=lead.state or "",
+            country=lead.country or "",
             brand=lead.brand or "",
             current_opening_date=lead.opening_date or "",
             current_brand_tier=lead.brand_tier or "",
@@ -1744,6 +1745,23 @@ async def smart_fill_lead(lead_id: int, request: Request, _csrf=Depends(require_
             lead.opening_date = reopening
             lead.timeline_label = get_timeline_label(reopening)
             lead.project_type = proj_type
+            # UN-EXPIRE: if this was previously marked expired but the future
+            # reopen date lands in an active bucket (URGENT/HOT/WARM/COOL),
+            # flip status back to "new" so the lead exits the Expired view
+            # and re-enters the Pipeline. Without this, the badge reads
+            # "Expired" while the timeline shows HOT — a zombie state.
+            # test_full_refresh.py already had this logic; porting to the
+            # live endpoint so the UI button behaves the same as the CLI.
+            if lead.status == "expired" and lead.timeline_label not in (
+                "EXPIRED",
+                "LATE",
+            ):
+                lead.status = "new"
+                logger.info(
+                    f"Full Refresh un-expired {lead.hotel_name}: "
+                    f"live reopening with {lead.timeline_label} bucket — "
+                    f"status → 'new'"
+                )
             logger.info(
                 f"Full Refresh: {lead.hotel_name} is a {proj_type} — "
                 f"opening_date set to {reopening!r} (timeline: {lead.timeline_label}), "
