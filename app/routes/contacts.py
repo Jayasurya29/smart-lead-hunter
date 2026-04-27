@@ -7,8 +7,12 @@ NOTE: enrich_lead() intentionally uses manual sessions because the enrichment
       network calls take 10-30s — we don't want to hold a DB connection that long.
 """
 
+import asyncio
+import json
 import logging
 import os
+import time
+from dataclasses import dataclass, field
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse
@@ -519,9 +523,9 @@ async def update_contact(
         "organization",
         "evidence_url",
     }
-    for field, value in body.items():
-        if field in allowed:
-            setattr(contact, field, value)
+    for fld, value in body.items():
+        if fld in allowed:
+            setattr(contact, fld, value)
     # Sync primary contact changes back to lead record
     if contact.is_primary:
         lead_result = await db.execute(
@@ -990,96 +994,105 @@ async def get_wiza_credits():
 
 
 # ═══════════════════════════════════════════════════════════════
-# ENRICH CONTACTS — SSE STREAM WITH PROGRESS
+# ENRICH CONTACTS — SSE STREAM WITH PROGRESS (multi-watcher version)
 # ═══════════════════════════════════════════════════════════════
-# Server-Sent Events endpoint that runs the same enrich_lead_contacts()
-# flow as the POST /enrich endpoint but yields progress events at each
-# of the 9 research iterations. The UI subscribes to this stream and
-# renders a real-time progress bar + stage checklist.
+# Design: a single background TASK runs per lead. Each SSE connection is
+# a SUBSCRIBER that receives events from the task's progress callback.
+# Multiple subscribers per task are supported — when the user navigates
+# away and comes back (or opens the lead in two browser tabs), the new
+# connection ATTACHES to the running task instead of starting a new one.
 #
-# Why SSE vs WebSocket: one-directional (server -> client), auto-reconnect
-# in the browser, simpler auth (cookie on the initial GET works), no
-# separate upgrade handshake. Same pattern used for scraping + discovery.
+# Why this matters: previously, navigating away → coming back triggered
+# a fresh enrichment that doubled Serper + Gemini cost. The 409-rejection
+# guard prevented the duplicate but left the user staring at a stuck
+# "Connecting..." card with no way to see real progress. Now the second
+# connection IS the way to see real progress.
+#
+# Lifecycle:
+#   1. POST-equivalent click → if no job for lead_id: create EnrichmentJob,
+#      start task. If job exists: just attach a watcher.
+#   2. progress_callback (from contact_enrichment.py) fires → fan-out the
+#      event to ALL subscribers of that lead's job. Also save to
+#      `current_event` so future watchers can replay it on attach.
+#   3. New SSE connection → adds queue to subscribers. If job has a
+#      `current_event` (meaning the task already started), push it
+#      immediately so user sees CURRENT state (Iter 3 · 36% · 3min)
+#      instead of a fresh "Iter 1" or "Connecting..."
+#   4. SSE disconnects → remove watcher's queue from subscribers. Task
+#      keeps running. Job stays alive.
+#   5. Task finishes → emit final complete/error event to all current
+#      subscribers, then `_jobs.pop(lead_id)` via add_done_callback.
+#   6. Cancel endpoint → user clicks Stop → task.cancel() → done_callback
+#      cleans up.
+#
+# In-memory only. Server restart drops all jobs (acceptable — a restart
+# disrupts in-flight enrichments anyway and the work that was done is
+# lost regardless).
 
 
-@router.get(
-    "/api/dashboard/leads/{lead_id}/enrich-stream",
-    tags=["Dashboard"],
-)
-async def enrich_lead_stream(lead_id: int, request: Request):
+@dataclass
+class EnrichmentJob:
+    """A single enrichment task + its watchers."""
+
+    lead_id: int
+    task: asyncio.Task
+    started_at: float
+    # Most recent event emitted by the task. New SSE connections receive
+    # this immediately so they see current state instead of starting empty.
+    current_event: dict | None = None
+    # One queue per active SSE connection watching this job. Events are
+    # fanned out to every queue. Queues are removed on client disconnect.
+    subscribers: set[asyncio.Queue] = field(default_factory=set)
+
+
+# Single source of truth for active enrichments. Module-level so all
+# routes (start + cancel + status) share the same view.
+_jobs: dict[int, EnrichmentJob] = {}
+
+
+async def _start_enrichment_job(lead_id: int, lead_facts: dict) -> EnrichmentJob:
+    """Create and register a new EnrichmentJob for `lead_id`.
+
+    Caller must verify no existing job before calling. Returns the
+    registered job with its background task already started.
     """
-    SSE streaming version of POST /enrich.
-
-    Event shapes (all wrapped in `data: {json}\\n\\n`):
-
-      {"type": "stage", "stage": 3, "total": 9,
-       "label": "Iter 2.5 · Department heads", "pct": 28, "elapsed_s": 12.3}
-
-      {"type": "complete", "pct": 100,
-       "summary": {"contacts_saved": 6, "contacts_rejected": 3, "duration_s": 118.4}}
-
-      {"type": "error", "message": "..."}
-
-    Progress math:
-      pct = min(100, round((stage / total) * 100))
-
-    The stream keeps pings alive every 10 seconds during long stages
-    (Iter 6 Gemini strategist can take 60s+ with no other events).
-    """
-    import asyncio
-    import json
-    import time
-    from fastapi.responses import StreamingResponse
-
-    # ── Verify the lead exists up-front (fail fast before streaming) ──
-    async with async_session() as session:
-        result = await session.execute(
-            select(PotentialLead).where(PotentialLead.id == lead_id)
-        )
-        lead = result.scalar_one_or_none()
-        if not lead:
-            raise HTTPException(status_code=404, detail="Lead not found")
-
-        # Snapshot the lead facts needed by enrichment
-        lead_facts = {
-            "hotel_name": lead.hotel_name,
-            "brand": lead.brand or "",
-            "city": lead.city or "",
-            "state": lead.state or "",
-            "country": lead.country or "USA",
-            "management_company": lead.management_company or "",
-            "opening_date": lead.opening_date or "",
-            "timeline_label": lead.timeline_label or "",
-            "description": lead.description or "",
-            "project_type_str": lead.hotel_type or "",
-            "search_name": getattr(lead, "search_name", None) or "",
-            "former_names": getattr(lead, "former_names", None) or [],
-        }
-
-    # ── Queue + task orchestration ──
-    # We run enrichment as a background task. The progress_callback pushes
-    # events onto a queue, and the generator below drains the queue and
-    # yields SSE-formatted events. When the task completes, we emit a final
-    # `complete` event and close the stream.
-    event_queue: asyncio.Queue = asyncio.Queue()
-    start_time = time.monotonic()
+    job = EnrichmentJob(
+        lead_id=lead_id,
+        task=None,  # filled in below — needs `job` reference inside task
+        started_at=time.monotonic(),
+    )
 
     async def progress_callback(stage: int, total: int, label: str):
-        elapsed = round(time.monotonic() - start_time, 1)
+        """Fan-out a stage event to all current subscribers + save as current."""
+        elapsed = round(time.monotonic() - job.started_at, 1)
         pct = min(100, round((stage / total) * 100))
-        await event_queue.put(
-            {
-                "type": "stage",
-                "stage": stage,
-                "total": total,
-                "label": label,
-                "pct": pct,
-                "elapsed_s": elapsed,
-            }
-        )
+        event = {
+            "type": "stage",
+            "stage": stage,
+            "total": total,
+            "label": label,
+            "pct": pct,
+            "elapsed_s": elapsed,
+        }
+        job.current_event = event
+        # Fan-out (non-blocking — if a subscriber's queue is full, drop)
+        for q in list(job.subscribers):
+            try:
+                q.put_nowait(event)
+            except asyncio.QueueFull:
+                pass
+
+    def emit_terminal(event: dict):
+        """Push a complete/error event to all subscribers. Sets current_event."""
+        job.current_event = event
+        for q in list(job.subscribers):
+            try:
+                q.put_nowait(event)
+            except asyncio.QueueFull:
+                pass
 
     async def run_enrichment():
-        """Run enrichment in the background + persist + emit complete/error."""
+        """Run the 11-stage enrichment + persist + emit complete/error."""
         try:
             from app.services.contact_enrichment import (
                 enrich_lead_contacts,
@@ -1093,10 +1106,7 @@ async def enrich_lead_stream(lead_id: int, request: Request):
                 progress_callback=progress_callback,
             )
 
-            # ── Phase B early-rejection path (residences_only etc.) ──
-            # If project-type classifier flagged this lead for rejection,
-            # mark it rejected and skip contact persistence (there's nothing
-            # to save — discovered_names is empty).
+            # ── Phase B early-rejection (residences_only, etc.) ──
             if getattr(enrichment_result, "should_reject", False):
                 try:
                     async with async_session() as rej_session:
@@ -1113,8 +1123,8 @@ async def enrich_lead_stream(lead_id: int, request: Request):
                 except Exception as ex:
                     logger.error(f"Failed to mark lead {lead_id} rejected: {ex}")
 
-                duration = round(time.monotonic() - start_time, 1)
-                await event_queue.put(
+                duration = round(time.monotonic() - job.started_at, 1)
+                emit_terminal(
                     {
                         "type": "complete",
                         "pct": 100,
@@ -1130,16 +1140,8 @@ async def enrich_lead_stream(lead_id: int, request: Request):
                 )
                 return
 
-            # ── Persist contacts to DB (THIS WAS MISSING) ──
-            # enrich_lead_contacts just returns contacts in memory — it does
-            # NOT save them. The helper below handles:
-            #   - MERGE on normalized name into lead_contacts table
-            #   - Update flat potential_leads fields (contact_*, mgmt_co, etc.)
-            #   - Rescore the lead based on new primary contact
-            persist_summary: dict = {
-                "contacts_added": 0,
-                "contacts_updated": 0,
-            }
+            # ── Persist to DB ──
+            persist_summary: dict = {"contacts_added": 0, "contacts_updated": 0}
             try:
                 async with async_session() as persist_session:
                     persist_summary = await persist_enrichment_contacts(
@@ -1149,10 +1151,8 @@ async def enrich_lead_stream(lead_id: int, request: Request):
                     )
                     await persist_session.commit()
             except Exception as ex:
-                logger.exception(
-                    f"Persist failed for lead {lead_id} (enrichment data lost): {ex}"
-                )
-                await event_queue.put(
+                logger.exception(f"Persist failed for lead {lead_id}: {ex}")
+                emit_terminal(
                     {
                         "type": "error",
                         "message": f"Save failed: {str(ex)[:200]}",
@@ -1160,12 +1160,12 @@ async def enrich_lead_stream(lead_id: int, request: Request):
                 )
                 return
 
-            duration = round(time.monotonic() - start_time, 1)
+            duration = round(time.monotonic() - job.started_at, 1)
             contacts_added = persist_summary.get("contacts_added", 0)
             contacts_updated = persist_summary.get("contacts_updated", 0)
             total_saved = contacts_added + contacts_updated
 
-            await event_queue.put(
+            emit_terminal(
                 {
                     "type": "complete",
                     "pct": 100,
@@ -1180,51 +1180,151 @@ async def enrich_lead_stream(lead_id: int, request: Request):
                     },
                 }
             )
+
+        except asyncio.CancelledError:
+            # User clicked Stop. Emit a clean cancel event so subscribers
+            # know it was deliberate, not an error.
+            duration = round(time.monotonic() - job.started_at, 1)
+            emit_terminal(
+                {
+                    "type": "error",
+                    "message": "Enrichment cancelled by user",
+                    "cancelled": True,
+                    "elapsed_s": duration,
+                }
+            )
+            raise  # re-raise so task.cancelled() returns True
         except Exception as e:
-            logger.exception(f"Enrichment SSE failed for lead {lead_id}: {e}")
-            await event_queue.put(
+            logger.exception(f"Enrichment failed for lead {lead_id}: {e}")
+            emit_terminal(
                 {
                     "type": "error",
                     "message": f"Enrichment failed: {str(e)[:200]}",
                 }
             )
 
-    # Kick off the enrichment task
-    task = asyncio.create_task(run_enrichment())
+    # Create + register task. We can't pass `job` to create_task before it's
+    # built, but inside `run_enrichment` we close over `job` from outer scope.
+    job.task = asyncio.create_task(run_enrichment())
+
+    # Cleanup: remove job from registry when task finishes.
+    def _on_done(_t):
+        _jobs.pop(lead_id, None)
+        logger.info(f"Enrichment job removed for lead {lead_id}")
+
+    job.task.add_done_callback(_on_done)
+
+    _jobs[lead_id] = job
+    return job
+
+
+@router.get(
+    "/api/dashboard/leads/{lead_id}/enrich-stream",
+    tags=["Dashboard"],
+)
+async def enrich_lead_stream(lead_id: int, request: Request):
+    """SSE stream of enrichment progress.
+
+    Behavior:
+      - First connection for a lead → starts the enrichment task.
+      - Subsequent connections (navigate away + back, second tab, etc.) →
+        attach as additional watchers of the SAME running task. Receive
+        the current stage event immediately so progress bar shows real
+        state, not "Iter 1" or "Connecting..."
+
+    Event shapes:
+      {"type": "stage", "stage": 3, "total": 11, "label": "...", "pct": 27, "elapsed_s": 12.3}
+      {"type": "complete", "pct": 100, "summary": {"contacts_saved": 6, ...}}
+      {"type": "error", "message": "...", "cancelled": True}  # user clicked Stop
+    """
+    from fastapi.responses import StreamingResponse
+
+    # ── Get-or-create the job for this lead ──
+    existing = _jobs.get(lead_id)
+    if existing is not None:
+        # Job already running — attach as additional watcher.
+        job = existing
+        logger.info(
+            f"Attaching new watcher to running enrichment for lead {lead_id} "
+            f"(now {len(job.subscribers) + 1} watcher(s))"
+        )
+    else:
+        # First request for this lead — verify lead exists, then start task.
+        async with async_session() as session:
+            result = await session.execute(
+                select(PotentialLead).where(PotentialLead.id == lead_id)
+            )
+            lead = result.scalar_one_or_none()
+            if not lead:
+                raise HTTPException(status_code=404, detail="Lead not found")
+
+            lead_facts = {
+                "hotel_name": lead.hotel_name,
+                "brand": lead.brand or "",
+                "city": lead.city or "",
+                "state": lead.state or "",
+                "country": lead.country or "USA",
+                "management_company": lead.management_company or "",
+                "opening_date": lead.opening_date or "",
+                "timeline_label": lead.timeline_label or "",
+                "description": lead.description or "",
+                "project_type_str": lead.hotel_type or "",
+                "search_name": getattr(lead, "search_name", None) or "",
+                "former_names": getattr(lead, "former_names", None) or [],
+            }
+
+        job = await _start_enrichment_job(lead_id, lead_facts)
+        logger.info(f"Started new enrichment job for lead {lead_id}")
+
+    # ── Subscribe this connection to the job ──
+    # bounded queue so a stalled subscriber can't OOM the server.
+    sub_queue: asyncio.Queue = asyncio.Queue(maxsize=100)
+    job.subscribers.add(sub_queue)
+
+    # Replay current state to this subscriber immediately so a reconnecting
+    # user sees real progress (Iter 3 · 36% · 3min) on first paint, not a
+    # blank "Connecting..." card.
+    if job.current_event is not None:
+        try:
+            sub_queue.put_nowait(job.current_event)
+        except asyncio.QueueFull:
+            pass
 
     async def event_stream():
-        """Drain the queue + send keepalive pings during silent stretches."""
-        # Initial "started" event so the UI knows connection is live
-        yield f'data: {json.dumps({"type": "started", "total": 9})}\n\n'
+        # Hello event — tells the UI the connection is live + total stages.
+        yield f'data: {json.dumps({"type": "started", "total": 11})}\n\n'
 
         try:
             while True:
-                # Bail out if the client disconnected
+                # Client disconnected — DO NOT cancel the task, just stop streaming.
                 if await request.is_disconnected():
-                    task.cancel()
+                    logger.info(
+                        f"Watcher disconnected from lead {lead_id} enrichment; "
+                        f"background task continues. "
+                        f"({len(job.subscribers) - 1} watcher(s) remain)"
+                    )
                     return
 
-                # Wait for the next event with a 10s timeout (keepalive budget)
                 try:
-                    event = await asyncio.wait_for(event_queue.get(), timeout=10.0)
+                    event = await asyncio.wait_for(sub_queue.get(), timeout=10.0)
                 except asyncio.TimeoutError:
-                    # No event in 10s — send keepalive ping so the browser's
-                    # EventSource doesn't time out on silent long stages.
                     yield f'data: {json.dumps({"type": "ping"})}\n\n'
-                    # If the task is done and queue empty, exit
-                    if task.done() and event_queue.empty():
+                    # If task is finished and queue empty, exit cleanly.
+                    if job.task.done() and sub_queue.empty():
                         return
                     continue
 
                 yield f"data: {json.dumps(event)}\n\n"
 
-                # Exit the loop on terminal events
+                # Exit on terminal events.
                 if event["type"] in ("complete", "error"):
                     return
 
         except asyncio.CancelledError:
-            # Normal client disconnect — don't treat as error
-            task.cancel()
+            logger.info(
+                f"SSE stream cancelled for lead {lead_id}; "
+                f"background task continues."
+            )
             raise
         except Exception as e:
             logger.error(f"Enrich stream error (lead {lead_id}): {e}")
@@ -1232,13 +1332,60 @@ async def enrich_lead_stream(lead_id: int, request: Request):
                 yield f'data: {json.dumps({"type": "error", "message": str(e)[:200]})}\n\n'
             except Exception:
                 pass
+        finally:
+            # Unsubscribe THIS connection — the task + other subscribers
+            # are unaffected.
+            job.subscribers.discard(sub_queue)
 
     return StreamingResponse(
         event_stream(),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache, no-transform",
-            "X-Accel-Buffering": "no",  # Disable nginx buffering if behind one
+            "X-Accel-Buffering": "no",
             "Connection": "keep-alive",
         },
     )
+
+
+@router.post(
+    "/api/dashboard/leads/{lead_id}/enrich-cancel",
+    tags=["Dashboard"],
+)
+async def enrich_lead_cancel(lead_id: int):
+    """Cancel an in-flight enrichment for a lead.
+
+    User clicked the Stop button. We cancel the background task, which
+    triggers asyncio.CancelledError inside run_enrichment, which emits
+    a clean error event to all watchers, which closes their progress
+    cards. Returns 200 even if no job exists (idempotent).
+    """
+    job = _jobs.get(lead_id)
+    if job is None:
+        return {"cancelled": False, "reason": "no_active_job"}
+
+    job.task.cancel()
+    logger.info(f"User cancelled enrichment for lead {lead_id}")
+    return {"cancelled": True}
+
+
+@router.get(
+    "/api/dashboard/leads/{lead_id}/enrich-status",
+    tags=["Dashboard"],
+)
+async def enrich_lead_status(lead_id: int):
+    """Cheap polling endpoint — is an enrichment running for this lead?
+
+    Used by the frontend to know whether to show the Run Enrichment
+    button or attach to a running job. Frontend can poll this on lead
+    detail mount before opening an SSE.
+    """
+    job = _jobs.get(lead_id)
+    if job is None:
+        return {"running": False}
+    return {
+        "running": True,
+        "current_event": job.current_event,
+        "watchers": len(job.subscribers),
+        "elapsed_s": round(time.monotonic() - job.started_at, 1),
+    }

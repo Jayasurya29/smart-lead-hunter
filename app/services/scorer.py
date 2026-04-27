@@ -201,6 +201,35 @@ for _brand in TIER3_UPPER_UPSCALE:
 for _brand in TIER4_UPSCALE:
     _BRAND_TIER_MAP[_brand] = (4, "Upscale", 10)
 
+# =============================================================================
+# LENGTH-SORTED BRAND LIST FOR SUBSTRING MATCHING (2026-04-27 fix)
+# =============================================================================
+# When a hotel name doesn't match _BRAND_TIER_MAP exactly (e.g. "Spark by
+# Hilton Newport News"), we fall through to substring matching. Without
+# length-sorting, the scan would check tier-by-tier in order — meaning
+# "Hilton" (in tier3) matches BEFORE "Spark by Hilton" (in tier4), and
+# child brands like Spark/Tempo/Garner/Homewood/Hampton get mis-tiered
+# as Upper Upscale just because their parent brand keyword appears.
+#
+# Sorting longer brands first makes the substring matcher prefer the
+# most-specific brand. "Spark by Hilton Newport News" → matches "spark by
+# hilton" (15 chars) before "hilton" (6 chars) → correctly tier4_upscale.
+#
+# Format: list of (brand, tier_num, tier_name, points) sorted by len(brand) DESC
+_BRAND_LIST_BY_SPECIFICITY: list = []
+for _brand in TIER5_SKIP:
+    _BRAND_LIST_BY_SPECIFICITY.append((_brand, 5, "Budget/Skip", 0))
+for _brand in TIER1_ULTRA_LUXURY:
+    _BRAND_LIST_BY_SPECIFICITY.append((_brand, 1, "Ultra Luxury", 25))
+for _brand in TIER2_LUXURY:
+    _BRAND_LIST_BY_SPECIFICITY.append((_brand, 2, "Luxury", 20))
+for _brand in TIER3_UPPER_UPSCALE:
+    _BRAND_LIST_BY_SPECIFICITY.append((_brand, 3, "Upper Upscale", 15))
+for _brand in TIER4_UPSCALE:
+    _BRAND_LIST_BY_SPECIFICITY.append((_brand, 4, "Upscale", 10))
+# Sort by brand-string length DESCENDING — longest/most-specific first.
+_BRAND_LIST_BY_SPECIFICITY.sort(key=lambda x: len(x[0]), reverse=True)
+
 
 def get_brand_tier(hotel_name: str) -> Tuple[int, str, int]:
     """
@@ -209,39 +238,27 @@ def get_brand_tier(hotel_name: str) -> Tuple[int, str, int]:
     M-07: Uses word-boundary matching for short brand names to prevent
     false positives (e.g. "Trump" no longer matches "tru").
 
+    2026-04-27 fix: When falling through to substring matching, scans
+    brands sorted by length DESCENDING. Without this, a hotel like
+    "Spark by Hilton Newport News" would match the parent "Hilton"
+    keyword (tier3) before the more-specific "Spark by Hilton" (tier4),
+    incorrectly tagging child brands as Upper Upscale.
+
     Returns: (tier_number, tier_name, points)
     """
     name_lower = hotel_name.lower()
 
-    # Audit Fix P-01: Try O(1) exact lookup first, fall back to substring matching
+    # Audit Fix P-01: Try O(1) exact lookup first, fall back to length-sorted
+    # substring matching
     if name_lower in _BRAND_TIER_MAP:
         return _BRAND_TIER_MAP[name_lower]
 
-    # Substring/word-boundary matching for partial names
-    # Check Tier 5 FIRST (to filter out budget hotels)
-    for brand in TIER5_SKIP:
+    # Length-sorted scan — longest brand match wins. "Spark by Hilton"
+    # (15 chars, tier4) is checked BEFORE "Hilton" (6 chars, tier3), so
+    # the more-specific child brand correctly takes precedence.
+    for brand, tier_num, tier_name, points in _BRAND_LIST_BY_SPECIFICITY:
         if _brand_matches(brand, name_lower):
-            return (5, "Budget/Skip", 0)
-
-    # Check Tier 1 (Ultra Luxury)
-    for brand in TIER1_ULTRA_LUXURY:
-        if _brand_matches(brand, name_lower):
-            return (1, "Ultra Luxury", 25)
-
-    # Check Tier 2 (Luxury)
-    for brand in TIER2_LUXURY:
-        if _brand_matches(brand, name_lower):
-            return (2, "Luxury", 20)
-
-    # Check Tier 3 (Upper Upscale)
-    for brand in TIER3_UPPER_UPSCALE:
-        if _brand_matches(brand, name_lower):
-            return (3, "Upper Upscale", 15)
-
-    # Check Tier 4 (Upscale)
-    for brand in TIER4_UPSCALE:
-        if _brand_matches(brand, name_lower):
-            return (4, "Upscale", 10)
+            return (tier_num, tier_name, points)
 
     # Unknown brand
     return (0, "Unknown", 5)

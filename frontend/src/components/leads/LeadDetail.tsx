@@ -4,7 +4,7 @@ import RevenuePotential from './RevenuePotential'
 import EnrichProgress from './EnrichProgress'
 import SmartFillProgress from './SmartFillProgress'
 import ConfirmDialog from '../ui/ConfirmDialog'
-import { editLead, saveContact, setPrimaryContact, deleteContact, updateContact, toggleContactScope, addContact } from '@/api/leads'
+import { editLead, saveContact, setPrimaryContact, deleteContact, updateContact, toggleContactScope, addContact, getEnrichmentStatus } from '@/api/leads'
 import api from '@/api/client'
 import { useQueryClient } from '@tanstack/react-query'
 import type { Lead, Contact } from '@/api/types'
@@ -82,6 +82,26 @@ export default function LeadDetail({ leadId, tab, onClose }: Props) {
   // same semantics, just scoped to the currently-viewed lead.
   const enrichingLive = enrichingLeadId === leadId
   const smartFillLive = smartFillLeadId === leadId ? smartFillMode : null
+
+  // ── Auto-attach to running enrichment on lead mount ──
+  // When user opens a lead, check if there's an enrichment already running
+  // for it (e.g. they started one earlier and navigated away, or another
+  // sales employee started it). If so, automatically show the progress
+  // card so they see live progress without having to click anything.
+  // The /enrich-status endpoint is cheap (just checks an in-memory dict).
+  useEffect(() => {
+    let cancelled = false
+    getEnrichmentStatus(leadId)
+      .then((data) => {
+        if (cancelled) return
+        if (data?.running) setEnrichingLeadId(leadId)
+      })
+      .catch(() => {
+        // status check failed — silently ignore, user can still click
+        // Run Enrichment manually
+      })
+    return () => { cancelled = true }
+  }, [leadId])
 
   const approveMut = useApproveLead()
   const rejectMut  = useRejectLead()
@@ -391,7 +411,10 @@ function OverviewTab({ lead, leadId, contactList, onEnrich, enriching, onSmartFi
         </div>
 
         {/* Live progress card — rendered when user clicked Smart Fill or
-            Full Refresh. Replaces the static button row while running. */}
+            Full Refresh. Replaces the static button row while running.
+            Lives on the Overview tab because Smart Fill's job is to
+            enrich the data fields shown here (rooms, address, mgmt co,
+            etc.) — the operation belongs visually next to its target. */}
         {smartFillLive && (
           <div className="mt-3 pt-3 border-t border-stone-100">
             <SmartFillProgress
@@ -654,44 +677,55 @@ function ContactsTab({ contacts, loading, leadId, onEnrich, enriching, enriching
   const [openEvidenceId, setOpenEvidenceId] = useState<number | null>(null)
 
   // ── Live enrichment progress ──
-  // When user clicked "Run Enrichment" / "Enrich" button, enrichingLive
-  // flips to true and we show the SSE-driven progress card INSTEAD of
-  // the regular contact list. When it completes, we refetch contacts +
-  // hide the progress card.
-  if (enrichingLive) {
-    return (
-      <div className="animate-fadeIn">
-        <EnrichProgress
-          leadId={leadId}
-          onComplete={(summary) => {
-            qc.invalidateQueries({ queryKey: ['contacts', leadId] })
-            qc.invalidateQueries({ queryKey: ['lead', leadId] })
-            qc.invalidateQueries({ queryKey: ['leads'] })
-            onEnrichComplete?.()
-          }}
-          onCancel={() => onEnrichComplete?.()}
-        />
-      </div>
-    )
-  }
+  // Renders ONLY on this tab. When user switches to Overview/Edit/Sources,
+  // this component unmounts and the SSE stream closes — but that's fine
+  // because the backend's job-registry / fan-out architecture keeps the
+  // task running. When user comes back to Contacts tab, the new mount
+  // attaches as a fresh watcher of the same running task and immediately
+  // sees current state via current_event replay. No double-enrichment,
+  // no lost progress.
+  const progressCard = enrichingLive ? (
+    <div className="mb-4 animate-fadeIn">
+      <EnrichProgress
+        leadId={leadId}
+        onComplete={() => {
+          qc.invalidateQueries({ queryKey: ['contacts', leadId] })
+          qc.invalidateQueries({ queryKey: ['lead', leadId] })
+          qc.invalidateQueries({ queryKey: ['leads'] })
+          onEnrichComplete?.()
+        }}
+        onCancel={() => onEnrichComplete?.()}
+      />
+    </div>
+  ) : null
 
   if (loading) {
-    return <div className="space-y-2">{Array.from({ length: 3 }).map((_, i) => <div key={i} className="skeleton h-24 rounded-lg" />)}</div>
+    return (
+      <>
+        {progressCard}
+        <div className="space-y-2">{Array.from({ length: 3 }).map((_, i) => <div key={i} className="skeleton h-24 rounded-lg" />)}</div>
+      </>
+    )
   }
 
   if (!contacts.length) {
     return (
-      <div className="text-center py-12 animate-fadeIn">
-        <User className="w-12 h-12 text-stone-300 mx-auto mb-3" />
-        <p className="text-sm font-medium text-stone-500">No contacts found</p>
-        <button
-          onClick={onEnrich}
-          disabled={enriching}
-          className="mt-3 px-5 py-2.5 text-xs font-semibold bg-navy-900 text-white rounded-lg hover:bg-navy-800 transition disabled:opacity-50"
-        >
-          {enriching ? 'Searching...' : 'Run Enrichment'}
-        </button>
-      </div>
+      <>
+        {progressCard}
+        {!enrichingLive && (
+          <div className="text-center py-12 animate-fadeIn">
+            <User className="w-12 h-12 text-stone-300 mx-auto mb-3" />
+            <p className="text-sm font-medium text-stone-500">No contacts found</p>
+            <button
+              onClick={onEnrich}
+              disabled={enriching}
+              className="mt-3 px-5 py-2.5 text-xs font-semibold bg-navy-900 text-white rounded-lg hover:bg-navy-800 transition disabled:opacity-50"
+            >
+              {enriching ? 'Searching...' : 'Run Enrichment'}
+            </button>
+          </div>
+        )}
+      </>
     )
   }
 
@@ -768,6 +802,8 @@ function ContactsTab({ contacts, loading, leadId, onEnrich, enriching, enriching
 
   return (
     <div className="space-y-2.5 animate-fadeIn">
+      {progressCard}
+
       {/* Priority legend — quick sales team reference */}
       <div className="flex items-center gap-3 px-3 py-2 bg-slate-50 rounded-md border border-slate-200 text-2xs flex-wrap">
         <span className="font-semibold text-stone-500 uppercase tracking-wide">Priority:</span>

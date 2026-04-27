@@ -1146,7 +1146,26 @@ async def iteration_4_linkedin_lookup(state: ResearchState) -> int:
         source_type = (contact.get("source_type") or "").lower()
 
         if scope == "hotel_specific" or source_type == "snippet":
-            query = f'"{name}" "{short_name}" OR "{state.brand or ""}" linkedin'.strip()
+            # Try TWO queries for hotel-specific contacts:
+            #   1. With management company FIRST — pre-opening hotel
+            #      staff often haven't updated their LinkedIn to the new
+            #      property yet, so they still show their parent
+            #      operator (e.g. "Daniel Young — New Waterloo" instead
+            #      of "Daniel Young — Fidelity Hotel").
+            #   2. Then with hotel + brand context — for staff already
+            #      identified at the property publicly.
+            mgmt = (state.management_company or "").strip()
+            primary_query = (
+                f'"{name}" "{short_name}" OR "{state.brand or ""}" linkedin'.strip()
+            )
+            mgmt_query = f'"{name}" "{mgmt}" linkedin'.strip() if mgmt else None
+            # Order: mgmt first when available (higher signal for pre-opening
+            # hires), then hotel+brand combo, then name-only fallback.
+            queries_to_try = []
+            if mgmt_query and mgmt_query not in state.queries_run:
+                queries_to_try.append(mgmt_query)
+            queries_to_try.append(primary_query)
+            queries_to_try.append(f'"{name}" linkedin')
         else:
             # Use the contact's OWN organization first — this is the most
             # specific context. "Elie Khoury" + "Crescent Hotels" finds the
@@ -1162,9 +1181,8 @@ async def iteration_4_linkedin_lookup(state: ResearchState) -> int:
                 or ""
             )
             query = f'"{name}" "{company_ctx}" linkedin'.strip()
+            queries_to_try = [query, f'"{name}" linkedin']
 
-        # Try qualified query first, then simple name-only fallback
-        queries_to_try = [query, f'"{name}" linkedin']
         found_url = False
 
         for q in queries_to_try:

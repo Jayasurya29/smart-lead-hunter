@@ -188,6 +188,22 @@ export async function checkDiscoveryStatus(discoveryId: string): Promise<any> {
   return data
 }
 
+/* Cancel an in-flight contact enrichment for a lead. Idempotent —
+   returns {cancelled: false} if no job is running, {cancelled: true}
+   if the running job was cancelled. */
+export async function cancelEnrichment(leadId: number): Promise<any> {
+  const { data } = await api.post(`/api/dashboard/leads/${leadId}/enrich-cancel`)
+  return data
+}
+
+/* Cheap polling endpoint — is an enrichment running for this lead?
+   Used on lead detail mount to decide whether to attach to existing
+   progress or show the "Run Enrichment" button. */
+export async function getEnrichmentStatus(leadId: number): Promise<any> {
+  const { data } = await api.get(`/api/dashboard/leads/${leadId}/enrich-status`)
+  return data
+}
+
 /* ════════════════════════════════════════
    SOURCES
    ════════════════════════════════════════ */

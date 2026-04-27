@@ -5558,3 +5558,57 @@ BrandRegistry.ALIASES.update(
         "planet hollywood resort": "planet hollywood",
     }
 )
+
+
+# =============================================================================
+# AUTO-SYNC TIERS FROM canonical_tiers.py (single source of truth)
+# =============================================================================
+# Every BrandInfo above has a hardcoded `tier=` field. These were entered
+# manually and have drifted from STR truth over time (audit found 8
+# conflicts on 2026-04-27). Rather than maintain two lists in lockstep,
+# we OVERWRITE the registry's tier field at module load with whatever
+# canonical_tiers.py says. This makes canonical_tiers.py the single
+# source of truth — the only place tier assignments live.
+#
+# Effect: if a developer adds a new BrandInfo entry with the wrong tier,
+# canonical_tiers.py wins silently. If a brand is missing from
+# canonical_tiers, the registry's hardcoded tier is preserved as fallback.
+# Run `python -m scripts.audit_str_alignment` after adding brands to
+# verify both sources stay aligned.
+
+
+def _sync_tiers_from_canonical() -> int:
+    """Sync each BRAND_REGISTRY entry's tier with canonical_tiers.
+
+    Returns the number of entries whose tier changed.
+    """
+    try:
+        from app.config.canonical_tiers import CANONICAL_TIERS
+    except ImportError:
+        # canonical_tiers not available — fall back to hardcoded tiers
+        return 0
+
+    changed = 0
+    # Build alias map: canonical_tiers brand → registry key (so we can find
+    # "spark by hilton" in canonical_tiers when registry uses "spark")
+    for reg_key, info in BRAND_REGISTRY.items():
+        if reg_key == "unknown":
+            continue
+        # Try direct match first, then aliases
+        canonical_tier = CANONICAL_TIERS.get(reg_key)
+        if canonical_tier is None:
+            # Try checking if reg_key is an alias used elsewhere
+            for alias_src, alias_dst in BrandRegistry.ALIASES.items():
+                if alias_dst == reg_key and alias_src in CANONICAL_TIERS:
+                    canonical_tier = CANONICAL_TIERS[alias_src]
+                    break
+        if canonical_tier and canonical_tier != info.tier:
+            info.tier = canonical_tier
+            changed += 1
+    return changed
+
+
+# Run sync at module import. Silent — no logging — because brand_registry
+# is imported at startup and we don't want noise in the logs. To audit
+# changes, run scripts/audit_str_alignment.py.
+_TIER_SYNC_COUNT = _sync_tiers_from_canonical()

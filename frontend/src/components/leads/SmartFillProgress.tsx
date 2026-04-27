@@ -64,10 +64,18 @@ export default function SmartFillProgress({ leadId, mode, onComplete, onCancel }
 
   useEffect(() => { onCompleteRef.current = onComplete }, [onComplete])
 
+  // Anchor elapsed time to the backend's job start (via elapsed_s in
+  // each event), not the component mount time. Without this, remounting
+  // the component (tab switch, etc.) resets the displayed counter to 0
+  // even though the actual job has been running for a while. See
+  // EnrichProgress.tsx for the same fix + full reasoning.
+  const jobStartedAtRef = useRef<number | null>(null)
+
   useEffect(() => {
-    const startedAt = Date.now()
     elapsedTimerRef.current = setInterval(() => {
-      setElapsed(Math.round((Date.now() - startedAt) / 1000))
+      if (jobStartedAtRef.current !== null) {
+        setElapsed(Math.round((Date.now() - jobStartedAtRef.current) / 1000))
+      }
     }, 1000)
     return () => {
       if (elapsedTimerRef.current) clearInterval(elapsedTimerRef.current)
@@ -86,12 +94,21 @@ export default function SmartFillProgress({ leadId, mode, onComplete, onCancel }
           setCurrentStage(data.stage)
           setCurrentLabel(data.label)
           setPct(data.pct)
+          // Trust backend's elapsed_s as truth — sets the anchor for
+          // the local 1-second ticker.
+          if (typeof data.elapsed_s === 'number') {
+            jobStartedAtRef.current = Date.now() - (data.elapsed_s * 1000)
+            setElapsed(Math.round(data.elapsed_s))
+          }
           return
         }
         if (data.type === 'complete') {
           setPct(100)
           setCurrentStage(STAGE_LABELS.length)
           setStatus('done')
+          if (typeof data.elapsed_s === 'number') {
+            setElapsed(Math.round(data.elapsed_s))
+          }
           es.close()
           setTimeout(() => onCompleteRef.current(data.summary), 500)
           return

@@ -33,6 +33,7 @@ import asyncio
 import json
 import logging
 import os
+import random
 import re
 from datetime import date
 from typing import Optional
@@ -103,7 +104,12 @@ def _get_client() -> httpx.AsyncClient:
 # Retries on 429/503/500 with exponential backoff
 # ═══════════════════════════════════════════════════════════════
 
-_GEMINI_RETRY_ATTEMPTS = 3
+_GEMINI_RETRY_ATTEMPTS = (
+    5  # Increased from 3 — paid Tier 1 quota almost always succeeds within 5 attempts
+)
+_GEMINI_RETRY_JITTER = (
+    0.5  # ±50% randomness on each backoff to de-sync parallel callers
+)
 
 
 def _try_recover_json(text: str):
@@ -230,6 +236,48 @@ def _count_items(data) -> int:
 
 _GEMINI_RETRY_BASE_DELAY = 2  # seconds
 
+# Global concurrency cap for in-flight Gemini calls across the whole app.
+# Without this, two parallel enrichments (different leads, different sales
+# employees) can stack 6+ concurrent Gemini calls, immediately hammer
+# Vertex AI's per-project RPM limit, get 429'd, and BOTH enrichments slow
+# to a crawl on retries. The semaphore caps in-flight calls at 5 — beyond
+# that, callers wait their turn. Trade: slightly slower individual
+# enrichment, dramatically fewer 429s under multi-user load.
+#
+# 5 was chosen because:
+# - Vertex Tier 1 is ~1,000 RPM = ~16 requests/sec sustained
+# - 5 in-flight calls × 2-3s avg latency = ~2 calls/sec per slot = 10 calls/sec total
+# - That leaves headroom for Smart Fill bursts + Discovery on top
+# Bump up if you get a quota increase; bump down if 429s persist.
+_GEMINI_CONCURRENCY = 5
+_gemini_semaphore: Optional[asyncio.Semaphore] = None
+
+
+def _get_gemini_semaphore() -> asyncio.Semaphore:
+    """Lazy-init the semaphore so it binds to the running event loop.
+
+    Module-level Semaphore() construction binds to whatever loop is
+    current at import time, which can differ from the loop that handles
+    the actual request. Lazy init avoids the cross-loop bug.
+    """
+    global _gemini_semaphore
+    if _gemini_semaphore is None:
+        _gemini_semaphore = asyncio.Semaphore(_GEMINI_CONCURRENCY)
+    return _gemini_semaphore
+
+
+def _retry_delay_with_jitter(attempt: int) -> float:
+    """Exponential backoff with ±50% randomness to de-sync parallel retries.
+
+    Without jitter, two enrichments hitting 429 at the same instant both
+    sleep 2s, both retry at the same instant, both 429 again. With jitter,
+    one might sleep 1.4s and the other 2.6s — they spread out across
+    Vertex's RPM window and one succeeds.
+    """
+    base = _GEMINI_RETRY_BASE_DELAY * (2**attempt)
+    jitter = base * _GEMINI_RETRY_JITTER * (2 * random.random() - 1)  # [-0.5x, +0.5x]
+    return max(0.5, base + jitter)
+
 
 async def _call_gemini(
     prompt: str,
@@ -288,11 +336,15 @@ async def _call_gemini(
     client = _get_client()
     last_error = None
 
+    # Global concurrency cap — only N Gemini calls in-flight across the app
+    sem = _get_gemini_semaphore()
+
     for attempt in range(_GEMINI_RETRY_ATTEMPTS):
         try:
-            resp = await client.post(
-                url, json=payload, headers=get_gemini_headers(), timeout=timeout
-            )
+            async with sem:
+                resp = await client.post(
+                    url, json=payload, headers=get_gemini_headers(), timeout=timeout
+                )
 
             if resp.status_code == 200:
                 data = resp.json()
@@ -376,10 +428,10 @@ async def _call_gemini(
                     return None
 
             elif resp.status_code in (429, 500, 503):
-                delay = _GEMINI_RETRY_BASE_DELAY * (2**attempt)
+                delay = _retry_delay_with_jitter(attempt)
                 logger.warning(
                     f"Gemini {resp.status_code} (attempt {attempt + 1}/{_GEMINI_RETRY_ATTEMPTS}), "
-                    f"retrying in {delay}s..."
+                    f"retrying in {delay:.1f}s..."
                 )
                 await asyncio.sleep(delay)
                 last_error = f"HTTP {resp.status_code}"
@@ -391,10 +443,10 @@ async def _call_gemini(
             logger.error(f"Gemini response parse error: {e}")
             return None
         except Exception as e:
-            delay = _GEMINI_RETRY_BASE_DELAY * (2**attempt)
+            delay = _retry_delay_with_jitter(attempt)
             logger.warning(
                 f"Gemini call failed (attempt {attempt + 1}/{_GEMINI_RETRY_ATTEMPTS}): {e}, "
-                f"retrying in {delay}s..."
+                f"retrying in {delay:.1f}s..."
             )
             await asyncio.sleep(delay)
             last_error = str(e)

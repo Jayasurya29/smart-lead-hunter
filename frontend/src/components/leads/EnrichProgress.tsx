@@ -21,8 +21,9 @@
  */
 
 import { useEffect, useRef, useState } from 'react'
-import { CheckCircle2, Loader2, AlertCircle, X } from 'lucide-react'
+import { CheckCircle2, Loader2, AlertCircle, X, Square } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { cancelEnrichment } from '@/api/leads'
 
 const STAGE_LABELS = [
   'Iter 1 · Discovery',
@@ -59,6 +60,10 @@ export default function EnrichProgress({ leadId, onComplete, onCancel }: Props) 
   const [elapsed, setElapsed] = useState(0)
   const [status, setStatus] = useState<'running' | 'done' | 'error'>('running')
   const [errorMsg, setErrorMsg] = useState<string>('')
+  // Collapsed by default — the 11-stage checklist takes ~280px which would
+  // push tab content out of view. User can click to expand for the full
+  // detailed checklist when they want to see exactly which iteration runs.
+  const [collapsed, setCollapsed] = useState(true)
   const esRef = useRef<EventSource | null>(null)
   const elapsedTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const onCompleteRef = useRef(onComplete)
@@ -67,13 +72,24 @@ export default function EnrichProgress({ leadId, onComplete, onCancel }: Props) 
   // the SSE stream every render.
   useEffect(() => { onCompleteRef.current = onComplete }, [onComplete])
 
-  // Local elapsed counter — driven by client clock, ticking once per second.
-  // The backend also reports its own elapsed_s in each event but this gives
-  // smooth 1-per-second updates between events.
+  // Local elapsed counter. The backend's `elapsed_s` is the SOURCE OF
+  // TRUTH (it's based on when the actual job started server-side).
+  // We use a ref to hold the OFFSET between Date.now() and the backend's
+  // job start, so the local 1-second ticker reads from the correct anchor.
+  //
+  // Without this, the elapsed time RESETS to 0 every time the user
+  // navigates away and back (component remounts → fresh `startedAt` →
+  // counter starts over). With this anchor, the counter reflects the
+  // real job-elapsed time across remounts.
+  const jobStartedAtRef = useRef<number | null>(null)
+
   useEffect(() => {
-    const startedAt = Date.now()
     elapsedTimerRef.current = setInterval(() => {
-      setElapsed(Math.round((Date.now() - startedAt) / 1000))
+      // If the backend has told us the job's start time, use it.
+      // Otherwise fall back to "0 seconds" until the first event arrives.
+      if (jobStartedAtRef.current !== null) {
+        setElapsed(Math.round((Date.now() - jobStartedAtRef.current) / 1000))
+      }
     }, 1000)
     return () => {
       if (elapsedTimerRef.current) clearInterval(elapsedTimerRef.current)
@@ -95,6 +111,16 @@ export default function EnrichProgress({ leadId, onComplete, onCancel }: Props) 
           setCurrentStage(data.stage)
           setCurrentLabel(data.label)
           setPct(data.pct)
+          // Trust the backend's elapsed_s as the truth. Compute the
+          // job's wall-clock start time from it and store as our anchor
+          // so the local ticker can extrapolate forward smoothly between
+          // events. This keeps the displayed elapsed time consistent
+          // across navigate-away-and-back cycles.
+          if (typeof data.elapsed_s === 'number') {
+            const backendElapsedMs = data.elapsed_s * 1000
+            jobStartedAtRef.current = Date.now() - backendElapsedMs
+            setElapsed(Math.round(data.elapsed_s))
+          }
           return
         }
 
@@ -102,6 +128,9 @@ export default function EnrichProgress({ leadId, onComplete, onCancel }: Props) 
           setPct(100)
           setCurrentStage(STAGE_LABELS.length)
           setStatus('done')
+          if (typeof data.elapsed_s === 'number') {
+            setElapsed(Math.round(data.elapsed_s))
+          }
           es.close()
           // Give the UI a tick to render 100% before closing
           setTimeout(() => onCompleteRef.current(data.summary), 500)
@@ -163,6 +192,24 @@ export default function EnrichProgress({ leadId, onComplete, onCancel }: Props) 
               {elapsed}s elapsed
             </div>
           </div>
+          {status === 'running' && (
+            <button
+              onClick={async () => {
+                try {
+                  await cancelEnrichment(leadId)
+                  // Backend will emit a final cancelled error event;
+                  // the SSE handler will pick it up and flip status.
+                } catch (err) {
+                  console.error('Cancel enrichment failed:', err)
+                }
+              }}
+              className="px-2 h-6 text-[10px] font-semibold text-red-600 bg-red-50 border border-red-200 rounded-md hover:bg-red-100 transition flex items-center gap-1"
+              title="Stop enrichment"
+            >
+              <Square className="w-3 h-3" fill="currentColor" />
+              Stop
+            </button>
+          )}
           {status !== 'running' && (
             <button
               onClick={onCancel}

@@ -2064,6 +2064,13 @@ async def batch_smart_fill_endpoint(_csrf=Depends(require_ajax)):
 #   8: rescore + recalc revenue
 
 
+# In-memory guard against parallel Smart Fill / Full Refresh on same lead.
+# Same rationale as _active_enrichments in contacts.py — frontend now keeps
+# the progress card mounted across tab switches, but this is the second
+# line of defense against double-runs from multiple browser tabs.
+_active_smart_fills: set[tuple[int, str]] = set()
+
+
 @router.get("/api/leads/{lead_id}/smart-fill-stream", tags=["Leads"])
 async def smart_fill_stream(lead_id: int, request: Request, mode: str = "smart"):
     """SSE streaming version of POST /smart-fill."""
@@ -2071,6 +2078,20 @@ async def smart_fill_stream(lead_id: int, request: Request, mode: str = "smart")
     from app.services.lead_data_enrichment import enrich_lead_data
     from app.services.utils import get_timeline_label, normalize_hotel_name
     from app.services.scorer import calculate_lead_score
+
+    # Guard against parallel runs on the same (lead, mode) tuple.
+    # Different modes (smart vs full) on the same lead are still blocked
+    # because they touch the same DB rows — running both at once would race.
+    key = (lead_id, mode)
+    if any(k[0] == lead_id for k in _active_smart_fills):
+        logger.info(
+            f"Smart Fill already in flight for lead {lead_id}, "
+            f"rejecting duplicate request."
+        )
+        raise HTTPException(
+            status_code=409,
+            detail="Smart Fill already running for this lead. Wait for it to finish.",
+        )
 
     # Verify lead exists up-front (fail fast)
     async with async_session() as session:
@@ -2243,14 +2264,32 @@ async def smart_fill_stream(lead_id: int, request: Request, mode: str = "smart")
                 }
             )
 
+    # Register this (lead, mode) as actively smart-filling. Same lifetime
+    # rule as enrich-stream: guard is RELEASED when the background task
+    # actually finishes, NOT when the stream disconnects. This prevents
+    # navigate-away-then-return from firing a duplicate Smart Fill on the
+    # same lead while the first is still running.
+    _active_smart_fills.add(key)
+
     task = asyncio.create_task(run_smart_fill())
+
+    def _release_smart_fill_guard(_t):
+        _active_smart_fills.discard(key)
+        logger.info(f"Smart Fill guard released for lead {lead_id} ({mode})")
+
+    task.add_done_callback(_release_smart_fill_guard)
 
     async def event_stream():
         yield f'data: {json.dumps({"type": "started", "total": TOTAL_STAGES})}\n\n'
         try:
             while True:
+                # Client navigated away — let the task finish in background.
+                # Don't cancel it; contacts/fields still need to be saved.
                 if await request.is_disconnected():
-                    task.cancel()
+                    logger.info(
+                        f"Smart Fill stream client disconnected for lead {lead_id}; "
+                        f"background task continues."
+                    )
                     return
                 try:
                     event = await asyncio.wait_for(event_queue.get(), timeout=10.0)
@@ -2263,7 +2302,10 @@ async def smart_fill_stream(lead_id: int, request: Request, mode: str = "smart")
                 if event["type"] in ("complete", "error"):
                     return
         except asyncio.CancelledError:
-            task.cancel()
+            logger.info(
+                f"Smart Fill stream cancelled for lead {lead_id}; "
+                f"background task continues."
+            )
             raise
         except Exception as e:
             logger.error(f"Smart Fill stream error (lead {lead_id}): {e}")
@@ -2271,6 +2313,7 @@ async def smart_fill_stream(lead_id: int, request: Request, mode: str = "smart")
                 yield f'data: {json.dumps({"type": "error", "message": str(e)[:200]})}\n\n'
             except Exception:
                 pass
+        # NOTE: no finally block. task.add_done_callback handles guard release.
 
     return StreamingResponse(
         event_stream(),
