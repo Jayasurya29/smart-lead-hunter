@@ -3187,13 +3187,24 @@ async def run_iterative_research(
             logger.debug(f"Progress callback failed (non-fatal): {e}")
 
     # ── Iteration 1: discovery ──
-    await _emit_progress(1, "Iter 1 · Discovery")
-    new_facts = await iteration_1_discovery(state)
-    logger.info(
-        f"[ITER 1/DISCOVERY] +{new_facts} facts. "
-        f"Owner={state.owner_company!r}, OperatorParent={state.operator_parent!r}, "
-        f"Stage={state.project_stage!r}, Names={len(state.discovered_names)}"
-    )
+    # Lean mode (existing hotels): SKIP. Smart Fill already populated
+    # operator/owner/project_type for open hotels. The discovery iteration
+    # is designed to find these from press releases for unknown future
+    # openings — for an established property they're already known facts.
+    # Saves 3 Serper queries per existing-hotel enrichment.
+    if state.is_existing_hotel:
+        logger.info(
+            "[LEAN] Skipping Iter 1 Discovery for existing hotel — "
+            "operator/owner already known from Smart Fill"
+        )
+    else:
+        await _emit_progress(1, "Iter 1 · Discovery")
+        new_facts = await iteration_1_discovery(state)
+        logger.info(
+            f"[ITER 1/DISCOVERY] +{new_facts} facts. "
+            f"Owner={state.owner_company!r}, OperatorParent={state.operator_parent!r}, "
+            f"Stage={state.project_stage!r}, Names={len(state.discovered_names)}"
+        )
 
     # ── Iteration 2: GM hunt ──
     if _should_continue(state):
@@ -3217,12 +3228,32 @@ async def run_iterative_research(
         )
 
     # ── Iteration 3: corporate / owner hunt ──
+    # Lean mode (existing hotels) + we already found enough property-level
+    # decision-makers: SKIP. The whole point of Iter 3 is to find buyers
+    # at the operator's HQ (procurement VPs, regional ops directors). If
+    # Iter 2 + 2.5 already surfaced 2+ property decision-makers
+    # (GM/DOH/F&B/Operations/Sales/Purchasing/HR), those ARE the buyers
+    # for an open hotel — no need to chase corporate. Saves 8 Serper
+    # queries + 1 Gemini extraction per existing-hotel run on hotels with
+    # well-staffed property pages (~60% of cases per industry norms).
     if _should_continue(state):
-        await _emit_progress(4, "Iter 3 · Corporate hunt")
-        new_facts = await iteration_3_corporate_hunt(state)
-        logger.info(
-            f"[ITER 3/CORPORATE] +{new_facts} facts. Names={len(state.discovered_names)}"
-        )
+        skip_iter_3 = False
+        if state.is_existing_hotel:
+            dm_count = _count_property_decision_makers(state)
+            if dm_count >= 2:
+                skip_iter_3 = True
+                logger.info(
+                    f"[LEAN] Skipping Iter 3 Corporate Hunt — found "
+                    f"{dm_count} property decision-makers in Iter 2/2.5; "
+                    f"property-level contacts sufficient"
+                )
+
+        if not skip_iter_3:
+            await _emit_progress(4, "Iter 3 · Corporate hunt")
+            new_facts = await iteration_3_corporate_hunt(state)
+            logger.info(
+                f"[ITER 3/CORPORATE] +{new_facts} facts. Names={len(state.discovered_names)}"
+            )
 
     # ── Iteration 4: linkedin lookup (always run if we have any names) ──
     if state.discovered_names:
@@ -3999,3 +4030,84 @@ def _looks_like_gm(title: str) -> bool:
             "pre-opening manager",
         )
     )
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# LEAN MODE HELPERS — for existing-hotel enrichment
+# ═══════════════════════════════════════════════════════════════════════
+# These are decision-maker titles for uniform procurement at the property
+# level. If we find 2+ of these in Iter 2 + 2.5 (i.e. before Iter 3
+# corporate hunt), we have enough buyers and can skip the corporate hunt.
+#
+# Why these specific titles:
+#   - General Manager: final approver on uniform programs, knows all dept heads
+#   - Director of Housekeeping: biggest line item (housekeeper uniforms),
+#     primary decision-maker for that segment
+#   - Director of F&B / Executive Chef: server uniforms, kitchen whites,
+#     banquet uniforms — high-volume orders
+#   - Director of Operations / Rooms: cross-functional procurement authority
+#   - Director of Sales / DOSM: branded uniforms for sales-facing staff
+#   - Purchasing/Procurement Manager: literally the buyer
+#   - HR Director: handles uniform program rollout (sizing, distribution)
+#
+# Kept narrow on purpose. Marketing directors, revenue managers, GMs of
+# parent operator (not THIS property) don't count — they don't write the PO.
+_PROPERTY_DECISION_MAKER_TITLES = (
+    # GM-level (uses _looks_like_gm internally for subtitle variants)
+    "general manager",
+    "hotel manager",
+    "managing director",
+    # Operations
+    "director of operations",
+    "director of rooms",
+    "rooms director",
+    # Housekeeping
+    "director of housekeeping",
+    "executive housekeeper",
+    "housekeeping director",
+    # F&B
+    "director of food and beverage",
+    "f&b director",
+    "food and beverage director",
+    "executive chef",
+    "chef de cuisine",
+    # Sales / Events
+    "director of sales",
+    "director of sales and marketing",
+    "dosm",
+    "director of events",
+    "director of catering",
+    # Procurement (the actual buyers)
+    "purchasing manager",
+    "director of purchasing",
+    "procurement manager",
+    "director of procurement",
+    # HR
+    "human resources director",
+    "director of human resources",
+    "hr director",
+)
+
+
+def _count_property_decision_makers(state: ResearchState) -> int:
+    """Count contacts whose title matches a property-level decision-maker.
+
+    Used by run_iterative_research (lean mode) to decide whether to skip
+    Iter 3 corporate hunt. The heuristic: 2+ named buyers at the property
+    means Iter 3 (looking for buyers at the operator's HQ) is likely
+    redundant for an open hotel.
+
+    Counts UNIQUE matched titles, not unique people — two GMs in the same
+    list (probably an extraction error) only count once. Zero-tolerance
+    for empty/None titles.
+    """
+    matched_titles: set[str] = set()
+    for contact in state.discovered_names:
+        raw_title = (contact.get("title") or "").strip().lower()
+        if not raw_title:
+            continue
+        for kw in _PROPERTY_DECISION_MAKER_TITLES:
+            if kw in raw_title:
+                matched_titles.add(kw)
+                break  # one match per contact is enough
+    return len(matched_titles)

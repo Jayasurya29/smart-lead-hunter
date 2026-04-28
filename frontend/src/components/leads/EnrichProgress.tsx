@@ -23,7 +23,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { CheckCircle2, Loader2, AlertCircle, X, Square } from 'lucide-react'
 import { cn } from '@/lib/utils'
-import { cancelEnrichment } from '@/api/leads'
+import api from '@/api/client'
 
 const STAGE_LABELS = [
   'Iter 1 · Discovery',
@@ -51,9 +51,19 @@ interface Props {
   leadId: number
   onComplete: (summary: CompleteSummary) => void
   onCancel: () => void
+  // Path Y → 1B (2026-04-28): allow rendering this component for either
+  // potential_leads OR existing_hotels by parameterizing the URL prefix.
+  // Default keeps the original behavior — the lead variant.
+  // For existing hotels pass basePath="/api/existing-hotels".
+  basePath?: string
 }
 
-export default function EnrichProgress({ leadId, onComplete, onCancel }: Props) {
+export default function EnrichProgress({
+  leadId,
+  onComplete,
+  onCancel,
+  basePath = '/api/dashboard/leads',
+}: Props) {
   const [currentStage, setCurrentStage] = useState(0)  // 1-indexed, 0 = not yet started
   const [currentLabel, setCurrentLabel] = useState<string>('Connecting...')
   const [pct, setPct] = useState(0)
@@ -97,8 +107,10 @@ export default function EnrichProgress({ leadId, onComplete, onCancel }: Props) 
   }, [])
 
   useEffect(() => {
-    // Subscribe to the SSE stream
-    const es = new EventSource(`/api/dashboard/leads/${leadId}/enrich-stream`)
+    // Subscribe to the SSE stream — basePath dictates which parent kind
+    // (lead or hotel) we're enriching. Both endpoints emit the same
+    // event shape, so the UI logic below is identical for both.
+    const es = new EventSource(`${basePath}/${leadId}/enrich-stream`)
     esRef.current = es
 
     es.onmessage = (e) => {
@@ -196,9 +208,12 @@ export default function EnrichProgress({ leadId, onComplete, onCancel }: Props) 
             <button
               onClick={async () => {
                 try {
-                  await cancelEnrichment(leadId)
+                  // POST against basePath so we hit the right endpoint:
+                  //   /api/dashboard/leads/{id}/enrich-cancel  (lead variant)
+                  //   /api/existing-hotels/{id}/enrich-cancel  (hotel variant)
                   // Backend will emit a final cancelled error event;
                   // the SSE handler will pick it up and flip status.
+                  await api.post(`${basePath}/${leadId}/enrich-cancel`)
                 } catch (err) {
                   console.error('Cancel enrichment failed:', err)
                 }

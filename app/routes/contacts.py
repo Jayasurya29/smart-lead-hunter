@@ -1032,9 +1032,20 @@ async def get_wiza_credits():
 
 @dataclass
 class EnrichmentJob:
-    """A single enrichment task + its watchers."""
+    """A single enrichment task + its watchers.
 
-    lead_id: int
+    Path Y → 1A (2026-04-28): job is keyed by composite (parent_kind,
+    parent_id) so a single registry serves both potential_leads and
+    existing_hotels. Fan-out, cancel, and replay-on-attach work the
+    same regardless of parent kind.
+
+    parent_kind:
+      "lead"  → potential_leads (original pipeline)
+      "hotel" → existing_hotels (added 2026-04-28)
+    """
+
+    parent_kind: str  # "lead" | "hotel"
+    parent_id: int
     task: asyncio.Task
     started_at: float
     # Most recent event emitted by the task. New SSE connections receive
@@ -1047,17 +1058,28 @@ class EnrichmentJob:
 
 # Single source of truth for active enrichments. Module-level so all
 # routes (start + cancel + status) share the same view.
-_jobs: dict[int, EnrichmentJob] = {}
+# Key: (parent_kind, parent_id). Same lead_id and hotel_id never collide.
+_jobs: dict[tuple[str, int], EnrichmentJob] = {}
 
 
-async def _start_enrichment_job(lead_id: int, lead_facts: dict) -> EnrichmentJob:
-    """Create and register a new EnrichmentJob for `lead_id`.
+async def _start_enrichment_job(
+    parent_kind: str, parent_id: int, lead_facts: dict
+) -> EnrichmentJob:
+    """Create and register a new EnrichmentJob.
 
-    Caller must verify no existing job before calling. Returns the
-    registered job with its background task already started.
+    Args:
+        parent_kind: "lead" or "hotel"
+        parent_id: PotentialLead.id or ExistingHotel.id
+        lead_facts: dict of facts to feed enrich_lead_contacts (hotel_name,
+                    brand, city, etc.). Built by the calling route.
+
+    Caller must verify no existing job for this (parent_kind, parent_id)
+    before calling. Returns the registered job with task already started.
     """
+    key = (parent_kind, parent_id)
     job = EnrichmentJob(
-        lead_id=lead_id,
+        parent_kind=parent_kind,
+        parent_id=parent_id,
         task=None,  # filled in below — needs `job` reference inside task
         started_at=time.monotonic(),
     )
@@ -1092,7 +1114,15 @@ async def _start_enrichment_job(lead_id: int, lead_facts: dict) -> EnrichmentJob
                 pass
 
     async def run_enrichment():
-        """Run the 11-stage enrichment + persist + emit complete/error."""
+        """Run the 11-stage enrichment + persist + emit complete/error.
+
+        Branches by parent_kind for the two operations that differ:
+          - Phase B rejection update (different model class)
+          - Persist call (passes the right kw-arg)
+        Everything else (the actual enrich_lead_contacts pipeline) is
+        identical between leads and hotels — both pass hotel_name + city
+        + brand etc. through lead_facts.
+        """
         try:
             from app.services.contact_enrichment import (
                 enrich_lead_contacts,
@@ -1100,18 +1130,35 @@ async def _start_enrichment_job(lead_id: int, lead_facts: dict) -> EnrichmentJob
             )
 
             # ── Run the 11-stage enrichment pipeline ──
+            # The function still takes lead_id as its first arg — that's
+            # just an internal identifier for logging/idempotency keys
+            # inside contact_enrichment, NOT a DB foreign key. Passing
+            # parent_id works for both kinds; the function never queries
+            # potential_leads with it.
+            #
+            # is_existing_hotel triggers lean-mode optimizations inside
+            # iterative_researcher: skips Iter 1 (Discovery) entirely +
+            # gates Iter 3 (Corporate Hunt) on having found 2+ property
+            # decision-makers. See enrich_lead_contacts docstring for
+            # the full lean-mode contract.
             enrichment_result = await enrich_lead_contacts(
-                lead_id=lead_id,
+                lead_id=parent_id,
                 **lead_facts,
                 progress_callback=progress_callback,
+                is_existing_hotel=(parent_kind == "hotel"),
             )
 
             # ── Phase B early-rejection (residences_only, etc.) ──
-            if getattr(enrichment_result, "should_reject", False):
+            # Only applies to potential_leads — existing_hotels are already
+            # operating, can't be rejected as "not a real hotel".
+            if (
+                getattr(enrichment_result, "should_reject", False)
+                and parent_kind == "lead"
+            ):
                 try:
                     async with async_session() as rej_session:
                         rej_result = await rej_session.execute(
-                            select(PotentialLead).where(PotentialLead.id == lead_id)
+                            select(PotentialLead).where(PotentialLead.id == parent_id)
                         )
                         rej_lead = rej_result.scalar_one_or_none()
                         if rej_lead:
@@ -1121,7 +1168,9 @@ async def _start_enrichment_job(lead_id: int, lead_facts: dict) -> EnrichmentJob
                             )[:100]
                             await rej_session.commit()
                 except Exception as ex:
-                    logger.error(f"Failed to mark lead {lead_id} rejected: {ex}")
+                    logger.error(
+                        f"Failed to mark {parent_kind} {parent_id} rejected: {ex}"
+                    )
 
                 duration = round(time.monotonic() - job.started_at, 1)
                 emit_terminal(
@@ -1141,17 +1190,28 @@ async def _start_enrichment_job(lead_id: int, lead_facts: dict) -> EnrichmentJob
                 return
 
             # ── Persist to DB ──
+            # persist_enrichment_contacts (refactored Path Y) accepts EITHER
+            # lead_id OR existing_hotel_id. We pass the right one based on
+            # parent_kind. The function sets the correct FK on lead_contacts
+            # rows and updates flat fields on the right parent table.
             persist_summary: dict = {"contacts_added": 0, "contacts_updated": 0}
             try:
                 async with async_session() as persist_session:
-                    persist_summary = await persist_enrichment_contacts(
-                        lead_id=lead_id,
-                        enrichment_result=enrichment_result,
-                        session=persist_session,
-                    )
+                    if parent_kind == "lead":
+                        persist_summary = await persist_enrichment_contacts(
+                            lead_id=parent_id,
+                            enrichment_result=enrichment_result,
+                            session=persist_session,
+                        )
+                    else:
+                        persist_summary = await persist_enrichment_contacts(
+                            existing_hotel_id=parent_id,
+                            enrichment_result=enrichment_result,
+                            session=persist_session,
+                        )
                     await persist_session.commit()
             except Exception as ex:
-                logger.exception(f"Persist failed for lead {lead_id}: {ex}")
+                logger.exception(f"Persist failed for {parent_kind} {parent_id}: {ex}")
                 emit_terminal(
                     {
                         "type": "error",
@@ -1195,7 +1255,7 @@ async def _start_enrichment_job(lead_id: int, lead_facts: dict) -> EnrichmentJob
             )
             raise  # re-raise so task.cancelled() returns True
         except Exception as e:
-            logger.exception(f"Enrichment failed for lead {lead_id}: {e}")
+            logger.exception(f"Enrichment failed for {parent_kind} {parent_id}: {e}")
             emit_terminal(
                 {
                     "type": "error",
@@ -1209,12 +1269,12 @@ async def _start_enrichment_job(lead_id: int, lead_facts: dict) -> EnrichmentJob
 
     # Cleanup: remove job from registry when task finishes.
     def _on_done(_t):
-        _jobs.pop(lead_id, None)
-        logger.info(f"Enrichment job removed for lead {lead_id}")
+        _jobs.pop(key, None)
+        logger.info(f"Enrichment job removed for {parent_kind} {parent_id}")
 
     job.task.add_done_callback(_on_done)
 
-    _jobs[lead_id] = job
+    _jobs[key] = job
     return job
 
 
@@ -1240,7 +1300,9 @@ async def enrich_lead_stream(lead_id: int, request: Request):
     from fastapi.responses import StreamingResponse
 
     # ── Get-or-create the job for this lead ──
-    existing = _jobs.get(lead_id)
+    # Composite key (parent_kind, parent_id) — see _jobs definition.
+    key = ("lead", lead_id)
+    existing = _jobs.get(key)
     if existing is not None:
         # Job already running — attach as additional watcher.
         job = existing
@@ -1273,7 +1335,7 @@ async def enrich_lead_stream(lead_id: int, request: Request):
                 "former_names": getattr(lead, "former_names", None) or [],
             }
 
-        job = await _start_enrichment_job(lead_id, lead_facts)
+        job = await _start_enrichment_job("lead", lead_id, lead_facts)
         logger.info(f"Started new enrichment job for lead {lead_id}")
 
     # ── Subscribe this connection to the job ──
@@ -1284,9 +1346,19 @@ async def enrich_lead_stream(lead_id: int, request: Request):
     # Replay current state to this subscriber immediately so a reconnecting
     # user sees real progress (Iter 3 · 36% · 3min) on first paint, not a
     # blank "Connecting..." card.
+    #
+    # IMPORTANT: refresh elapsed_s BEFORE replaying. The stored
+    # current_event has elapsed_s from when it was first emitted (could be
+    # 30 seconds ago if Iter 3's queries are slow). If we replay it as-is,
+    # the frontend's anchor calculation puts the job-start time at "30s
+    # ago" — and the timer ticks 30, 31, 32 instead of the real 60, 61, 62.
+    # Recompute against job.started_at so the anchor reflects real elapsed.
     if job.current_event is not None:
+        replay = dict(job.current_event)
+        if "elapsed_s" in replay:
+            replay["elapsed_s"] = round(time.monotonic() - job.started_at, 1)
         try:
-            sub_queue.put_nowait(job.current_event)
+            sub_queue.put_nowait(replay)
         except asyncio.QueueFull:
             pass
 
@@ -1360,7 +1432,7 @@ async def enrich_lead_cancel(lead_id: int):
     a clean error event to all watchers, which closes their progress
     cards. Returns 200 even if no job exists (idempotent).
     """
-    job = _jobs.get(lead_id)
+    job = _jobs.get(("lead", lead_id))
     if job is None:
         return {"cancelled": False, "reason": "no_active_job"}
 
@@ -1380,7 +1452,7 @@ async def enrich_lead_status(lead_id: int):
     button or attach to a running job. Frontend can poll this on lead
     detail mount before opening an SSE.
     """
-    job = _jobs.get(lead_id)
+    job = _jobs.get(("lead", lead_id))
     if job is None:
         return {"running": False}
     return {

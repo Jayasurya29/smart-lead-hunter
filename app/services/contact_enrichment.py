@@ -3478,6 +3478,8 @@ async def enrich_lead_contacts(
     search_name: Optional[str] = None,
     former_names: Optional[list] = None,
     progress_callback=None,
+    *,
+    is_existing_hotel: bool = False,
 ) -> EnrichmentResult:
     """
     Main enrichment entry (v5 — iterative researcher).
@@ -3496,6 +3498,21 @@ async def enrich_lead_contacts(
     default) preserves the old fire-and-forget behavior for Celery and
     batch jobs.
 
+    is_existing_hotel (kw-only, default False): True when enriching an
+    already-operating hotel from existing_hotels (vs a pre-opening
+    potential_lead). Triggers lean-mode optimizations:
+      - Iter 1 (Discovery) skipped — Smart Fill already gave us
+        operator + owner; no need to re-derive.
+      - Iter 2 (GM Hunt) uses 2 queries instead of 5 — open hotels
+        have established teams + property websites with named GMs;
+        the broad "find ANY GM mention" angles aren't needed.
+      - Iter 3 (Corporate Hunt) GATED on Iter 2.5 results —
+        if 2+ property-level decision-makers were found
+        (housekeeping/F&B/operations/sales/HR/GM), corporate is
+        skipped entirely. We already have the buyers.
+    Other iterations (4-6.5) unchanged — verification quality
+    matters equally regardless of property status.
+
     If iterative researcher fails for any reason, falls back to v4 legacy
     pipeline so enrichment never returns nothing.
     """
@@ -3505,7 +3522,10 @@ async def enrich_lead_contacts(
     )
 
     result = EnrichmentResult()
-    logger.info(f"Starting enrichment v5 (iterative) for lead {lead_id}: {hotel_name}")
+    logger.info(
+        f"Starting enrichment v5 (iterative) for lead {lead_id}: {hotel_name}"
+        + (" [LEAN MODE — open hotel]" if is_existing_hotel else "")
+    )
 
     # ── Build research state from lead facts ──
     research_state = ResearchState(
@@ -3521,6 +3541,7 @@ async def enrich_lead_contacts(
         search_name=search_name,
         former_names=former_names,
         description=description,  # ← Phase B: flow DB description into classifier
+        is_existing_hotel=is_existing_hotel,  # ← Lean mode flag
     )
 
     # ── Run the iteration loop ──
@@ -4688,30 +4709,65 @@ async def save_enrichment_to_lead(lead_id: int, result: EnrichmentResult) -> dic
 
 
 async def persist_enrichment_contacts(
-    lead_id: int,
-    enrichment_result: "EnrichmentResult",
-    session,
+    lead_id: int = None,
+    enrichment_result: "EnrichmentResult" = None,
+    session=None,
+    *,
+    existing_hotel_id: int = None,
 ) -> dict:
     """
     Persist enrichment results into the database.
 
+    Supports BOTH parent kinds (migration 018, 2026-04-27):
+      - lead_id: write to potential_leads + lead_contacts.lead_id
+      - existing_hotel_id: write to existing_hotels + lead_contacts.existing_hotel_id
+
+    Pass exactly one of (lead_id, existing_hotel_id), never both, never
+    neither. Caller's responsibility — enforced by ValueError below.
+
     Updates:
-      1. potential_leads.contact_* / management_company / developer / owner
+      1. parent row: contact_* / management_company / developer / owner
          (fill-empty only — never overwrites populated fields)
-      2. lead_contacts table (MERGE on normalized name)
+      2. lead_contacts table (MERGE on normalized name) — sets the correct
+         FK based on parent kind. Same CHECK constraint in DB ensures
+         exactly one of (lead_id, existing_hotel_id) is set per row.
 
     Args:
-        lead_id: PotentialLead.id to persist into
+        lead_id: PotentialLead.id to persist into. Mutually exclusive with
+                 existing_hotel_id.
         enrichment_result: EnrichmentResult from enrich_lead_contacts()
         session: open AsyncSession (caller manages transaction + commit)
+        existing_hotel_id: ExistingHotel.id to persist into (kw-only).
+                           Mutually exclusive with lead_id.
 
     Returns:
         dict with: status, contacts_added, contacts_updated, flat_fields_updated, lead_not_found
     """
     from sqlalchemy import select
     from app.models.potential_lead import PotentialLead
+    from app.models.existing_hotel import ExistingHotel
     from app.models.lead_contact import LeadContact
     from app.services.utils import normalize_hotel_name
+
+    # ── Validate parent ──
+    # Exactly one of lead_id / existing_hotel_id must be set. We validate
+    # in code AND the DB has a CHECK constraint as last-line defense.
+    if (lead_id is None) == (existing_hotel_id is None):
+        raise ValueError(
+            "persist_enrichment_contacts requires exactly one of lead_id or "
+            f"existing_hotel_id. Got lead_id={lead_id}, "
+            f"existing_hotel_id={existing_hotel_id}."
+        )
+
+    # Normalize parent identifier — `parent_id` and `parent_kind` drive
+    # the rest of this function. parent_kind is what we pass to log lines
+    # and what determines which FK gets set on new LeadContact rows.
+    if lead_id is not None:
+        parent_id = lead_id
+        parent_kind = "lead"
+    else:
+        parent_id = existing_hotel_id
+        parent_kind = "hotel"
 
     summary = {
         "status": "no_data",
@@ -4720,14 +4776,21 @@ async def persist_enrichment_contacts(
         "flat_fields_updated": [],
     }
 
-    # ── Load lead ──
-    lead_result = await session.execute(
-        select(PotentialLead).where(PotentialLead.id == lead_id)
-    )
-    lead = lead_result.scalar_one_or_none()
+    # ── Load parent (potential_lead OR existing_hotel) ──
+    if parent_kind == "lead":
+        parent_result = await session.execute(
+            select(PotentialLead).where(PotentialLead.id == parent_id)
+        )
+    else:
+        parent_result = await session.execute(
+            select(ExistingHotel).where(ExistingHotel.id == parent_id)
+        )
+    lead = parent_result.scalar_one_or_none()
     if not lead:
         summary["status"] = "lead_not_found"
-        logger.warning(f"persist_enrichment_contacts: lead {lead_id} not found")
+        logger.warning(
+            f"persist_enrichment_contacts: {parent_kind} {parent_id} not found"
+        )
         return summary
 
     # ── Update flat lead fields (fill-empty only) ──
@@ -4760,8 +4823,14 @@ async def persist_enrichment_contacts(
 
     # ── Persist contacts to lead_contacts table (MERGE) ──
     if enrichment_result.contacts:
+        # Filter contacts by whichever parent FK is set (dual-FK schema —
+        # see migration 018 + lead_contact.py CHECK constraint).
+        if parent_kind == "lead":
+            existing_filter = LeadContact.lead_id == parent_id
+        else:
+            existing_filter = LeadContact.existing_hotel_id == parent_id
         existing_result = await session.execute(
-            select(LeadContact).where(LeadContact.lead_id == lead_id)
+            select(LeadContact).where(existing_filter)
         )
         existing_by_norm: dict = {
             normalize_hotel_name(c.name): c for c in existing_result.scalars().all()
@@ -4880,13 +4949,16 @@ async def persist_enrichment_contacts(
                     existing.last_enriched_at = local_now()
                     summary["contacts_updated"] += 1
                     logger.info(
-                        f"persist_enrichment_contacts: lead {lead_id}: "
+                        f"persist_enrichment_contacts: {parent_kind} {parent_id}: "
                         f"updated '{existing.name}' (filled {', '.join(filled)})"
                     )
             else:
-                # Insert new contact
+                # Insert new contact. Set ONE of (lead_id, existing_hotel_id)
+                # based on parent kind — DB CHECK constraint enforces exactly
+                # one is non-NULL.
                 contact = LeadContact(
-                    lead_id=lead_id,
+                    lead_id=parent_id if parent_kind == "lead" else None,
+                    existing_hotel_id=parent_id if parent_kind == "hotel" else None,
                     name=name,
                     title=c.get("title"),
                     email=c.get("email"),
@@ -4921,7 +4993,7 @@ async def persist_enrichment_contacts(
                 session.add(contact)
                 summary["contacts_added"] += 1
                 logger.info(
-                    f"persist_enrichment_contacts: lead {lead_id}: "
+                    f"persist_enrichment_contacts: {parent_kind} {parent_id}: "
                     f"added '{name}' [{c.get('scope', 'unknown')}]"
                 )
 

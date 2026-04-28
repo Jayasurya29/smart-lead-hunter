@@ -9,6 +9,7 @@ Stores contacts linked to leads. Supports:
 
 from sqlalchemy import (
     Boolean,
+    CheckConstraint,
     Column,
     DateTime,
     ForeignKey,
@@ -27,14 +28,38 @@ from datetime import datetime, timezone
 class LeadContact(Base):
     __tablename__ = "lead_contacts"
 
-    # M-08: Composite index for duplicate checks during enrichment
-    __table_args__ = (Index("ix_lead_contacts_lead_name", "lead_id", "name"),)
+    # M-08: Composite index for duplicate checks during enrichment.
+    # Migration 018: CHECK constraint enforces exactly one of (lead_id,
+    # existing_hotel_id) is set.
+    __table_args__ = (
+        Index("ix_lead_contacts_lead_name", "lead_id", "name"),
+        CheckConstraint(
+            "(lead_id IS NOT NULL AND existing_hotel_id IS NULL) OR "
+            "(lead_id IS NULL AND existing_hotel_id IS NOT NULL)",
+            name="ck_lead_contacts_exactly_one_parent",
+        ),
+    )
 
     id = Column(Integer, primary_key=True, autoincrement=True)
+
+    # Dual FK — a contact attaches to EITHER a potential_lead OR an
+    # existing_hotel (never both, never neither). Migration 018 added
+    # existing_hotel_id and relaxed lead_id NOT NULL. The CHECK constraint
+    # in __table_args__ above enforces the invariant in the database.
+    #
+    # When a property migrates from potential_leads → existing_hotels,
+    # all its contacts get UPDATE-d in place: lead_id=NULL, existing_hotel_id=N.
+    # No copy, no data loss.
     lead_id = Column(
         Integer,
         ForeignKey("potential_leads.id", ondelete="CASCADE"),
-        nullable=False,
+        nullable=True,
+        index=True,
+    )
+    existing_hotel_id = Column(
+        Integer,
+        ForeignKey("existing_hotels.id", ondelete="CASCADE"),
+        nullable=True,
         index=True,
     )
 

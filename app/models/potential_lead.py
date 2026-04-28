@@ -92,6 +92,14 @@ class PotentialLead(Base):
     address = Column(Text)  # Street address (e.g. "3001 Turtle Creek Blvd")
     zip_code = Column(String(20))  # Postal code for precise geocoding
 
+    # ── Symmetry with existing_hotels (migration 018) ──
+    # Added so a property carries the same information through both
+    # lifecycle stages (pipeline → opened). Map page can route by zone
+    # the moment a lead enters the pipeline, not waiting for opening.
+    zone = Column(String(50))  # South Florida, Orlando, Tampa Bay, etc.
+    chain = Column(String(150))  # Brand parent (Hilton Worldwide, Marriott Intl)
+    data_source = Column(String(50))  # scraping_run / manual / google_places / etc.
+
     # Scoring (0-100)
     lead_score = Column(
         Integer, CheckConstraint("lead_score >= 0 AND lead_score <= 100")
@@ -180,6 +188,10 @@ class PotentialLead(Base):
             "address": self.address,
             "zip_code": self.zip_code,
             "former_names": self.former_names,
+            # Symmetry with existing_hotels (migration 018)
+            "zone": self.zone,
+            "chain": self.chain,
+            "data_source": self.data_source,
             # Contact
             "contact_name": self.contact_name,
             "contact_title": self.contact_title,

@@ -1,7 +1,9 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import api from '@/api/client'
 import ConfirmDialog from '@/components/ui/ConfirmDialog'
+import EnrichProgress from '@/components/leads/EnrichProgress'
+import SmartFillProgress from '@/components/leads/SmartFillProgress'
 import {
   cn, getTierColor, getTierLabel,
 } from '@/lib/utils'
@@ -426,19 +428,27 @@ function HotelTable({ hotels, total, page, totalPages, tab, selectedId, onSelect
         <table className="w-full">
           <thead className="sticky top-0 z-10">
             <tr className="bg-slate-50/90 backdrop-blur-sm border-b border-slate-100">
+              <th className="px-3 py-2.5 text-left text-[11px] font-bold text-slate-400 uppercase tracking-wider w-16">Score</th>
               <th className="px-3 py-2.5 text-left text-[11px] font-bold text-slate-400 uppercase tracking-wider">Hotel</th>
               <th className="px-3 py-2.5 text-left text-[11px] font-bold text-slate-400 uppercase tracking-wider w-16">Tier</th>
               <th className="px-3 py-2.5 text-left text-[11px] font-bold text-slate-400 uppercase tracking-wider">Location</th>
               <th className="px-3 py-2.5 text-left text-[11px] font-bold text-slate-400 uppercase tracking-wider w-28">Zone</th>
-              <th className="px-3 py-2.5 text-left text-[11px] font-bold text-slate-400 uppercase tracking-wider w-16">Rooms</th>
               <th className="px-3 py-2.5 text-left text-[11px] font-bold text-slate-400 uppercase tracking-wider w-24">Potential</th>
               <th className="px-3 py-2.5 text-left text-[11px] font-bold text-slate-400 uppercase tracking-wider w-20">Type</th>
-              <th className="px-3 py-2.5 text-left text-[11px] font-bold text-slate-400 uppercase tracking-wider w-20">Contact</th>
               <th className="px-3 py-2.5 w-24" />
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100/80">
-            {hotels.map((hotel) => (
+            {hotels.map((hotel) => {
+              // Read canonical hotel_name (post-018) with legacy `name` fallback.
+              // Migration 018 backfilled both, but the API now returns
+              // hotel_name as the canonical field. Old rows updated by post-018
+              // code only have hotel_name set — using `hotel.name` alone shows
+              // a blank cell.
+              const h = hotel as any
+              const displayName = h.hotel_name || hotel.name
+              const score = hotel.lead_score
+              return (
               <tr
                 key={hotel.id}
                 onClick={() => onSelect(hotel.id)}
@@ -447,8 +457,26 @@ function HotelTable({ hotels, total, page, totalPages, tab, selectedId, onSelect
                   selectedId === hotel.id && 'active',
                 )}
               >
+                <td className="px-3 py-2.5">
+                  {/* Score badge — same color buckets as New Hotels' LeadTable.
+                      Em-dash when no score yet (existing hotels not all
+                      scored — Smart Fill or Run Enrichment populates over
+                      time). */}
+                  <div
+                    className={cn(
+                      'inline-flex items-center justify-center w-9 h-7 rounded-md text-xs font-bold tabular-nums',
+                      score == null ? 'bg-stone-50 text-stone-300' :
+                      score >= 75 ? 'bg-emerald-50 text-emerald-700' :
+                      score >= 55 ? 'bg-amber-50 text-amber-700' :
+                      score >= 35 ? 'bg-orange-50 text-orange-700' :
+                      'bg-stone-100 text-stone-500',
+                    )}
+                  >
+                    {score ?? '—'}
+                  </div>
+                </td>
                 <td className="px-3 py-2.5 max-w-[280px]">
-                  <div className="truncate text-[15px] font-bold text-navy-950 leading-snug">{hotel.name}</div>
+                  <div className="truncate text-[15px] font-bold text-navy-950 leading-snug">{displayName || '—'}</div>
                   {hotel.brand && <div className="truncate text-xs text-stone-400 leading-snug">{hotel.brand}</div>}
                 </td>
                 <td className="px-3 py-2.5">
@@ -473,9 +501,6 @@ function HotelTable({ hotels, total, page, totalPages, tab, selectedId, onSelect
                   )}
                 </td>
                 <td className="px-3 py-2.5">
-                  <span className="text-sm text-navy-800 font-medium">{hotel.room_count || '—'}</span>
-                </td>
-                <td className="px-3 py-2.5">
                   {hotel.revenue_opening ? (
                     <span className="text-sm font-bold text-emerald-700">{fmtRevenue(hotel.revenue_annual)}</span>
                   ) : (
@@ -489,13 +514,6 @@ function HotelTable({ hotels, total, page, totalPages, tab, selectedId, onSelect
                   )}>
                     {hotel.is_client ? 'Client' : 'Prospect'}
                   </span>
-                </td>
-                <td className="px-3 py-2.5">
-                  {hotel.gm_name ? (
-                    <span className="text-xs text-navy-600 font-medium truncate block max-w-[120px]">{hotel.gm_name}</span>
-                  ) : (
-                    <span className="text-xs text-stone-300">—</span>
-                  )}
                 </td>
                 <td className="px-2 py-2.5">
                   <div className="row-actions flex items-center gap-0.5 justify-end">
@@ -522,7 +540,8 @@ function HotelTable({ hotels, total, page, totalPages, tab, selectedId, onSelect
                   </div>
                 </td>
               </tr>
-            ))}
+              )
+            })}
           </tbody>
         </table>
       </div>
@@ -607,6 +626,36 @@ function HotelDetail({ hotelId, tab, onClose }: { hotelId: number; tab: Pipeline
 
   const [confirmAction, setConfirmAction] = useState<'approve' | 'reject' | 'restore' | null>(null)
 
+  // ── Detail tab system (1B, 2026-04-28) ──
+  // Mirror the LeadDetail layout: Overview / Contacts / Edit / Sources.
+  // The schema parity from migration 018 means the same data flows into
+  // both pages — only the URL prefix differs ("/api/existing-hotels"
+  // vs "/api/dashboard/leads"). EnrichProgress + SmartFillProgress now
+  // accept a basePath prop for exactly this reason.
+  type DetailTab = 'overview' | 'contacts' | 'edit' | 'sources'
+  const [activeTab, setActiveTab] = useState<DetailTab>('overview')
+
+  // Run Enrichment / Smart Fill state — scoped per-hotel so navigating
+  // between hotels doesn't leak progress between them.
+  const [enrichingHotelId, setEnrichingHotelId] = useState<number | null>(null)
+  const [smartFillHotelId, setSmartFillHotelId] = useState<number | null>(null)
+  const [smartFillMode, setSmartFillMode] = useState<'smart' | 'full'>('smart')
+  const enrichingLive = enrichingHotelId === hotelId
+  const smartFillLive = smartFillHotelId === hotelId ? smartFillMode : null
+
+  // Auto-attach to running enrichment when this hotel is opened. Same
+  // pattern as LeadDetail — calls cheap status endpoint on mount.
+  useEffect(() => {
+    let cancelled = false
+    api.get(`/api/existing-hotels/${hotelId}/enrich-status`)
+      .then((r) => {
+        if (cancelled) return
+        if (r.data?.running) setEnrichingHotelId(hotelId)
+      })
+      .catch(() => { /* ignore — user can still click Run Enrichment */ })
+    return () => { cancelled = true }
+  }, [hotelId])
+
   const approveMut = useMutation({
     mutationFn: () => api.post(`/api/existing-hotels/${hotelId}/approve`),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['existing-hotels'] }); qc.invalidateQueries({ queryKey: ['existing-hotels-stats'] }); qc.invalidateQueries({ queryKey: ['existing-hotel', hotelId] }) },
@@ -636,13 +685,16 @@ function HotelDetail({ hotelId, tab, onClose }: { hotelId: number; tab: Pipeline
     )
   }
 
+  // Use canonical hotel_name (post-018) but fall back to legacy name for safety
+  const displayName = (hotel as any).hotel_name || hotel.name
+
   return (
     <div className="h-full flex flex-col bg-white animate-slideIn">
       {/* Header */}
       <div className="px-5 pt-5 pb-3 flex-shrink-0 border-b border-slate-100 bg-gradient-to-b from-slate-50/50 to-white">
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0 flex-1">
-            <h2 className="text-lg font-bold text-navy-900 leading-snug truncate">{hotel.name}</h2>
+            <h2 className="text-lg font-bold text-navy-900 leading-snug truncate">{displayName}</h2>
             {hotel.brand && <p className="text-sm text-stone-400 mt-0.5">{hotel.brand}</p>}
           </div>
           <div className="flex items-center gap-2 flex-shrink-0">
@@ -672,130 +724,56 @@ function HotelDetail({ hotelId, tab, onClose }: { hotelId: number; tab: Pipeline
         </div>
       </div>
 
-      {/* Content */}
-      <div className="flex-1 overflow-y-auto p-5 space-y-5">
-        {/* Details */}
-        <Section title="Details">
-          <div className="grid grid-cols-2 gap-4">
-            <Field icon={MapPin} label="Location" value={[hotel.city, hotel.state].filter(Boolean).join(', ') || '—'} />
-            <Field icon={Building2} label="Rooms" value={hotel.room_count ? `${hotel.room_count} rooms` : '—'} />
-            {hotel.address && <Field icon={MapPin} label="Address" value={hotel.address} />}
-            {hotel.property_type && <Field icon={Building2} label="Type" value={hotel.property_type} />}
-            {hotel.zone && <Field icon={MapPin} label="Zone" value={hotel.zone} />}
-          </div>
-        </Section>
-
-        {/* Revenue Potential */}
-        {(hotel.revenue_opening || hotel.revenue_annual) && (
-          <div className="bg-white border border-stone-200 rounded-lg">
-            <div className="flex items-center gap-2 px-4 py-3 border-b border-stone-100">
-              <div className="w-7 h-7 rounded-md bg-emerald-50 flex items-center justify-center">
-                <DollarSign className="w-4 h-4 text-emerald-600" />
-              </div>
-              <div>
-                <h3 className="text-sm font-semibold text-navy-900">Revenue Potential</h3>
-                <p className="text-[10px] text-stone-400">{getTierLabel(hotel.brand_tier)} · {hotel.room_count} rooms</p>
-              </div>
-            </div>
-            <div className="grid grid-cols-2 divide-x divide-stone-100 p-4">
-              <div>
-                <div className="text-[11px] font-semibold text-stone-500 uppercase tracking-wider mb-1">Annual Recurring</div>
-                <div className="text-2xl font-bold text-navy-900">{fmtRevenue(hotel.revenue_annual)}</div>
-                <p className="text-[10px] text-stone-400 mt-0.5">Yearly garment spend</p>
-              </div>
-              <div className="pl-4">
-                <div className="text-[11px] font-semibold text-stone-500 uppercase tracking-wider mb-1">Opening Order</div>
-                <div className="text-2xl font-bold text-navy-900">{fmtRevenue(hotel.revenue_opening)}</div>
-                <p className="text-[10px] text-stone-400 mt-0.5">If rebrand / full refit</p>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Contact */}
-        <Section title="Contact">
-          {hotel.gm_name ? (
-            <div className="bg-slate-50 rounded-lg p-3.5 border border-slate-200/80">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-full bg-gradient-to-br from-navy-400 to-navy-600 flex items-center justify-center flex-shrink-0">
-                  <span className="text-white font-bold text-sm">{hotel.gm_name[0]}</span>
-                </div>
-                <div className="min-w-0 flex-1">
-                  <p className="text-sm font-semibold text-navy-900">{hotel.gm_name}</p>
-                  {hotel.gm_title && <p className="text-xs text-stone-500">{hotel.gm_title}</p>}
-                </div>
-              </div>
-              <div className="mt-2.5 space-y-1.5">
-                {hotel.gm_email && (
-                  <a href={`mailto:${hotel.gm_email}`} className="flex items-center gap-1.5 text-xs text-navy-600 hover:underline">
-                    <Mail className="w-3.5 h-3.5" /> {hotel.gm_email}
-                  </a>
-                )}
-                {hotel.gm_phone && (
-                  <a href={`tel:${hotel.gm_phone}`} className="flex items-center gap-1.5 text-xs text-navy-600 hover:underline">
-                    <Phone className="w-3.5 h-3.5" /> {hotel.gm_phone}
-                  </a>
-                )}
-                {hotel.gm_linkedin && (
-                  <a href={hotel.gm_linkedin} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium text-blue-700 bg-blue-50 rounded-md hover:bg-blue-100 transition">
-                    <Linkedin className="w-3.5 h-3.5" /> LinkedIn
-                  </a>
-                )}
-              </div>
-            </div>
-          ) : (
-            <p className="text-xs text-stone-400">No contact information yet</p>
-          )}
-        </Section>
-
-        {/* Website */}
-        {hotel.website && (
-          <Section title="Website">
-            <a
-              href={hotel.website.startsWith('http') ? hotel.website : `https://${hotel.website}`}
-              target="_blank" rel="noopener noreferrer"
-              className="flex items-center gap-2 text-sm text-navy-600 hover:text-navy-800 hover:underline transition"
-            >
-              <Globe className="w-4 h-4" /> {hotel.website}
-            </a>
-          </Section>
-        )}
-
-        {/* SAP Info */}
-        {hotel.is_client && hotel.sap_bp_code && (
-          <Section title="Client Info">
-            <div className="space-y-2 text-sm">
-              <div className="flex justify-between">
-                <span className="text-stone-400 font-medium">SAP Code</span>
-                <span className="text-navy-700 font-semibold">{hotel.sap_bp_code}</span>
-              </div>
-            </div>
-          </Section>
-        )}
-
-        {/* Metadata */}
-        <Section title="Metadata">
-          <div className="space-y-2 text-sm">
-            <div className="flex justify-between">
-              <span className="text-stone-400 font-medium">Hotel ID</span>
-              <span className="text-navy-700 font-semibold">{hotel.id}</span>
-            </div>
-            <div className="flex justify-between">
-              <span className="text-stone-400 font-medium">Data Source</span>
-              <span className="text-navy-700 font-semibold capitalize">{hotel.data_source || '—'}</span>
-            </div>
-            <div className="flex justify-between">
-              <span className="text-stone-400 font-medium">Status</span>
-              <span className="text-navy-700 font-semibold capitalize">{hotel.status || '—'}</span>
-            </div>
-            {hotel.insightly_id && (
-              <div className="flex justify-between">
-                <span className="text-stone-400 font-medium">Insightly</span>
-                <span className="text-navy-700 font-semibold">#{hotel.insightly_id}</span>
-              </div>
+      {/* Tabs */}
+      <div className="flex border-b border-slate-100 px-5 flex-shrink-0">
+        {(['overview', 'contacts', 'edit', 'sources'] as DetailTab[]).map((t) => (
+          <button
+            key={t}
+            onClick={() => setActiveTab(t)}
+            className={cn(
+              'px-3.5 py-3 text-xs font-semibold capitalize transition',
+              activeTab === t ? 'text-navy-900 tab-active' : 'text-stone-400 hover:text-stone-600',
             )}
-          </div>
-        </Section>
+          >
+            {t}
+          </button>
+        ))}
+      </div>
+
+      {/* Tab content */}
+      <div className="flex-1 overflow-y-auto p-5 space-y-5">
+        {activeTab === 'overview' && (
+          <HotelOverviewTab
+            hotel={hotel}
+            hotelId={hotelId}
+            onEnrich={() => setEnrichingHotelId(hotelId)}
+            enrichingLive={enrichingLive}
+            onEnrichComplete={() => {
+              qc.invalidateQueries({ queryKey: ['existing-hotel', hotelId] })
+              qc.invalidateQueries({ queryKey: ['hotel-contacts', hotelId] })
+              setEnrichingHotelId(null)
+            }}
+            onSmartFill={(mode) => { setSmartFillMode(mode); setSmartFillHotelId(hotelId) }}
+            smartFillLive={smartFillLive}
+            onSmartFillComplete={() => {
+              qc.invalidateQueries({ queryKey: ['existing-hotel', hotelId] })
+              setSmartFillHotelId(null)
+            }}
+          />
+        )}
+        {activeTab === 'contacts' && (
+          <HotelContactsTab
+            hotelId={hotelId}
+            onEnrich={() => setEnrichingHotelId(hotelId)}
+            enrichingLive={enrichingLive}
+            onEnrichComplete={() => {
+              qc.invalidateQueries({ queryKey: ['hotel-contacts', hotelId] })
+              setEnrichingHotelId(null)
+            }}
+          />
+        )}
+        {activeTab === 'edit' && <HotelEditTab hotel={hotel} hotelId={hotelId} />}
+        {activeTab === 'sources' && <HotelSourcesTab hotel={hotel} />}
       </div>
 
       {/* Action Bar */}
@@ -837,7 +815,7 @@ function HotelDetail({ hotelId, tab, onClose }: { hotelId: number; tab: Pipeline
         open={confirmAction === 'approve'}
         variant="approve"
         title="Approve Hotel"
-        message={`Push "${hotel.name}" to Insightly CRM?`}
+        message={`Push "${displayName}" to Insightly CRM?`}
         confirmLabel="Approve & Push"
         pending={approveMut.isPending}
         onConfirm={() => { approveMut.mutate(); setConfirmAction(null) }}
@@ -847,7 +825,7 @@ function HotelDetail({ hotelId, tab, onClose }: { hotelId: number; tab: Pipeline
         open={confirmAction === 'reject'}
         variant="reject"
         title="Reject Hotel"
-        message={`Move "${hotel.name}" to Rejected?`}
+        message={`Move "${displayName}" to Rejected?`}
         confirmLabel="Reject"
         pending={rejectMut.isPending}
         onConfirm={() => { rejectMut.mutate(); setConfirmAction(null) }}
@@ -858,13 +836,468 @@ function HotelDetail({ hotelId, tab, onClose }: { hotelId: number; tab: Pipeline
         variant="restore"
         title={isApproved ? 'Back to Pipeline' : 'Restore Hotel'}
         message={isApproved
-          ? `Move "${hotel.name}" back to pipeline? This will delete from Insightly.`
-          : `Restore "${hotel.name}" back to pipeline?`}
+          ? `Move "${displayName}" back to pipeline? This will delete from Insightly.`
+          : `Restore "${displayName}" back to pipeline?`}
         confirmLabel={isApproved ? 'Remove from CRM' : 'Restore'}
         pending={restoreMut.isPending}
         onConfirm={() => { restoreMut.mutate(); setConfirmAction(null) }}
         onCancel={() => setConfirmAction(null)}
       />
+    </div>
+  )
+}
+
+
+/* ═══════════════════════════════════════════════════
+   HOTEL DETAIL TABS (1B, 2026-04-28)
+   ═══════════════════════════════════════════════════
+   Mirror of LeadDetail's tab structure. Each tab is its own component
+   that takes the hotel + relevant callbacks. We reuse:
+     - EnrichProgress (with basePath="/api/existing-hotels")
+     - SmartFillProgress (with basePath="/api/existing-hotels")
+   Everything else (contact list, edit form, sources view) is built
+   inline against the hotel-specific endpoints.
+*/
+
+function HotelOverviewTab({
+  hotel, hotelId,
+  onEnrich, enrichingLive, onEnrichComplete,
+  onSmartFill, smartFillLive, onSmartFillComplete,
+}: {
+  hotel: Hotel; hotelId: number;
+  onEnrich: () => void; enrichingLive: boolean; onEnrichComplete: () => void;
+  onSmartFill: (mode: 'smart' | 'full') => void; smartFillLive: 'smart' | 'full' | null; onSmartFillComplete: () => void;
+}) {
+  const h = hotel as any  // post-018 fields not in legacy interface
+
+  return (
+    <>
+      {/* Smart Fill progress — replaces the action buttons while running */}
+      {smartFillLive && (
+        <div className="mb-3">
+          <SmartFillProgress
+            leadId={hotelId}
+            mode={smartFillLive}
+            basePath="/api/existing-hotels"
+            onComplete={onSmartFillComplete}
+            onCancel={onSmartFillComplete}
+          />
+        </div>
+      )}
+
+      <Section title="Details">
+        <div className="grid grid-cols-2 gap-4">
+          <Field icon={MapPin} label="Location" value={[hotel.city, hotel.state].filter(Boolean).join(', ') || '—'} />
+          <Field icon={Building2} label="Rooms" value={hotel.room_count ? `${hotel.room_count} rooms` : '—'} />
+          {hotel.address && <Field icon={MapPin} label="Address" value={hotel.address} />}
+          {(h.hotel_type || hotel.property_type) && (
+            <Field icon={Building2} label="Type" value={h.hotel_type || hotel.property_type} />
+          )}
+          {hotel.zone && <Field icon={MapPin} label="Zone" value={hotel.zone} />}
+          {h.management_company && <Field icon={Building2} label="Mgmt Co" value={h.management_company} />}
+          {h.developer && <Field icon={Building2} label="Developer" value={h.developer} />}
+          {h.owner && <Field icon={Building2} label="Owner" value={h.owner} />}
+          {h.opening_date && <Field icon={MapPin} label="Opening" value={h.opening_date} />}
+        </div>
+
+        {/* Smart Fill action bar (hidden while running) */}
+        {!smartFillLive && (
+          <div className="flex items-center gap-2 mt-3 pt-3 border-t border-stone-100">
+            <button
+              onClick={() => onSmartFill('smart')}
+              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold bg-violet-50 text-violet-700 border border-violet-200 rounded-md hover:bg-violet-100 transition"
+            >
+              Smart Fill
+            </button>
+            <button
+              onClick={() => onSmartFill('full')}
+              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-stone-400 hover:text-violet-600 hover:bg-violet-50 rounded-md border border-dashed border-stone-200 hover:border-violet-300 transition"
+            >
+              Full Refresh
+            </button>
+          </div>
+        )}
+      </Section>
+
+      {/* Run Enrichment Button + progress card */}
+      <Section title="Contact Enrichment">
+        {enrichingLive ? (
+          <EnrichProgress
+            leadId={hotelId}
+            basePath="/api/existing-hotels"
+            onComplete={onEnrichComplete}
+            onCancel={onEnrichComplete}
+          />
+        ) : (
+          <button
+            onClick={onEnrich}
+            className="w-full px-4 py-2.5 text-xs font-semibold bg-navy-900 text-white rounded-lg hover:bg-navy-800 transition"
+          >
+            Run Enrichment
+          </button>
+        )}
+      </Section>
+
+      {/* Revenue Potential */}
+      {(hotel.revenue_opening || hotel.revenue_annual) && (
+        <div className="bg-white border border-stone-200 rounded-lg">
+          <div className="flex items-center gap-2 px-4 py-3 border-b border-stone-100">
+            <div className="w-7 h-7 rounded-md bg-emerald-50 flex items-center justify-center">
+              <DollarSign className="w-4 h-4 text-emerald-600" />
+            </div>
+            <div>
+              <h3 className="text-sm font-semibold text-navy-900">Revenue Potential</h3>
+              <p className="text-[10px] text-stone-400">{getTierLabel(hotel.brand_tier)} · {hotel.room_count} rooms</p>
+            </div>
+          </div>
+          <div className="grid grid-cols-2 divide-x divide-stone-100 p-4">
+            <div>
+              <div className="text-[11px] font-semibold text-stone-500 uppercase tracking-wider mb-1">Annual Recurring</div>
+              <div className="text-2xl font-bold text-navy-900">{fmtRevenue(hotel.revenue_annual)}</div>
+            </div>
+            <div className="pl-4">
+              <div className="text-[11px] font-semibold text-stone-500 uppercase tracking-wider mb-1">Opening Order</div>
+              <div className="text-2xl font-bold text-navy-900">{fmtRevenue(hotel.revenue_opening)}</div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Primary Contact (denormalized snapshot) */}
+      <Section title="Primary Contact">
+        {(h.contact_name || hotel.gm_name) ? (
+          <div className="bg-slate-50 rounded-lg p-3.5 border border-slate-200/80">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-full bg-gradient-to-br from-navy-400 to-navy-600 flex items-center justify-center flex-shrink-0">
+                <span className="text-white font-bold text-sm">{(h.contact_name || hotel.gm_name)[0]}</span>
+              </div>
+              <div className="min-w-0 flex-1">
+                <p className="text-sm font-semibold text-navy-900">{h.contact_name || hotel.gm_name}</p>
+                {(h.contact_title || hotel.gm_title) && (
+                  <p className="text-xs text-stone-500">{h.contact_title || hotel.gm_title}</p>
+                )}
+              </div>
+            </div>
+            <div className="mt-2.5 space-y-1.5">
+              {(h.contact_email || hotel.gm_email) && (
+                <a href={`mailto:${h.contact_email || hotel.gm_email}`} className="flex items-center gap-1.5 text-xs text-navy-600 hover:underline">
+                  <Mail className="w-3.5 h-3.5" /> {h.contact_email || hotel.gm_email}
+                </a>
+              )}
+              {(h.contact_phone || hotel.gm_phone) && (
+                <a href={`tel:${h.contact_phone || hotel.gm_phone}`} className="flex items-center gap-1.5 text-xs text-navy-600 hover:underline">
+                  <Phone className="w-3.5 h-3.5" /> {h.contact_phone || hotel.gm_phone}
+                </a>
+              )}
+            </div>
+          </div>
+        ) : (
+          <p className="text-xs text-stone-400">No primary contact yet — run enrichment to find one</p>
+        )}
+      </Section>
+
+      {/* Website */}
+      {(h.hotel_website || hotel.website) && (
+        <Section title="Website">
+          <a
+            href={(h.hotel_website || hotel.website).startsWith('http') ? (h.hotel_website || hotel.website) : `https://${h.hotel_website || hotel.website}`}
+            target="_blank" rel="noopener noreferrer"
+            className="flex items-center gap-2 text-sm text-navy-600 hover:text-navy-800 hover:underline transition"
+          >
+            <Globe className="w-4 h-4" /> {h.hotel_website || hotel.website}
+          </a>
+        </Section>
+      )}
+
+      {/* SAP Info */}
+      {hotel.is_client && hotel.sap_bp_code && (
+        <Section title="Client Info">
+          <div className="space-y-2 text-sm">
+            <div className="flex justify-between">
+              <span className="text-stone-400 font-medium">SAP Code</span>
+              <span className="text-navy-700 font-semibold">{hotel.sap_bp_code}</span>
+            </div>
+          </div>
+        </Section>
+      )}
+
+      {h.description && (
+        <Section title="Description">
+          <p className="text-sm text-stone-600 leading-relaxed whitespace-pre-line">{h.description}</p>
+        </Section>
+      )}
+    </>
+  )
+}
+
+
+function HotelContactsTab({
+  hotelId, onEnrich, enrichingLive, onEnrichComplete,
+}: {
+  hotelId: number;
+  onEnrich: () => void;
+  enrichingLive: boolean;
+  onEnrichComplete: () => void;
+}) {
+  const qc = useQueryClient()
+
+  // Fetch contacts attached to this existing hotel via the dual-FK
+  // endpoint added in Path Y. Same priority sorting as the lead version.
+  const { data: contacts, isLoading } = useQuery<any[]>({
+    queryKey: ['hotel-contacts', hotelId],
+    queryFn: async () => (await api.get(`/api/existing-hotels/${hotelId}/contacts`)).data,
+  })
+
+  async function handleSave(contactId: number) {
+    await api.post(`/api/existing-hotels/${hotelId}/contacts/${contactId}/save`)
+    qc.invalidateQueries({ queryKey: ['hotel-contacts', hotelId] })
+  }
+  async function handleSetPrimary(contactId: number) {
+    await api.post(`/api/existing-hotels/${hotelId}/contacts/${contactId}/set-primary`)
+    qc.invalidateQueries({ queryKey: ['hotel-contacts', hotelId] })
+    qc.invalidateQueries({ queryKey: ['existing-hotel', hotelId] })
+  }
+  async function handleDelete(contactId: number) {
+    if (!confirm('Delete this contact?')) return
+    await api.delete(`/api/existing-hotels/${hotelId}/contacts/${contactId}`)
+    qc.invalidateQueries({ queryKey: ['hotel-contacts', hotelId] })
+  }
+
+  return (
+    <>
+      {/* Run Enrichment progress card — same component LeadDetail uses */}
+      {enrichingLive && (
+        <div className="mb-4">
+          <EnrichProgress
+            leadId={hotelId}
+            basePath="/api/existing-hotels"
+            onComplete={onEnrichComplete}
+            onCancel={onEnrichComplete}
+          />
+        </div>
+      )}
+
+      {isLoading ? (
+        <div className="space-y-2">
+          {Array.from({ length: 3 }).map((_, i) => <div key={i} className="skeleton h-24 rounded-lg" />)}
+        </div>
+      ) : !contacts || contacts.length === 0 ? (
+        !enrichingLive && (
+          <div className="text-center py-12">
+            <User className="w-12 h-12 text-stone-300 mx-auto mb-3" />
+            <p className="text-sm font-medium text-stone-500">No contacts yet</p>
+            <button
+              onClick={onEnrich}
+              className="mt-3 px-5 py-2.5 text-xs font-semibold bg-navy-900 text-white rounded-lg hover:bg-navy-800 transition"
+            >
+              Run Enrichment
+            </button>
+          </div>
+        )
+      ) : (
+        <div className="space-y-2.5">
+          {contacts.map((c) => (
+            <div
+              key={c.id}
+              className={cn(
+                'rounded-lg border p-4 transition',
+                c.is_primary ? 'border-navy-200 bg-navy-50/30' : 'border-stone-200 bg-white',
+              )}
+            >
+              <div className="flex items-start justify-between gap-2">
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-2">
+                    <h4 className="text-sm font-semibold text-navy-900 truncate">{c.name}</h4>
+                    {c.is_primary && (
+                      <span className="text-[10px] font-bold px-1.5 py-0.5 bg-navy-600 text-white rounded">PRIMARY</span>
+                    )}
+                    {c.priority_label && (
+                      <span className="text-[10px] font-bold px-1.5 py-0.5 bg-emerald-50 text-emerald-700 rounded">{c.priority_label}</span>
+                    )}
+                  </div>
+                  {c.title && <p className="text-xs text-stone-500 mt-0.5">{c.title}</p>}
+                  {c.organization && <p className="text-xs text-stone-400 mt-0.5">{c.organization}</p>}
+                </div>
+                <div className="flex items-center gap-1">
+                  {!c.is_primary && (
+                    <ActionBtn onClick={() => handleSetPrimary(c.id)} color="amber" title="Set primary">
+                      <CheckCircle2 className="w-3.5 h-3.5" />
+                    </ActionBtn>
+                  )}
+                  {!c.is_saved && (
+                    <ActionBtn onClick={() => handleSave(c.id)} color="emerald" title="Save contact">
+                      <CheckCircle2 className="w-3.5 h-3.5" />
+                    </ActionBtn>
+                  )}
+                  <ActionBtn onClick={() => handleDelete(c.id)} color="red" title="Delete">
+                    <X className="w-3.5 h-3.5" />
+                  </ActionBtn>
+                </div>
+              </div>
+              <div className="mt-2 space-y-1">
+                {c.email && (
+                  <a href={`mailto:${c.email}`} className="flex items-center gap-1.5 text-xs text-navy-600 hover:underline">
+                    <Mail className="w-3 h-3" /> {c.email}
+                  </a>
+                )}
+                {c.phone && (
+                  <a href={`tel:${c.phone}`} className="flex items-center gap-1.5 text-xs text-navy-600 hover:underline">
+                    <Phone className="w-3 h-3" /> {c.phone}
+                  </a>
+                )}
+                {c.linkedin && (
+                  <a href={c.linkedin} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1.5 px-2 py-0.5 text-xs font-medium text-blue-700 bg-blue-50 rounded hover:bg-blue-100">
+                    <Linkedin className="w-3 h-3" /> LinkedIn
+                  </a>
+                )}
+              </div>
+              {c.strategist_reasoning && (
+                <p className="text-[10px] text-stone-500 mt-2 italic leading-snug">{c.strategist_reasoning}</p>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+    </>
+  )
+}
+
+
+function HotelEditTab({ hotel, hotelId }: { hotel: Hotel; hotelId: number }) {
+  const qc = useQueryClient()
+  const h = hotel as any
+  const [form, setForm] = useState<Record<string, any>>({
+    hotel_name: h.hotel_name || hotel.name || '',
+    brand: hotel.brand || '',
+    chain: hotel.chain || '',
+    brand_tier: hotel.brand_tier || '',
+    address: hotel.address || '',
+    city: hotel.city || '',
+    state: hotel.state || '',
+    country: hotel.country || 'USA',
+    zip_code: hotel.zip_code || '',
+    room_count: hotel.room_count ?? '',
+    hotel_website: h.hotel_website || hotel.website || '',
+    hotel_type: h.hotel_type || hotel.property_type || '',
+    management_company: h.management_company || '',
+    developer: h.developer || '',
+    owner: h.owner || '',
+    opening_date: h.opening_date || '',
+    contact_name: h.contact_name || hotel.gm_name || '',
+    contact_title: h.contact_title || hotel.gm_title || '',
+    contact_email: h.contact_email || hotel.gm_email || '',
+    contact_phone: h.contact_phone || hotel.gm_phone || '',
+    zone: hotel.zone || '',
+  })
+  const [saving, setSaving] = useState(false)
+
+  async function handleSave() {
+    setSaving(true)
+    try {
+      const payload: any = {}
+      Object.entries(form).forEach(([k, v]) => {
+        if (v !== '') payload[k] = (k === 'room_count' && v !== '') ? Number(v) : v
+      })
+      await api.patch(`/api/existing-hotels/${hotelId}`, payload)
+      qc.invalidateQueries({ queryKey: ['existing-hotel', hotelId] })
+      qc.invalidateQueries({ queryKey: ['existing-hotels'] })
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const fields: { key: string; label: string; type?: string }[] = [
+    { key: 'hotel_name', label: 'Hotel Name' },
+    { key: 'brand', label: 'Brand' },
+    { key: 'chain', label: 'Chain' },
+    { key: 'brand_tier', label: 'Brand Tier' },
+    { key: 'hotel_type', label: 'Type' },
+    { key: 'address', label: 'Address' },
+    { key: 'city', label: 'City' },
+    { key: 'state', label: 'State' },
+    { key: 'country', label: 'Country' },
+    { key: 'zip_code', label: 'Zip Code' },
+    { key: 'room_count', label: 'Room Count', type: 'number' },
+    { key: 'hotel_website', label: 'Website' },
+    { key: 'management_company', label: 'Management Co' },
+    { key: 'developer', label: 'Developer' },
+    { key: 'owner', label: 'Owner' },
+    { key: 'opening_date', label: 'Opening Date' },
+    { key: 'zone', label: 'Zone' },
+    { key: 'contact_name', label: 'Contact Name' },
+    { key: 'contact_title', label: 'Contact Title' },
+    { key: 'contact_email', label: 'Contact Email' },
+    { key: 'contact_phone', label: 'Contact Phone' },
+  ]
+
+  return (
+    <div className="space-y-4">
+      <div className="grid grid-cols-2 gap-3">
+        {fields.map((f) => (
+          <div key={f.key}>
+            <label className="text-[10px] font-semibold text-stone-500 uppercase tracking-wider">{f.label}</label>
+            <input
+              type={f.type || 'text'}
+              value={form[f.key] ?? ''}
+              onChange={(e) => setForm({ ...form, [f.key]: e.target.value })}
+              className="mt-1 w-full px-2.5 py-1.5 text-sm border border-stone-200 rounded-md focus:border-navy-400 focus:outline-none focus:ring-1 focus:ring-navy-400/20"
+            />
+          </div>
+        ))}
+      </div>
+      <button
+        onClick={handleSave}
+        disabled={saving}
+        className="w-full px-4 py-2.5 text-xs font-semibold bg-navy-900 text-white rounded-lg hover:bg-navy-800 transition disabled:opacity-50"
+      >
+        {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin inline" /> : 'Save Changes'}
+      </button>
+    </div>
+  )
+}
+
+
+function HotelSourcesTab({ hotel }: { hotel: Hotel }) {
+  const h = hotel as any
+  const sources: string[] = h.source_urls || (h.source_url ? [h.source_url] : [])
+
+  return (
+    <div className="space-y-3">
+      <div className="space-y-2">
+        <div className="flex justify-between text-xs">
+          <span className="text-stone-400">Data source</span>
+          <span className="text-navy-700 font-semibold capitalize">{h.data_source || '—'}</span>
+        </div>
+        <div className="flex justify-between text-xs">
+          <span className="text-stone-400">Status</span>
+          <span className="text-navy-700 font-semibold capitalize">{hotel.status || '—'}</span>
+        </div>
+        <div className="flex justify-between text-xs">
+          <span className="text-stone-400">Last verified</span>
+          <span className="text-navy-700 font-semibold">{h.last_verified_at ? new Date(h.last_verified_at).toLocaleDateString() : '—'}</span>
+        </div>
+        {hotel.insightly_id && (
+          <div className="flex justify-between text-xs">
+            <span className="text-stone-400">Insightly</span>
+            <span className="text-navy-700 font-semibold">#{hotel.insightly_id}</span>
+          </div>
+        )}
+      </div>
+
+      {sources.length > 0 && (
+        <Section title="Source URLs">
+          <ul className="space-y-1.5">
+            {sources.map((url, i) => (
+              <li key={i}>
+                <a href={url} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1.5 text-xs text-navy-600 hover:underline truncate">
+                  <ExternalLink className="w-3 h-3 flex-shrink-0" />
+                  <span className="truncate">{url}</span>
+                </a>
+              </li>
+            ))}
+          </ul>
+        </Section>
+      )}
     </div>
   )
 }

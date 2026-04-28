@@ -49,9 +49,19 @@ interface Props {
   mode: 'smart' | 'full'
   onComplete: (summary: CompleteSummary) => void
   onCancel: () => void
+  // Path Y → 1B (2026-04-28): URL prefix to support both potential_leads
+  // and existing_hotels. Default keeps original behavior.
+  // For existing hotels pass basePath="/api/existing-hotels".
+  basePath?: string
 }
 
-export default function SmartFillProgress({ leadId, mode, onComplete, onCancel }: Props) {
+export default function SmartFillProgress({
+  leadId,
+  mode,
+  onComplete,
+  onCancel,
+  basePath = '/api/leads',
+}: Props) {
   const [currentStage, setCurrentStage] = useState(0)
   const [currentLabel, setCurrentLabel] = useState<string>('Connecting...')
   const [pct, setPct] = useState(0)
@@ -83,7 +93,7 @@ export default function SmartFillProgress({ leadId, mode, onComplete, onCancel }
   }, [])
 
   useEffect(() => {
-    const es = new EventSource(`/api/leads/${leadId}/smart-fill-stream?mode=${mode}`)
+    const es = new EventSource(`${basePath}/${leadId}/smart-fill-stream?mode=${mode}`)
     esRef.current = es
 
     es.onmessage = (e) => {
