@@ -192,6 +192,14 @@ export async function getHotelEnrichmentStatus(hotelId: number): Promise<any> {
   return data
 }
 
+/* Get current Smart Fill (in-flight) status for an existing hotel.
+   Used on hotel detail mount to decide whether to attach to a running
+   Smart Fill or show the idle Smart Fill button. */
+export async function getHotelSmartFillStatus(hotelId: number): Promise<{ running: boolean; mode: string | null }> {
+  const { data } = await api.get(`/api/existing-hotels/${hotelId}/smart-fill-status`)
+  return data
+}
+
 export async function cancelHotelEnrichment(hotelId: number): Promise<any> {
   const { data } = await api.post(`/api/existing-hotels/${hotelId}/enrich-cancel`)
   return data

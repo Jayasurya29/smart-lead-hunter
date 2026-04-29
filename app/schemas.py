@@ -285,6 +285,13 @@ class LeadUpdate(BaseModel):
     # Web presence
     hotel_website: Optional[str] = None
     source_url: Optional[str] = None
+    # Geocoords — editable so sales can fix incorrect Geoapify hits.
+    # Smart Fill / Full Refresh sometimes returns geocoords for the wrong
+    # location (similar hotel name, parent brand HQ, etc.). Without these
+    # fields in the schema, PATCH silently drops them and the bad coords
+    # stick. Clearing both → null lets the next Smart Fill re-geocode.
+    latitude: Optional[float] = None
+    longitude: Optional[float] = None
 
     @field_validator("status")
     @classmethod

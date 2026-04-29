@@ -36,7 +36,7 @@ import {
   restoreExistingHotel, editExistingHotel,
   saveHotelContact, deleteHotelContact, setPrimaryHotelContact,
   updateHotelContact, addHotelContact, toggleHotelContactScope,
-  enrichHotelContactEmail, getHotelEnrichmentStatus,
+  enrichHotelContactEmail, getHotelEnrichmentStatus, getHotelSmartFillStatus,
   type ExistingHotel, type ExistingHotelStats,
 } from '@/api/existingHotels'
 import type { Contact } from '@/api/types'
@@ -408,38 +408,48 @@ export default function ExistingHotels() {
             onClick={async () => {
               setExporting(true)
               try {
-                const res = await api.post(
-                  '/api/existing-hotels/export-csv',
-                  { is_client: filters.is_client || null },
-                )
-                const rows = res.data?.rows || []
-                if (rows.length === 0) {
-                  alert('No geocoded hotels match the current filter.')
-                  return
-                }
-                const cols = Object.keys(rows[0])
-                const csv = [
-                  cols.join(','),
-                  ...rows.map((r: any) =>
-                    cols.map((c) => {
-                      const v = r[c] ?? ''
-                      const s = String(v).replace(/"/g, '""')
-                      return /[",\n]/.test(s) ? `"${s}"` : s
-                    }).join(',')
-                  ),
-                ].join('\n')
-                const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }))
+                const queryParams: Record<string, string> = {}
+                // Send tab status (Pipeline/Approved/Rejected) so the
+                // exported file's title + filename match the user's view
+                if (STATUS_BY_TAB[activeTab]) queryParams.status = STATUS_BY_TAB[activeTab]
+                if (filters.search)     queryParams.search     = filters.search
+                if (filters.state)      queryParams.state      = filters.state
+                if (filters.brand_tier) queryParams.tier       = filters.brand_tier
+                if (filters.zone)       queryParams.zone       = filters.zone
+                if (filters.is_client)  queryParams.is_client  = filters.is_client
+
+                const res = await api.get('/api/existing-hotels/export-xlsx', {
+                  params: queryParams,
+                  responseType: 'blob',
+                  headers: { Accept: '*/*' },
+                })
+                const blob = new Blob([res.data], {
+                  type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                })
+                // Pull filename from server (e.g. JA_ExistingHotels_Pipeline_2026-04-29.xlsx)
+                let filename = `JA_ExistingHotels_${new Date().toISOString().split('T')[0]}.xlsx`
+                const cd = res.headers?.['content-disposition'] || ''
+                const match = /filename="?([^"]+)"?/i.exec(cd)
+                if (match?.[1]) filename = match[1]
+
+                const url = URL.createObjectURL(blob)
                 const a = document.createElement('a')
                 a.href = url
-                a.download = `existing_hotels_${new Date().toISOString().split('T')[0]}.csv`
+                a.download = filename
+                document.body.appendChild(a)
                 a.click()
+                document.body.removeChild(a)
                 URL.revokeObjectURL(url)
-              } catch (e) { console.error('Export failed', e) }
-              finally { setExporting(false) }
+              } catch (e) {
+                console.error('Export failed', e)
+                alert('Export failed — check console for details.')
+              } finally {
+                setExporting(false)
+              }
             }}
             disabled={exporting}
             className="flex items-center gap-1.5 px-3 h-9 text-xs font-semibold text-stone-600 bg-white border border-stone-200 rounded-lg hover:bg-emerald-50 hover:text-emerald-700 hover:border-emerald-300 transition disabled:opacity-50 flex-shrink-0"
-            title="Export to CSV (Atlist-compatible)"
+            title="Export to Excel (Call List + Summary)"
           >
             {exporting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />}
             {exporting ? 'Exporting...' : 'Export'}
@@ -941,6 +951,26 @@ function HotelDetail({ hotelId, tab, onClose }: { hotelId: number; tab: Pipeline
       .then((data) => {
         if (cancelled) return
         if (data?.running) setEnrichingHotelId(hotelId)
+      })
+      .catch(() => { /* silent */ })
+    return () => { cancelled = true }
+  }, [hotelId])
+
+  // ── Auto-attach to running Smart Fill on hotel mount ──
+  // Without this, navigating away from a hotel with Smart Fill in
+  // progress and returning fires a fresh POST → 409 → "Connecting…"
+  // forever. Status endpoint just checks the in-memory guard set.
+  useEffect(() => {
+    let cancelled = false
+    getHotelSmartFillStatus(hotelId)
+      .then((data) => {
+        if (cancelled) return
+        if (data?.running) {
+          setSmartFillHotelId(hotelId)
+          if (data.mode === 'full' || data.mode === 'smart') {
+            setSmartFillMode(data.mode)
+          }
+        }
       })
       .catch(() => { /* silent */ })
     return () => { cancelled = true }
@@ -2040,6 +2070,8 @@ function HotelEditTab({ hotel, hotelId }: { hotel: ExistingHotel; hotelId: numbe
     sap_bp_code:        h.sap_bp_code || '',
     client_notes:       h.client_notes || '',
     is_client:          hotel.is_client || false,
+    latitude:           hotel.latitude != null ? String(hotel.latitude) : '',
+    longitude:          hotel.longitude != null ? String(hotel.longitude) : '',
   })
 
   useEffect(() => {
@@ -2068,18 +2100,35 @@ function HotelEditTab({ hotel, hotelId }: { hotel: ExistingHotel; hotelId: numbe
       sap_bp_code:        h.sap_bp_code || '',
       client_notes:       h.client_notes || '',
       is_client:          hotel.is_client || false,
+      latitude:           hotel.latitude != null ? String(hotel.latitude) : '',
+      longitude:          hotel.longitude != null ? String(hotel.longitude) : '',
     })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [hotel.id, hotel.updated_at])
 
   function set(key: string, val: any) { setForm((prev) => ({ ...prev, [key]: val })) }
 
+  function handleClearCoords() {
+    setForm((prev) => ({ ...prev, latitude: '', longitude: '' }))
+  }
+
   async function handleSave() {
     setSaving(true); setSaveMsg('')
     try {
       const payload: any = {}
+      // Coords are special: empty string means "clear it" (send null
+      // explicitly so backend NULLs the column → next Smart Fill will
+      // re-geocode). Other empty strings get skipped to preserve
+      // existing values.
       Object.entries(form).forEach(([k, v]) => {
-        if (v !== '' && v !== null && v !== undefined) {
+        if (k === 'latitude' || k === 'longitude') {
+          if (v === '' || v === null || v === undefined) {
+            payload[k] = null
+          } else {
+            const n = Number(v)
+            if (!Number.isNaN(n)) payload[k] = n
+          }
+        } else if (v !== '' && v !== null && v !== undefined) {
           payload[k] = (k === 'room_count' && v) ? Number(v) : v
         }
       })
@@ -2126,6 +2175,34 @@ function HotelEditTab({ hotel, hotelId }: { hotel: ExistingHotel; hotelId: numbe
           </label>
         </div>
         <EditField label="Client Notes"    value={form.client_notes}       onChange={(v) => set('client_notes', v)} span={2} />
+
+        {/* Latitude + Longitude. Clear them → next Smart Fill / Full
+            Refresh re-geocodes from scratch. Useful when Geoapify
+            returned coords for the wrong location. */}
+        <EditField label="Latitude"        value={form.latitude}           onChange={(v) => set('latitude', v)} />
+        <EditField label="Longitude"       value={form.longitude}          onChange={(v) => set('longitude', v)} />
+        <div className="col-span-2 flex items-center gap-3 -mt-1">
+          {(form.latitude || form.longitude) && (
+            <button
+              type="button"
+              onClick={handleClearCoords}
+              className="text-xs text-stone-500 hover:text-red-600 underline-offset-2 hover:underline transition"
+              title="Clear both coordinates so the next Smart Fill / Full Refresh re-geocodes"
+            >
+              Clear coords (re-geocode on next refresh)
+            </button>
+          )}
+          {form.latitude && form.longitude && !Number.isNaN(Number(form.latitude)) && !Number.isNaN(Number(form.longitude)) && (
+            <a
+              href={`https://www.google.com/maps?q=${form.latitude},${form.longitude}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-xs text-blue-600 hover:underline"
+            >
+              View on Google Maps ↗
+            </a>
+          )}
+        </div>
       </div>
 
       <div className="flex items-center gap-3 pt-2">

@@ -4,7 +4,7 @@ import RevenuePotential from './RevenuePotential'
 import EnrichProgress from './EnrichProgress'
 import SmartFillProgress from './SmartFillProgress'
 import ConfirmDialog from '../ui/ConfirmDialog'
-import { editLead, saveContact, setPrimaryContact, deleteContact, updateContact, toggleContactScope, addContact, getEnrichmentStatus } from '@/api/leads'
+import { editLead, saveContact, setPrimaryContact, deleteContact, updateContact, toggleContactScope, addContact, getEnrichmentStatus, getSmartFillStatus } from '@/api/leads'
 import api from '@/api/client'
 import { useQueryClient } from '@tanstack/react-query'
 import type { Lead, Contact } from '@/api/types'
@@ -100,6 +100,27 @@ export default function LeadDetail({ leadId, tab, onClose }: Props) {
         // status check failed — silently ignore, user can still click
         // Run Enrichment manually
       })
+    return () => { cancelled = true }
+  }, [leadId])
+
+  // ── Auto-attach to running Smart Fill on lead mount ──
+  // Same pattern as enrichment auto-attach above. When user navigates
+  // back to a lead with Smart Fill in progress, this effect detects it
+  // via the status endpoint and remounts SmartFillProgress, which
+  // attaches as a watcher to the running task.
+  useEffect(() => {
+    let cancelled = false
+    getSmartFillStatus(leadId)
+      .then((data) => {
+        if (cancelled) return
+        if (data?.running) {
+          setSmartFillLeadId(leadId)
+          if (data.mode === 'full' || data.mode === 'smart') {
+            setSmartFillMode(data.mode)
+          }
+        }
+      })
+      .catch(() => { /* silently ignore */ })
     return () => { cancelled = true }
   }, [leadId])
 
@@ -1335,6 +1356,9 @@ function EditTab({ lead, leadId }: { lead: Lead; leadId: number }) {
     owner:              lead.owner || '',
     address:            lead.address || '',
     zip_code:           lead.zip_code || '',
+    hotel_website:      lead.hotel_website || '',
+    latitude:           lead.latitude != null ? String(lead.latitude) : '',
+    longitude:          lead.longitude != null ? String(lead.longitude) : '',
   })
 
   // Re-sync form state whenever the lead record is updated server-side
@@ -1358,6 +1382,9 @@ function EditTab({ lead, leadId }: { lead: Lead; leadId: number }) {
       owner:              lead.owner || '',
       address:            lead.address || '',
       zip_code:           lead.zip_code || '',
+      hotel_website:      lead.hotel_website || '',
+      latitude:           lead.latitude != null ? String(lead.latitude) : '',
+      longitude:          lead.longitude != null ? String(lead.longitude) : '',
     })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [lead.id, lead.updated_at])
@@ -1366,14 +1393,34 @@ function EditTab({ lead, leadId }: { lead: Lead; leadId: number }) {
     setForm((prev) => ({ ...prev, [key]: val }))
   }
 
+  function handleClearCoords() {
+    setForm((prev) => ({ ...prev, latitude: '', longitude: '' }))
+  }
+
   async function handleSave() {
     setSaving(true)
     setSaveMsg('')
     try {
-      await editLead(leadId, {
+      // Build payload — convert numeric fields, null-out empty coords
+      // (so backend sets DB to NULL → next Smart Fill re-geocodes).
+      const payload: any = {
         ...form,
         room_count: form.room_count ? Number(form.room_count) : undefined,
-      } as any)
+        latitude: form.latitude.trim() === '' ? null : Number(form.latitude),
+        longitude: form.longitude.trim() === '' ? null : Number(form.longitude),
+      }
+      // Validate parsed numbers — block save if user typed garbage
+      if (payload.latitude !== null && Number.isNaN(payload.latitude)) {
+        setSaveMsg('Error: Latitude must be a number')
+        setSaving(false)
+        return
+      }
+      if (payload.longitude !== null && Number.isNaN(payload.longitude)) {
+        setSaveMsg('Error: Longitude must be a number')
+        setSaving(false)
+        return
+      }
+      await editLead(leadId, payload as any)
       setSaveMsg('Saved!')
       qc.invalidateQueries({ queryKey: ['lead', leadId] })
       qc.invalidateQueries({ queryKey: ['leads'] })
@@ -1400,6 +1447,37 @@ function EditTab({ lead, leadId }: { lead: Lead; leadId: number }) {
         <EditField label="Owner"      value={form.owner}         onChange={(v) => handleChange('owner', v)} />
         <EditField label="Address"    value={form.address}       onChange={(v) => handleChange('address', v)} span={2} />
         <EditField label="Zip Code"   value={form.zip_code}      onChange={(v) => handleChange('zip_code', v)} />
+        <EditField label="Website"    value={form.hotel_website} onChange={(v) => handleChange('hotel_website', v)} span={2} />
+
+        {/* Latitude + Longitude with a "Clear" button below.
+            Clearing both → null on save → the next Smart Fill / Full Refresh
+            re-geocodes from scratch (Geoapify hit on the hotel name + city).
+            Useful when Smart Fill picked the wrong location (similar hotel
+            name, parent brand HQ, etc.). */}
+        <EditField label="Latitude"   value={form.latitude}      onChange={(v) => handleChange('latitude', v)} />
+        <EditField label="Longitude"  value={form.longitude}     onChange={(v) => handleChange('longitude', v)} />
+        <div className="col-span-2 flex items-center gap-3 -mt-1">
+          {(form.latitude || form.longitude) && (
+            <button
+              type="button"
+              onClick={handleClearCoords}
+              className="text-xs text-stone-500 hover:text-red-600 underline-offset-2 hover:underline transition"
+              title="Clear both coordinates so the next Smart Fill / Full Refresh re-geocodes"
+            >
+              Clear coords (re-geocode on next refresh)
+            </button>
+          )}
+          {form.latitude && form.longitude && !Number.isNaN(Number(form.latitude)) && !Number.isNaN(Number(form.longitude)) && (
+            <a
+              href={`https://www.google.com/maps?q=${form.latitude},${form.longitude}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-xs text-blue-600 hover:underline"
+            >
+              View on Google Maps ↗
+            </a>
+          )}
+        </div>
       </div>
 
       <div className="flex items-center gap-3 pt-2">

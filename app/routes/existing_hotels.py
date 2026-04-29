@@ -9,13 +9,15 @@ The old hotel_discovery.py and chain_discovery.py modules are deleted.
 
 import asyncio
 import logging
+import time
+from dataclasses import dataclass, field
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy import select, func, case, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.database import get_db
+from app.database import get_db, async_session
 from app.models.existing_hotel import ExistingHotel
 from app.shared import require_ajax, escape_like
 
@@ -542,6 +544,127 @@ async def run_all_discovery():
         raise HTTPException(status_code=500, detail=f"Discovery failed: {str(e)[:200]}")
 
 
+# ══════════════════════════════════════════════════════════════════
+# EXCEL EXPORT (sales-ready, multi-sheet, styled)
+# ══════════════════════════════════════════════════════════════════
+
+
+@router.get("/export-xlsx")
+async def export_existing_hotels_xlsx(
+    db: AsyncSession = Depends(get_db),
+    status: Optional[str] = Query(
+        None, description="Filter by status (new, approved, rejected)"
+    ),
+    tier: Optional[str] = Query(None, description="Filter by brand_tier"),
+    state: Optional[str] = Query(None, description="Filter by state"),
+    zone: Optional[str] = Query(None, description="Filter by sales zone"),
+    is_client: Optional[str] = Query(
+        None, description="'true'/'false' to filter clients"
+    ),
+    search: Optional[str] = Query(None, description="Search hotel name/brand/city"),
+    min_score: Optional[int] = Query(None, description="Minimum score"),
+):
+    """Export Existing Hotels to a polished 2-sheet Excel workbook.
+
+    Sheet 1 — Call List (color-coded score, tier chips, autofiltered)
+    Sheet 2 — Summary / Score Distribution (pivot-friendly)
+
+    Filters mirror the Existing Hotels page so the file matches what's
+    on screen. No timeline column on this export (existing hotels are
+    operating, not pre-opening).
+    """
+    import io
+    from datetime import date
+    from fastapi.responses import StreamingResponse
+    from sqlalchemy import or_
+
+    from app.models.lead_contact import LeadContact
+    from app.services.excel_export import build_workbook
+
+    # ── Build query ──
+    q = select(ExistingHotel)
+    if status:
+        statuses = [s.strip() for s in status.split(",")]
+        q = q.where(ExistingHotel.status.in_(statuses))
+    if tier:
+        q = q.where(ExistingHotel.brand_tier == tier)
+    if state:
+        q = q.where(ExistingHotel.state == state)
+    if zone:
+        q = q.where(ExistingHotel.zone == zone)
+    if is_client == "true":
+        q = q.where(ExistingHotel.is_client.is_(True))
+    elif is_client == "false":
+        q = q.where(ExistingHotel.is_client.is_(False))
+    if min_score:
+        q = q.where(ExistingHotel.lead_score >= min_score)
+    if search:
+        s_lower = f"%{search.lower()}%"
+        q = q.where(
+            or_(
+                ExistingHotel.hotel_name.ilike(s_lower),
+                ExistingHotel.name.ilike(s_lower),
+                ExistingHotel.brand.ilike(s_lower),
+                ExistingHotel.city.ilike(s_lower),
+                ExistingHotel.state.ilike(s_lower),
+            )
+        )
+
+    q = q.order_by(ExistingHotel.lead_score.desc().nullslast())
+    result = await db.execute(q)
+    hotels = list(result.scalars().all())
+
+    # ── Fetch contacts grouped by hotel ──
+    primary_contacts: dict[int, LeadContact] = {}
+    if hotels:
+        hotel_ids = [h.id for h in hotels]
+        cq = await db.execute(
+            select(LeadContact)
+            .where(LeadContact.existing_hotel_id.in_(hotel_ids))
+            .order_by(LeadContact.score.desc().nullslast())
+        )
+        all_contacts = list(cq.scalars().all())
+        contacts_by_hotel: dict[int, list] = {}
+        for c in all_contacts:
+            contacts_by_hotel.setdefault(c.existing_hotel_id, []).append(c)
+        for h in hotels:
+            cs = contacts_by_hotel.get(h.id, [])
+            setattr(h, "_export_all_contacts", cs)
+            primary = next((c for c in cs if c.is_primary), None) or (
+                cs[0] if cs else None
+            )
+            if primary:
+                primary_contacts[h.id] = primary
+
+    # ── Tab label from status filter ──
+    if status and "new" in status:
+        tab_label = "Pipeline"
+    elif status and "approved" in status:
+        tab_label = "Approved"
+    elif status and "rejected" in status:
+        tab_label = "Rejected"
+    else:
+        tab_label = "All"
+
+    # ── Build workbook ──
+    xlsx_bytes = build_workbook(
+        hotels,
+        primary_contacts,
+        kind="existing",
+        tab_label=tab_label,
+    )
+
+    filename = (
+        f"JA_ExistingHotels_{tab_label.replace(' ', '')}_"
+        f"{date.today().isoformat()}.xlsx"
+    )
+    return StreamingResponse(
+        io.BytesIO(xlsx_bytes),
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
 # ════════════════════════════════════════════════════════════════
 # DETAIL / EDIT / CREATE
 # ════════════════════════════════════════════════════════════════
@@ -998,72 +1121,65 @@ async def add_hotel_contact(
 
 
 # ════════════════════════════════════════════════════════════════
-# SMART FILL — SSE pipeline for AI-powered field filling
+# SMART FILL — JOB-WITH-SUBSCRIBERS PATTERN
 # ════════════════════════════════════════════════════════════════
-# Mirrors /api/leads/{id}/smart-fill-stream from scraping.py. Reuses
-# the same enrich_lead_data service — only the parent kind differs.
-# Result-application logic mirrors _apply_enrichment_to_lead in
-# scraping.py BUT skips timeline_label (existing_hotels don't carry it).
-@router.get("/{hotel_id}/smart-fill-stream")
-async def smart_fill_hotel_stream(
-    hotel_id: int,
-    request: Request,
-    mode: str = Query("smart", pattern="^(smart|full)$"),
-):
-    """SSE stream of Smart Fill progress for an existing hotel.
+# Same architecture as scraping.py + contacts.py: a single background
+# task runs independently of any client. Multiple SSE clients (browser
+# tabs, navigate-away-and-back, etc.) attach as watchers and receive
+# fan-out events. Reconnecting clients get the latest event replayed.
 
-    mode=smart: only fills fields that are currently empty
-    mode=full:  re-fills every field (Full Refresh)
-    """
-    import asyncio
-    import json
-    import time
-    from fastapi.responses import StreamingResponse
-    from app.database import async_session
+
+@dataclass
+class _ExistingHotelSmartFillJob:
+    hotel_id: int
+    mode: str
+    task: object  # asyncio.Task | None
+    started_at: float
+    current_event: dict | None = None
+    subscribers: set = field(default_factory=set)
+
+
+# Single source of truth for in-flight existing-hotels Smart Fills,
+# keyed by hotel_id (one job per hotel at a time).
+_eh_smart_fill_jobs: dict[int, _ExistingHotelSmartFillJob] = {}
+
+
+async def _start_eh_smart_fill_job(hotel_id: int, mode: str, hotel_snapshot: dict):
+    """Create + register an existing-hotels SmartFillJob."""
     from app.services.lead_data_enrichment import enrich_lead_data
 
-    # Verify hotel exists + load facts
-    async with async_session() as session:
-        result = await session.execute(
-            select(ExistingHotel).where(ExistingHotel.id == hotel_id)
-        )
-        hotel = result.scalar_one_or_none()
-        if not hotel:
-            raise HTTPException(status_code=404, detail="Hotel not found")
-
-        # Snapshot what enrich_lead_data needs. Only the keyword args its
-        # signature actually accepts — passing extras would crash with a
-        # TypeError. The function reference: hotel_name, city, state,
-        # country, brand, current_opening_date, current_brand_tier,
-        # current_room_count, mode, search_name, progress_callback.
-        hotel_snapshot = {
-            "hotel_name": hotel.hotel_name or hotel.name or "",
-            "city": hotel.city or "",
-            "state": hotel.state or "",
-            "country": hotel.country or "USA",
-            "brand": hotel.brand or "",
-            "current_opening_date": hotel.opening_date or "",
-            "current_brand_tier": hotel.brand_tier or "",
-            "current_room_count": hotel.room_count or 0,
-            "search_name": getattr(hotel, "search_name", None) or "",
-        }
-
-    event_queue: asyncio.Queue = asyncio.Queue(maxsize=100)
-    start_time = time.monotonic()
+    job = _ExistingHotelSmartFillJob(
+        hotel_id=hotel_id,
+        mode=mode,
+        task=None,
+        started_at=time.monotonic(),
+    )
 
     async def progress_callback(stage: int, total: int, label: str):
-        elapsed = round(time.monotonic() - start_time, 1)
+        elapsed = round(time.monotonic() - job.started_at, 1)
         pct = min(100, round((stage / total) * 100))
-        await event_queue.put(
-            {
-                "type": "stage",
-                "stage": stage,
-                "total": total,
-                "label": label,
-                "pct": pct,
-                "elapsed_s": elapsed,
-            }
-        )
+        event = {
+            "type": "stage",
+            "stage": stage,
+            "total": total,
+            "label": label,
+            "pct": pct,
+            "elapsed_s": elapsed,
+        }
+        job.current_event = event
+        for q in list(job.subscribers):
+            try:
+                q.put_nowait(event)
+            except asyncio.QueueFull:
+                pass
+
+    def emit_terminal(event: dict):
+        job.current_event = event
+        for q in list(job.subscribers):
+            try:
+                q.put_nowait(event)
+            except asyncio.QueueFull:
+                pass
 
     async def run_smart_fill():
         try:
@@ -1073,19 +1189,6 @@ async def smart_fill_hotel_stream(
                 progress_callback=progress_callback,
             )
 
-            # Apply enriched fields to the hotel row.
-            # The enrich_lead_data result dict has fields at the TOP LEVEL
-            # (e.g. enriched["opening_date"], enriched["brand_tier"]) — NOT
-            # nested under an "enriched" key. The full set of possible keys:
-            #   project_type, opening_date, reopening_date, opened_date,
-            #   already_opened, brand_tier, room_count, brand, city, state,
-            #   country, description, address, zip_code, official_name,
-            #   search_name, former_names, management_company, owner,
-            #   developer, source_url, confidence, changes
-            #
-            # Mirrors _apply_enrichment_to_lead from scraping.py but SKIPS
-            # timeline_label (existing_hotels don't have that column —
-            # migration 018 deliberately omits it for already-opened hotels).
             applied: list[str] = []
             async with async_session() as apply_session:
                 ah_result = await apply_session.execute(
@@ -1102,18 +1205,12 @@ async def smart_fill_hotel_stream(
                         "tier5_skip",
                     }
 
-                    # project_type — historical metadata, also useful on
-                    # existing hotels (was it new build / renovation /
-                    # rebrand). Always update if mode=full or empty.
                     if enriched.get("project_type") and (
                         mode == "full" or not ah.project_type
                     ):
                         ah.project_type = enriched["project_type"]
                         applied.append("project_type")
 
-                    # opening_date — historical fact, but still apply
-                    # the regression guard to reject less-specific values
-                    # (e.g. "September 2024" → "2024" should be rejected).
                     if enriched.get("opening_date"):
                         from app.services.utils import should_accept_opening_date
 
@@ -1158,10 +1255,6 @@ async def smart_fill_hotel_stream(
                             ah.room_count = new_rc
                             applied.append("room_count")
 
-                    # hotel_type — feeds the Option B scorer (10 pts).
-                    # In smart mode, fills only if current is empty or a
-                    # generic freeform value. In full mode, always
-                    # overwrite when a valid enum value is returned.
                     if enriched.get("hotel_type"):
                         new_ht = (enriched.get("hotel_type") or "").strip().lower()
                         _VALID_HT = {
@@ -1181,7 +1274,7 @@ async def smart_fill_hotel_stream(
                             )
                             if mode == "full" or ambiguous:
                                 ah.hotel_type = new_ht
-                                ah.property_type = new_ht  # legacy mirror
+                                ah.property_type = new_ht
                                 applied.append("hotel_type")
 
                     if enriched.get("brand"):
@@ -1191,8 +1284,7 @@ async def smart_fill_hotel_stream(
                                 ah.brand = new_brand
                                 applied.append("brand")
 
-                    # Location + descriptive fields — fill empties or full mode
-                    for field in (
+                    for fld in (
                         "city",
                         "state",
                         "country",
@@ -1203,16 +1295,15 @@ async def smart_fill_hotel_stream(
                         "owner",
                         "developer",
                     ):
-                        if enriched.get(field) and (
-                            mode == "full" or not getattr(ah, field, None)
+                        if enriched.get(fld) and (
+                            mode == "full" or not getattr(ah, fld, None)
                         ):
-                            setattr(ah, field, enriched[field])
-                            applied.append(field)
+                            setattr(ah, fld, enriched[fld])
+                            applied.append(fld)
 
-                    # Name intelligence — always update when present
                     if enriched.get("official_name"):
                         ah.hotel_name = enriched["official_name"]
-                        ah.name = enriched["official_name"]  # legacy backfill
+                        ah.name = enriched["official_name"]
                         applied.append("hotel_name")
                     if enriched.get("search_name"):
                         ah.search_name = enriched["search_name"]
@@ -1221,12 +1312,6 @@ async def smart_fill_hotel_stream(
                         ah.former_names = enriched["former_names"]
                         applied.append("former_names")
 
-                    # ── Auto-rescore (Option B, account fit) ────────
-                    # Any time Smart Fill changes brand_tier, room_count,
-                    # hotel_type, or zone, the score should refresh so
-                    # the Pipeline ranking stays accurate. We rescore on
-                    # ANY apply (cheap pure function — sub-millisecond)
-                    # so we don't have to enumerate which fields matter.
                     if applied:
                         try:
                             from app.services.existing_hotel_scorer import (
@@ -1243,12 +1328,6 @@ async def smart_fill_hotel_stream(
 
                     await apply_session.commit()
 
-            # ── Revenue auto-update — runs in its own session AFTER
-            # the Smart Fill commit. Smart Fill may have just filled
-            # in room_count, brand_tier, or hotel_type — the three
-            # inputs the revenue calculator needs. If revenue was NULL
-            # before and the inputs are now present, it'll populate.
-            # If inputs changed, revenue refreshes accordingly.
             if applied:
                 try:
                     from app.services.revenue_updater import update_hotel_revenue
@@ -1262,8 +1341,8 @@ async def smart_fill_hotel_stream(
                         f"existing_hotel #{hotel_id}: {_rev_err}"
                     )
 
-            duration = round(time.monotonic() - start_time, 1)
-            await event_queue.put(
+            duration = round(time.monotonic() - job.started_at, 1)
+            emit_terminal(
                 {
                     "type": "complete",
                     "pct": 100,
@@ -1276,35 +1355,137 @@ async def smart_fill_hotel_stream(
                     },
                 }
             )
+
+        except asyncio.CancelledError:
+            emit_terminal(
+                {
+                    "type": "error",
+                    "message": "Smart Fill cancelled",
+                    "cancelled": True,
+                }
+            )
+            raise
         except Exception as e:
-            logger.exception(f"Smart Fill failed for hotel {hotel_id}: {e}")
-            await event_queue.put(
+            logger.exception(f"Smart Fill task failed for hotel {hotel_id}: {e}")
+            emit_terminal(
                 {
                     "type": "error",
                     "message": f"Smart Fill failed: {str(e)[:200]}",
                 }
             )
 
-    task = asyncio.create_task(run_smart_fill())
+    job.task = asyncio.create_task(run_smart_fill())
+
+    def _cleanup(_t):
+        _eh_smart_fill_jobs.pop(hotel_id, None)
+        logger.info(f"Existing-hotels Smart Fill job for hotel {hotel_id} cleaned up")
+
+    job.task.add_done_callback(_cleanup)
+    _eh_smart_fill_jobs[hotel_id] = job
+    return job
+
+
+@router.get("/{hotel_id}/smart-fill-status")
+async def smart_fill_hotel_status(hotel_id: int):
+    """Cheap probe: is a Smart Fill running for this hotel?"""
+    job = _eh_smart_fill_jobs.get(hotel_id)
+    if job is None:
+        return {"running": False, "mode": None}
+    return {
+        "running": True,
+        "mode": job.mode,
+        "watchers": len(job.subscribers),
+    }
+
+
+@router.get("/{hotel_id}/smart-fill-stream")
+async def smart_fill_hotel_stream(
+    hotel_id: int,
+    request: Request,
+    mode: str = Query("smart", pattern="^(smart|full)$"),
+):
+    """SSE stream of Smart Fill progress for an existing hotel.
+
+    Behavior (mirrors scraping.py + contacts.py):
+      - First connection → starts background task + subscribes.
+      - Subsequent connections → attach as additional watchers of the
+        SAME running task. Latest event replayed on connect.
+      - Client disconnect does NOT cancel; background work continues.
+    """
+    import json
+    from fastapi.responses import StreamingResponse
+
+    existing = _eh_smart_fill_jobs.get(hotel_id)
+    if existing is not None:
+        job = existing
+        logger.info(
+            f"Attaching new watcher to running Smart Fill for hotel {hotel_id} "
+            f"(now {len(job.subscribers) + 1} watcher(s))"
+        )
+    else:
+        async with async_session() as session:
+            result = await session.execute(
+                select(ExistingHotel).where(ExistingHotel.id == hotel_id)
+            )
+            hotel = result.scalar_one_or_none()
+            if not hotel:
+                raise HTTPException(status_code=404, detail="Hotel not found")
+            hotel_snapshot = {
+                "hotel_name": hotel.hotel_name or hotel.name or "",
+                "city": hotel.city or "",
+                "state": hotel.state or "",
+                "country": hotel.country or "USA",
+                "brand": hotel.brand or "",
+                "current_opening_date": hotel.opening_date or "",
+                "current_brand_tier": hotel.brand_tier or "",
+                "current_room_count": hotel.room_count or 0,
+                "search_name": getattr(hotel, "search_name", None) or "",
+            }
+
+        job = await _start_eh_smart_fill_job(hotel_id, mode, hotel_snapshot)
+        logger.info(f"Started new Smart Fill job for hotel {hotel_id} (mode={mode})")
+
+    sub_queue: asyncio.Queue = asyncio.Queue(maxsize=100)
+    job.subscribers.add(sub_queue)
+
+    if job.current_event is not None:
+        replay = dict(job.current_event)
+        if "elapsed_s" in replay:
+            replay["elapsed_s"] = round(time.monotonic() - job.started_at, 1)
+        try:
+            sub_queue.put_nowait(replay)
+        except asyncio.QueueFull:
+            pass
 
     async def event_stream():
         yield f'data: {json.dumps({"type": "started", "total": 8})}\n\n'
         try:
             while True:
                 if await request.is_disconnected():
+                    logger.info(
+                        f"Watcher disconnected from hotel {hotel_id} Smart Fill; "
+                        f"background task continues. "
+                        f"({len(job.subscribers) - 1} watcher(s) remain)"
+                    )
                     return
                 try:
-                    event = await asyncio.wait_for(event_queue.get(), timeout=10.0)
+                    event = await asyncio.wait_for(sub_queue.get(), timeout=10.0)
                 except asyncio.TimeoutError:
                     yield f'data: {json.dumps({"type": "ping"})}\n\n'
-                    if task.done() and event_queue.empty():
+                    if job.task and job.task.done() and sub_queue.empty():
                         return
                     continue
                 yield f"data: {json.dumps(event)}\n\n"
                 if event["type"] in ("complete", "error"):
                     return
         except asyncio.CancelledError:
+            logger.info(
+                f"Smart Fill stream cancelled for hotel {hotel_id}; "
+                f"background task continues."
+            )
             raise
+        finally:
+            job.subscribers.discard(sub_queue)
 
     return StreamingResponse(
         event_stream(),

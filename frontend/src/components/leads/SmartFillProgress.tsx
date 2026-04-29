@@ -93,7 +93,10 @@ export default function SmartFillProgress({
   }, [])
 
   useEffect(() => {
-    const es = new EventSource(`${basePath}/${leadId}/smart-fill-stream?mode=${mode}`)
+    const es = new EventSource(
+      `${basePath}/${leadId}/smart-fill-stream?mode=${mode}`,
+      { withCredentials: true },
+    )
     esRef.current = es
 
     es.onmessage = (e) => {

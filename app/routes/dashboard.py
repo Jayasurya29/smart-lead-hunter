@@ -161,7 +161,19 @@ async def dashboard_edit_lead(
         "contact_phone",
         "description",
         "notes",
+        # Web + geo fields — added 2026-04-29 so sales can fix bad data
+        # Smart Fill picked up. Without these in the whitelist the PATCH
+        # silently dropped them and the wrong values stuck.
+        "hotel_website",
+        "address",
+        "zip_code",
+        "source_url",
+        "latitude",
+        "longitude",
     ]
+
+    # Numeric fields that need float conversion (vs default str cast).
+    _FLOAT_FIELDS = {"latitude", "longitude"}
 
     # A-01: Capture old values for audit trail
     old_values = {}
@@ -178,6 +190,12 @@ async def dashboard_edit_lead(
             elif field == "room_count":
                 try:
                     setattr(lead, field, int(value) if value else None)
+                except (ValueError, TypeError):
+                    pass
+            elif field in _FLOAT_FIELDS:
+                # latitude / longitude — coerce to float, skip on garbage
+                try:
+                    setattr(lead, field, float(value))
                 except (ValueError, TypeError):
                     pass
             else:

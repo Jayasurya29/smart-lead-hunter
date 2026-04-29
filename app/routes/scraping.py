@@ -6,6 +6,7 @@ import logging
 import os
 import time
 import uuid
+from dataclasses import dataclass, field
 from urllib.parse import urlparse
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -2078,93 +2079,105 @@ async def batch_smart_fill_endpoint(_csrf=Depends(require_ajax)):
 #   8: rescore + recalc revenue
 
 
-# In-memory guard against parallel Smart Fill / Full Refresh on same lead.
-# Same rationale as _active_enrichments in contacts.py — frontend now keeps
-# the progress card mounted across tab switches, but this is the second
-# line of defense against double-runs from multiple browser tabs.
-_active_smart_fills: set[tuple[int, str]] = set()
+# ════════════════════════════════════════════════════════════════════════════
+# SMART FILL — JOB-WITH-SUBSCRIBERS PATTERN
+# ════════════════════════════════════════════════════════════════════════════
+#
+# Same architecture as the contact enrichment in routes/contacts.py.
+# A single background task runs independently of any client connection.
+# Multiple SSE clients (browser tabs, navigate-away-and-back, etc.) attach
+# as watchers and receive fan-out events from a shared queue. Each watcher
+# also gets the latest event replayed on connect so reconnecting users see
+# real progress instead of "Connecting...".
+#
+# Per the original design choice in contacts.py — DO NOT cancel the task
+# when an SSE stream disconnects. Background work continues to completion
+# regardless. Guard releases via task.add_done_callback when the task
+# actually finishes.
 
 
-@router.get("/api/leads/{lead_id}/smart-fill-stream", tags=["Leads"])
-async def smart_fill_stream(lead_id: int, request: Request, mode: str = "smart"):
-    """SSE streaming version of POST /smart-fill."""
-    from app.models.potential_lead import PotentialLead
+@dataclass
+class SmartFillJob:
+    """One Smart Fill task + its watchers."""
+
+    lead_id: int
+    mode: str  # "smart" | "full"
+    task: asyncio.Task | None
+    started_at: float
+    current_event: dict | None = None
+    subscribers: set[asyncio.Queue] = field(default_factory=set)
+
+
+# Single source of truth keyed by lead_id (not (lead_id, mode) — the
+# behavior we want is "one Smart Fill per lead at a time", not one per
+# mode. If user clicks Smart Fill then Full Refresh during run, the
+# second click should reject, same as before).
+_smart_fill_jobs: dict[int, SmartFillJob] = {}
+
+
+async def _start_smart_fill_job(
+    lead_id: int, mode: str, lead_snapshot: dict
+) -> SmartFillJob:
+    """Create and register a SmartFillJob. Caller must verify no existing job."""
     from app.services.lead_data_enrichment import enrich_lead_data
     from app.services.utils import get_timeline_label, normalize_hotel_name
     from app.services.scorer import calculate_lead_score
+    from app.models.potential_lead import PotentialLead
 
-    # Guard against parallel runs on the same (lead, mode) tuple.
-    # Different modes (smart vs full) on the same lead are still blocked
-    # because they touch the same DB rows — running both at once would race.
-    key = (lead_id, mode)
-    if any(k[0] == lead_id for k in _active_smart_fills):
-        logger.info(
-            f"Smart Fill already in flight for lead {lead_id}, "
-            f"rejecting duplicate request."
-        )
-        raise HTTPException(
-            status_code=409,
-            detail="Smart Fill already running for this lead. Wait for it to finish.",
-        )
-
-    # Verify lead exists up-front (fail fast)
-    async with async_session() as session:
-        result = await session.execute(
-            select(PotentialLead).where(PotentialLead.id == lead_id)
-        )
-        lead = result.scalar_one_or_none()
-        if not lead:
-            raise HTTPException(status_code=404, detail="Lead not found")
-        lead_snapshot = {
-            "hotel_name": lead.hotel_name,
-            "city": lead.city or "",
-            "state": lead.state or "",
-            "country": lead.country or "",
-            "brand": lead.brand or "",
-            "opening_date": lead.opening_date or "",
-            "brand_tier": lead.brand_tier or "",
-            "room_count": lead.room_count or 0,
-            "search_name": getattr(lead, "search_name", None) or "",
-        }
-
-    # ── Total stages = 8: 6 inside enrich_lead_data + save + rescore ──
     TOTAL_STAGES = 8
-    event_queue: asyncio.Queue = asyncio.Queue()
-    start_time = time.monotonic()
+    job = SmartFillJob(
+        lead_id=lead_id,
+        mode=mode,
+        task=None,
+        started_at=time.monotonic(),
+    )
 
     async def progress_callback(stage: int, total: int, label: str):
-        """enrich_lead_data emits stages 1-6; we rescale to 1-6 of our 8."""
-        elapsed = round(time.monotonic() - start_time, 1)
+        elapsed = round(time.monotonic() - job.started_at, 1)
         pct = min(100, round((stage / TOTAL_STAGES) * 100))
-        await event_queue.put(
-            {
-                "type": "stage",
-                "stage": stage,
-                "total": TOTAL_STAGES,
-                "label": label,
-                "pct": pct,
-                "elapsed_s": elapsed,
-            }
-        )
+        event = {
+            "type": "stage",
+            "stage": stage,
+            "total": TOTAL_STAGES,
+            "label": label,
+            "pct": pct,
+            "elapsed_s": elapsed,
+        }
+        job.current_event = event
+        for q in list(job.subscribers):
+            try:
+                q.put_nowait(event)
+            except asyncio.QueueFull:
+                pass
 
     async def emit_stage(stage: int, label: str):
-        """Direct emit for the save + rescore stages that happen in this endpoint."""
-        elapsed = round(time.monotonic() - start_time, 1)
+        elapsed = round(time.monotonic() - job.started_at, 1)
         pct = min(100, round((stage / TOTAL_STAGES) * 100))
-        await event_queue.put(
-            {
-                "type": "stage",
-                "stage": stage,
-                "total": TOTAL_STAGES,
-                "label": label,
-                "pct": pct,
-                "elapsed_s": elapsed,
-            }
-        )
+        event = {
+            "type": "stage",
+            "stage": stage,
+            "total": TOTAL_STAGES,
+            "label": label,
+            "pct": pct,
+            "elapsed_s": elapsed,
+        }
+        job.current_event = event
+        for q in list(job.subscribers):
+            try:
+                q.put_nowait(event)
+            except asyncio.QueueFull:
+                pass
+
+    def emit_terminal(event: dict):
+        job.current_event = event
+        for q in list(job.subscribers):
+            try:
+                q.put_nowait(event)
+            except asyncio.QueueFull:
+                pass
 
     async def run_smart_fill():
         try:
-            # Stages 1-6: enrich_lead_data emits via progress_callback
             enriched = await enrich_lead_data(
                 hotel_name=lead_snapshot["hotel_name"],
                 city=lead_snapshot["city"],
@@ -2180,20 +2193,22 @@ async def smart_fill_stream(lead_id: int, request: Request, mode: str = "smart")
             )
 
             if not enriched.get("changes"):
-                await event_queue.put(
+                duration = round(time.monotonic() - job.started_at, 1)
+                emit_terminal(
                     {
                         "type": "complete",
                         "pct": 100,
+                        "elapsed_s": duration,
                         "summary": {
                             "status": "no_data",
                             "message": "No new data found",
                             "changes": [],
+                            "duration_s": duration,
                         },
                     }
                 )
                 return
 
-            # ── Stage 7: apply field changes to lead ──
             await emit_stage(7, "Saving changes to database")
             async with async_session() as session:
                 result = await session.execute(
@@ -2201,7 +2216,7 @@ async def smart_fill_stream(lead_id: int, request: Request, mode: str = "smart")
                 )
                 lead = result.scalar_one_or_none()
                 if not lead:
-                    await event_queue.put(
+                    emit_terminal(
                         {
                             "type": "error",
                             "message": "Lead disappeared during enrichment",
@@ -2209,14 +2224,28 @@ async def smart_fill_stream(lead_id: int, request: Request, mode: str = "smart")
                     )
                     return
 
-                # Apply field changes — mirrors the merge logic in the POST
-                # smart_fill_lead endpoint. Kept in sync manually; see the
-                # POST endpoint for the authoritative version with comments.
                 _apply_enrichment_to_lead(lead, enriched, mode, get_timeline_label)
 
-                lead.hotel_name_normalized = normalize_hotel_name(lead.hotel_name)
+                # Recompute normalized name with collision guard (the bug
+                # that crashed Smart Fill on duplicate-name leads).
+                new_norm = normalize_hotel_name(lead.hotel_name)
+                if new_norm and new_norm != (lead.hotel_name_normalized or ""):
+                    collision_q = await session.execute(
+                        select(PotentialLead.id).where(
+                            PotentialLead.hotel_name_normalized == new_norm,
+                            PotentialLead.id != lead_id,
+                        )
+                    )
+                    collision_id = collision_q.scalar_one_or_none()
+                    if collision_id is None:
+                        lead.hotel_name_normalized = new_norm
+                    else:
+                        logger.warning(
+                            f"Smart Fill: skipping hotel_name_normalized update "
+                            f"for lead {lead_id} — collision with lead {collision_id} "
+                            f"(both normalize to {new_norm!r}). Run dedup."
+                        )
 
-                # ── Stage 8: rescore + revenue ──
                 await emit_stage(8, "Rescoring lead")
                 try:
                     from app.services.rescore import rescore_lead
@@ -2253,11 +2282,7 @@ async def smart_fill_stream(lead_id: int, request: Request, mode: str = "smart")
                     except Exception as e:
                         logger.warning(f"Revenue update failed: {e}")
 
-                # ── Auto-transfer if Smart Fill discovered the lead is
-                #    actually 0-3 months out (or already opened). At that
-                #    point it belongs in existing_hotels, not here.
-                #    transfer_lead handles dedup/merge against existing_hotels
-                #    and hard-deletes the source lead row.
+                # Auto-transfer to existing_hotels if opening date is now <3mo
                 try:
                     fresh_label = get_timeline_label(lead.opening_date or "")
                     if fresh_label == "EXPIRED":
@@ -2271,11 +2296,9 @@ async def smart_fill_stream(lead_id: int, request: Request, mode: str = "smart")
                             eh_id = tr.get("existing_hotel_id")
                             logger.info(
                                 f"Smart Fill auto-transferred lead #{lead_id} "
-                                f"→ existing_hotel #{eh_id} "
-                                f"({tr['status']}; opening_date={lead.opening_date} "
-                                f"is now < 3 months out)"
+                                f"→ existing_hotel #{eh_id}"
                             )
-                            await event_queue.put(
+                            emit_terminal(
                                 {
                                     "type": "auto_transferred",
                                     "lead_id": lead_id,
@@ -2288,9 +2311,8 @@ async def smart_fill_stream(lead_id: int, request: Request, mode: str = "smart")
                         f"Smart Fill auto-transfer check failed for #{lead_id}: {e}"
                     )
 
-            # ── Final complete event ──
-            duration = round(time.monotonic() - start_time, 1)
-            await event_queue.put(
+            duration = round(time.monotonic() - job.started_at, 1)
+            emit_terminal(
                 {
                     "type": "complete",
                     "pct": 100,
@@ -2304,51 +2326,131 @@ async def smart_fill_stream(lead_id: int, request: Request, mode: str = "smart")
                 }
             )
 
+        except asyncio.CancelledError:
+            emit_terminal(
+                {
+                    "type": "error",
+                    "message": "Smart Fill cancelled",
+                    "cancelled": True,
+                }
+            )
+            raise
         except Exception as e:
-            logger.exception(f"Smart Fill SSE failed for lead {lead_id}: {e}")
-            await event_queue.put(
+            logger.exception(f"Smart Fill task failed for lead {lead_id}: {e}")
+            emit_terminal(
                 {
                     "type": "error",
                     "message": f"Smart Fill failed: {str(e)[:200]}",
                 }
             )
 
-    # Register this (lead, mode) as actively smart-filling. Same lifetime
-    # rule as enrich-stream: guard is RELEASED when the background task
-    # actually finishes, NOT when the stream disconnects. This prevents
-    # navigate-away-then-return from firing a duplicate Smart Fill on the
-    # same lead while the first is still running.
-    _active_smart_fills.add(key)
+    job.task = asyncio.create_task(run_smart_fill())
 
-    task = asyncio.create_task(run_smart_fill())
+    def _cleanup(_t):
+        _smart_fill_jobs.pop(lead_id, None)
+        logger.info(f"Smart Fill job for lead {lead_id} ({mode}) cleaned up")
 
-    def _release_smart_fill_guard(_t):
-        _active_smart_fills.discard(key)
-        logger.info(f"Smart Fill guard released for lead {lead_id} ({mode})")
+    job.task.add_done_callback(_cleanup)
+    _smart_fill_jobs[lead_id] = job
+    return job
 
-    task.add_done_callback(_release_smart_fill_guard)
+
+@router.get("/api/leads/{lead_id}/smart-fill-status", tags=["Leads"])
+async def smart_fill_status(lead_id: int):
+    """Cheap probe: is a Smart Fill currently running for this lead?"""
+    job = _smart_fill_jobs.get(lead_id)
+    if job is None:
+        return {"running": False, "mode": None}
+    return {
+        "running": True,
+        "mode": job.mode,
+        "watchers": len(job.subscribers),
+    }
+
+
+@router.get("/api/leads/{lead_id}/smart-fill-stream", tags=["Leads"])
+async def smart_fill_stream(lead_id: int, request: Request, mode: str = "smart"):
+    """SSE streaming for Smart Fill / Full Refresh.
+
+    Behavior (mirrors enrich-stream):
+      - First connection for a lead → starts the background task.
+      - Subsequent connections (navigate away + back, second tab) →
+        attach as additional watchers of the SAME running task. Receive
+        the most recent stage event immediately so the progress bar shows
+        real state, not "Connecting...".
+      - Client disconnect does NOT cancel the task. Background work
+        continues; subscribers list shrinks by one.
+    """
+    from app.models.potential_lead import PotentialLead
+    from fastapi.responses import StreamingResponse
+
+    # ── Get-or-create the job for this lead ──
+    existing = _smart_fill_jobs.get(lead_id)
+    if existing is not None:
+        job = existing
+        logger.info(
+            f"Attaching new watcher to running Smart Fill for lead {lead_id} "
+            f"(now {len(job.subscribers) + 1} watcher(s))"
+        )
+    else:
+        async with async_session() as session:
+            result = await session.execute(
+                select(PotentialLead).where(PotentialLead.id == lead_id)
+            )
+            lead = result.scalar_one_or_none()
+            if not lead:
+                raise HTTPException(status_code=404, detail="Lead not found")
+            lead_snapshot = {
+                "hotel_name": lead.hotel_name,
+                "city": lead.city or "",
+                "state": lead.state or "",
+                "country": lead.country or "",
+                "brand": lead.brand or "",
+                "opening_date": lead.opening_date or "",
+                "brand_tier": lead.brand_tier or "",
+                "room_count": lead.room_count or 0,
+                "search_name": getattr(lead, "search_name", None) or "",
+            }
+
+        job = await _start_smart_fill_job(lead_id, mode, lead_snapshot)
+        logger.info(f"Started new Smart Fill job for lead {lead_id} (mode={mode})")
+
+    # ── Subscribe this connection to the job ──
+    sub_queue: asyncio.Queue = asyncio.Queue(maxsize=100)
+    job.subscribers.add(sub_queue)
+
+    # Replay current state to this subscriber so reconnecting users see
+    # real progress, not "Connecting...". Refresh elapsed_s against
+    # job.started_at so the frontend's timer anchor is correct.
+    if job.current_event is not None:
+        replay = dict(job.current_event)
+        if "elapsed_s" in replay:
+            replay["elapsed_s"] = round(time.monotonic() - job.started_at, 1)
+        try:
+            sub_queue.put_nowait(replay)
+        except asyncio.QueueFull:
+            pass
 
     async def event_stream():
-        yield f'data: {json.dumps({"type": "started", "total": TOTAL_STAGES})}\n\n'
+        yield f'data: {json.dumps({"type": "started", "total": 8})}\n\n'
         try:
             while True:
-                # Client navigated away — let the task finish in background.
-                # Don't cancel it; contacts/fields still need to be saved.
                 if await request.is_disconnected():
                     logger.info(
-                        f"Smart Fill stream client disconnected for lead {lead_id}; "
-                        f"background task continues."
+                        f"Watcher disconnected from lead {lead_id} Smart Fill; "
+                        f"background task continues. "
+                        f"({len(job.subscribers) - 1} watcher(s) remain)"
                     )
                     return
                 try:
-                    event = await asyncio.wait_for(event_queue.get(), timeout=10.0)
+                    event = await asyncio.wait_for(sub_queue.get(), timeout=10.0)
                 except asyncio.TimeoutError:
                     yield f'data: {json.dumps({"type": "ping"})}\n\n'
-                    if task.done() and event_queue.empty():
+                    if job.task and job.task.done() and sub_queue.empty():
                         return
                     continue
                 yield f"data: {json.dumps(event)}\n\n"
-                if event["type"] in ("complete", "error"):
+                if event["type"] in ("complete", "error", "auto_transferred"):
                     return
         except asyncio.CancelledError:
             logger.info(
@@ -2362,7 +2464,9 @@ async def smart_fill_stream(lead_id: int, request: Request, mode: str = "smart")
                 yield f'data: {json.dumps({"type": "error", "message": str(e)[:200]})}\n\n'
             except Exception:
                 pass
-        # NOTE: no finally block. task.add_done_callback handles guard release.
+        finally:
+            # Unsubscribe THIS connection — task + other subscribers unaffected.
+            job.subscribers.discard(sub_queue)
 
     return StreamingResponse(
         event_stream(),
@@ -2483,9 +2587,9 @@ def _apply_enrichment_to_lead(lead, enriched: dict, mode: str, get_timeline_labe
         elif not (lead.brand or "").strip() and new_brand:
             lead.brand = new_brand
 
-    for field in ("city", "state", "country", "description"):
-        if field in enriched and (mode == "full" or not getattr(lead, field, None)):
-            setattr(lead, field, enriched[field])
+    for fld in ("city", "state", "country", "description"):
+        if fld in enriched and (mode == "full" or not getattr(lead, fld, None)):
+            setattr(lead, fld, enriched[fld])
 
     if "official_name" in enriched:
         lead.hotel_name = enriched["official_name"]
@@ -2494,6 +2598,6 @@ def _apply_enrichment_to_lead(lead, enriched: dict, mode: str, get_timeline_labe
     if "former_names" in enriched:
         lead.former_names = enriched["former_names"]
 
-    for field in ("management_company", "owner", "developer", "address", "zip_code"):
-        if field in enriched and (mode == "full" or not getattr(lead, field, None)):
-            setattr(lead, field, enriched[field])
+    for fld in ("management_company", "owner", "developer", "address", "zip_code"):
+        if fld in enriched and (mode == "full" or not getattr(lead, fld, None)):
+            setattr(lead, fld, enriched[fld])

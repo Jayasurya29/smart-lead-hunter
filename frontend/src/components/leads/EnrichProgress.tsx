@@ -110,7 +110,10 @@ export default function EnrichProgress({
     // Subscribe to the SSE stream — basePath dictates which parent kind
     // (lead or hotel) we're enriching. Both endpoints emit the same
     // event shape, so the UI logic below is identical for both.
-    const es = new EventSource(`${basePath}/${leadId}/enrich-stream`)
+    const es = new EventSource(
+      `${basePath}/${leadId}/enrich-stream`,
+      { withCredentials: true },
+    )
     esRef.current = es
 
     es.onmessage = (e) => {

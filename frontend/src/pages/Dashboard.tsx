@@ -145,18 +145,46 @@ export default function Dashboard() {
             onClick={async () => {
               setExporting(true)
               try {
-                const params = new URLSearchParams()
-                if (filters.timeline) params.set('timeline', filters.timeline)
-                if (filters.tier) params.set('tier', filters.tier)
-                const res = await api.get(`/api/leads/export?${params}`, { responseType: 'blob' })
-                const url = URL.createObjectURL(new Blob([res.data]))
+                const queryParams: Record<string, string> = {}
+                // Send tab status (Pipeline/Approved/Rejected) so the
+                // export's title banner + filename match the user's view
+                const STATUS_BY_TAB: Record<string, string> = {
+                  pipeline: 'new', approved: 'approved', rejected: 'rejected',
+                }
+                if (STATUS_BY_TAB[tab]) queryParams.status = STATUS_BY_TAB[tab]
+                if (filters.timeline) queryParams.timeline = filters.timeline
+                if (filters.tier)     queryParams.tier     = filters.tier
+                if (filters.location) queryParams.location = filters.location
+                if (search)           queryParams.search   = search
+                const res = await api.get('/leads/export', {
+                  params: queryParams,
+                  responseType: 'blob',
+                  headers: { Accept: '*/*' },
+                })
+                const blob = new Blob([res.data], {
+                  type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                })
+                // Pull the filename the backend suggested so we get
+                // "JA_NewHotels_Pipeline_2026-04-29.xlsx" not the generic
+                // version
+                let filename = `JA_NewHotels_${new Date().toISOString().split('T')[0]}.xlsx`
+                const cd = res.headers?.['content-disposition'] || ''
+                const match = /filename="?([^"]+)"?/i.exec(cd)
+                if (match?.[1]) filename = match[1]
+                const url = URL.createObjectURL(blob)
                 const a = document.createElement('a')
                 a.href = url
-                a.download = `leads_export_${new Date().toISOString().split('T')[0]}.xlsx`
+                a.download = filename
+                document.body.appendChild(a)
                 a.click()
+                document.body.removeChild(a)
                 URL.revokeObjectURL(url)
-              } catch(e) { console.error('Export failed', e) }
-              finally { setExporting(false) }
+              } catch (e) {
+                console.error('Export failed', e)
+                alert('Export failed — check console for details.')
+              } finally {
+                setExporting(false)
+              }
             }}
             disabled={exporting}
             className="flex items-center gap-1.5 px-3 h-9 text-xs font-semibold text-stone-600 bg-white border border-stone-200 rounded-lg hover:bg-emerald-50 hover:text-emerald-700 hover:border-emerald-300 transition disabled:opacity-50 flex-shrink-0"

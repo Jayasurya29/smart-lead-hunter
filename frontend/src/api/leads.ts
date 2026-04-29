@@ -199,6 +199,17 @@ export async function cancelEnrichment(leadId: number): Promise<any> {
 /* Cheap polling endpoint — is an enrichment running for this lead?
    Used on lead detail mount to decide whether to attach to existing
    progress or show the "Run Enrichment" button. */
+/* Get current Smart Fill (in-flight) status for a lead.
+   Used on lead detail mount to decide whether to attach to a running
+   Smart Fill or show the idle Smart Fill button. */
+export async function getSmartFillStatus(leadId: number): Promise<{ running: boolean; mode: string | null }> {
+  const { data } = await api.get(`/api/leads/${leadId}/smart-fill-status`)
+  return data
+}
+
+/* Get current contact enrichment status for a lead.
+   Used on lead detail mount to decide whether to attach to existing
+   progress or show the "Run Enrichment" button. */
 export async function getEnrichmentStatus(leadId: number): Promise<any> {
   const { data } = await api.get(`/api/dashboard/leads/${leadId}/enrich-status`)
   return data
