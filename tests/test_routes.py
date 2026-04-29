@@ -45,14 +45,26 @@ class TestHealthEndpoints:
 
     @pytest.mark.asyncio
     async def test_root_returns_app_info(self, client):
-        # Root now serves the built React frontend (index.html). The old
-        # JSON status response was replaced when the SPA was added.
+        # Root behavior depends on whether the built React frontend is
+        # present at frontend/dist/index.html:
+        #   - In dev / CI without a build → falls back to JSON status response
+        #   - In production with a build → serves the SPA shell (HTML)
+        # Either is valid; we just confirm a 200 and recognizable content.
         resp = await client.get("/")
         assert resp.status_code == 200
-        body = resp.text.lower()
-        # Confirm we're getting the React app shell
-        assert "<!doctype html>" in body or "<html" in body
-        assert 'id="root"' in body
+
+        body = resp.text
+        content_type = resp.headers.get("content-type", "").lower()
+
+        if "json" in content_type:
+            data = resp.json()
+            assert data.get("name", "").lower().startswith("smart lead")
+            assert data.get("status") == "running"
+        else:
+            # HTML SPA shell
+            lower = body.lower()
+            assert "<!doctype html>" in lower or "<html" in lower
+            assert 'id="root"' in body
 
     @pytest.mark.asyncio
     async def test_docs_accessible(self, client):
