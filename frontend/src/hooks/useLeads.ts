@@ -18,13 +18,14 @@ export function useLeads(
   page: number = 1,
   search: string = '',
   filters: Record<string, string> = {},
+  per_page: number = 25,
 ) {
   return useQuery({
-    queryKey: ['leads', tab, page, search, filters],
+    queryKey: ['leads', tab, page, search, filters, per_page],
     queryFn: () => fetchLeads({
       status: STATUS_MAP[tab],
       page,
-      per_page: 25,
+      per_page,
       search: search || undefined,
       location:   filters.location || undefined,
       brand_tier: filters.tier || undefined,

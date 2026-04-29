@@ -318,8 +318,7 @@ class TestAppSettings:
             + settings.score_timing_max
             + settings.score_room_count_max
             + settings.score_contact_max
-            + settings.score_new_build_max
-            + settings.score_existing_client_max
+            + settings.score_hotel_type_max
         )
         assert total == 100, f"Scoring weights sum to {total}, expected 100"
 

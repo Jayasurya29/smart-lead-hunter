@@ -23,6 +23,8 @@ interface Props {
   onSort?: (sort: string) => void
   currentSort?: string
   isLoading?: boolean
+  perPage?: number
+  onPerPageChange?: (n: number) => void
 }
 
 /* ── Sort config ── */
@@ -146,6 +148,7 @@ function sortLeads(leads: Lead[], sort: string): Lead[] {
 export default function LeadTable({
   leads, total, page, totalPages, tab,
   selectedId, onSelect, onPageChange, onSort, currentSort = 'newest', isLoading,
+  perPage, onPerPageChange,
 }: Props) {
   const approveMut = useApproveLead()
   const rejectMut  = useRejectLead()
@@ -363,54 +366,79 @@ export default function LeadTable({
         </table>
       </div>
 
-      {/* ── Page Numbers ── */}
-      {totalPages > 1 && (
+      {/* ── Pagination row + per-page selector ── */}
+      {(totalPages > 1 || onPerPageChange) && (
         <div className="flex items-center justify-between px-4 py-2.5 border-t border-slate-100 bg-white/80 flex-shrink-0">
-          <span className="text-xs text-stone-400">
-            Page {page} of {totalPages} · {total} lead{total !== 1 ? 's' : ''}
-          </span>
-          <div className="flex items-center gap-1">
-            <button
-              onClick={() => onPageChange(page - 1)}
-              disabled={page <= 1}
-              className="p-1.5 rounded hover:bg-stone-100 disabled:opacity-30 disabled:cursor-not-allowed transition"
-            >
-              <ChevronLeft className="w-4 h-4 text-stone-500" />
-            </button>
-            {Array.from({ length: Math.min(totalPages, 7) }).map((_, i) => {
-              let pageNum: number
-              if (totalPages <= 7) {
-                pageNum = i + 1
-              } else if (page <= 4) {
-                pageNum = i + 1
-              } else if (page >= totalPages - 3) {
-                pageNum = totalPages - 6 + i
-              } else {
-                pageNum = page - 3 + i
-              }
-              return (
-                <button
-                  key={pageNum}
-                  onClick={() => onPageChange(pageNum)}
-                  className={cn(
-                    'w-8 h-8 rounded text-xs font-semibold transition',
-                    page === pageNum
-                      ? 'bg-navy-900 text-white'
-                      : 'text-stone-500 hover:bg-stone-100',
-                  )}
+          {/* Left: page-size selector + count summary */}
+          <div className="flex items-center gap-3">
+            {onPerPageChange && perPage !== undefined && (
+              <div className="flex items-center gap-1.5">
+                <label className="text-2xs font-semibold text-stone-400 uppercase tracking-wider">
+                  Show
+                </label>
+                <select
+                  value={perPage}
+                  onChange={(e) => onPerPageChange(Number(e.target.value))}
+                  className="h-7 px-2 pr-6 text-xs font-semibold bg-white text-navy-900 border border-stone-200 rounded cursor-pointer hover:border-stone-300 focus:outline-none focus:border-navy-400 focus:ring-2 focus:ring-navy-100 transition appearance-none bg-no-repeat bg-right"
+                  style={{ backgroundImage: 'url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns=\'http://www.w3.org/2000/svg\' width=\'10\' height=\'6\' viewBox=\'0 0 10 6\'%3E%3Cpath d=\'M5 6L0 0h10z\' fill=\'%2378716c\'/%3E%3C/svg%3E")', backgroundPositionX: 'calc(100% - 6px)' }}
+                  title="Leads per page"
                 >
-                  {pageNum}
-                </button>
-              )
-            })}
-            <button
-              onClick={() => onPageChange(page + 1)}
-              disabled={page >= totalPages}
-              className="p-1.5 rounded hover:bg-stone-100 disabled:opacity-30 disabled:cursor-not-allowed transition"
-            >
-              <ChevronRight className="w-4 h-4 text-stone-500" />
-            </button>
+                  <option value={25}>25</option>
+                  <option value={50}>50</option>
+                  <option value={100}>100</option>
+                </select>
+              </div>
+            )}
+            <span className="text-xs text-stone-400">
+              Page {page} of {totalPages} · {total} lead{total !== 1 ? 's' : ''}
+            </span>
           </div>
+
+          {/* Right: page navigation */}
+          {totalPages > 1 && (
+            <div className="flex items-center gap-1">
+              <button
+                onClick={() => onPageChange(page - 1)}
+                disabled={page <= 1}
+                className="p-1.5 rounded hover:bg-stone-100 disabled:opacity-30 disabled:cursor-not-allowed transition"
+              >
+                <ChevronLeft className="w-4 h-4 text-stone-500" />
+              </button>
+              {Array.from({ length: Math.min(totalPages, 7) }).map((_, i) => {
+                let pageNum: number
+                if (totalPages <= 7) {
+                  pageNum = i + 1
+                } else if (page <= 4) {
+                  pageNum = i + 1
+                } else if (page >= totalPages - 3) {
+                  pageNum = totalPages - 6 + i
+                } else {
+                  pageNum = page - 3 + i
+                }
+                return (
+                  <button
+                    key={pageNum}
+                    onClick={() => onPageChange(pageNum)}
+                    className={cn(
+                      'w-8 h-8 rounded text-xs font-semibold transition',
+                      page === pageNum
+                        ? 'bg-navy-900 text-white'
+                        : 'text-stone-500 hover:bg-stone-100',
+                    )}
+                  >
+                    {pageNum}
+                  </button>
+                )
+              })}
+              <button
+                onClick={() => onPageChange(page + 1)}
+                disabled={page >= totalPages}
+                className="p-1.5 rounded hover:bg-stone-100 disabled:opacity-30 disabled:cursor-not-allowed transition"
+              >
+                <ChevronRight className="w-4 h-4 text-stone-500" />
+              </button>
+            </div>
+          )}
         </div>
       )}
 

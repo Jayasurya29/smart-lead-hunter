@@ -373,6 +373,7 @@ async def process_scraped_content(
                         "timing": breakdown.timing,
                         "room_count": breakdown.room_count,
                         "contact": breakdown.contact,
+                        "hotel_type": breakdown.hotel_type,
                     }
 
                     lead_id = await save_lead_to_db(hotel, session=session)

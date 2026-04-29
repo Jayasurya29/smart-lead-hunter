@@ -3,22 +3,29 @@ SMART LEAD HUNTER - LEAD SCORING SYSTEM
 ========================================
 Complete scoring system for hotel leads (100 points max)
 
-Last Updated: February 2026
+Last Updated: April 2026
 
 M-07 FIX: Brand matching now uses word-boundary regex for short brand names
 (<=4 chars) to prevent false positives. "Trump International" no longer
 matches "tru" (Tier 5), "The Glorious Hotel" no longer matches "glo", etc.
 
-SCORING BREAKDOWN:
+SCORING BREAKDOWN (revised 2026-04-28):
 - Brand Tier:           25 pts (25%) - Quality + uniform variety
+- Timing:               25 pts (25%) - HOT (6-12mo) is sweet spot
 - Location:             20 pts (20%) - Your market = your edge
-- Timing:               25 pts (25%) - Urgency = action NOW
 - Room Count:           15 pts (15%) - Order size potential
-- Contact Info:          8 pts (8%)  - Sales efficiency
-- New Build:             4 pts (4%)  - Order certainty
-- Existing Client:       3 pts (3%)  - Relationship bonus
+- Hotel Type:            9 pts (9%)  - Resort vs hotel role mix
+- Contact Info:          6 pts (6%)  - Name + email signals readiness
 
 TOTAL:                 100 pts
+
+Retired components (2026-04-28):
+- New Build (4 pts) — was double-counted with timing + project_type
+- Existing Client (3 pts) — was double-counted with brand_tier; the
+                            "client list" was just luxury parent brands
+                            already getting 25 pts from Tier 1 anyway
+- Phone (2 pts of contact) — unfairly penalized pre-opening hotels
+                             that don't have published phone numbers yet
 
 SKIP FILTERS (Don't Save):
 - Tier 5 Budget brands (Hampton, Holiday Inn, etc.)
@@ -1166,13 +1173,13 @@ def get_timing_score(opening_date: str = None) -> Tuple[int, str, int]:
     """
     Score based on opening timing relative to TODAY.
 
-    Rules (as of Feb 2026):
-    - Past / already opened    → 0 pts, EXPIRED (should not save)
-    - 1-2 months out           → 5 pts, LONG SHOT (probably committed)
-    - 3-6 months out           → 25 pts, HOT (actively sourcing uniforms)
-    - 7-12 months out          → 18 pts, WARM (in planning phase)
-    - 13-24 months out         → 12 pts, PIPELINE (worth tracking)
-    - 25+ months out           → 6 pts, EARLY (too far out)
+    Aligned to timeline_label buckets in app/services/utils.py:
+      - <3 months         → 0 pts, EXPIRED (too late, routes to existing_hotels)
+      - 3-6 months        → 22 pts, URGENT (tight but possible)
+      - 6-12 months       → 25 pts, HOT (sweet spot — active decision window)
+      - 12-18 months      → 16 pts, WARM (planning phase)
+      - 18+ months        → 10 pts, COOL (too early, watchlist)
+      - Unknown / TBD     → 4 pts
 
     Returns: (points, timing_tier, year)
     """
@@ -1209,19 +1216,23 @@ def get_timing_score(opening_date: str = None) -> Tuple[int, str, int]:
     # Calculate months until opening
     months_out = (year - current_year) * 12 + (opening_month - current_month)
 
-    # Score by months out
+    # Score by months out — aligned to timeline_label buckets in
+    # app/services/utils.py:get_timeline_label(). Business rule: uniform
+    # sales cycle is 6-12 months, so HOT is the sweet spot (top score).
+    # URGENT (3-6mo) is tight but possible, WARM (12-18mo) is planning,
+    # COOL (18+) is too early.
     if months_out <= 0:
         return (0, f"{year} - EXPIRED", year)
-    elif months_out <= 2:
-        return (5, f"{year} - Long Shot", year)
-    elif months_out <= 6:
-        return (25, f"{year} - HOT (sourcing now)", year)
-    elif months_out <= 12:
-        return (18, f"{year} - Warm (planning)", year)
-    elif months_out <= 24:
-        return (12, f"{year} - Pipeline", year)
+    elif months_out < 3:
+        return (0, f"{year} - EXPIRED (too late)", year)
+    elif months_out < 6:
+        return (22, f"{year} - URGENT (tight but possible)", year)
+    elif months_out < 12:
+        return (25, f"{year} - HOT (sweet spot)", year)
+    elif months_out < 18:
+        return (16, f"{year} - WARM (planning)", year)
     else:
-        return (6, f"{year}+ - Early", year)
+        return (10, f"{year} - COOL (early)", year)
 
 
 # =============================================================================
@@ -1236,7 +1247,7 @@ def get_room_count_score(room_count: int = None) -> Tuple[int, str]:
     Returns: (points, size_tier)
     """
     if not room_count:
-        return (2, "Unknown")
+        return (4, "Unknown")
 
     try:
         rooms = int(room_count)
@@ -1246,20 +1257,20 @@ def get_room_count_score(room_count: int = None) -> Tuple[int, str]:
             if match:
                 rooms = int(match.group())
             else:
-                return (2, "Unknown")
+                return (4, "Unknown")
         else:
-            return (2, "Unknown")
+            return (4, "Unknown")
 
     if rooms >= 500:
         return (15, "500+ rooms - Mega")
     elif rooms >= 300:
-        return (12, "300-499 rooms - Large")
-    elif rooms >= 150:
-        return (9, "150-299 rooms - Medium-Large")
+        return (13, "300-499 rooms - Large")
+    elif rooms >= 200:
+        return (11, "200-299 rooms - Medium-Large")
     elif rooms >= 100:
-        return (6, "100-149 rooms - Medium")
+        return (8, "100-199 rooms - Medium")
     elif rooms >= 50:
-        return (4, "50-99 rooms - Boutique")
+        return (5, "50-99 rooms - Boutique")
     else:
         return (2, "<50 rooms - Small")
 
@@ -1273,7 +1284,13 @@ def get_contact_score(
     contact_name: str = None, contact_email: str = None, contact_phone: str = None
 ) -> Tuple[int, str, Dict]:
     """
-    Score based on contact information availability.
+    Score based on contact information availability. (6 pts max)
+
+    Phone removed 2026-04-28 — pre-opening hotels rarely have published
+    phone numbers, so penalizing leads for missing phone was unfair.
+    Email + name are the real signals for outreach readiness. The phone
+    parameter is kept in the signature for backwards compatibility but
+    is no longer scored.
     """
     points = 0
     breakdown = {}
@@ -1292,21 +1309,9 @@ def get_contact_score(
         points += 3
         breakdown["email"] = 3
 
-    # Check for phone
-    if (
-        contact_phone
-        and str(contact_phone).strip()
-        and str(contact_phone).lower() not in ["none", "unknown", "n/a", ""]
-    ):
-        if re.search(r"\d{3,}", str(contact_phone)):
-            points += 2
-            breakdown["phone"] = 2
-
     # Determine tier description
-    if points == 8:
+    if points == 6:
         tier = "Full Contact - Ready!"
-    elif points >= 6:
-        tier = "Good Contact Info"
     elif points >= 3:
         tier = "Partial Contact"
     else:
@@ -1426,6 +1431,49 @@ def get_existing_client_score(
 
 
 # =============================================================================
+# HOTEL TYPE SCORING (9 pts max — added 2026-04-28)
+# =============================================================================
+#
+# Mirrors the existing-hotels scorer (10 pts there, 9 here for fit). Hotel
+# type drives uniform-buying behavior: resorts have more F&B/spa/recreation
+# headcount per room, all-inclusives even more so. Urban hotels are smaller
+# uniform deals at the same room count.
+#
+# Substring matching on freeform values like "luxury hotel and residences",
+# "all-inclusive resort", "boutique hotel". Coverage is excellent on the
+# new-hotels side (97% populated; only 12 NULLs out of 369).
+
+
+def get_hotel_type_score(hotel_type: str = None) -> Tuple[int, str]:
+    """Return (points, tier_label).
+
+    Substring matching handles freeform values that come out of the
+    Gemini extraction pipeline ("luxury hotel", "Boutique resort",
+    "Resort and Residences", etc.).
+    """
+    if not hotel_type:
+        return (4, "Unknown")
+
+    t = str(hotel_type).strip().lower()
+    if not t:
+        return (4, "Unknown")
+
+    if "all-inclusive" in t or "all_inclusive" in t or "all inclusive" in t:
+        return (9, "All-Inclusive")
+    if "resort" in t:
+        return (9, "Resort")
+    if "boutique" in t:
+        return (8, "Boutique")
+    if "lodge" in t:
+        return (6, "Lodge")
+    if "inn" in t:
+        return (4, "Inn")
+    if "hotel" in t:
+        return (6, "Hotel")
+    return (4, f"Unknown ({hotel_type})")
+
+
+# =============================================================================
 # MAIN SCORING FUNCTION
 # =============================================================================
 
@@ -1443,6 +1491,7 @@ def calculate_lead_score(
     project_type: str = None,
     description: str = None,
     brand: str = None,
+    hotel_type: str = None,
 ) -> Dict:
     """
     Calculate total lead score and determine if lead should be saved.
@@ -1558,7 +1607,7 @@ def calculate_lead_score(
     result["breakdown"]["rooms"] = {"points": room_points, "tier": room_tier}
     result["total_score"] += room_points
 
-    # 5. CONTACT INFO (8 pts max)
+    # 5. CONTACT INFO (6 pts max — phone removed 2026-04-28)
     contact_points, contact_tier, contact_breakdown = get_contact_score(
         contact_name, contact_email, contact_phone
     )
@@ -1569,18 +1618,16 @@ def calculate_lead_score(
     }
     result["total_score"] += contact_points
 
-    # 6. NEW BUILD (4 pts max)
-    build_points, build_tier = get_new_build_score(project_type, description)
-    result["breakdown"]["new_build"] = {"points": build_points, "tier": build_tier}
-    result["total_score"] += build_points
-
-    # 7. EXISTING CLIENT (3 pts max)
-    client_points, client_tier = get_existing_client_score(hotel_name, brand)
-    result["breakdown"]["existing_client"] = {
-        "points": client_points,
-        "tier": client_tier,
+    # 6. HOTEL TYPE (9 pts max — replaced new_build + existing_client 2026-04-28)
+    # Substring matching on freeform values like "luxury hotel and residences",
+    # "all-inclusive resort", "boutique hotel". Mirrors the existing-hotels
+    # scorer's hotel_type component (10 pts there, 9 pts here for consistency).
+    hotel_type_points, hotel_type_tier = get_hotel_type_score(hotel_type)
+    result["breakdown"]["hotel_type"] = {
+        "points": hotel_type_points,
+        "tier": hotel_type_tier,
     }
-    result["total_score"] += client_points
+    result["total_score"] += hotel_type_points
 
     # Determine score tier
     if result["total_score"] >= SCORE_HOT_THRESHOLD:
@@ -1687,6 +1734,7 @@ class LeadScorer:
             project_type=hotel.get("project_type"),
             description=hotel.get("description"),
             brand=hotel.get("brand"),
+            hotel_type=hotel.get("hotel_type") or hotel.get("property_type"),
         )
 
         # Convert to ScoreBreakdown object
@@ -1706,8 +1754,12 @@ class LeadScorer:
             timing=breakdown.get("timing", {}).get("points", 0),
             room_count=breakdown.get("rooms", {}).get("points", 0),
             contact=breakdown.get("contact", {}).get("points", 0),
-            new_build=breakdown.get("new_build", {}).get("points", 0),
-            existing_client=breakdown.get("existing_client", {}).get("points", 0),
+            # new_build + existing_client retired 2026-04-28; values
+            # default to 0 for backwards-compat with any callers still
+            # reading these attributes off ScoreBreakdown.
+            new_build=0,
+            existing_client=0,
+            hotel_type=breakdown.get("hotel_type", {}).get("points", 0),
         )
 
     def is_budget_brand(self, hotel: Dict) -> bool:
@@ -1749,8 +1801,9 @@ class ScoreBreakdown:
         timing: int = 0,
         room_count: int = 0,
         contact: int = 0,
-        new_build: int = 0,
-        existing_client: int = 0,
+        new_build: int = 0,  # retired 2026-04-28, kept for compat
+        existing_client: int = 0,  # retired 2026-04-28, kept for compat
+        hotel_type: int = 0,
     ):
         self.total = total
         self.should_save = should_save
@@ -1766,6 +1819,7 @@ class ScoreBreakdown:
         self.contact = contact
         self.new_build = new_build
         self.existing_client = existing_client
+        self.hotel_type = hotel_type
 
     def to_dict(self) -> Dict:
         """Convert to dictionary for JSON storage"""
@@ -1782,6 +1836,9 @@ class ScoreBreakdown:
             "timing": self.timing,
             "room_count": self.room_count,
             "contact": self.contact,
+            "hotel_type": self.hotel_type,
+            # Retired components — included as 0 for backwards compat with
+            # any UI / reporting code that reads these fields.
             "new_build": self.new_build,
             "existing_client": self.existing_client,
         }
@@ -1836,12 +1893,10 @@ def format_score_breakdown(result: Dict) -> str:
     lines.append(
         f"Contact:   {breakdown['contact']['points']:>2} pts - {breakdown['contact']['tier']}"
     )
-    lines.append(
-        f"Build:     {breakdown['new_build']['points']:>2} pts - {breakdown['new_build']['tier']}"
-    )
-    lines.append(
-        f"Client:    {breakdown['existing_client']['points']:>2} pts - {breakdown['existing_client']['tier']}"
-    )
+    if "hotel_type" in breakdown:
+        lines.append(
+            f"Type:      {breakdown['hotel_type']['points']:>2} pts - {breakdown['hotel_type']['tier']}"
+        )
 
     return "\n".join(lines)
 

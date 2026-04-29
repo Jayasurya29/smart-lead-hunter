@@ -15,6 +15,7 @@ from sqlalchemy import select, update, and_
 
 from app.database import async_session
 from app.models.potential_lead import PotentialLead
+from app.models.existing_hotel import ExistingHotel
 from app.services.revenue_calculator import (
     calculate_annual_recurring,
     calculate_new_opening,
@@ -235,4 +236,118 @@ async def bulk_update_revenue(force: bool = False) -> dict:
         "skipped": skipped,
         "failed": failed,
         "total": len(leads),
+    }
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Existing Hotels — equivalents of the lead-side functions
+# ─────────────────────────────────────────────────────────────────────────────
+#
+# `calculate_for_lead` is already a pure function — it works on any object
+# with brand_tier / brand / state / city / country / location_type /
+# hotel_type / room_count attributes. ExistingHotel has all of these
+# (schema parity from migration 018), so it can be reused as-is. We only
+# need DB-aware wrappers for ExistingHotel rows.
+#
+# Hooked from:
+#   - lead_transfer.py  → after a lead transfers, update revenue on the
+#                         new existing_hotel row so it lands on Pipeline
+#                         with $$ already shown
+#   - routes/existing_hotels.py Smart Fill apply path → after applying
+#                         changes that affect revenue (room_count,
+#                         brand_tier, hotel_type) auto-update revenue
+#   - scripts/backfill_revenue.py → one-shot to populate all 2,334 rows
+
+
+async def update_hotel_revenue(hotel_id: int) -> tuple[float | None, float | None]:
+    """Calculate and store revenue for a single existing_hotel.
+
+    Returns (opening, annual). Each None if the row is missing required
+    inputs (room_count, tier).
+
+    Mirrors update_lead_revenue but on existing_hotels.
+    """
+    async with async_session() as session:
+        result = await session.execute(
+            select(ExistingHotel).where(ExistingHotel.id == hotel_id)
+        )
+        hotel = result.scalar_one_or_none()
+        if not hotel:
+            return None, None
+
+        opening, annual = calculate_for_lead(hotel)
+
+        # Only write if values changed
+        if opening != hotel.revenue_opening or annual != hotel.revenue_annual:
+            await session.execute(
+                update(ExistingHotel)
+                .where(ExistingHotel.id == hotel_id)
+                .values(
+                    revenue_opening=opening,
+                    revenue_annual=annual,
+                    estimated_revenue=annual,  # legacy column mirror
+                )
+            )
+            await session.commit()
+            if opening is not None:
+                logger.info(
+                    f"Revenue updated for existing_hotel {hotel_id} "
+                    f"({hotel.hotel_name or hotel.name}): "
+                    f"opening=${opening:,.0f} annual=${annual:,.0f}"
+                )
+
+        return opening, annual
+
+
+async def bulk_update_existing_revenue(force: bool = False) -> dict:
+    """Calculate revenue for all existing_hotels missing it (or all if
+    force=True). Used by scripts/backfill_revenue.py for the one-shot
+    backfill. Returns summary stats."""
+    async with async_session() as session:
+        if force:
+            result = await session.execute(select(ExistingHotel))
+        else:
+            result = await session.execute(
+                select(ExistingHotel).where(
+                    and_(
+                        ExistingHotel.revenue_opening.is_(None),
+                        ExistingHotel.room_count.isnot(None),
+                    )
+                )
+            )
+        hotels = result.scalars().all()
+
+    updated = 0
+    skipped = 0
+    failed = 0
+
+    for hotel in hotels:
+        opening, annual = calculate_for_lead(hotel)
+        if opening is not None:
+            async with async_session() as session:
+                await session.execute(
+                    update(ExistingHotel)
+                    .where(ExistingHotel.id == hotel.id)
+                    .values(
+                        revenue_opening=opening,
+                        revenue_annual=annual,
+                        estimated_revenue=annual,
+                    )
+                )
+                await session.commit()
+            updated += 1
+        elif hotel.room_count and _resolve_tier(hotel):
+            failed += 1
+        else:
+            skipped += 1
+
+    logger.info(
+        f"Bulk revenue update (existing_hotels): "
+        f"{updated} updated, {skipped} skipped (missing data), {failed} failed"
+    )
+    return {
+        "updated": updated,
+        "skipped": skipped,
+        "failed": failed,
+        "total": len(hotels),
     }

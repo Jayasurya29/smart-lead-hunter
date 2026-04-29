@@ -807,6 +807,12 @@ Examples:
         for f in missing
         if f not in ("management_company", "owner", "developer", "address", "zip_code")
     ]
+    # hotel_type is cheap to extract (no extra Gemini call cost — same JSON
+    # response) and feeds the existing-hotels score component. Always
+    # request it regardless of whether it's "missing" — if the row already
+    # has one the apply step will keep the more-specific value.
+    if "hotel_type" not in data_fields:
+        data_fields.append("hotel_type")
 
     prompt = f"""You are extracting facts about a specific hotel from search snippets.
 
@@ -825,6 +831,14 @@ SEARCH SNIPPETS ({len(snippets)} results):
 INSTRUCTIONS:
 - Fill fields when snippets provide evidence
 - For brand_tier enums, use ONE of the valid values or omit
+- For hotel_type, classify as ONE of:
+    * "resort"        — destination/beach/mountain/golf/spa property with extensive on-site amenities
+    * "all_inclusive" — meals/drinks/activities bundled in room rate (Sandals, Beaches, Club Med)
+    * "boutique"      — small (<100 rooms typically), independent or design-led, distinctive identity
+    * "hotel"         — standard urban / business / upscale hotel without resort amenities
+    * "lodge"         — rural / wilderness / adventure-oriented property
+    * "inn"           — small lodging, typically <40 rooms, often historic
+  Omit hotel_type if truly ambiguous from snippets.
 - Omit fields you truly cannot infer from snippets
 
 Return JSON:
@@ -858,6 +872,17 @@ Return JSON:
             "country": {"type": "string"},
             "description": {"type": "string"},
             "former_names": {"type": "array", "items": {"type": "string"}},
+            "hotel_type": {
+                "type": "string",
+                "enum": [
+                    "resort",
+                    "all_inclusive",
+                    "boutique",
+                    "hotel",
+                    "lodge",
+                    "inn",
+                ],
+            },
             "confidence": {"type": "string", "enum": ["high", "medium", "low"]},
         },
     }
@@ -2040,6 +2065,29 @@ def _map_extraction_to_result(
             result["brand"] = new_brand
             if "brand" not in result["changes"]:
                 result["changes"].append("brand")
+
+    # ── hotel_type ──
+    # Feeds the existing-hotels scorer (10 pts component). Stored on
+    # both potential_leads.hotel_type and existing_hotels.hotel_type
+    # (schema parity from migration 018). The actual smart-vs-full
+    # decision and current-value comparison happen in the downstream
+    # apply functions (_apply_enrichment_to_lead in routes/scraping.py
+    # for new hotels, and the apply block in routes/existing_hotels.py
+    # for existing hotels) — we just put a valid value into the result
+    # dict if Gemini returned one.
+    new_ht = (extraction.get("hotel_type") or "").strip().lower()
+    _VALID_HOTEL_TYPES = {
+        "resort",
+        "all_inclusive",
+        "boutique",
+        "hotel",
+        "lodge",
+        "inn",
+    }
+    if new_ht in _VALID_HOTEL_TYPES:
+        result["hotel_type"] = new_ht
+        if "hotel_type" not in result["changes"]:
+            result["changes"].append("hotel_type")
 
     # ── city / state / country ──
     for loc_field in ("city", "state", "country"):

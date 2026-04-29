@@ -539,7 +539,7 @@ async def save_lead_to_db(
 
     normalized = normalize_hotel_name(hotel_name)
 
-    # ── EXACT MATCH on normalized name ────────────────────────────────
+    # ── EXACT MATCH on potential_leads ────────────────────────────────
     result = await session.execute(
         select(PotentialLead).where(PotentialLead.hotel_name_normalized == normalized)
     )
@@ -561,6 +561,27 @@ async def save_lead_to_db(
             "status": "enriched" if enriched else "duplicate",
             "id": existing.id,
             "reason": "Already exists (exact match)",
+        }
+
+    # ── EXACT MATCH on existing_hotels ────────────────────────────────
+    # If this hotel already lives as an existing_hotel (graduated lead,
+    # SAP import, manual add), we should NOT create a new potential_lead
+    # for it — that creates the prospects/clients duplication this
+    # whole flow is designed to prevent.
+    from app.models.existing_hotel import ExistingHotel
+
+    eh_result = await session.execute(
+        select(ExistingHotel).where(ExistingHotel.hotel_name_normalized == normalized)
+    )
+    eh_existing = eh_result.scalars().first()
+    if eh_existing:
+        logger.info(
+            f"   ⏭ Skipped (already in existing_hotels): {hotel_name} → EH#{eh_existing.id}"
+        )
+        return {
+            "status": "duplicate",
+            "id": None,
+            "reason": f"Already exists in existing_hotels (EH#{eh_existing.id})",
         }
 
     # ── FUZZY MATCH ───────────────────────────────────────────────────
@@ -630,7 +651,74 @@ async def save_lead_to_db(
         logger.info(f"   ⏭️ Skipped: {hotel_name} - {skip_reason}")
         return {"status": "skipped", "id": None, "reason": skip_reason}
 
-    # ── SAVE ──────────────────────────────────────────────────────────
+    # ── DIRECT-TO-EXISTING ROUTE ──────────────────────────────────────
+    # If this lead's opening_date is already < 3 months away (or in the
+    # past), it belongs in existing_hotels — not potential_leads.
+    # Skip the potential_leads save and write directly to existing_hotels.
+    # The transfer_lead service handles the full pipeline (scoring under
+    # Option B, revenue calc, dedup against existing rows).
+    from app.services.utils import get_timeline_label
+
+    timeline = get_timeline_label(lead.opening_date or "")
+    if timeline == "EXPIRED":
+        try:
+            from app.services.lead_transfer import (
+                _build_existing_hotel_from_lead,
+                _find_existing_hotel_match,
+                _enrich_existing_from_lead,
+            )
+            from app.services.existing_hotel_scorer import apply_score_to_hotel
+            from app.services.revenue_updater import update_hotel_revenue
+
+            # Dedup check against existing_hotels — merge if match
+            eh_match = await _find_existing_hotel_match(lead, session)
+            if eh_match:
+                _enrich_existing_from_lead(eh_match, lead)
+                apply_score_to_hotel(eh_match)
+                if commit:
+                    await session.commit()
+                    try:
+                        await update_hotel_revenue(eh_match.id)
+                    except Exception:
+                        pass
+                logger.info(
+                    f"   ⇄ Direct-to-existing (merge): '{hotel_name}' → EH#{eh_match.id} "
+                    f"(opening {lead.opening_date} is < 3 months — graduated immediately)"
+                )
+                return {
+                    "status": "merged_to_existing",
+                    "id": eh_match.id,
+                    "reason": f"Opening < 3mo, merged into EH#{eh_match.id}",
+                }
+
+            # No match — create new existing_hotel directly
+            new_eh = _build_existing_hotel_from_lead(lead)
+            apply_score_to_hotel(new_eh)
+            session.add(new_eh)
+            if commit:
+                await session.commit()
+                await session.refresh(new_eh)
+                try:
+                    await update_hotel_revenue(new_eh.id)
+                except Exception:
+                    pass
+            logger.info(
+                f"   ✓ Direct-to-existing (new): '{hotel_name}' → EH#{new_eh.id} "
+                f"(opening {lead.opening_date} is < 3 months — graduated immediately)"
+            )
+            return {
+                "status": "saved_to_existing",
+                "id": new_eh.id,
+                "reason": f"Opening < 3mo, created EH#{new_eh.id}",
+            }
+        except Exception as e:
+            # Fall through to normal potential_leads save if direct-to-existing fails
+            logger.warning(
+                f"Direct-to-existing failed for {hotel_name}: {e}. "
+                f"Falling back to potential_leads."
+            )
+
+    # ── SAVE to potential_leads ───────────────────────────────────────
     session.add(lead)
     if commit:
         await session.commit()

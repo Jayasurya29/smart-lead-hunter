@@ -329,3 +329,150 @@ def get_timeline_label(opening_date: str) -> str:
         return "WARM"
     else:
         return "COOL"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Opening date specificity / regression guard
+# ─────────────────────────────────────────────────────────────────────────────
+#
+# Smart Fill / Full Refresh sometimes returns a less-specific value than what's
+# already on the lead ("Late 2026" → "2026"). Without a guard, this regression
+# overwrites good data and can incorrectly push leads into the EXPIRED bucket
+# (because bare "2026" gets parsed as January 2026 by months_to_opening).
+#
+# Specificity hierarchy (most → least):
+#   5  Full date with day            "2026-09-15", "September 15 2026"
+#   4  Month + year                  "September 2026", "Sep 2026"
+#   3  Quarter                        "Q3 2026", "Q1 2026"
+#   2  Half / season                 "Late 2026", "Spring 2026", "Fall 2026", "H2 2026"
+#   1  Year only                     "2026"
+#   0  Multi-year / vague / empty    "2026 or 2027", "TBD", ""
+#
+# Rule (used by enrichment apply paths): new value is accepted only if it's
+# at least as specific as current. Year shifted backward without higher
+# specificity is rejected as suspicious data.
+
+
+def opening_date_specificity(value: str | None) -> int:
+    """Return 0-5 specificity score for an opening_date string."""
+    if not value:
+        return 0
+    s = value.strip().lower()
+    if not s or s in ("tbd", "tba", "none", "unknown", "n/a"):
+        return 0
+
+    # Multi-year ranges or "or" lists → vague
+    if " or " in s or " - " in s or " through " in s:
+        # But a date range like "Sep 15-20 2026" is fine; only count "or" as vague
+        if " or " in s:
+            return 0
+
+    # ISO-style or with explicit day: 5
+    if re.search(r"\b(19|20)\d{2}-\d{1,2}-\d{1,2}\b", s):
+        return 5
+    if re.search(
+        r"\b(jan(uary)?|feb(ruary)?|mar(ch)?|apr(il)?|may|jun(e)?|jul(y)?|aug(ust)?|"
+        r"sep(t(ember)?)?|oct(ober)?|nov(ember)?|dec(ember)?)\s+\d{1,2}(st|nd|rd|th)?,?\s*(19|20)\d{2}\b",
+        s,
+    ):
+        return 5
+    if re.search(
+        r"\b\d{1,2}(st|nd|rd|th)?\s+(jan(uary)?|feb(ruary)?|mar(ch)?|apr(il)?|may|jun(e)?|"
+        r"jul(y)?|aug(ust)?|sep(t(ember)?)?|oct(ober)?|nov(ember)?|dec(ember)?)\s+(19|20)\d{2}\b",
+        s,
+    ):
+        return 5
+
+    # Month + year: 4
+    if re.search(
+        r"\b(jan(uary)?|feb(ruary)?|mar(ch)?|apr(il)?|may|jun(e)?|jul(y)?|aug(ust)?|"
+        r"sep(t(ember)?)?|oct(ober)?|nov(ember)?|dec(ember)?)\s*,?\s*(19|20)\d{2}\b",
+        s,
+    ):
+        return 4
+
+    # Quarter + year: 3
+    if re.search(r"\bq[1-4]\s*(19|20)\d{2}\b", s):
+        return 3
+
+    # Half / season + year: 2
+    if re.search(
+        r"\b(early|mid(-?year)?|late|first half|second half|h[12]|"
+        r"spring|summer|fall|autumn|winter|holiday)\s*,?\s*(19|20)\d{2}\b",
+        s,
+    ):
+        return 2
+
+    # Year only: 1
+    if re.search(r"^\s*(19|20)\d{2}\s*$", s):
+        return 1
+    # Year embedded in something else but no other markers
+    if re.search(r"\b(19|20)\d{2}\b", s):
+        return 1
+
+    return 0
+
+
+def _extract_year(value: str | None) -> int | None:
+    """Pull the dominant 4-digit year out of a freeform opening_date string."""
+    if not value:
+        return None
+    m = re.search(r"\b((?:19|20)\d{2})\b", value)
+    return int(m.group(1)) if m else None
+
+
+def should_accept_opening_date(
+    current: str | None, candidate: str | None
+) -> tuple[bool, str]:
+    """Decide whether a new opening_date should overwrite the current one.
+
+    Returns (accept: bool, reason: str). The reason is for logging only.
+
+    Rules:
+      1. If current is empty → accept anything non-empty.
+      2. If candidate is empty → reject (don't blank-out a real value).
+      3. If candidate is more specific OR equally specific → accept,
+         BUT only if the year hasn't shifted backward (suspicious).
+      4. If candidate is less specific → reject (regression).
+      5. If years differ and the candidate is less specific → reject.
+
+    The year-shift-backward case is conservative: we accept only when
+    the new value carries higher specificity (e.g. correcting "2027"
+    → "September 2026" is fine; "2027" → "2026" is rejected).
+    """
+    cur = (current or "").strip()
+    cand = (candidate or "").strip()
+
+    if not cand:
+        return False, "candidate is empty"
+    if not cur:
+        return True, "current is empty, accepting"
+
+    if cand == cur:
+        return False, "no change"
+
+    cur_spec = opening_date_specificity(cur)
+    cand_spec = opening_date_specificity(cand)
+
+    cur_year = _extract_year(cur)
+    cand_year = _extract_year(cand)
+
+    # Year shifted backward — only accept if specificity strictly increases
+    if cur_year and cand_year and cand_year < cur_year:
+        if cand_spec > cur_spec:
+            return True, (
+                f"year shifted back ({cur_year}→{cand_year}) but specificity "
+                f"increased ({cur_spec}→{cand_spec})"
+            )
+        return False, (
+            f"year shifted back ({cur_year}→{cand_year}) without specificity gain "
+            f"({cur_spec}→{cand_spec}) — rejected as suspicious"
+        )
+
+    if cand_spec < cur_spec:
+        return False, (
+            f"specificity regression ({cur_spec}→{cand_spec}): "
+            f"{cur!r} is more specific than {cand!r}"
+        )
+
+    return True, f"specificity ok ({cur_spec}→{cand_spec})"

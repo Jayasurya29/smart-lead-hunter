@@ -177,6 +177,7 @@ async def rescore_lead(lead_id: int, session: AsyncSession) -> Optional[Dict]:
         room_count=lead.room_count or 0,
         description=lead.description or "",
         brand=lead.brand or "",
+        hotel_type=lead.hotel_type or "",
     )
 
     # If lead would be filtered (budget/international/expired), keep existing

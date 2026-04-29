@@ -63,14 +63,18 @@ class Settings(BaseSettings):
     # -------------------------------------------------------------------------
     # LEAD SCORING WEIGHTS (100 points total)
     # -------------------------------------------------------------------------
-    # These match your scorer.py settings
-    score_brand_tier_max: int = 25  # Ultra-luxury = 25, Luxury = 20, etc.
-    score_location_max: int = 20  # Florida = 20, Caribbean = 15
-    score_timing_max: int = 25  # 2026 = 25, 2027 = 18
-    score_room_count_max: int = 15  # 500+ = 15, 300+ = 12
-    score_contact_max: int = 8  # Name + Email + Phone = 8
-    score_new_build_max: int = 4  # New construction bonus
-    score_existing_client_max: int = 3  # Already a customer
+    # These match scorer.py — Updated 2026-04-29:
+    #   - Phone removed from contact (8 → 6)
+    #   - new_build (4 pts) and existing_client (3 pts) retired (double-counted
+    #     with brand_tier and timing)
+    #   - hotel_type (9 pts) added — resort vs urban hotel role mix matters
+    #   - Rooms band tweaked: 200-299 splits into its own bucket
+    score_brand_tier_max: int = 25  # T1=25, T2=20, T3=15, T4=10, unknown=5
+    score_location_max: int = 20  # FL=20, Caribbean=15, US-other=10
+    score_timing_max: int = 25  # HOT (6-12mo) = 25 sweet spot
+    score_room_count_max: int = 15  # 500+=15 down to <50=2
+    score_contact_max: int = 6  # Name=3 + Email=3 (phone removed)
+    score_hotel_type_max: int = 9  # Resort/AI=9, Boutique=8, Hotel/Lodge=6, Inn=4
 
     # -------------------------------------------------------------------------
     # LEAD CLASSIFICATION THRESHOLDS

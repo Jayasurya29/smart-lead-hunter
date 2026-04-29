@@ -45,11 +45,14 @@ class TestHealthEndpoints:
 
     @pytest.mark.asyncio
     async def test_root_returns_app_info(self, client):
+        # Root now serves the built React frontend (index.html). The old
+        # JSON status response was replaced when the SPA was added.
         resp = await client.get("/")
         assert resp.status_code == 200
-        data = resp.json()
-        assert data["name"] == "Smart Lead Hunter"
-        assert data["status"] == "running"
+        body = resp.text.lower()
+        # Confirm we're getting the React app shell
+        assert "<!doctype html>" in body or "<html" in body
+        assert 'id="root"' in body
 
     @pytest.mark.asyncio
     async def test_docs_accessible(self, client):
@@ -268,8 +271,8 @@ class TestLeadListFilters:
 
     @pytest.mark.asyncio
     async def test_per_page_too_large(self, authed_client):
-        """per_page=200 should be rejected (le=100)."""
-        resp = await _db_request(authed_client.get("/leads?per_page=200"))
+        """per_page=501 should be rejected (le=500)."""
+        resp = await _db_request(authed_client.get("/leads?per_page=501"))
         assert resp.status_code == 422
 
     @pytest.mark.asyncio

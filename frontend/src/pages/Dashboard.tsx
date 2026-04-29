@@ -7,14 +7,13 @@ import LeadTable from '@/components/leads/LeadTable'
 import LeadDetail from '@/components/leads/LeadDetail'
 import FilterBar, { DEFAULT_FILTERS, type Filters } from '@/components/leads/FilterBar'
 import { cn } from '@/lib/utils'
-import { Inbox, CheckCircle2, XCircle, Clock, Search, X, Download, Loader2 } from 'lucide-react'
+import { Inbox, CheckCircle2, XCircle, Search, X, Download, Loader2 } from 'lucide-react'
 import api from '@/api/client'
 
 const TABS: { key: LeadTab; label: string; icon: React.ElementType }[] = [
   { key: 'pipeline', label: 'Pipeline', icon: Inbox },
   { key: 'approved', label: 'Approved', icon: CheckCircle2 },
   { key: 'rejected', label: 'Rejected', icon: XCircle },
-  { key: 'expired',  label: 'Expired',  icon: Clock },
 ]
 
 export default function Dashboard() {
@@ -23,6 +22,24 @@ export default function Dashboard() {
   const [search, setSearch] = useState('')
   const [selectedLeadId, setSelectedLeadId] = useState<number | null>(null)
   const [searchParams, setSearchParams] = useSearchParams()
+
+  // Page-size persists across sessions via localStorage so the user's
+  // boss can set 50 once and have it stick. Defaults to 25 if no
+  // saved preference. Falls back gracefully if localStorage is blocked.
+  const [perPage, setPerPage] = useState<number>(() => {
+    try {
+      const saved = window.localStorage.getItem('slh.leads.perPage')
+      const n = saved ? Number(saved) : NaN
+      return [25, 50, 100].includes(n) ? n : 25
+    } catch {
+      return 25
+    }
+  })
+  function handlePerPageChange(n: number) {
+    setPerPage(n)
+    setPage(1)
+    try { window.localStorage.setItem('slh.leads.perPage', String(n)) } catch { /* silent */ }
+  }
 
   // Auto-open lead from map (e.g. ?lead=123)
   useEffect(() => {
@@ -35,9 +52,9 @@ export default function Dashboard() {
   const [filters, setFilters] = useState<Filters>(DEFAULT_FILTERS)
   const [exporting, setExporting] = useState(false)
 
-  const { data, isLoading } = useLeads(tab, page, search, filters as unknown as Record<string, string>)
+  const { data, isLoading } = useLeads(tab, page, search, filters as unknown as Record<string, string>, perPage)
 
-  const totalPages = data?.pages ?? (Math.ceil((data?.total || 0) / (data?.per_page || 25)) || 1)
+  const totalPages = data?.pages ?? (Math.ceil((data?.total || 0) / (data?.per_page || perPage)) || 1)
 
   function handleTabChange(newTab: LeadTab) {
     setTab(newTab)
@@ -170,6 +187,8 @@ export default function Dashboard() {
             onSort={handleSort}
             currentSort={filters.sort}
             isLoading={isLoading}
+            perPage={perPage}
+            onPerPageChange={handlePerPageChange}
           />
         </div>
 

@@ -34,6 +34,7 @@ from app.routes.scraping import router as scraping_router
 from app.routes.contacts import router as contacts_router
 from app.routes.auth import router as auth_router
 from app.routes.existing_hotels import router as existing_hotels_router
+from app.routes.existing_hotels_parity import router as existing_hotels_parity_router
 
 from app.routes.sap import router as sap_router, legacy_router as sap_legacy_router
 
@@ -264,6 +265,7 @@ app.include_router(dashboard_router)
 app.include_router(scraping_router)
 app.include_router(contacts_router)
 app.include_router(existing_hotels_router)
+app.include_router(existing_hotels_parity_router)
 app.include_router(sap_router)
 app.include_router(sap_legacy_router)
 app.include_router(revenue_router)

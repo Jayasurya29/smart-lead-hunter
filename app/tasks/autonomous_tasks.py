@@ -535,21 +535,19 @@ def daily_health_check(self) -> Dict[str, Any]:
                 select(PotentialLead).where(PotentialLead.status == "new")
             )
             timeline_updated = 0
-            timeline_expired = 0
             for lead in active_leads.scalars().all():
                 new_label = get_timeline_label(lead.opening_date)
                 if new_label != lead.timeline_label:
                     lead.timeline_label = new_label
-                    if new_label == "EXPIRED":
-                        lead.status = "expired"
-                        timeline_expired += 1
                     timeline_updated += 1
             results["timeline_updated"] = timeline_updated
-            results["timeline_expired"] = timeline_expired
+            # Note: status='expired' transitions + auto-transfer to
+            # existing_hotels are handled by the dedicated
+            # recompute_timeline_labels task. We ONLY refresh the label
+            # here; the daily auto-transfer is its own task with its
+            # own per-lead transaction handling.
             if timeline_updated:
-                logger.info(
-                    f"  Timeline: {timeline_updated} updated, {timeline_expired} expired"
-                )
+                logger.info(f"  Timeline: {timeline_updated} label(s) updated")
 
             # Rescore stale leads
             week_ago = local_now() - timedelta(days=7)
@@ -641,13 +639,23 @@ def rescore_all_leads_task(self) -> Dict[str, Any]:
 def recompute_timeline_labels(self) -> Dict[str, Any]:
     """Recompute timeline_label on every active lead based on today's date.
 
-    Runs daily at 9:30 AM (see beat_schedule in celery_app.py). Fixes the stale
-    label problem: timeline_label is stored as a column and was previously only
-    refreshed inside daily_health_check, which is scoped to status='new' and
-    gated on several other maintenance steps. This task is single-purpose so it
-    always runs cleanly regardless of upstream failures.
+    Runs daily at 9:30 AM (see beat_schedule in celery_app.py).
+
+    Behavior (updated 2026-04-29):
+      - For leads still active (URGENT/HOT/WARM/COOL): just update
+        timeline_label.
+      - For leads that crossed into EXPIRED today: AUTO-TRANSFER them to
+        existing_hotels via lead_transfer.transfer_lead(). The lead is
+        hard-deleted, contacts re-parent, and a new (or merged) row
+        appears on the Existing Hotels Pipeline tab. No operator review
+        needed — the lead is now an operating hotel and lives in the
+        right table.
+      - RESURRECTION case (opening_date pushed back so label is no
+        longer EXPIRED): only matters for leads still in
+        potential_leads. Leads already auto-transferred won't come back.
     """
     from app.services.utils import get_timeline_label
+    from app.services.lead_transfer import transfer_lead
 
     logger.info("Recompute Timeline Labels: starting...")
 
@@ -655,12 +663,20 @@ def recompute_timeline_labels(self) -> Dict[str, Any]:
         results = {
             "leads_checked": 0,
             "labels_updated": 0,
-            "newly_expired": 0,
+            "auto_transferred": 0,
+            "auto_merged": 0,
+            "transfer_errors": 0,
             "resurrected": 0,
             "by_label": {},
         }
+
+        # Pass 1: walk all leads, decide which need label-only update vs
+        # full auto-transfer. We collect the transfer-bound IDs so we
+        # can run transfer_lead() in its own transaction (it commits
+        # internally and we don't want partial writes if one fails).
+        ids_to_transfer: list[int] = []
+
         async with async_session() as session:
-            # Cover every active-ish status. Don't touch rejected/deleted.
             leads_q = await session.execute(
                 select(PotentialLead).where(
                     PotentialLead.status.notin_(["deleted", "rejected"])
@@ -669,41 +685,83 @@ def recompute_timeline_labels(self) -> Dict[str, Any]:
             for lead in leads_q.scalars().all():
                 results["leads_checked"] += 1
                 new_label = get_timeline_label(lead.opening_date)
-                if new_label != lead.timeline_label:
-                    old_label = lead.timeline_label
+                old_label = lead.timeline_label
+
+                if new_label != old_label:
                     lead.timeline_label = new_label
                     results["labels_updated"] += 1
-                    # Auto-expire leads that crossed into EXPIRED today
-                    if new_label == "EXPIRED" and lead.status not in ("expired",):
-                        lead.status = "expired"
-                        results["newly_expired"] += 1
-                    # RESURRECTION: lead's opening date moved forward, label is
-                    # now active again. If status was stuck at 'expired', reset
-                    # to 'new' so it reappears in the active pipeline tabs.
-                    # Without this, leads whose opening_date gets corrected or
-                    # pushed out (reopenings, rescheduled projects) stay
-                    # invisible in the Expired tab forever.
-                    elif (
-                        new_label in ("URGENT", "HOT", "WARM", "COOL")
-                        and lead.status == "expired"
-                    ):
-                        lead.status = "new"
-                        results["resurrected"] += 1
-                        logger.info(
-                            f"[RESURRECTION] Lead {lead.id} "
-                            f"{lead.hotel_name!r}: "
-                            f"timeline {old_label or 'NONE'} -> {new_label}, "
-                            f"status 'expired' -> 'new' "
-                            f"(opening={lead.opening_date})"
-                        )
                     key = f"{old_label or 'NONE'}->{new_label}"
                     results["by_label"][key] = results["by_label"].get(key, 0) + 1
+
+                # Queue for auto-transfer if EXPIRED
+                if new_label == "EXPIRED":
+                    ids_to_transfer.append(lead.id)
+                    continue  # don't set status='expired' — it's about to be deleted
+
+                # RESURRECTION: opening_date moved forward, no longer expired.
+                # Reset status if it was stuck at 'expired' from a previous run.
+                if (
+                    new_label in ("URGENT", "HOT", "WARM", "COOL")
+                    and lead.status == "expired"
+                ):
+                    lead.status = "new"
+                    results["resurrected"] += 1
+                    logger.info(
+                        f"[RESURRECTION] Lead {lead.id} "
+                        f"{lead.hotel_name!r}: "
+                        f"timeline {old_label or 'NONE'} -> {new_label}, "
+                        f"status 'expired' -> 'new' "
+                        f"(opening={lead.opening_date})"
+                    )
+
             await session.commit()
+
+        # Pass 2: auto-transfer expired leads. transfer_lead handles
+        # cross-table dedup against existing_hotels (merge if match,
+        # create if not), contact re-parenting, scoring under Option B,
+        # revenue calculation, and hard-deletes the source lead.
+        if ids_to_transfer:
+            logger.info(
+                f"Recompute Timeline Labels: auto-transferring "
+                f"{len(ids_to_transfer)} expired lead(s) to existing_hotels..."
+            )
+            for lid in ids_to_transfer:
+                try:
+                    async with async_session() as transfer_session:
+                        r = await transfer_lead(lid, transfer_session, commit=True)
+                    status = r.get("status")
+                    eh_id = r.get("existing_hotel_id")
+                    if status == "transferred":
+                        results["auto_transferred"] += 1
+                        logger.info(
+                            f"   ✓ Auto-transferred lead #{lid} → "
+                            f"existing_hotel #{eh_id}"
+                        )
+                    elif status == "merged":
+                        results["auto_merged"] += 1
+                        logger.info(
+                            f"   ⇄ Auto-merged lead #{lid} → "
+                            f"existing_hotel #{eh_id}"
+                        )
+                    elif status == "not_found":
+                        # Lead disappeared between pass 1 and pass 2 —
+                        # could be concurrent edit. Not an error.
+                        pass
+                    else:
+                        results["transfer_errors"] += 1
+                        logger.warning(
+                            f"   ✗ Auto-transfer #{lid}: unexpected status {status!r}"
+                        )
+                except Exception as e:
+                    results["transfer_errors"] += 1
+                    logger.exception(f"   ✗ Auto-transfer failed for lead #{lid}: {e}")
 
         logger.info(
             f"Recompute Timeline Labels: checked={results['leads_checked']}, "
-            f"updated={results['labels_updated']}, "
-            f"newly_expired={results['newly_expired']}, "
+            f"labels_updated={results['labels_updated']}, "
+            f"auto_transferred={results['auto_transferred']}, "
+            f"auto_merged={results['auto_merged']}, "
+            f"transfer_errors={results['transfer_errors']}, "
             f"resurrected={results['resurrected']}"
         )
         if results["by_label"]:

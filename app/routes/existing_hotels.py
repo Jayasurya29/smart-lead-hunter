@@ -134,6 +134,27 @@ async def list_existing_hotels(
         "oldest": ExistingHotel.created_at.asc(),
         "revenue_high": ExistingHotel.revenue_annual.desc().nullslast(),
         "revenue_low": ExistingHotel.revenue_annual.asc().nullslast(),
+        # Score (Option B account-fit). NULL scores sink to the bottom on
+        # both directions so unscored rows don't pollute the top of either
+        # ranking. The rescore script populates lead_score on every row,
+        # but defensive nullslast() handles future rows that haven't been
+        # rescored yet.
+        "score_high": ExistingHotel.lead_score.desc().nullslast(),
+        "score_low": ExistingHotel.lead_score.asc().nullslast(),
+        # Brand tier. SQL string sort works because the canonical_tier
+        # values ("tier1_ultra_luxury" → "tier4_upscale") sort
+        # alphabetically in the right order: tier1 < tier2 < tier3 < tier4.
+        "tier_asc": ExistingHotel.brand_tier.asc().nullslast(),
+        "tier_desc": ExistingHotel.brand_tier.desc().nullslast(),
+        # Location: state then city, both ascending/descending together.
+        # Matches the frontend's display "city, state" so users see
+        # adjacent rows clustered by state.
+        "location_az": ExistingHotel.state.asc().nullslast(),
+        "location_za": ExistingHotel.state.desc().nullslast(),
+        # Opening date — for existing_hotels this is the (historical)
+        # open date. NULLs go last on both directions.
+        "opening_soon": ExistingHotel.opening_date.asc().nullslast(),
+        "opening_late": ExistingHotel.opening_date.desc().nullslast(),
     }
     order = sort_map.get(sort, ExistingHotel.hotel_name.asc())
     query = query.order_by(order)
@@ -1090,19 +1111,31 @@ async def smart_fill_hotel_stream(
                         ah.project_type = enriched["project_type"]
                         applied.append("project_type")
 
-                    # opening_date — historical fact. Always update.
+                    # opening_date — historical fact, but still apply
+                    # the regression guard to reject less-specific values
+                    # (e.g. "September 2024" → "2024" should be rejected).
                     if enriched.get("opening_date"):
-                        ah.opening_date = enriched["opening_date"]
-                        # Also extract opening_year for filtering
-                        try:
-                            import re
+                        from app.services.utils import should_accept_opening_date
 
-                            m = re.search(r"(20\d{2})", enriched["opening_date"])
-                            if m:
-                                ah.opening_year = int(m.group(1))
-                        except Exception:
-                            pass
-                        applied.append("opening_date")
+                        accept, reason = should_accept_opening_date(
+                            ah.opening_date, enriched["opening_date"]
+                        )
+                        if accept:
+                            ah.opening_date = enriched["opening_date"]
+                            try:
+                                import re
+
+                                m = re.search(r"(20\d{2})", enriched["opening_date"])
+                                if m:
+                                    ah.opening_year = int(m.group(1))
+                            except Exception:
+                                pass
+                            applied.append("opening_date")
+                        else:
+                            logger.info(
+                                f"Smart Fill REJECTED opening_date update for "
+                                f"existing_hotel #{hotel_id}: {reason}"
+                            )
 
                     if enriched.get("brand_tier"):
                         new_tier = enriched["brand_tier"].strip().lower()
@@ -1124,6 +1157,32 @@ async def smart_fill_hotel_stream(
                         ):
                             ah.room_count = new_rc
                             applied.append("room_count")
+
+                    # hotel_type — feeds the Option B scorer (10 pts).
+                    # In smart mode, fills only if current is empty or a
+                    # generic freeform value. In full mode, always
+                    # overwrite when a valid enum value is returned.
+                    if enriched.get("hotel_type"):
+                        new_ht = (enriched.get("hotel_type") or "").strip().lower()
+                        _VALID_HT = {
+                            "resort",
+                            "all_inclusive",
+                            "boutique",
+                            "hotel",
+                            "lodge",
+                            "inn",
+                        }
+                        if new_ht in _VALID_HT:
+                            current_ht = (ah.hotel_type or "").strip().lower()
+                            ambiguous = (
+                                current_ht == ""
+                                or current_ht == "hotel"
+                                or current_ht not in _VALID_HT
+                            )
+                            if mode == "full" or ambiguous:
+                                ah.hotel_type = new_ht
+                                ah.property_type = new_ht  # legacy mirror
+                                applied.append("hotel_type")
 
                     if enriched.get("brand"):
                         new_brand = enriched["brand"].strip()
@@ -1162,7 +1221,46 @@ async def smart_fill_hotel_stream(
                         ah.former_names = enriched["former_names"]
                         applied.append("former_names")
 
+                    # ── Auto-rescore (Option B, account fit) ────────
+                    # Any time Smart Fill changes brand_tier, room_count,
+                    # hotel_type, or zone, the score should refresh so
+                    # the Pipeline ranking stays accurate. We rescore on
+                    # ANY apply (cheap pure function — sub-millisecond)
+                    # so we don't have to enumerate which fields matter.
+                    if applied:
+                        try:
+                            from app.services.existing_hotel_scorer import (
+                                apply_score_to_hotel,
+                            )
+
+                            new_score, _bd = apply_score_to_hotel(ah)
+                            applied.append(f"lead_score={new_score}")
+                        except Exception as _score_err:
+                            logger.warning(
+                                f"Smart Fill auto-rescore failed for "
+                                f"existing_hotel #{hotel_id}: {_score_err}"
+                            )
+
                     await apply_session.commit()
+
+            # ── Revenue auto-update — runs in its own session AFTER
+            # the Smart Fill commit. Smart Fill may have just filled
+            # in room_count, brand_tier, or hotel_type — the three
+            # inputs the revenue calculator needs. If revenue was NULL
+            # before and the inputs are now present, it'll populate.
+            # If inputs changed, revenue refreshes accordingly.
+            if applied:
+                try:
+                    from app.services.revenue_updater import update_hotel_revenue
+
+                    op, an = await update_hotel_revenue(hotel_id)
+                    if op is not None:
+                        applied.append(f"revenue_annual={int(an):,}")
+                except Exception as _rev_err:
+                    logger.warning(
+                        f"Smart Fill revenue update failed for "
+                        f"existing_hotel #{hotel_id}: {_rev_err}"
+                    )
 
             duration = round(time.monotonic() - start_time, 1)
             await event_queue.put(

@@ -1808,19 +1808,33 @@ async def smart_fill_lead(lead_id: int, request: Request, _csrf=Depends(require_
             # (update brand_tier, mgmt_company, owner, etc.)
 
         if "opening_date" in enriched and not is_live_reopening:
-            lead.opening_date = enriched["opening_date"]
-            new_label = get_timeline_label(enriched["opening_date"])
-            lead.timeline_label = new_label
-            # If the refreshed opening date lands in the EXPIRED bucket
-            # (past or 0-3 months future), auto-expire the lead so it exits
-            # the Pipeline tab. Without this, status stays "new" while the
-            # badge shows "Expired" — a zombie state.
-            if new_label == "EXPIRED":
-                lead.status = "expired"
+            # Regression guard — reject the new value if it's less specific
+            # than what we already have (e.g. "Late 2026" → "2026") or if
+            # the year shifted backward without any specificity gain.
+            from app.services.utils import should_accept_opening_date
+
+            accept, reason = should_accept_opening_date(
+                lead.opening_date, enriched["opening_date"]
+            )
+            if accept:
+                lead.opening_date = enriched["opening_date"]
+                new_label = get_timeline_label(enriched["opening_date"])
+                lead.timeline_label = new_label
+                # If the refreshed opening date lands in the EXPIRED bucket
+                # (past or 0-3 months future), auto-expire the lead so it exits
+                # the Pipeline tab. Without this, status stays "new" while the
+                # badge shows "Expired" — a zombie state.
+                if new_label == "EXPIRED":
+                    lead.status = "expired"
+                    logger.info(
+                        f"Full Refresh auto-expired {lead.hotel_name}: "
+                        f"opening_date refreshed to '{enriched['opening_date']}' "
+                        f"(EXPIRED bucket)"
+                    )
+            else:
                 logger.info(
-                    f"Full Refresh auto-expired {lead.hotel_name}: "
-                    f"opening_date refreshed to '{enriched['opening_date']}' "
-                    f"(EXPIRED bucket)"
+                    f"Full Refresh REJECTED opening_date update for "
+                    f"{lead.hotel_name}: {reason}"
                 )
         # ── Core hotel attributes — protect manual edits ──
         # The user can manually set these via Edit → Save. Full Refresh
@@ -2239,6 +2253,41 @@ async def smart_fill_stream(lead_id: int, request: Request, mode: str = "smart")
                     except Exception as e:
                         logger.warning(f"Revenue update failed: {e}")
 
+                # ── Auto-transfer if Smart Fill discovered the lead is
+                #    actually 0-3 months out (or already opened). At that
+                #    point it belongs in existing_hotels, not here.
+                #    transfer_lead handles dedup/merge against existing_hotels
+                #    and hard-deletes the source lead row.
+                try:
+                    fresh_label = get_timeline_label(lead.opening_date or "")
+                    if fresh_label == "EXPIRED":
+                        from app.services.lead_transfer import transfer_lead
+
+                        async with async_session() as transfer_session:
+                            tr = await transfer_lead(
+                                lead_id, transfer_session, commit=True
+                            )
+                        if tr.get("status") in ("transferred", "merged"):
+                            eh_id = tr.get("existing_hotel_id")
+                            logger.info(
+                                f"Smart Fill auto-transferred lead #{lead_id} "
+                                f"→ existing_hotel #{eh_id} "
+                                f"({tr['status']}; opening_date={lead.opening_date} "
+                                f"is now < 3 months out)"
+                            )
+                            await event_queue.put(
+                                {
+                                    "type": "auto_transferred",
+                                    "lead_id": lead_id,
+                                    "existing_hotel_id": eh_id,
+                                    "status": tr["status"],
+                                }
+                            )
+                except Exception as e:
+                    logger.warning(
+                        f"Smart Fill auto-transfer check failed for #{lead_id}: {e}"
+                    )
+
             # ── Final complete event ──
             duration = round(time.monotonic() - start_time, 1)
             await event_queue.put(
@@ -2383,11 +2432,31 @@ def _apply_enrichment_to_lead(lead, enriched: dict, mode: str, get_timeline_labe
             lead.status = "new"
 
     if "opening_date" in enriched and not is_live_reopening:
-        lead.opening_date = enriched["opening_date"]
-        new_label = get_timeline_label(enriched["opening_date"])
-        lead.timeline_label = new_label
-        if new_label == "EXPIRED":
-            lead.status = "expired"
+        # Regression guard — reject less-specific or year-shifted-back values
+        from app.services.utils import should_accept_opening_date
+
+        accept, reason = should_accept_opening_date(
+            lead.opening_date, enriched["opening_date"]
+        )
+        if accept:
+            lead.opening_date = enriched["opening_date"]
+            new_label = get_timeline_label(enriched["opening_date"])
+            lead.timeline_label = new_label
+            if new_label == "EXPIRED":
+                lead.status = "expired"
+        else:
+            logger.info(
+                f"Smart Fill REJECTED opening_date update for "
+                f"{lead.hotel_name!r}: {reason}"
+            )
+            # Drop the field from enriched so downstream code doesn't
+            # treat it as a "change."
+            enriched.pop("opening_date", None)
+            try:
+                if "opening_date" in (enriched.get("changes") or []):
+                    enriched["changes"].remove("opening_date")
+            except Exception:
+                pass
 
     if "brand_tier" in enriched:
         new_tier = (enriched.get("brand_tier") or "").strip().lower()
