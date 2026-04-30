@@ -11,6 +11,7 @@ from app.models.audit_log import AuditLog
 from app.models.lead_contact import LeadContact
 from app.models.existing_hotel import ExistingHotel
 from app.models.discovery_query_stat import DiscoveryQueryStat
+from app.models.research_history import ResearchHistory
 
 __all__ = [
     "PotentialLead",
@@ -23,4 +24,5 @@ __all__ = [
     "LeadContact",
     "ExistingHotel",
     "DiscoveryQueryStat",
+    "ResearchHistory",
 ]

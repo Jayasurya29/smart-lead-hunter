@@ -8,6 +8,7 @@ import Dashboard from '@/pages/Dashboard'
 import { Loader2 } from 'lucide-react'
 import UsersPage from '@/pages/Users'
 import ExistingHotels from '@/pages/ExistingHotels'
+import Outreach from '@/pages/Outreach'
 import SourcesPage from '@/pages/SourcesPage'
 // HIDDEN 2026-04-24 — re-enable by uncommenting
 // import ClientIntelligence from '@/pages/ClientIntelligence'
@@ -103,10 +104,7 @@ export default function AppRouter() {
             path="/outreach"
             element={
               <ProtectedRoute>
-                <div className="p-8 text-center text-gray-400">
-                  <p className="text-lg font-medium mb-2">AI Email Outreach</p>
-                  <p className="text-sm">Coming soon — automated email campaigns with Gemini</p>
-                </div>
+                <Outreach />
               </ProtectedRoute>
             }
           />

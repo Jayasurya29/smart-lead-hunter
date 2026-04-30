@@ -25,7 +25,7 @@ const NAV_ITEMS: NavItem[] = [
   { to: '/map',              label: 'Map',              icon: Map },
   { to: '/sources',          label: 'Sources',          icon: Radar },
   { to: '/users',            label: 'Team',             icon: Shield },
-  { to: '/outreach',         label: 'Outreach',         icon: Mail, disabled: true },
+  { to: '/outreach',         label: 'Outreach',         icon: Mail },
 ]
 
 export default function AppLayout({ children }: { children: ReactNode }) {

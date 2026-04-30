@@ -16,7 +16,7 @@ import {
   X, MapPin, Calendar, Building2, Layers, Globe, ExternalLink,
   User, Mail, Phone, Linkedin, Star, Bookmark, BookmarkCheck,
   Loader2, CheckCircle2, XCircle, Undo2, Trash2, Search, Save,
-  Link2, Pencil, Check, Zap, RefreshCw,
+  Link2, Pencil, Check, Zap, RefreshCw, Sparkles,
 } from 'lucide-react'
 
 /** Safely render any value — prevents empty object {} crashing React */
@@ -867,6 +867,25 @@ function ContactsTab({ contacts, loading, leadId, onEnrich, enriching, enriching
                 <Pencil className="w-3 h-3" />
               </button>
             )}
+            {/* Send to Outreach — opens a new tab on the Outreach page with
+                this contact pre-filled. The Outreach page detects the
+                ?contact_id=N&parent_kind=lead&parent_id=M URL params and
+                auto-opens the composer modal in pre-filled mode. */}
+            <button
+              onClick={() => {
+                const params = new URLSearchParams({
+                  new: '1',
+                  contact_id: String(c.id),
+                  parent_kind: 'lead',
+                  parent_id: String(leadId),
+                })
+                window.open(`/outreach?${params}`, '_blank')
+              }}
+              className="p-1.5 text-stone-400 hover:text-purple-600 hover:bg-purple-50 rounded-md transition"
+              title="Send to Outreach (AI-personalized email)"
+            >
+              <Sparkles className="w-3 h-3" />
+            </button>
             <button
               onClick={() => handleDelete(c.id)}
               disabled={deleting === c.id}

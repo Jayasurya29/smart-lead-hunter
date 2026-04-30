@@ -54,7 +54,7 @@ import {
   CheckCircle2, XCircle, Undo2, Mail, Linkedin, DollarSign,
   Inbox, Calendar, Layers, Star, Bookmark, BookmarkCheck,
   Pencil, Check, Zap, RefreshCw, Trash2, Save, SlidersHorizontal,
-  Download, Link2,
+  Download, Link2, Sparkles,
 } from 'lucide-react'
 
 /* ═════════════════════════════════════════════════════════
@@ -1750,6 +1750,21 @@ function HotelContactsTab({
                 <Pencil className="w-3 h-3" />
               </button>
             )}
+            <button
+              onClick={() => {
+                const params = new URLSearchParams({
+                  new: '1',
+                  contact_id: String(c.id),
+                  parent_kind: 'existing_hotel',
+                  parent_id: String(hotelId),
+                })
+                window.open(`/outreach?${params}`, '_blank')
+              }}
+              className="p-1.5 text-stone-400 hover:text-purple-600 hover:bg-purple-50 rounded-md transition"
+              title="Send to Outreach (AI-personalized email)"
+            >
+              <Sparkles className="w-3 h-3" />
+            </button>
             <button onClick={() => handleDelete(c.id)} disabled={deleting === c.id} className="p-1.5 text-stone-400 hover:text-red-600 hover:bg-red-50 rounded-md transition disabled:opacity-50" title="Delete contact">
               {deleting === c.id ? <Loader2 className="w-3 h-3 animate-spin" /> : <Trash2 className="w-3 h-3" />}
             </button>
