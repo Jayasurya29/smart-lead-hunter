@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useSearchParams } from 'react-router-dom'
-import { Plus, Sparkles, Search, Loader2, Inbox, CheckCircle2, XCircle, Send } from 'lucide-react'
+import { Plus, Sparkles, Search, Loader2, Inbox, CheckCircle2, XCircle, Send, Building2 } from 'lucide-react'
 import {
   listOutreach, getOutreachStats,
   ResearchRecord, ApprovalStatus,
@@ -94,16 +94,21 @@ export default function Outreach() {
 
   return (
     <div className="h-full flex flex-col bg-stone-50">
-      {/* ── Header — compact single-row layout ─────────────── */}
-      <div className="px-6 py-3 bg-white border-b border-stone-200 flex-shrink-0">
+      {/* ── Header — compact single-row layout with color treatment ─ */}
+      <div className="px-6 py-3 bg-gradient-to-r from-purple-50/60 via-white to-white border-b border-stone-200 flex-shrink-0">
         <div className="flex items-center gap-4">
-          {/* Title block (compact) */}
-          <div className="flex-shrink-0">
-            <h1 className="text-base font-bold text-navy-900 leading-tight">Outreach</h1>
-            <p className="text-2xs text-stone-500">AI-personalized · review · copy & send</p>
+          {/* Title block — purple icon badge + heading */}
+          <div className="flex items-center gap-2.5 flex-shrink-0">
+            <div className="w-9 h-9 rounded-lg bg-gradient-to-br from-purple-500 to-purple-700 flex items-center justify-center shadow-sm">
+              <Sparkles className="w-4 h-4 text-white" />
+            </div>
+            <div>
+              <h1 className="text-base font-bold text-navy-900 leading-tight">Outreach</h1>
+              <p className="text-2xs text-stone-500">AI-personalized · review · copy &amp; send</p>
+            </div>
           </div>
 
-          {/* Tabs — middle of row */}
+          {/* Tabs — color-coded by status, active state has color depth */}
           <div className="flex items-center gap-1 flex-shrink-0">
             {TABS.map((t) => {
               const Icon = t.icon
@@ -111,6 +116,16 @@ export default function Outreach() {
                 ? (stats as any)?.[t.statusFilter] ?? 0
                 : stats?.total ?? 0
               const isActive = tab === t.key
+              // Each tab has its own color theme so the user gets a sense
+              // of where they are even mid-skim
+              const themes = {
+                pending:  { active: 'bg-amber-50 text-amber-800 border-amber-200',   badge: 'bg-amber-200 text-amber-900' },
+                approved: { active: 'bg-blue-50 text-blue-800 border-blue-200',      badge: 'bg-blue-200 text-blue-900' },
+                sent:     { active: 'bg-emerald-50 text-emerald-800 border-emerald-200', badge: 'bg-emerald-200 text-emerald-900' },
+                rejected: { active: 'bg-rose-50 text-rose-800 border-rose-200',      badge: 'bg-rose-200 text-rose-900' },
+                all:      { active: 'bg-purple-50 text-purple-800 border-purple-200', badge: 'bg-purple-200 text-purple-900' },
+              } as const
+              const theme = themes[t.key]
               return (
                 <button
                   key={t.key}
@@ -119,10 +134,10 @@ export default function Outreach() {
                     setPage(1)
                     setSelectedId(null)
                   }}
-                  className={`flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-semibold rounded-md transition ${
+                  className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-md transition border ${
                     isActive
-                      ? 'bg-purple-50 text-purple-700 border border-purple-200'
-                      : 'text-stone-600 hover:bg-stone-100 border border-transparent'
+                      ? theme.active
+                      : 'text-stone-600 hover:bg-stone-100 border-transparent'
                   }`}
                 >
                   <Icon className="w-3.5 h-3.5" />
@@ -130,7 +145,7 @@ export default function Outreach() {
                   {count > 0 && (
                     <span
                       className={`ml-0.5 px-1.5 py-0.5 text-2xs font-bold rounded ${
-                        isActive ? 'bg-purple-200 text-purple-800' : 'bg-stone-200 text-stone-600'
+                        isActive ? theme.badge : 'bg-stone-200 text-stone-600'
                       }`}
                     >
                       {count}
@@ -141,7 +156,7 @@ export default function Outreach() {
             })}
           </div>
 
-          {/* Search — flexes to fill remaining space */}
+          {/* Search */}
           <div className="relative flex-1 max-w-md ml-auto">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-stone-400" />
             <input
@@ -152,14 +167,14 @@ export default function Outreach() {
                 setPage(1)
               }}
               placeholder="Search contact, hotel, subject..."
-              className="w-full pl-9 pr-3 h-8 text-xs bg-stone-50 border border-stone-200 rounded-md focus:outline-none focus:border-purple-400 focus:ring-2 focus:ring-purple-100"
+              className="w-full pl-9 pr-3 h-9 text-xs bg-white border border-stone-200 rounded-md focus:outline-none focus:border-purple-400 focus:ring-2 focus:ring-purple-100"
             />
           </div>
 
-          {/* New Outreach button — far right */}
+          {/* New Outreach button — far right with stronger gradient */}
           <button
             onClick={() => setComposerOpen(true)}
-            className="flex items-center gap-1.5 px-3 py-1.5 bg-gradient-to-br from-purple-600 to-purple-700 text-white text-xs font-semibold rounded-md hover:from-purple-700 hover:to-purple-800 transition shadow-sm flex-shrink-0"
+            className="flex items-center gap-1.5 px-4 py-2 bg-gradient-to-br from-purple-600 to-purple-700 text-white text-xs font-bold rounded-md hover:from-purple-700 hover:to-purple-800 transition shadow-sm hover:shadow-md flex-shrink-0"
           >
             <Plus className="w-3.5 h-3.5" />
             New Outreach
@@ -277,33 +292,41 @@ function OutreachRow({
   onClick: () => void
 }) {
   const fitScore = record.fit_score ?? 0
-  const fitColor =
-    fitScore >= 80 ? 'bg-emerald-500 text-white'
-      : fitScore >= 60 ? 'bg-amber-500 text-white'
-      : fitScore >= 40 ? 'bg-stone-500 text-white'
-      : 'bg-red-400 text-white'
+  // Gradient avatars matching detail-panel header — same color logic
+  const avatarStyle =
+    fitScore >= 80 ? 'bg-gradient-to-br from-emerald-500 to-emerald-600 text-white'
+      : fitScore >= 60 ? 'bg-gradient-to-br from-amber-500 to-amber-600 text-white'
+      : fitScore >= 40 ? 'bg-gradient-to-br from-stone-500 to-stone-600 text-white'
+      : 'bg-gradient-to-br from-red-400 to-red-500 text-white'
 
   return (
     <button
       onClick={onClick}
-      className={`w-full text-left px-4 py-3 transition ${
-        selected ? 'bg-purple-50 border-l-2 border-purple-600' : 'hover:bg-stone-50 border-l-2 border-transparent'
+      className={`w-full text-left px-4 py-3.5 transition group ${
+        selected
+          ? 'bg-gradient-to-r from-purple-50/80 to-transparent border-l-[3px] border-purple-600'
+          : 'hover:bg-stone-50/80 border-l-[3px] border-transparent'
       }`}
     >
       <div className="flex items-start gap-3">
-        <div className={`flex-shrink-0 w-9 h-9 rounded-md flex items-center justify-center text-xs font-bold ${fitColor}`}>
+        {/* Larger avatar with shadow + gradient — matches detail header style */}
+        <div className={`flex-shrink-0 w-11 h-11 rounded-lg flex items-center justify-center text-sm font-bold shadow-sm ${avatarStyle}`}>
           {fitScore}
         </div>
         <div className="flex-1 min-w-0">
           <div className="flex items-center justify-between gap-2 mb-0.5">
-            <h3 className="text-sm font-semibold text-navy-900 truncate">{record.contact_name}</h3>
+            <h3 className="text-sm font-bold text-navy-900 truncate">{record.contact_name}</h3>
             <StatusBadge status={record.approval_status} />
           </div>
-          <p className="text-xs text-stone-500 truncate">{record.contact_title || '—'}</p>
-          <p className="text-xs text-stone-400 truncate mt-0.5">{record.hotel_name}</p>
+          <p className="text-xs font-medium text-stone-700 truncate">{record.contact_title || '—'}</p>
+          <p className="text-2xs text-stone-500 truncate mt-0.5 flex items-center gap-1">
+            <Building2 className="w-3 h-3 flex-shrink-0 text-stone-400" />
+            <span className="truncate">{record.hotel_name}</span>
+          </p>
           {record.outreach_angle && (
-            <p className="text-2xs text-purple-700 mt-1 italic line-clamp-1">
-              ✨ {record.outreach_angle}
+            <p className="text-2xs text-purple-700 mt-1.5 italic line-clamp-1 flex items-center gap-1">
+              <Sparkles className="w-3 h-3 flex-shrink-0" />
+              <span className="truncate">{record.outreach_angle}</span>
             </p>
           )}
         </div>

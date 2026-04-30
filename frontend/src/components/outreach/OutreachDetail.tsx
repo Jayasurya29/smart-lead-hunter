@@ -2,7 +2,8 @@ import { useState, useEffect } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   Check, X as XIcon, Send, Copy, Edit3, Loader2, Mail,
-  ExternalLink, Sparkles, Star,
+  ExternalLink, Sparkles, Star, AlertCircle, TrendingUp, Target,
+  Building2, MapPin, Linkedin,
 } from 'lucide-react'
 import {
   ResearchRecord,
@@ -194,24 +195,77 @@ export default function OutreachDetail({ record, onClose }: Props) {
 
   return (
     <div className="h-full flex flex-col bg-white">
-      {/* ── Header ────────────────────────────────────────────── */}
-      <div className="px-5 pt-5 pb-4 border-b border-stone-100 flex-shrink-0">
-        <div className="flex items-start justify-between gap-3 mb-2">
-          <div className="min-w-0">
-            <div className="flex items-center gap-2 mb-1">
-              <h2 className="text-lg font-bold text-navy-900 truncate">
-                {record.contact_name}
-              </h2>
-              <div className={`px-2 py-0.5 rounded text-2xs font-bold ${fitColor}`}>
-                FIT {fitScore}
-              </div>
+      {/* ── Header — avatar + name + contact info chips ─────── */}
+      <div className="px-6 pt-6 pb-5 border-b border-stone-100 bg-gradient-to-br from-stone-50/50 to-white flex-shrink-0">
+        <div className="flex items-start justify-between gap-3 mb-3">
+          <div className="flex items-start gap-3 min-w-0 flex-1">
+            {/* Avatar circle with initials */}
+            <div className={`flex-shrink-0 w-12 h-12 rounded-full flex items-center justify-center text-base font-bold text-white shadow-sm ${
+              fitScore >= 80 ? 'bg-gradient-to-br from-emerald-500 to-emerald-600'
+                : fitScore >= 60 ? 'bg-gradient-to-br from-amber-500 to-amber-600'
+                : fitScore >= 40 ? 'bg-gradient-to-br from-stone-500 to-stone-600'
+                : 'bg-gradient-to-br from-red-400 to-red-500'
+            }`}>
+              {(record.contact_name || '?').split(' ').map(n => n[0]).slice(0, 2).join('').toUpperCase()}
             </div>
-            <p className="text-sm text-stone-500 truncate">
-              {record.contact_title || '—'} · {record.hotel_name}
-            </p>
-            {record.hotel_location && (
-              <p className="text-xs text-stone-400 mt-0.5">{record.hotel_location}</p>
-            )}
+            <div className="min-w-0 flex-1">
+              {/* Name + fit score */}
+              <div className="flex items-center gap-2 mb-1">
+                <h2 className="text-xl font-bold text-navy-900 truncate">
+                  {record.contact_name}
+                </h2>
+                <div className={`px-2 py-0.5 rounded text-2xs font-bold flex-shrink-0 ${fitColor}`}>
+                  FIT {fitScore}
+                </div>
+              </div>
+              {/* Title */}
+              {record.contact_title && (
+                <p className="text-sm font-medium text-stone-700 mb-2">
+                  {record.contact_title}
+                </p>
+              )}
+              {/* Hotel + location chips */}
+              <div className="flex flex-wrap items-center gap-1.5">
+                <span className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-navy-50 text-navy-800 rounded-md text-xs font-semibold">
+                  <Building2 className="w-3 h-3" />
+                  {record.hotel_name}
+                </span>
+                {record.hotel_location && (
+                  <span className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-stone-100 text-stone-700 rounded-md text-xs">
+                    <MapPin className="w-3 h-3" />
+                    {record.hotel_location}
+                  </span>
+                )}
+              </div>
+              {/* Email + LinkedIn — clickable when present */}
+              {(record.email || record.linkedin_url) && (
+                <div className="flex flex-wrap items-center gap-1.5 mt-2">
+                  {record.email && (
+                    <a
+                      href={`mailto:${record.email}`}
+                      className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-white border border-stone-200 hover:border-purple-300 hover:bg-purple-50 text-stone-700 hover:text-purple-700 rounded-md text-xs transition group"
+                      title="Click to compose in default mail client"
+                    >
+                      <Mail className="w-3 h-3 text-stone-400 group-hover:text-purple-600" />
+                      <span className="truncate max-w-[200px]">{record.email}</span>
+                    </a>
+                  )}
+                  {record.linkedin_url && (
+                    <a
+                      href={record.linkedin_url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-white border border-stone-200 hover:border-blue-300 hover:bg-blue-50 text-stone-700 hover:text-blue-700 rounded-md text-xs transition group"
+                      title="Open LinkedIn profile in new tab"
+                    >
+                      <Linkedin className="w-3 h-3 text-stone-400 group-hover:text-blue-600" />
+                      LinkedIn
+                      <ExternalLink className="w-2.5 h-2.5 text-stone-300 group-hover:text-blue-500" />
+                    </a>
+                  )}
+                </div>
+              )}
+            </div>
           </div>
           <button
             onClick={onClose}
@@ -220,11 +274,11 @@ export default function OutreachDetail({ record, onClose }: Props) {
             <XIcon className="w-4 h-4" />
           </button>
         </div>
-        {/* Status pill */}
-        <div className="flex items-center gap-2 text-xs">
+        {/* Status pill row */}
+        <div className="flex items-center gap-2 text-xs pt-2 border-t border-stone-100">
           <StatusPill status={record.approval_status} />
           {record.send_time && (
-            <span className="text-stone-400">· Suggested: {record.send_time}</span>
+            <span className="text-stone-400">· Suggested send: {record.send_time}</span>
           )}
         </div>
       </div>
@@ -232,64 +286,123 @@ export default function OutreachDetail({ record, onClose }: Props) {
       {/* ── Body (scrollable) ─────────────────────────────────── */}
       <div className="flex-1 overflow-y-auto p-5 space-y-5">
 
-        {/* Personalization brief */}
+        {/* Personalization Brief — purple-tinted card, comfortable typography */}
         {(record.outreach_angle || record.personalization_hook) && (
-          <Section title="Personalization Brief" icon={<Sparkles className="w-3.5 h-3.5" />}>
-            {record.outreach_angle && (
-              <div className="mb-2">
-                <span className="text-2xs uppercase tracking-wider font-semibold text-stone-400">Angle</span>
-                <p className="text-sm text-navy-900 mt-0.5">{record.outreach_angle}</p>
+          <div className="bg-gradient-to-br from-purple-50/70 to-indigo-50/40 border border-purple-200/70 rounded-xl p-5">
+            <div className="flex items-center gap-2 mb-4 pb-2 border-b border-purple-200/60">
+              <div className="w-7 h-7 rounded-lg bg-purple-100 flex items-center justify-center">
+                <Sparkles className="w-4 h-4 text-purple-600" />
               </div>
-            )}
-            {record.personalization_hook && (
-              <div className="mb-2">
-                <span className="text-2xs uppercase tracking-wider font-semibold text-stone-400">Hook</span>
-                <p className="text-sm text-navy-900 mt-0.5 italic">{record.personalization_hook}</p>
-              </div>
-            )}
-            {record.contact_summary && (
-              <div className="mb-2">
-                <span className="text-2xs uppercase tracking-wider font-semibold text-stone-400">About {record.contact_name.split(' ')[0]}</span>
-                <p className="text-sm text-stone-700 mt-0.5">{record.contact_summary}</p>
-              </div>
-            )}
-          </Section>
+              <h3 className="text-xs uppercase tracking-wider font-bold text-purple-900">
+                Personalization Brief
+              </h3>
+            </div>
+            <div className="space-y-4">
+              {record.outreach_angle && (
+                <div>
+                  <span className="inline-flex items-center px-2 py-0.5 text-2xs uppercase tracking-wider font-bold text-purple-800 bg-purple-100 rounded mb-1.5">
+                    Angle
+                  </span>
+                  <p className="text-sm text-navy-900 leading-relaxed">{record.outreach_angle}</p>
+                </div>
+              )}
+              {record.personalization_hook && (
+                <div>
+                  <span className="inline-flex items-center px-2 py-0.5 text-2xs uppercase tracking-wider font-bold text-indigo-800 bg-indigo-100 rounded mb-1.5">
+                    Hook
+                  </span>
+                  <p className="text-sm text-navy-900 leading-relaxed italic">"{record.personalization_hook}"</p>
+                </div>
+              )}
+              {record.contact_summary && (
+                <div>
+                  <span className="inline-flex items-center px-2 py-0.5 text-2xs uppercase tracking-wider font-bold text-stone-700 bg-stone-100 rounded mb-1.5">
+                    About {record.contact_name.split(' ')[0]}
+                  </span>
+                  <p className="text-sm text-stone-700 leading-relaxed">{record.contact_summary}</p>
+                </div>
+              )}
+            </div>
+          </div>
         )}
 
-        {/* Pain points + value props */}
+        {/* Pain points + value props — color-washed cards with comfortable typography */}
         {(record.pain_points.length > 0 || record.value_props.length > 0) && (
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             {record.pain_points.length > 0 && (
-              <Section title="Pain Points" compact>
-                <ul className="space-y-1">
+              <div className="bg-gradient-to-br from-rose-50/70 to-orange-50/40 border border-rose-200/70 rounded-xl p-4">
+                <div className="flex items-center gap-2 mb-3 pb-2 border-b border-rose-200/60">
+                  <div className="w-7 h-7 rounded-lg bg-rose-100 flex items-center justify-center">
+                    <Target className="w-4 h-4 text-rose-600" />
+                  </div>
+                  <h3 className="text-xs uppercase tracking-wider font-bold text-rose-900">
+                    Pain Points
+                  </h3>
+                  <span className="ml-auto text-2xs font-bold text-rose-400">
+                    {record.pain_points.length}
+                  </span>
+                </div>
+                <ul className="space-y-2.5">
                   {record.pain_points.map((p, i) => (
-                    <li key={i} className="text-xs text-stone-700 flex gap-1">
-                      <span className="text-red-500">·</span><span>{p}</span>
+                    <li key={i} className="flex gap-2.5 text-sm text-stone-800 leading-relaxed">
+                      <span className="flex-shrink-0 w-5 h-5 rounded-full bg-rose-100 text-rose-700 text-2xs font-bold flex items-center justify-center mt-0.5">
+                        {i + 1}
+                      </span>
+                      <span>{p}</span>
                     </li>
                   ))}
                 </ul>
-              </Section>
+              </div>
             )}
             {record.value_props.length > 0 && (
-              <Section title="Value Props" compact>
-                <ul className="space-y-1">
+              <div className="bg-gradient-to-br from-emerald-50/70 to-teal-50/40 border border-emerald-200/70 rounded-xl p-4">
+                <div className="flex items-center gap-2 mb-3 pb-2 border-b border-emerald-200/60">
+                  <div className="w-7 h-7 rounded-lg bg-emerald-100 flex items-center justify-center">
+                    <TrendingUp className="w-4 h-4 text-emerald-600" />
+                  </div>
+                  <h3 className="text-xs uppercase tracking-wider font-bold text-emerald-900">
+                    Value Props
+                  </h3>
+                  <span className="ml-auto text-2xs font-bold text-emerald-400">
+                    {record.value_props.length}
+                  </span>
+                </div>
+                <ul className="space-y-2.5">
                   {record.value_props.map((v, i) => (
-                    <li key={i} className="text-xs text-stone-700 flex gap-1">
-                      <span className="text-emerald-500">·</span><span>{v}</span>
+                    <li key={i} className="flex gap-2.5 text-sm text-stone-800 leading-relaxed">
+                      <span className="flex-shrink-0 w-5 h-5 rounded-full bg-emerald-100 text-emerald-700 flex items-center justify-center mt-0.5">
+                        <Check className="w-3 h-3" strokeWidth={3} />
+                      </span>
+                      <span>{v}</span>
                     </li>
                   ))}
                 </ul>
-              </Section>
+              </div>
             )}
           </div>
         )}
 
         {/* Email */}
-        <Section title="Email Draft" icon={<Mail className="w-3.5 h-3.5" />}>
+        {/* Email Draft — blue/sky tinted card, the deliverable */}
+        <div className="bg-gradient-to-br from-sky-50/70 to-blue-50/40 border border-sky-200/70 rounded-xl p-5">
+          <div className="flex items-center gap-2 mb-4 pb-2 border-b border-sky-200/60">
+            <div className="w-7 h-7 rounded-lg bg-sky-100 flex items-center justify-center">
+              <Mail className="w-4 h-4 text-sky-600" />
+            </div>
+            <h3 className="text-xs uppercase tracking-wider font-bold text-sky-900">
+              Email Draft
+            </h3>
+            <span className="ml-auto text-2xs text-sky-400 font-semibold">
+              Ready to send
+            </span>
+          </div>
+
           {/* Subject */}
-          <div className="mb-3">
-            <div className="flex items-center justify-between mb-1">
-              <span className="text-2xs uppercase tracking-wider font-semibold text-stone-400">Subject</span>
+          <div className="mb-4">
+            <div className="flex items-center justify-between mb-1.5">
+              <span className="inline-flex items-center px-2 py-0.5 text-2xs uppercase tracking-wider font-bold text-sky-800 bg-sky-100 rounded">
+                Subject
+              </span>
               <div className="flex gap-1">
                 <IconBtn onClick={() => copy(draft.email_subject, 'subject')} title="Copy subject">
                   <Copy className="w-3 h-3" />
@@ -303,17 +416,20 @@ export default function OutreachDetail({ record, onClose }: Props) {
               <textarea
                 value={draft.email_subject}
                 onChange={(e) => setDraft({ ...draft, email_subject: e.target.value })}
-                className="w-full px-3 py-2 text-sm border border-stone-300 rounded-md focus:outline-none focus:border-purple-400 focus:ring-2 focus:ring-purple-100 resize-none"
+                className="w-full px-3 py-2 text-sm bg-white border border-stone-300 rounded-md focus:outline-none focus:border-sky-400 focus:ring-2 focus:ring-sky-100 resize-none"
                 rows={1}
               />
             ) : (
-              <p className="text-sm text-navy-900 font-medium">{draft.email_subject || '—'}</p>
+              <p className="text-base text-navy-900 font-semibold leading-relaxed">{draft.email_subject || '—'}</p>
             )}
           </div>
+
           {/* Body */}
           <div>
-            <div className="flex items-center justify-between mb-1">
-              <span className="text-2xs uppercase tracking-wider font-semibold text-stone-400">Body</span>
+            <div className="flex items-center justify-between mb-1.5">
+              <span className="inline-flex items-center px-2 py-0.5 text-2xs uppercase tracking-wider font-bold text-sky-800 bg-sky-100 rounded">
+                Body
+              </span>
               <div className="flex gap-1">
                 <IconBtn onClick={() => copy(draft.email_body, 'body')} title="Copy body">
                   <Copy className="w-3 h-3" />
@@ -325,7 +441,7 @@ export default function OutreachDetail({ record, onClose }: Props) {
                   <a
                     href={`mailto:${record.email}?subject=${encodeURIComponent(draft.email_subject || '')}&body=${encodeURIComponent(stripAiSignature(draft.email_body || ''))}`}
                     title="Open in default mail client"
-                    className="p-1.5 rounded hover:bg-stone-100 text-stone-500 hover:text-purple-600 transition"
+                    className="p-1.5 rounded hover:bg-stone-100 text-stone-500 hover:text-sky-600 transition"
                   >
                     <ExternalLink className="w-3 h-3" />
                   </a>
@@ -336,13 +452,16 @@ export default function OutreachDetail({ record, onClose }: Props) {
               <textarea
                 value={draft.email_body}
                 onChange={(e) => setDraft({ ...draft, email_body: e.target.value })}
-                className="w-full px-3 py-2 text-sm border border-stone-300 rounded-md focus:outline-none focus:border-purple-400 focus:ring-2 focus:ring-purple-100 font-mono"
+                className="w-full px-3 py-2 text-sm bg-white border border-stone-300 rounded-md focus:outline-none focus:border-sky-400 focus:ring-2 focus:ring-sky-100 font-mono"
                 rows={8}
               />
             ) : (
-              <pre className="whitespace-pre-wrap text-sm text-stone-800 leading-relaxed font-sans">{draft.email_body || '—'}</pre>
+              <div className="bg-white/80 border border-sky-100 rounded-lg p-4">
+                <pre className="whitespace-pre-wrap text-sm text-stone-800 leading-relaxed font-sans">{draft.email_body || '—'}</pre>
+              </div>
             )}
           </div>
+
           {(editing === 'subject' || editing === 'body') && (
             <div className="mt-3 flex justify-end gap-2">
               <button
@@ -364,31 +483,42 @@ export default function OutreachDetail({ record, onClose }: Props) {
                   email_body: draft.email_body,
                 })}
                 disabled={saveMut.isPending}
-                className="px-3 py-1.5 text-xs font-semibold text-white bg-purple-600 rounded-md hover:bg-purple-700 disabled:opacity-50"
+                className="px-3 py-1.5 text-xs font-semibold text-white bg-sky-600 rounded-md hover:bg-sky-700 disabled:opacity-50"
               >
                 {saveMut.isPending ? 'Saving...' : 'Save edits'}
               </button>
             </div>
           )}
-        </Section>
+        </div>
 
-        {/* LinkedIn */}
+        {/* LinkedIn Message — blue-tinted card */}
         {(record.linkedin_message || draft.linkedin_message) && (
-          <Section title="LinkedIn Message" icon={<Star className="w-3.5 h-3.5" />}>
-            <div className="flex items-center justify-end mb-1 gap-1">
-              <IconBtn onClick={() => copy(draft.linkedin_message, 'linkedin')} title="Copy">
-                <Copy className="w-3 h-3" />
-              </IconBtn>
-              <IconBtn onClick={() => setEditing(editing === 'linkedin' ? null : 'linkedin')} title="Edit">
-                <Edit3 className="w-3 h-3" />
-              </IconBtn>
+          <div className="bg-gradient-to-br from-blue-50/70 to-indigo-50/40 border border-blue-200/70 rounded-xl p-5">
+            <div className="flex items-center gap-2 mb-3 pb-2 border-b border-blue-200/60">
+              <div className="w-7 h-7 rounded-lg bg-blue-100 flex items-center justify-center">
+                <Linkedin className="w-4 h-4 text-blue-600" />
+              </div>
+              <h3 className="text-xs uppercase tracking-wider font-bold text-blue-900">
+                LinkedIn Message
+              </h3>
+              <span className="ml-auto text-2xs text-blue-400 font-semibold">
+                {(draft.linkedin_message || '').length}/280
+              </span>
+              <div className="flex gap-1 ml-1">
+                <IconBtn onClick={() => copy(draft.linkedin_message, 'linkedin')} title="Copy">
+                  <Copy className="w-3 h-3" />
+                </IconBtn>
+                <IconBtn onClick={() => setEditing(editing === 'linkedin' ? null : 'linkedin')} title="Edit">
+                  <Edit3 className="w-3 h-3" />
+                </IconBtn>
+              </div>
             </div>
             {editing === 'linkedin' ? (
               <>
                 <textarea
                   value={draft.linkedin_message}
                   onChange={(e) => setDraft({ ...draft, linkedin_message: e.target.value })}
-                  className="w-full px-3 py-2 text-sm border border-stone-300 rounded-md focus:outline-none focus:border-purple-400 focus:ring-2 focus:ring-purple-100"
+                  className="w-full px-3 py-2 text-sm bg-white border border-stone-300 rounded-md focus:outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
                   rows={3}
                 />
                 <div className="mt-2 flex justify-end gap-2">
@@ -404,37 +534,58 @@ export default function OutreachDetail({ record, onClose }: Props) {
                   <button
                     onClick={() => saveMut.mutate({ linkedin_message: draft.linkedin_message })}
                     disabled={saveMut.isPending}
-                    className="px-3 py-1.5 text-xs font-semibold text-white bg-purple-600 rounded-md hover:bg-purple-700 disabled:opacity-50"
+                    className="px-3 py-1.5 text-xs font-semibold text-white bg-blue-600 rounded-md hover:bg-blue-700 disabled:opacity-50"
                   >
                     {saveMut.isPending ? 'Saving...' : 'Save'}
                   </button>
                 </div>
               </>
             ) : (
-              <p className="text-sm text-stone-800 leading-relaxed">{draft.linkedin_message || '—'}</p>
+              <div className="bg-white/80 border border-blue-100 rounded-lg p-4">
+                <p className="text-sm text-stone-800 leading-relaxed">{draft.linkedin_message || '—'}</p>
+              </div>
             )}
-          </Section>
+          </div>
         )}
 
         {/* 3-touch sequence (generated on demand) */}
-        <Section title="Follow-up Sequence">
+        {/* Follow-up Sequence — amber/orange tinted card */}
+        <div className="bg-gradient-to-br from-amber-50/70 to-orange-50/40 border border-amber-200/70 rounded-xl p-5">
+          <div className="flex items-center gap-2 mb-3 pb-2 border-b border-amber-200/60">
+            <div className="w-7 h-7 rounded-lg bg-amber-100 flex items-center justify-center">
+              <Send className="w-4 h-4 text-amber-600" />
+            </div>
+            <h3 className="text-xs uppercase tracking-wider font-bold text-amber-900">
+              Follow-up Sequence
+            </h3>
+            {sequence && (
+              <span className="ml-auto text-2xs text-amber-400 font-semibold">
+                {sequence.length} touches
+              </span>
+            )}
+          </div>
+
           {!sequence ? (
             <button
               onClick={() => seqMut.mutate()}
               disabled={seqMut.isPending}
-              className="w-full px-4 py-2 text-xs font-semibold text-purple-700 bg-purple-50 hover:bg-purple-100 rounded-md transition disabled:opacity-50 flex items-center justify-center gap-2"
+              className="w-full px-4 py-3 text-sm font-semibold text-amber-800 bg-white/70 border border-amber-200 hover:bg-white hover:border-amber-300 rounded-lg transition disabled:opacity-50 flex items-center justify-center gap-2"
             >
-              {seqMut.isPending ? <Loader2 className="w-3 h-3 animate-spin" /> : <Sparkles className="w-3 h-3" />}
+              {seqMut.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
               {seqMut.isPending ? 'Generating sequence...' : 'Generate 3-touch sequence'}
             </button>
           ) : (
             <div className="space-y-3">
               {sequence.map((touch, i) => (
-                <div key={i} className="border border-stone-200 rounded-lg p-3">
-                  <div className="flex items-center justify-between mb-1">
+                <div key={i} className="bg-white/80 border border-amber-100 rounded-lg p-4">
+                  <div className="flex items-center justify-between mb-2">
                     <div className="flex items-center gap-2">
-                      <span className="text-2xs font-bold text-purple-700">DAY {touch.day}</span>
-                      <span className="text-2xs uppercase tracking-wider font-semibold text-stone-400">{touch.type}</span>
+                      <span className="inline-flex items-center px-2 py-0.5 text-2xs font-bold text-amber-900 bg-amber-100 rounded">
+                        DAY {touch.day}
+                      </span>
+                      <span className="text-2xs uppercase tracking-wider font-semibold text-stone-500">
+                        {touch.type}
+                      </span>
                     </div>
                     <IconBtn
                       onClick={() => copy(`Subject: ${touch.subject}\n\n${touch.body}`, `touch-${i}`)}
@@ -443,13 +594,13 @@ export default function OutreachDetail({ record, onClose }: Props) {
                       <Copy className="w-3 h-3" />
                     </IconBtn>
                   </div>
-                  <p className="text-sm font-medium text-navy-900 mb-1">{touch.subject}</p>
-                  <pre className="whitespace-pre-wrap text-xs text-stone-700 font-sans">{touch.body}</pre>
+                  <p className="text-sm font-semibold text-navy-900 mb-2 leading-relaxed">{touch.subject}</p>
+                  <pre className="whitespace-pre-wrap text-xs text-stone-700 font-sans leading-relaxed">{touch.body}</pre>
                 </div>
               ))}
             </div>
           )}
-        </Section>
+        </div>
 
         {record.approval_notes && (
           <div className="px-3 py-2 bg-red-50 border border-red-200 rounded-md text-xs text-red-700">
@@ -536,12 +687,10 @@ export default function OutreachDetail({ record, onClose }: Props) {
                     const subject = encodeURIComponent(draft.email_subject || '')
                     const body = encodeURIComponent(stripAiSignature(draft.email_body || ''))
                     window.location.href = `mailto:${record.email}?subject=${subject}&body=${body}`
-                    // Show the confirm banner — user has to actively
-                    // confirm "yes I sent it" for status to change
                     setTimeout(() => setShowConfirmSent(true), 400)
                   }}
                   className="flex-1 px-3 py-2 text-sm font-semibold text-white bg-emerald-600 rounded-md hover:bg-emerald-700 flex items-center justify-center gap-1.5 transition"
-                  title="Opens Outlook (or your default mail client) with the email pre-filled. After you hit Send there, confirm here."
+                  title="Opens Outlook with the email pre-filled. After you hit Send there, confirm here."
                 >
                   <Mail className="w-4 h-4" />
                   Open in Outlook
