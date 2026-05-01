@@ -28,7 +28,7 @@ from app.services.utils import local_now
 try:
     from app.services.url_filter import URLFilter
 except ImportError:
-    from url_filter import URLFilter
+    from app.services.url_filter import URLFilter
 
 try:
     from app.services.source_config import (

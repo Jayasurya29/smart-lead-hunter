@@ -53,6 +53,14 @@ class PitchState(TypedDict, total=False):
     conversation_hooks: Optional[list[str]]
     hotel_tier_inferred: Optional[str]
 
+    # Anti-hallucination plumbing — Validator agent uses these to
+    # fact-check Researcher output before downstream agents see it
+    raw_research_text: Optional[str]
+    fact_citations: Optional[list]
+    validator_stripped_count: Optional[int]
+    research_confidence: Optional[str]  # "high" | "medium" | "low"
+    sources: Optional[list]  # [{url, title, snippet, category}, ...]
+
     # ── Analyst output ────────────────────────────────────────────────
     fit_score: Optional[int]
     fit_breakdown: Optional[dict]

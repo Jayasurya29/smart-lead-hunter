@@ -58,6 +58,12 @@ function stripAiSignature(body: string): string {
 export default function OutreachDetail({ record, onClose }: Props) {
   const qc = useQueryClient()
   const [editing, setEditing] = useState<'subject' | 'body' | 'linkedin' | null>(null)
+  // Sub-tab inside the detail panel — Brief & Email is the default,
+  // Sources is the second tab. Sources used to live mid-scroll on the
+  // Brief view but pushed Email Draft below the fold; promoting it to
+  // its own tab keeps the Brief lean and makes verification a one-click
+  // toggle when reps want to fact-check.
+  const [activeTab, setActiveTab] = useState<'brief' | 'sources'>('brief')
   const [draft, setDraft] = useState({
     email_subject: record.email_subject || '',
     email_body: record.email_body || '',
@@ -84,6 +90,7 @@ export default function OutreachDetail({ record, onClose }: Props) {
     setRejectFeedback('')
     setSequence(null)
     setShowConfirmSent(false)
+    setActiveTab('brief')
   }, [record.id])
 
   const saveMut = useMutation({
@@ -277,15 +284,135 @@ export default function OutreachDetail({ record, onClose }: Props) {
         {/* Status pill row */}
         <div className="flex items-center gap-2 text-xs pt-2 border-t border-stone-100">
           <StatusPill status={record.approval_status} />
+          {record.research_confidence && (
+            <ConfidenceBadge confidence={record.research_confidence} />
+          )}
           {record.send_time && (
             <span className="text-stone-400">· Suggested send: {record.send_time}</span>
           )}
         </div>
       </div>
 
-      {/* ── Body (scrollable) ─────────────────────────────────── */}
+      {/* ── Sub-tab strip — Brief & Email vs Sources ───────────── */}
+      <div className="flex items-center gap-1 px-5 pt-3 bg-white border-b border-stone-100 flex-shrink-0">
+        <button
+          onClick={() => setActiveTab('brief')}
+          className={`px-4 py-2 text-xs font-bold uppercase tracking-wider rounded-t-md transition border-b-2 -mb-px ${
+            activeTab === 'brief'
+              ? 'text-purple-700 border-purple-600 bg-purple-50/40'
+              : 'text-stone-500 border-transparent hover:text-stone-700 hover:bg-stone-50'
+          }`}
+        >
+          Brief &amp; Email
+        </button>
+        <button
+          onClick={() => setActiveTab('sources')}
+          className={`px-4 py-2 text-xs font-bold uppercase tracking-wider rounded-t-md transition border-b-2 -mb-px flex items-center gap-1.5 ${
+            activeTab === 'sources'
+              ? 'text-stone-800 border-stone-600 bg-stone-50/60'
+              : 'text-stone-500 border-transparent hover:text-stone-700 hover:bg-stone-50'
+          }`}
+        >
+          <ExternalLink className="w-3 h-3" />
+          Sources
+          {record.sources && record.sources.length > 0 && (
+            <span className={`px-1.5 py-0.5 text-2xs font-bold rounded ${
+              activeTab === 'sources'
+                ? 'bg-stone-200 text-stone-700'
+                : 'bg-stone-100 text-stone-500'
+            }`}>
+              {record.sources.length}
+            </span>
+          )}
+        </button>
+      </div>
+
+      {/* ── Body (scrollable) — content swaps based on activeTab ── */}
       <div className="flex-1 overflow-y-auto p-5 space-y-5">
 
+        {/* ════════════════ SOURCES TAB ════════════════ */}
+        {activeTab === 'sources' && (
+          <>
+            {(!record.sources || record.sources.length === 0) ? (
+              <div className="text-center py-16">
+                <ExternalLink className="w-10 h-10 text-stone-200 mx-auto mb-3" />
+                <p className="text-sm text-stone-500">No sources captured for this outreach</p>
+                <p className="text-xs text-stone-400 mt-1">
+                  This may be an older record generated before source tracking was added.
+                </p>
+              </div>
+            ) : (
+              <>
+                <div className="bg-blue-50/60 border border-blue-200/60 rounded-lg px-4 py-3">
+                  <p className="text-sm text-blue-900 font-semibold mb-0.5">
+                    All facts in the Brief are grounded in these sources
+                  </p>
+                  <p className="text-xs text-blue-700">
+                    Click any card to open the original article. Use this to verify any specific claim before you send the email.
+                  </p>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  {record.sources.map((src, i) => {
+                    const categoryColors: Record<string, { bg: string; text: string }> = {
+                      news:        { bg: 'bg-blue-100',    text: 'text-blue-800' },
+                      pre_opening: { bg: 'bg-amber-100',   text: 'text-amber-800' },
+                      expansion:   { bg: 'bg-violet-100',  text: 'text-violet-800' },
+                      hiring:      { bg: 'bg-emerald-100', text: 'text-emerald-800' },
+                      staffing:    { bg: 'bg-emerald-100', text: 'text-emerald-800' },
+                      awards:      { bg: 'bg-yellow-100',  text: 'text-yellow-800' },
+                      contact:     { bg: 'bg-purple-100',  text: 'text-purple-800' },
+                      contact_linkedin: { bg: 'bg-blue-100', text: 'text-blue-800' },
+                      contact_brand: { bg: 'bg-purple-100', text: 'text-purple-800' },
+                      press_release: { bg: 'bg-rose-100', text: 'text-rose-800' },
+                      brand:       { bg: 'bg-indigo-100',  text: 'text-indigo-800' },
+                      brand_city:  { bg: 'bg-indigo-100',  text: 'text-indigo-800' },
+                    }
+                    const c = categoryColors[src.category] || { bg: 'bg-stone-100', text: 'text-stone-700' }
+                    return (
+                      <a
+                        key={i}
+                        href={src.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="block p-3.5 bg-white border border-stone-200 rounded-lg hover:border-stone-400 hover:shadow-md transition group"
+                        title={src.url}
+                      >
+                        <div className="flex items-start justify-between gap-2 mb-2">
+                          <span className={`inline-flex items-center px-1.5 py-0.5 text-2xs font-bold uppercase tracking-wider rounded ${c.bg} ${c.text}`}>
+                            {src.category.replace(/_/g, ' ')}
+                          </span>
+                          <ExternalLink className="w-3.5 h-3.5 text-stone-300 group-hover:text-stone-700 flex-shrink-0" />
+                        </div>
+                        <p className="text-sm font-semibold text-navy-900 line-clamp-2 group-hover:text-purple-700 transition leading-snug">
+                          {src.title}
+                        </p>
+                        {src.snippet && (
+                          <p className="text-xs text-stone-600 mt-1.5 line-clamp-3 leading-relaxed">
+                            {src.snippet}
+                          </p>
+                        )}
+                        <p className="text-2xs text-stone-400 mt-2 truncate flex items-center gap-1">
+                          <span>🔗</span>
+                          {(() => {
+                            try {
+                              return new URL(src.url).hostname.replace(/^www\./, '')
+                            } catch {
+                              return src.url
+                            }
+                          })()}
+                        </p>
+                      </a>
+                    )
+                  })}
+                </div>
+              </>
+            )}
+          </>
+        )}
+
+        {/* ════════════════ BRIEF & EMAIL TAB ════════════════ */}
+        {activeTab === 'brief' && (
+          <>
         {/* Personalization Brief — purple-tinted card, comfortable typography */}
         {(record.outreach_angle || record.personalization_hook) && (
           <div className="bg-gradient-to-br from-purple-50/70 to-indigo-50/40 border border-purple-200/70 rounded-xl p-5">
@@ -383,6 +510,28 @@ export default function OutreachDetail({ record, onClose }: Props) {
         )}
 
         {/* Email */}
+        {/* Sources hint — small button that switches to Sources tab.
+            Replaces the inline Sources card that used to live here, which
+            was eating too much vertical space and pushing Email Draft
+            below the fold. */}
+        {record.sources && record.sources.length > 0 && (
+          <button
+            onClick={() => setActiveTab('sources')}
+            className="w-full flex items-center justify-between gap-3 px-4 py-2.5 bg-white border border-stone-200 hover:border-stone-400 hover:bg-stone-50 rounded-lg transition group"
+          >
+            <span className="flex items-center gap-2 text-xs">
+              <ExternalLink className="w-3.5 h-3.5 text-stone-400 group-hover:text-stone-700" />
+              <span className="font-semibold text-stone-700">
+                {record.sources.length} sources backing this brief
+              </span>
+              <span className="text-stone-400">— click to verify any fact</span>
+            </span>
+            <span className="text-xs font-semibold text-purple-600 group-hover:underline">
+              View sources →
+            </span>
+          </button>
+        )}
+
         {/* Email Draft — blue/sky tinted card, the deliverable */}
         <div className="bg-gradient-to-br from-sky-50/70 to-blue-50/40 border border-sky-200/70 rounded-xl p-5">
           <div className="flex items-center gap-2 mb-4 pb-2 border-b border-sky-200/60">
@@ -607,6 +756,8 @@ export default function OutreachDetail({ record, onClose }: Props) {
             <span className="font-bold">Rejection notes:</span> {record.approval_notes}
           </div>
         )}
+          </>
+        )}
       </div>
 
       {/* ── Footer actions ────────────────────────────────────── */}
@@ -823,6 +974,39 @@ function StatusPill({ status }: { status: string }) {
   const c = config[status] || config.pending
   return (
     <span className={`inline-flex items-center px-2 py-0.5 rounded text-2xs font-bold uppercase tracking-wider ${c.bg} ${c.text}`}>
+      {c.label}
+    </span>
+  )
+}
+
+/**
+ * Confidence badge — surfaces how trustworthy the brief is at a glance.
+ * Displayed next to the status pill on every outreach record.
+ *
+ *   high    → green ✓ (full research, brief is solid)
+ *   medium  → yellow (some sparseness, glance-check the brief)
+ *   low     → red ⚠ (very thin research, fact-check before sending)
+ */
+function ConfidenceBadge({ confidence }: { confidence: 'high' | 'medium' | 'low' }) {
+  const config = {
+    high:   { bg: 'bg-emerald-100', text: 'text-emerald-800', icon: '✓', label: 'Strong research' },
+    medium: { bg: 'bg-amber-100',   text: 'text-amber-800',   icon: '~', label: 'Moderate research' },
+    low:    { bg: 'bg-rose-100',    text: 'text-rose-800',    icon: '⚠', label: 'Thin research — verify' },
+  } as const
+  const c = config[confidence]
+  if (!c) return null
+  return (
+    <span
+      className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-2xs font-bold uppercase tracking-wider ${c.bg} ${c.text}`}
+      title={
+        confidence === 'low'
+          ? 'Research came back sparse — fact-check this brief manually before sending.'
+          : confidence === 'medium'
+          ? 'Research had some gaps — quick scan recommended.'
+          : 'Research returned strong, varied data.'
+      }
+    >
+      <span>{c.icon}</span>
       {c.label}
     </span>
   )

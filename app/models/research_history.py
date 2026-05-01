@@ -27,7 +27,7 @@ from sqlalchemy import (
     ForeignKey,
     Index,
 )
-from sqlalchemy.dialects.postgresql import ARRAY
+from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 from sqlalchemy.sql import func
 
 from app.database import Base
@@ -78,6 +78,14 @@ class ResearchHistory(Base):
     hotel_tier = Column(String(50), nullable=True)
     hiring_signals = Column(ARRAY(Text), nullable=True)
     recent_news = Column(ARRAY(Text), nullable=True)
+    # Research confidence flag — 'high' / 'medium' / 'low' / null
+    # Surfaces in UI as a badge so reps know to fact-check thin briefs
+    research_confidence = Column(String(10), nullable=True)
+
+    # Source URLs collected by the Researcher — JSONB list of
+    # {url, title, snippet, category} entries. UI shows these as
+    # clickable citation cards so reps can verify any fact in the brief.
+    sources = Column(JSONB, nullable=True)
 
     # ── Analyst output ──
     fit_score = Column(Integer, nullable=True, index=True)
@@ -136,6 +144,8 @@ class ResearchHistory(Base):
             "outreach_angle": self.outreach_angle,
             "personalization_hook": self.personalization_hook,
             "hotel_tier": self.hotel_tier,
+            "research_confidence": self.research_confidence,
+            "sources": list(self.sources or []),
             "hiring_signals": list(self.hiring_signals or []),
             "recent_news": list(self.recent_news or []),
             "fit_score": self.fit_score,

@@ -17,7 +17,7 @@ from __future__ import annotations
 import logging
 
 from .state import PitchState
-from .config import get_llm
+from .config import get_analyst_llm
 from ._helpers import (
     JA_BACKGROUND,
     fmt_known_context,
@@ -171,17 +171,80 @@ Awards / Recent News:
   }}
 }}
 
-Hard rules:
-- fit_score MUST equal base_account_score + research_adjustment, no surprises.
-- value_props arrays should each have 1-2 props (so 3-6 total across all categories).
-- Every value prop must be SPECIFIC to this hotel's situation. No "we offer
-  premium quality" — instead "Custom uniform program tailored to {state.get('brand') or 'your'} brand
-  standards across {state.get('room_count') or 'your'}-room property."
-- If is_client=true, value props should focus on EXPANSION / additional
-  departments / consolidating reorders, not first-time acquisition.
+Hard rules — anti-hallucination protocol:
+
+1. NUMBERS YOU CITE MUST APPEAR IN THE RESEARCH FINDINGS ABOVE.
+   - If pain points say "300 staff", you can write "outfit 300 staff".
+   - If no headcount appears anywhere, write "the team" or "all staff".
+   - Never invent or extrapolate (e.g., research says "300 hires" → don't
+     write "with families that's 1000 people"). Only use numbers verbatim.
+
+2. EVERY VALUE PROP MUST BE SPECIFIC TO THIS HOTEL'S SITUATION.
+   - Bad: "we offer premium quality"
+   - Good: "Custom uniform program tailored to {state.get('brand') or 'your'} brand
+     standards across {state.get('room_count') or 'your'}-room property"
+
+3. ARITHMETIC CONSISTENCY.
+   - fit_score MUST equal base_account_score + research_adjustment exactly.
+   - value_props arrays should each have 1-2 props (3-6 total across all categories).
+
+4. EXISTING CLIENT SHIFT.
+   - If is_client=true, value props focus on EXPANSION (new properties,
+     additional departments, reorder consolidation) — NOT first-time acquisition.
+
+5. DON'T RE-USE SAME NUMBER WITH DIFFERENT MEANINGS.
+   - If the research says "300 staff" and "300 rooms", be careful not to
+     conflate them in a single value prop.
 """
 
-    analysis = invoke_json(get_llm(), prompt, _DEFAULT_ANALYSIS)
+    analysis = invoke_json(get_analyst_llm(), prompt, _DEFAULT_ANALYSIS)
+
+    # ── Truncation salvage ─────────────────────────────────────────
+    # If invoke_json returned the default (parse failed, usually due to
+    # max_output_tokens cutoff mid-string), try one more invocation that
+    # asks Gemini to ONLY return the fit_score + adjustment as a tiny
+    # JSON. Far less likely to truncate. Better than letting fit_score
+    # silently fall back to default 50.
+    if analysis.get("fit_score") in (None, 50) and not analysis.get(
+        "fit_breakdown", {}
+    ).get("rationale"):
+        logger.warning(
+            "[Analyst] First-pass parse failed — running fit-score salvage call"
+        )
+        salvage_prompt = f"""You just analyzed {hotel_name} for outreach fit.
+The base account score is {base_score}/100. Based on the research findings
+(hiring signals, recent news, awards, expansion signals), what's your
+ADJUSTMENT (±15) and final fit score?
+
+Return ONLY this minimal JSON, no markdown:
+{{
+  "fit_score": <integer 0-100>,
+  "research_adjustment": <integer -15 to +15>,
+  "rationale": "1 sentence explanation"
+}}
+
+Hotel context:
+- Hiring: {hiring_str[:300]}
+- Awards/News: {awards_str[:200]} {news_str[:200]}
+- Pain points: {pain_str[:300]}
+"""
+        salvage = invoke_json(
+            get_analyst_llm(),
+            salvage_prompt,
+            {"fit_score": base_score, "research_adjustment": 0, "rationale": ""},
+        )
+        if salvage.get("fit_score") and salvage.get("fit_score") != base_score:
+            analysis["fit_score"] = salvage["fit_score"]
+            analysis["fit_breakdown"] = {
+                "base_account_score": base_score,
+                "research_adjustment": salvage.get("research_adjustment", 0),
+                "rationale": salvage.get("rationale", "")
+                + " (recovered from truncated initial pass)",
+            }
+            logger.info(
+                f"[Analyst] Salvaged fit_score={analysis['fit_score']} "
+                f"(adj={salvage.get('research_adjustment', 0)})"
+            )
 
     # Validate / clamp fit_score
     try:

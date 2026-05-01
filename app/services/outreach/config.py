@@ -87,58 +87,101 @@ def _load_service_account_credentials():
         return None
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Per-agent LLM factories
+#
+# Different agents need different temperatures to balance creativity vs
+# faithfulness. Hallucination is the #1 risk in fact-extraction agents
+# (Researcher, Analyst), so we run them at near-zero temp. The Writer
+# needs some creativity to vary phrasing, so it sits at 0.4. The Critic
+# is a strict yes/no judge → 0.0. Keeps things deterministic where it
+# matters and creative where it helps.
+#
+# All factories are LRU-cached so we only pay the credential / network
+# setup cost once per process.
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def _build_llm(model: str, temperature: float, max_tokens: int):
+    """Internal — builds a ChatVertexAI with the given config."""
+    from langchain_google_vertexai import ChatVertexAI
+
+    project = _vertex_project()
+    location = _vertex_location()
+    if not project:
+        raise RuntimeError(
+            "Outreach agents require Vertex AI configured. Set "
+            "VERTEX_PROJECT_ID in .env (or settings.vertex_project_id)."
+        )
+    creds = _load_service_account_credentials()
+    kwargs = dict(
+        model=model,
+        project=project,
+        location=location,
+        temperature=temperature,
+        max_output_tokens=max_tokens,
+    )
+    if creds is not None:
+        kwargs["credentials"] = creds
+    return ChatVertexAI(**kwargs)
+
+
 @lru_cache(maxsize=1)
+def get_researcher_llm():
+    """Researcher synthesis — fact extraction, near-zero creativity.
+    Hallucinated facts here poison every downstream agent."""
+    return _build_llm("gemini-2.5-flash", temperature=0.1, max_tokens=8192)
+
+
+@lru_cache(maxsize=1)
+def get_analyst_llm():
+    """Analyst scoring + value props — should be deterministic.
+    The base score is given; we just want consistent adjustments.
+    8192 tokens — value_props with 6 categorized props + fit_breakdown
+    rationale + primary_angle. 4096 was still getting truncated mid-
+    rationale, which failed JSON parse and silently dropped the score
+    back to default."""
+    return _build_llm("gemini-2.5-flash", temperature=0.1, max_tokens=8192)
+
+
+@lru_cache(maxsize=1)
+def get_writer_llm():
+    """Writer email + LinkedIn — needs some creativity for varied phrasing.
+    But still capped at 0.4 — beyond that the model starts inventing facts.
+    4096 tokens — combined email body + LinkedIn message + tone field
+    plus Critic-feedback regeneration on retry runs."""
+    return _build_llm("gemini-2.5-flash", temperature=0.4, max_tokens=4096)
+
+
+@lru_cache(maxsize=1)
+def get_critic_llm():
+    """Critic — strict rubric judge, fully deterministic."""
+    return _build_llm("gemini-2.5-flash-lite", temperature=0.0, max_tokens=2048)
+
+
+@lru_cache(maxsize=1)
+def get_validator_llm():
+    """Validator (between Researcher and Analyst) — checks claims against
+    source. Must be deterministic and cheap (Flash Lite)."""
+    return _build_llm("gemini-2.5-flash-lite", temperature=0.0, max_tokens=4096)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Backwards-compat — older agents called get_llm() / get_llm_lite() before
+# we split into per-agent factories. Keep these as aliases pointing at the
+# closest match so the ported PitchIQ code that hasn't been refactored yet
+# (e.g., the /sequence endpoint's inline LLM call) still works.
+# ─────────────────────────────────────────────────────────────────────────────
+
+
 def get_llm():
-    """Main writing/analysis model (Gemini 2.5 Flash)."""
-    from langchain_google_vertexai import ChatVertexAI
-
-    project = _vertex_project()
-    location = _vertex_location()
-    if not project:
-        raise RuntimeError(
-            "Outreach agents require Vertex AI configured. Set "
-            "VERTEX_PROJECT_ID in .env (or settings.vertex_project_id)."
-        )
-    creds = _load_service_account_credentials()
-    kwargs = dict(
-        model="gemini-2.5-flash",
-        project=project,
-        location=location,
-        temperature=0.4,
-        # 8192 — the Researcher synthesis returns a deeply-structured
-        # JSON object (hotel_intel + contact_intel + 3 conversation_hooks
-        # + recent_news + signals + pain_points). 2048 was getting
-        # truncated mid-output, leaving the parser with malformed JSON.
-        max_output_tokens=8192,
-    )
-    if creds is not None:
-        kwargs["credentials"] = creds
-    return ChatVertexAI(**kwargs)
+    """Deprecated alias — defaults to the writer LLM (creative, 0.4)."""
+    return get_writer_llm()
 
 
-@lru_cache(maxsize=1)
 def get_llm_lite():
-    """Cheaper model for the Critic + cleanup tasks (Gemini 2.5 Flash Lite)."""
-    from langchain_google_vertexai import ChatVertexAI
-
-    project = _vertex_project()
-    location = _vertex_location()
-    if not project:
-        raise RuntimeError(
-            "Outreach agents require Vertex AI configured. Set "
-            "VERTEX_PROJECT_ID in .env (or settings.vertex_project_id)."
-        )
-    creds = _load_service_account_credentials()
-    kwargs = dict(
-        model="gemini-2.5-flash-lite",
-        project=project,
-        location=location,
-        temperature=0.2,
-        max_output_tokens=2048,
-    )
-    if creds is not None:
-        kwargs["credentials"] = creds
-    return ChatVertexAI(**kwargs)
+    """Deprecated alias — defaults to the critic LLM (deterministic, 0.0)."""
+    return get_critic_llm()
 
 
 # Backwards-compat aliases so the ported agents can `from .config import llm`

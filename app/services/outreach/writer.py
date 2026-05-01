@@ -22,7 +22,7 @@ from __future__ import annotations
 import logging
 
 from .state import PitchState
-from .config import get_llm
+from .config import get_writer_llm
 from ._helpers import (
     JA_BACKGROUND,
     fmt_list,
@@ -237,6 +237,12 @@ Value props from Analyst (use 1, max 2 — don't list them all):
    the rep's full signature (logo, contact info, certifications) when
    the email opens — adding our own would create a duplicate signature.
    The body stops at the question mark of the CTA.
+9. ANTI-HALLUCINATION: do NOT include any number (headcount, room count,
+   budget, date, percentage) that doesn't appear in the research brief
+   above. If the brief says "300 staff", you can write "300 staff". If
+   it doesn't mention a number, write "the team" or "your staff" — never
+   invent. The recipient can fact-check the email; a wrong number kills
+   credibility instantly.
 
 ═══ LINKEDIN RULES ═══
 1. Address as "{first_name or contact_name}" only
@@ -256,7 +262,7 @@ Value props from Analyst (use 1, max 2 — don't list them all):
 }}
 """
 
-    output = invoke_json(get_llm(), prompt, _DEFAULT_OUTPUT)
+    output = invoke_json(get_writer_llm(), prompt, _DEFAULT_OUTPUT)
 
     # Defensive cleanup: if Gemini ignored the no-signature rule and
     # included a closing/signature anyway, strip it. Outlook adds the

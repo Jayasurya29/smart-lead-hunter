@@ -1,6 +1,13 @@
 """LangGraph orchestrator for the v2 outreach pipeline.
 
-Researcher → Analyst → Writer → Critic → (rewrite up to 2x) → Scheduler.
+Researcher → Validator → Analyst → Writer → Critic → (rewrite up to 2x) → Scheduler.
+
+The Validator sits between Researcher and Analyst — it scrubs fabricated
+numbers from the research output so downstream agents never see hallucinated
+headcounts, dates, or amounts. Without it, the Analyst would happily
+generate value props citing "outfit 400+ staff" when the research only
+mentioned "300 staff", which then carries through to the email and the rep
+sends a factually-wrong opener.
 
 The conditional-edge from Critic kicks back to Writer if the rubric
 average is below 3.8 OR any individual score is below 3. Cap at 2
@@ -13,6 +20,7 @@ from langgraph.graph import StateGraph, END
 
 from .state import PitchState
 from .researcher import researcher_agent
+from .validator import validator_agent
 from .analyst import analyst_agent
 from .writer import writer_agent
 from .critic import critic_agent
@@ -32,13 +40,15 @@ def build_graph():
     graph = StateGraph(PitchState)
 
     graph.add_node("researcher", researcher_agent)
+    graph.add_node("validator", validator_agent)
     graph.add_node("analyst", analyst_agent)
     graph.add_node("writer", writer_agent)
     graph.add_node("critic", critic_agent)
     graph.add_node("scheduler", scheduler_agent)
 
     graph.set_entry_point("researcher")
-    graph.add_edge("researcher", "analyst")
+    graph.add_edge("researcher", "validator")
+    graph.add_edge("validator", "analyst")
     graph.add_edge("analyst", "writer")
     graph.add_edge("writer", "critic")
     graph.add_conditional_edges(

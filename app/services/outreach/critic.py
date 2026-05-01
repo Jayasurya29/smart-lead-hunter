@@ -15,7 +15,7 @@ from __future__ import annotations
 import logging
 
 from .state import PitchState
-from .config import get_llm_lite
+from .config import get_critic_llm
 from ._helpers import invoke_json
 
 logger = logging.getLogger(__name__)
@@ -117,7 +117,7 @@ APPROVED = avg score >= 3.8 AND no individual score < 3
 }}
 """
 
-    critique = invoke_json(get_llm_lite(), prompt, _DEFAULT_CRITIQUE)
+    critique = invoke_json(get_critic_llm(), prompt, _DEFAULT_CRITIQUE)
 
     # Validate scores — defensive coercion
     scores = critique.get("scores") or {}

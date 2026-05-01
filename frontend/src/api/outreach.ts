@@ -2,6 +2,13 @@ import api from '@/api/client'
 
 export type ApprovalStatus = 'pending' | 'approved' | 'rejected' | 'sent'
 
+export interface ResearchSource {
+  url: string
+  title: string
+  snippet: string
+  category: string
+}
+
 export interface ResearchRecord {
   id: number
   lead_id: number | null
@@ -33,6 +40,8 @@ export interface ResearchRecord {
   follow_up_sequence: string[]
   approval_status: ApprovalStatus
   approval_notes: string | null
+  research_confidence: 'high' | 'medium' | 'low' | null
+  sources: ResearchSource[]
   created_at: string | null
   updated_at: string | null
   sent_at: string | null

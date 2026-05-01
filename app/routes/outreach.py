@@ -283,6 +283,8 @@ def _state_to_db_kwargs(
         "send_time": state.get("send_time") or "",
         "follow_up_sequence": followups_flat,
         "approval_status": "pending",
+        "research_confidence": state.get("research_confidence") or None,
+        "sources": state.get("sources") or [],
     }
 
 
