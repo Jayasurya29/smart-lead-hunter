@@ -1160,12 +1160,16 @@ async def iteration_4_linkedin_lookup(state: ResearchState) -> int:
             )
             mgmt_query = f'"{name}" "{mgmt}" linkedin'.strip() if mgmt else None
             # Order: mgmt first when available (higher signal for pre-opening
-            # hires), then hotel+brand combo, then name-only fallback.
+            # hires), then hotel+brand combo. NOTE: we intentionally DROP
+            # the bare `"name" linkedin` fallback that used to be the third
+            # query — empirically it returns ~3 results per call but >90%
+            # are wrong-person matches that get rejected by the slug+role
+            # token check. That's 1 wasted query per candidate × ~10
+            # candidates = ~10 wasted Serper queries per enrichment.
             queries_to_try = []
             if mgmt_query and mgmt_query not in state.queries_run:
                 queries_to_try.append(mgmt_query)
             queries_to_try.append(primary_query)
-            queries_to_try.append(f'"{name}" linkedin')
         else:
             # Use the contact's OWN organization first — this is the most
             # specific context. "Elie Khoury" + "Crescent Hotels" finds the
@@ -1181,7 +1185,10 @@ async def iteration_4_linkedin_lookup(state: ResearchState) -> int:
                 or ""
             )
             query = f'"{name}" "{company_ctx}" linkedin'.strip()
-            queries_to_try = [query, f'"{name}" linkedin']
+            # Same reasoning — drop bare-name fallback. If we don't have
+            # company context AND can't find via context, the bare lookup
+            # is overwhelmingly going to be wrong-person matches anyway.
+            queries_to_try = [query]
 
         found_url = False
 
@@ -1926,8 +1933,23 @@ async def iteration_5_5_regional_fit(state: ResearchState) -> int:
     For contacts whose title says "Global" or lacks a clear regional qualifier,
     search for evidence of where they actually work. Attaches a
     `_region_evidence` field to each contact for Iter 6 to reason with.
+
+    NOTE: This iteration only matters for multi-region brands (Caribbean,
+    Latin America, Asia) where the same brand has corporate folks scattered
+    across regions. For US-only leads, every corporate contact is "Americas"
+    by default — no ambiguity to resolve. Skipping for US leads saves
+    ~10-15 Serper queries per enrichment with zero quality cost.
     """
     from app.services import contact_enrichment as ce
+
+    # Skip entirely for US-only leads — region disambiguation is meaningless
+    # when the lead is in the US and the brand operates in the US.
+    country = (state.country or "").lower()
+    if country in ("usa", "united states", "us", "u.s.", "u.s.a."):
+        logger.info(
+            "[ITER 5.5/REGION] Skipped — US-only lead, no region ambiguity to resolve"
+        )
+        return 0
 
     (state.region_term or "").lower()  # region used via _REGION_MARKERS
     (state.country or "").lower()
@@ -3254,6 +3276,44 @@ async def run_iterative_research(
             logger.info(
                 f"[ITER 3/CORPORATE] +{new_facts} facts. Names={len(state.discovered_names)}"
             )
+
+    # ── PRE-VERIFICATION CAP ──
+    # After Iter 3, we typically have 12-20 candidates. Iters 4-6.5 then
+    # spend ~8 Serper queries verifying EACH candidate (LinkedIn lookup,
+    # current-role check, region check, employment verify). Many of those
+    # candidates will be dropped by the final Smart Cap (which keeps top 6).
+    # So we're spending ~50 queries verifying contacts we'll throw away.
+    #
+    # Solution: pre-cap to top 8 BEFORE verification. We verify what we'll
+    # actually keep + a 2-contact buffer in case verification demotes some.
+    # Saves ~30 Serper queries per enrichment (~30s of latency) with zero
+    # quality cost — the dropped candidates would've been Smart-Capped anyway.
+    PRE_VERIFY_CAP = 8
+    if len(state.discovered_names) > PRE_VERIFY_CAP:
+        # Sort by tier first (hotel_specific → chain_area → corporate),
+        # then by evidence count as a tiebreaker. Same priority logic as
+        # the final Smart Cap, just applied earlier.
+        scope_priority = {
+            "hotel_specific": 0,
+            "chain_area": 1,
+            "management_corporate": 2,
+            "chain_corporate": 3,
+            "owner": 0,  # owners are high-value for pre-opening leads
+            "": 4,
+        }
+        before_cap = len(state.discovered_names)
+        state.discovered_names.sort(
+            key=lambda c: (
+                scope_priority.get(c.get("scope") or "", 4),
+                -len(c.get("evidence") or []),  # more evidence = higher
+            )
+        )
+        state.discovered_names = state.discovered_names[:PRE_VERIFY_CAP]
+        logger.info(
+            f"[PRE-VERIFY CAP] {before_cap} → {len(state.discovered_names)} candidates "
+            f"(saving ~{(before_cap - len(state.discovered_names)) * 4} Serper queries on "
+            f"verification of low-priority contacts)"
+        )
 
     # ── Iteration 4: linkedin lookup (always run if we have any names) ──
     if state.discovered_names:

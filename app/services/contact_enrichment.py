@@ -105,10 +105,23 @@ def _get_client() -> httpx.AsyncClient:
 # ═══════════════════════════════════════════════════════════════
 
 _GEMINI_RETRY_ATTEMPTS = (
-    5  # Increased from 3 — paid Tier 1 quota almost always succeeds within 5 attempts
+    6  # Increased from 3. Vertex AI Gemini uses Dynamic Shared Quota
+    # (per Google's official doc: "If you receive a resource exhausted
+    # (429) error, it means the shared pool is temporarily experiencing
+    # high demand from many users at once. You should implement retry
+    # mechanisms in your application, as availability can change
+    # quickly."). DSQ bursts typically clear in 30-60 seconds, so
+    # patient retry is the correct response.
 )
 _GEMINI_RETRY_JITTER = (
     0.5  # ±50% randomness on each backoff to de-sync parallel callers
+)
+_GEMINI_RETRY_MAX_DELAY = (
+    30  # seconds — cap on any single retry delay. Bumped from 8s to 30s
+    # because DSQ throttles can take ~30 sec to clear during demand
+    # spikes. With 6 attempts capped at 30s and exponential backoff,
+    # total wait reaches ~90 sec. Worth the wait — alternative is
+    # falling back to title-only priority which produces worse output.
 )
 
 
@@ -273,20 +286,28 @@ def _retry_delay_with_jitter(attempt: int) -> float:
     sleep 2s, both retry at the same instant, both 429 again. With jitter,
     one might sleep 1.4s and the other 2.6s — they spread out across
     Vertex's RPM window and one succeeds.
+
+    Capped at _GEMINI_RETRY_MAX_DELAY so a string of failures doesn't
+    waste a minute+ of clock time per call.
     """
     base = _GEMINI_RETRY_BASE_DELAY * (2**attempt)
     jitter = base * _GEMINI_RETRY_JITTER * (2 * random.random() - 1)  # [-0.5x, +0.5x]
-    return max(0.5, base + jitter)
+    return max(0.5, min(_GEMINI_RETRY_MAX_DELAY, base + jitter))
 
 
-async def _call_gemini(
+async def _call_gemini_single(
     prompt: str,
     model: Optional[str] = None,
-    timeout: int = 30,
+    timeout: int = 90,
     response_schema: Optional[dict] = None,
     max_output_tokens: int = 16384,
 ) -> Optional[dict]:
-    """Call Gemini API with retry and exponential backoff.
+    """Call Gemini API with retry and exponential backoff (SINGLE model only).
+
+    Wrapped by `_call_gemini` which adds multi-model fallback. Most callers
+    should use that — only use this directly if you specifically want to
+    bypass the fallback chain (e.g., the caller is itself part of the
+    fallback chain implementation).
 
     Returns parsed JSON response or None on failure.
     Retries on 429 (rate limit), 500, 503 (server errors).
@@ -313,6 +334,25 @@ async def _call_gemini(
         "temperature": 0.1,
         "maxOutputTokens": max_output_tokens,
     }
+
+    # ── THINKING CONFIG ──
+    # Gemini 2.5+ models include "thinking" — internal reasoning before
+    # the actual response. Default thinking budget can take 30-60 seconds
+    # for complex prompts, which causes our 30s timeout to fire and kill
+    # the call mid-flight (the empty-error ReadTimeouts we kept seeing).
+    #
+    # For enrichment we don't need deep reasoning — most calls are simple
+    # extraction ("find names in this text") or scoring. Setting minimum
+    # thinking gives us same quality with ~5x faster response time.
+    #
+    # Gemini 3 uses `thinking_level` (minimal/low/medium/high)
+    # Gemini 2.5 uses `thinking_budget` (integer token count, 0 disables)
+    if "gemini-3" in model.lower():
+        generation_config["thinking_config"] = {"thinking_level": "minimal"}
+    elif "gemini-2.5" in model.lower():
+        generation_config["thinking_config"] = {"thinking_budget": 0}
+    # Older models (2.0, 1.5) have no thinking config — leave it off
+
     # ── STRUCTURED OUTPUTS (Vertex AI / Gemini 2.x) ──
     # When a schema is supplied and we're on Vertex, force Gemini to return
     # well-formed JSON matching the schema. This eliminates the malformed-JSON
@@ -428,11 +468,37 @@ async def _call_gemini(
                     return None
 
             elif resp.status_code in (429, 500, 503):
-                delay = _retry_delay_with_jitter(attempt)
-                logger.warning(
-                    f"Gemini {resp.status_code} (attempt {attempt + 1}/{_GEMINI_RETRY_ATTEMPTS}), "
-                    f"retrying in {delay:.1f}s..."
+                # Google's Vertex AI returns a Retry-After header on 429
+                # indicating exactly when the throttle clears. Use it
+                # when present — beats our exponential backoff guess.
+                retry_after = resp.headers.get("Retry-After") or resp.headers.get(
+                    "retry-after"
                 )
+                if retry_after:
+                    try:
+                        # Header can be seconds (int) or HTTP date.
+                        # Vertex AI sends seconds.
+                        delay = float(retry_after)
+                        # Cap to MAX_DELAY anyway, in case Google asks
+                        # for a 5-minute wait — we'd rather just give up
+                        # and fall back than block enrichment for that long.
+                        delay = min(delay, _GEMINI_RETRY_MAX_DELAY)
+                        logger.warning(
+                            f"Gemini {resp.status_code} (attempt {attempt + 1}/{_GEMINI_RETRY_ATTEMPTS}), "
+                            f"server requested retry in {delay:.1f}s (Retry-After header)..."
+                        )
+                    except (ValueError, TypeError):
+                        delay = _retry_delay_with_jitter(attempt)
+                        logger.warning(
+                            f"Gemini {resp.status_code} (attempt {attempt + 1}/{_GEMINI_RETRY_ATTEMPTS}), "
+                            f"retrying in {delay:.1f}s..."
+                        )
+                else:
+                    delay = _retry_delay_with_jitter(attempt)
+                    logger.warning(
+                        f"Gemini {resp.status_code} (attempt {attempt + 1}/{_GEMINI_RETRY_ATTEMPTS}), "
+                        f"retrying in {delay:.1f}s..."
+                    )
                 await asyncio.sleep(delay)
                 last_error = f"HTTP {resp.status_code}"
             else:
@@ -444,14 +510,124 @@ async def _call_gemini(
             return None
         except Exception as e:
             delay = _retry_delay_with_jitter(attempt)
+            # Empty exception messages have plagued these logs forever —
+            # use repr() and type() so we can finally see what's failing.
+            err_type = type(e).__name__
+            err_repr = repr(e) if str(e) else f"{err_type}(<empty msg>)"
             logger.warning(
-                f"Gemini call failed (attempt {attempt + 1}/{_GEMINI_RETRY_ATTEMPTS}): {e}, "
-                f"retrying in {delay:.1f}s..."
+                f"Gemini call failed (attempt {attempt + 1}/{_GEMINI_RETRY_ATTEMPTS}): "
+                f"{err_repr}, retrying in {delay:.1f}s..."
             )
             await asyncio.sleep(delay)
-            last_error = str(e)
+            last_error = err_repr
 
     logger.error(f"Gemini failed after {_GEMINI_RETRY_ATTEMPTS} attempts: {last_error}")
+    return None
+
+
+# ═══════════════════════════════════════════════════════════════
+# MULTI-MODEL FALLBACK CHAIN
+# ═══════════════════════════════════════════════════════════════
+#
+# When the primary model's DSQ pool is saturated, we exhaust 6 retries
+# (~90s wasted) before falling back to title-only priority — at the cost
+# of brief quality. Instead, when retries fail with 429, we automatically
+# try a different model's pool. Per Google's DSQ docs:
+#
+#   "The throughput limit shown for a model family applies independently
+#   to each model within that family. Usage against one of these limits
+#   doesn't impact the throughput for other models."
+#
+# So if gemini-2.5-flash is throttled, gemini-2.5-flash-lite (separate
+# pool) likely succeeds immediately. Quality drop is minor; reliability
+# gain is huge.
+#
+# Order matters — best model first, lighter fallbacks after.
+
+_GEMINI_FALLBACK_CHAIN = [
+    # Primary — env-controlled. Defaults to gemini-2.5-flash via ai_client.
+    None,  # placeholder, resolved at call time to the env-configured model
+    # ── First fallback: gemini-3-flash-preview ──
+    # Google's newest Flash (released April 2026). Different model family
+    # from 2.5-flash → SEPARATE DSQ pool. Few customers have migrated yet,
+    # so pool is much less crowded. Quality matches or BEATS 2.5-flash on
+    # extraction tasks (per Google's launch benchmarks). Verified working
+    # on this project 2026-05-01 via test_gemini_models.py.
+    "gemini-3-flash-preview",
+    # ── Second fallback: gemini-3.1-flash-lite-preview ──
+    # Newest Flash-Lite tier, separate pool again. Optimized for high-volume
+    # cost-sensitive traffic. Worse than 3-flash on complex reasoning but
+    # still competitive with 2.5-flash on simple extractions. Verified
+    # working on this project 2026-05-01.
+    "gemini-3.1-flash-lite-preview",
+    # ── Last resort: gemini-2.5-flash-lite ──
+    # Stable GA model, separate pool from 2.5-flash. Quality drop is real
+    # (~5-10% on extraction) but better than failing. Always available.
+    # Verified working on this project 2026-05-01.
+    "gemini-2.5-flash-lite",
+    # NOT in chain (verified inaccessible on this project 2026-05-01):
+    #   gemini-2.0-flash-001 — returns 404. Per Google's docs, access was
+    #   frozen for new customers on 2026-03-06.
+]
+
+
+async def _call_gemini(
+    prompt: str,
+    model: Optional[str] = None,
+    timeout: int = 90,
+    response_schema: Optional[dict] = None,
+    max_output_tokens: int = 16384,
+) -> Optional[dict]:
+    """Multi-model wrapper — tries each model in the fallback chain until
+    one succeeds or all are exhausted. The original retry-with-backoff
+    logic lives in _call_gemini_single (each call to the wrapper does
+    its own retry loop)."""
+    # If caller specified a model, honor that — single model, no fallback
+    if model is not None:
+        return await _call_gemini_single(
+            prompt,
+            model=model,
+            timeout=timeout,
+            response_schema=response_schema,
+            max_output_tokens=max_output_tokens,
+        )
+
+    # Build the chain: primary model + the rest
+    primary_model = get_enrichment_gemini_model()
+    chain = [primary_model] + [
+        m
+        for m in _GEMINI_FALLBACK_CHAIN[1:]  # skip placeholder
+        if m and m != primary_model  # don't repeat primary
+    ]
+
+    last_error_model: Optional[str] = None
+    for idx, attempt_model in enumerate(chain):
+        is_fallback = idx > 0
+        if is_fallback:
+            logger.warning(
+                f"[FALLBACK] Primary model {primary_model!r} exhausted retries — "
+                f"trying fallback model {attempt_model!r} (different DSQ pool)"
+            )
+        result = await _call_gemini_single(
+            prompt,
+            model=attempt_model,
+            timeout=timeout,
+            response_schema=response_schema,
+            max_output_tokens=max_output_tokens,
+        )
+        if result is not None:
+            if is_fallback:
+                logger.info(
+                    f"[FALLBACK] ✓ Recovered via fallback model {attempt_model!r} "
+                    f"after primary {primary_model!r} failed"
+                )
+            return result
+        last_error_model = attempt_model
+
+    logger.error(
+        f"All {len(chain)} models in fallback chain failed (last: {last_error_model!r}). "
+        f"Falling back to non-AI heuristics in caller."
+    )
     return None
 
 

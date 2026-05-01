@@ -4,7 +4,7 @@ import RevenuePotential from './RevenuePotential'
 import EnrichProgress from './EnrichProgress'
 import SmartFillProgress from './SmartFillProgress'
 import ConfirmDialog from '../ui/ConfirmDialog'
-import { editLead, saveContact, setPrimaryContact, deleteContact, updateContact, toggleContactScope, addContact, getEnrichmentStatus, getSmartFillStatus } from '@/api/leads'
+import { editLead, saveContact, setPrimaryContact, deleteContact, updateContact, toggleContactScope, addContact, getEnrichmentStatus } from '@/api/leads'
 import api from '@/api/client'
 import { useQueryClient } from '@tanstack/react-query'
 import type { Lead, Contact } from '@/api/types'
@@ -100,27 +100,6 @@ export default function LeadDetail({ leadId, tab, onClose }: Props) {
         // status check failed — silently ignore, user can still click
         // Run Enrichment manually
       })
-    return () => { cancelled = true }
-  }, [leadId])
-
-  // ── Auto-attach to running Smart Fill on lead mount ──
-  // Same pattern as enrichment auto-attach above. When user navigates
-  // back to a lead with Smart Fill in progress, this effect detects it
-  // via the status endpoint and remounts SmartFillProgress, which
-  // attaches as a watcher to the running task.
-  useEffect(() => {
-    let cancelled = false
-    getSmartFillStatus(leadId)
-      .then((data) => {
-        if (cancelled) return
-        if (data?.running) {
-          setSmartFillLeadId(leadId)
-          if (data.mode === 'full' || data.mode === 'smart') {
-            setSmartFillMode(data.mode)
-          }
-        }
-      })
-      .catch(() => { /* silently ignore */ })
     return () => { cancelled = true }
   }, [leadId])
 
@@ -970,7 +949,13 @@ function ContactsTab({ contacts, loading, leadId, onEnrich, enriching, enriching
                   <div className="flex items-center gap-2">
                     <span className="text-sm font-semibold text-navy-900">{c.name}</span>
                     {c.is_primary && <Star className="w-3.5 h-3.5 text-gold-500 fill-gold-500" />}
-                    <div className="flex items-center gap-2 ml-auto">
+                    {/* Tiny right padding so the priority + score block sits
+                        a hair away from the absolutely-positioned action icons
+                        (Edit / Outreach / Trash) at the top-right corner.
+                        Action icons are hover-only — when not hovered, this
+                        feels balanced; when hovered the icons sit just past
+                        the score with a few pixels of gap. */}
+                    <div className="flex items-center gap-2 ml-auto pr-3">
                       <PriorityBadge label={(c as any).priority_label} reason={(c as any).priority_reason} />
                       {c.score > 0 && (
                         <div className="flex flex-col items-end relative">
