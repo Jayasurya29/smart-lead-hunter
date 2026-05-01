@@ -1766,14 +1766,60 @@ async def smart_fill_lead(lead_id: int, request: Request, _csrf=Depends(require_
             lead.project_type = proj_type
 
         if enriched.get("already_opened") and not is_live_reopening:
-            # Standard case — hotel is open and operating. Expire it.
+            # Standard case — hotel is open and operating.
+            #
+            # FIX 2026-05-01 (Reflections-ghost bug): mark expired then
+            # IMMEDIATELY graduate to existing_hotels via transfer_lead.
+            # Without this inline transfer, the row sits at
+            # status='expired' invisible to the UI (Expired tab was
+            # removed) and waits for the daily Celery task
+            # `recompute_timeline_labels` to pick it up. If Celery beat
+            # is down — even briefly — the lead becomes a ghost.
+            # Mirrors the SSE-streamed Smart Fill at the bottom of this
+            # file so both endpoints behave identically.
             lead.status = "expired"
             lead.opening_date = enriched.get("opened_date", lead.opening_date)
             lead.timeline_label = "EXPIRED"
             await session.commit()
+
+            opened_date_str = enriched.get("opened_date", "date unknown")
+            try:
+                from app.services.lead_transfer import transfer_lead
+
+                async with async_session() as transfer_session:
+                    tr = await transfer_lead(lead_id, transfer_session, commit=True)
+                if tr.get("status") in ("transferred", "merged"):
+                    eh_id = tr.get("existing_hotel_id")
+                    verb = (
+                        "Merged into" if tr["status"] == "merged" else "Transferred to"
+                    )
+                    logger.info(
+                        f"Smart Fill (already_opened) auto-{tr['status']} "
+                        f"lead #{lead_id} → existing_hotel #{eh_id}"
+                    )
+                    return {
+                        "status": "transferred",
+                        "message": (
+                            f"Hotel already opened ({opened_date_str}). "
+                            f"{verb} existing_hotel #{eh_id}."
+                        ),
+                        "existing_hotel_id": eh_id,
+                        "changes": ["status", "graduated_to_existing"],
+                    }
+            except Exception as e:
+                logger.warning(
+                    f"Smart Fill (already_opened) auto-transfer failed for "
+                    f"#{lead_id}: {e} — lead remains at status='expired' "
+                    f"and will be picked up by next pipeline run"
+                )
+
             return {
                 "status": "expired",
-                "message": f"Hotel already opened ({enriched.get('opened_date', 'date unknown')}). Moved to Expired.",
+                "message": (
+                    f"Hotel already opened ({opened_date_str}). "
+                    f"Moved to Expired (auto-transfer to Existing Hotels "
+                    f"will retry on next pipeline run)."
+                ),
                 "changes": ["status"],
             }
 
@@ -2034,6 +2080,39 @@ async def smart_fill_lead(lead_id: int, request: Request, _csrf=Depends(require_
                 logger.warning(
                     f"Revenue update failed after SmartFill for {lead_id}: {e}"
                 )
+
+        # FIX 2026-05-01 (Reflections-ghost bug): auto-transfer to
+        # existing_hotels if opening_date is now < 3 months. Mirrors the
+        # SSE-streamed Smart Fill (line ~2285) so the sync and streaming
+        # endpoints behave identically. Without this, a Full Refresh that
+        # pushed opening_date into the EXPIRED bucket leaves the lead at
+        # status='expired' invisible to the UI and the row waits for the
+        # daily Celery task — turns into a ghost if Celery is down.
+        try:
+            fresh_label = get_timeline_label(lead.opening_date or "")
+            if fresh_label == "EXPIRED":
+                from app.services.lead_transfer import transfer_lead
+
+                async with async_session() as transfer_session:
+                    tr = await transfer_lead(lead_id, transfer_session, commit=True)
+                if tr.get("status") in ("transferred", "merged"):
+                    eh_id = tr.get("existing_hotel_id")
+                    logger.info(
+                        f"Smart Fill (sync) auto-{tr['status']} lead #{lead_id} "
+                        f"→ existing_hotel #{eh_id}"
+                    )
+                    return {
+                        "status": "transferred",
+                        "existing_hotel_id": eh_id,
+                        "changes": (
+                            enriched.get("changes", []) + ["graduated_to_existing"]
+                        ),
+                        "confidence": enriched.get("confidence", "unknown"),
+                    }
+        except Exception as e:
+            logger.warning(
+                f"Smart Fill (sync) auto-transfer check failed for #{lead_id}: {e}"
+            )
 
         return {
             "status": "enriched",
