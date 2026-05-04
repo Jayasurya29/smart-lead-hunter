@@ -427,7 +427,7 @@ async def map_data(
         ExistingHotel.longitude,
         ExistingHotel.is_client,
         ExistingHotel.room_count,
-        ExistingHotel.phone,
+        ExistingHotel.contact_phone,
         ExistingHotel.zone,
         ExistingHotel.revenue_annual,
     ).where(ExistingHotel.latitude.isnot(None))
