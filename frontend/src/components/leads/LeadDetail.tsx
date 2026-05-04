@@ -378,7 +378,15 @@ function OverviewTab({ lead, leadId, contactList, onEnrich, enriching, onSmartFi
   enrichingLive?: boolean; onEnrichComplete?: () => void
   smartFillLive?: null | 'smart' | 'full'; onSmartFillComplete?: () => void
 }) {
-  const hasMissing = !lead.brand_tier || lead.brand_tier === 'unknown' || !lead.opening_date || !lead.room_count || !lead.management_company || !lead.owner || !lead.developer || !lead.address
+  // Mandatory fields — match backend `batch_smart_fill` triggers in
+  // app/services/lead_data_enrichment.py. These four gate downstream
+  // tasks (auto_enrich filtering, scoring, revenue projection, HPI
+  // procurement targeting), so they're worth chasing. Aligned 2026-05-04.
+  //
+  // Fields like owner / developer / address are tracked but NOT shown as
+  // "missing" because Gemini rarely finds them and the button would stay
+  // perpetually on. Full Refresh re-checks all fields including those.
+  const hasMissing = !lead.opening_date || !lead.brand_tier || lead.brand_tier === 'unknown' || !lead.room_count || !lead.management_company
   const qc = useQueryClient()
   const [geoEnriching, setGeoEnriching] = useState(false)
   const [geoResult, setGeoResult] = useState<{website?: string; lat?: number; lng?: number} | null>(null)

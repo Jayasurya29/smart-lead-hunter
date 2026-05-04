@@ -1187,6 +1187,7 @@ async def _start_eh_smart_fill_job(hotel_id: int, mode: str, hotel_snapshot: dic
                 **hotel_snapshot,
                 mode=mode,
                 progress_callback=progress_callback,
+                use_grounding=True,  # hybrid — grounded first, falls back to Serper+Gemini
             )
 
             applied: list[str] = []
@@ -1439,6 +1440,7 @@ async def smart_fill_hotel_stream(
                 "current_opening_date": hotel.opening_date or "",
                 "current_brand_tier": hotel.brand_tier or "",
                 "current_room_count": hotel.room_count or 0,
+                "current_management_company": hotel.management_company or "",
                 "search_name": getattr(hotel, "search_name", None) or "",
             }
 

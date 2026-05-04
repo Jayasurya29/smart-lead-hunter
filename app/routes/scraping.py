@@ -1729,7 +1729,9 @@ async def smart_fill_lead(lead_id: int, request: Request, _csrf=Depends(require_
             current_opening_date=lead.opening_date or "",
             current_brand_tier=lead.brand_tier or "",
             current_room_count=lead.room_count or 0,
+            current_management_company=lead.management_company or "",
             mode=mode,
+            use_grounding=True,  # hybrid — grounded first, falls back to Serper+Gemini
         )
 
         if not enriched.get("changes"):
@@ -1971,6 +1973,22 @@ async def smart_fill_lead(lead_id: int, request: Request, _csrf=Depends(require_
                 lead.zip_code = enriched["zip_code"]
         if "former_names" in enriched:
             lead.former_names = enriched["former_names"]
+
+        # Hybrid geocode + website fields (set by the grounded fast-path's
+        # _hybrid_geocode_and_website helper). Always update — these are
+        # auto-discovered and we want the freshest result available.
+        if enriched.get("hotel_website"):
+            lead.hotel_website = enriched["hotel_website"]
+            if not getattr(lead, "website_verified", None) or (
+                getattr(lead, "website_verified", "") != "manual"
+            ):
+                lead.website_verified = "auto"
+        if (
+            enriched.get("latitude") is not None
+            and enriched.get("longitude") is not None
+        ):
+            lead.latitude = enriched["latitude"]
+            lead.longitude = enriched["longitude"]
 
         # ── Always update normalized name for dedup matching ──
         from app.services.utils import normalize_hotel_name
@@ -2266,9 +2284,11 @@ async def _start_smart_fill_job(
                 current_opening_date=lead_snapshot["opening_date"],
                 current_brand_tier=lead_snapshot["brand_tier"],
                 current_room_count=lead_snapshot["room_count"],
+                current_management_company=lead_snapshot.get("management_company", ""),
                 mode=mode,
                 search_name=lead_snapshot["search_name"],
                 progress_callback=progress_callback,
+                use_grounding=True,  # hybrid — grounded first, falls back to Serper+Gemini
             )
 
             if not enriched.get("changes"):
@@ -2488,6 +2508,7 @@ async def smart_fill_stream(lead_id: int, request: Request, mode: str = "smart")
                 "opening_date": lead.opening_date or "",
                 "brand_tier": lead.brand_tier or "",
                 "room_count": lead.room_count or 0,
+                "management_company": lead.management_company or "",
                 "search_name": getattr(lead, "search_name", None) or "",
             }
 
@@ -2680,3 +2701,17 @@ def _apply_enrichment_to_lead(lead, enriched: dict, mode: str, get_timeline_labe
     for fld in ("management_company", "owner", "developer", "address", "zip_code"):
         if fld in enriched and (mode == "full" or not getattr(lead, fld, None)):
             setattr(lead, fld, enriched[fld])
+
+    # Hybrid geocode + website fields (set by the grounded fast-path's
+    # _hybrid_geocode_and_website helper). Always update — these are
+    # auto-discovered and we want the freshest result available.
+    if enriched.get("hotel_website"):
+        lead.hotel_website = enriched["hotel_website"]
+        # Mark as auto-discovered if no manual value already
+        if not getattr(lead, "website_verified", None) or (
+            getattr(lead, "website_verified", "") != "manual"
+        ):
+            lead.website_verified = "auto"
+    if enriched.get("latitude") is not None and enriched.get("longitude") is not None:
+        lead.latitude = enriched["latitude"]
+        lead.longitude = enriched["longitude"]

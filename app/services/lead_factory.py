@@ -46,12 +46,14 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.potential_lead import PotentialLead
+from app.models.existing_hotel import ExistingHotel
 
 from app.services.utils import (
     normalize_hotel_name,
     normalize_state,
     local_now,
     get_timeline_label,
+    _strip_diacritics,
 )
 from app.services.scorer import calculate_lead_score
 from app.config.intelligence_config import SCORE_HOT_THRESHOLD, SCORE_WARM_THRESHOLD
@@ -162,12 +164,13 @@ def _normalize_for_dedup(name: str) -> str:
     """Aggressively normalize a hotel name for fuzzy comparison.
 
     Pipeline:
-      1. Strip multi-word brand/collection suffixes (", An Autograph
+      1. Strip diacritics (Curaçao → Curacao, Cancún → Cancun, São → Sao).
+      2. Strip multi-word brand/collection suffixes (", An Autograph
          Collection ..." etc.) — comma-prefixed only so we don't eat
          the brand from names where the brand IS the hotel name.
-      2. Lowercase, strip ALL non-alphanumeric chars to whitespace.
-      3. Drop generic tokens like "the", "hotel", "resort".
-      4. Collapse whitespace.
+      3. Lowercase, strip ALL non-alphanumeric chars to whitespace.
+      4. Drop generic tokens like "the", "hotel", "resort".
+      5. Collapse whitespace.
 
     Examples:
       "The Ritz-Carlton Hotel Savannah, A Member Of Marriott"
@@ -176,9 +179,15 @@ def _normalize_for_dedup(name: str) -> str:
       "Royalton Vessence Barbados, An Autograph Collection All-Inclusive Resort"
                                               →  "royalton vessence barbados"
       "Four Seasons Resort Maui"              →  "four seasons maui"
+      "The Pyrmont Curaçao"                   →  "pyrmont curacao"  ← fixed 2026-05-04
     """
     if not name:
         return ""
+    # Step 1: drop diacritics so "Curaçao" → "Curacao" — must happen
+    # BEFORE the [^a-z0-9] regex (which would otherwise strip the
+    # cedilla and leave "Curaao", silently breaking dedup against
+    # the unaccented spelling used by other sources).
+    name = _strip_diacritics(name)
     cleaned = _BRAND_SUFFIXES.sub("", name)
     cleaned = re.sub(r"[^a-z0-9\s]", " ", cleaned.lower())
     tokens = [t for t in cleaned.split() if t and t not in _GENERIC_TOKENS]
@@ -250,20 +259,46 @@ def _build_location_filters(lead_dict: Dict) -> list:
     Always includes city/state matches when those fields are present.
     Adds country match when state is missing OR country is in SMALL_COUNTRIES
     (catches the Caribbean/micro-state case where city ≈ state ≈ country).
+
+    Diacritic-insensitive matching (added 2026-05-04 — the Pyrmont Curaçao bug)
+    -------------------------------------------------------------------------
+    PostgreSQL ILIKE is case-insensitive but NOT diacritic-insensitive.
+    Without handling this, a new lead with city="Curaçao" (cedilla) would
+    never match an existing row where city="Curacao" (no cedilla) — the SQL
+    filter excludes the candidate before the fuzzy name match even runs.
+
+    Strategy: widen the filter to match BOTH spellings of any term that
+    contains diacritics. We strip diacritics from the new lead's location
+    (Python side) and add a second ILIKE clause for the original spelling.
+    The OR'd filters then catch rows whether they were stored with or
+    without diacritics. No DB extension required.
     """
-    city = (lead_dict.get("city") or "").strip().lower()
-    state = (lead_dict.get("state") or "").strip().lower()
-    country = (lead_dict.get("country") or "").strip().lower()
+    raw_city = (lead_dict.get("city") or "").strip().lower()
+    raw_state = (lead_dict.get("state") or "").strip().lower()
+    raw_country = (lead_dict.get("country") or "").strip().lower()
+
+    city = _strip_diacritics(raw_city)
+    state = _strip_diacritics(raw_state)
+    country = _strip_diacritics(raw_country)
 
     filters = []
+
+    def _both_spellings(column, raw: str, stripped: str):
+        """Add ILIKE filter for the diacritic-stripped value, plus the
+        original if it differs (covers DB rows stored either way)."""
+        out = [column.ilike(f"%{stripped}%")]
+        if raw and raw != stripped:
+            out.append(column.ilike(f"%{raw}%"))
+        return out
+
     if city:
-        filters.append(PotentialLead.city.ilike(f"%{city}%"))
+        filters.extend(_both_spellings(PotentialLead.city, raw_city, city))
     if state:
-        filters.append(PotentialLead.state.ilike(f"%{state}%"))
+        filters.extend(_both_spellings(PotentialLead.state, raw_state, state))
         # Also catch when state was accidentally stored in city field
-        filters.append(PotentialLead.city.ilike(f"%{state}%"))
+        filters.extend(_both_spellings(PotentialLead.city, raw_state, state))
     if country and (not state or country in _SMALL_COUNTRIES):
-        filters.append(PotentialLead.country.ilike(f"%{country}%"))
+        filters.extend(_both_spellings(PotentialLead.country, raw_country, country))
     return filters
 
 
@@ -568,8 +603,6 @@ async def save_lead_to_db(
     # SAP import, manual add), we should NOT create a new potential_lead
     # for it — that creates the prospects/clients duplication this
     # whole flow is designed to prevent.
-    from app.models.existing_hotel import ExistingHotel
-
     eh_result = await session.execute(
         select(ExistingHotel).where(ExistingHotel.hotel_name_normalized == normalized)
     )
@@ -642,6 +675,105 @@ async def save_lead_to_db(
                     "status": "enriched" if enriched else "duplicate",
                     "id": candidate.id,
                     "reason": f"Fuzzy match: {candidate.hotel_name}",
+                }
+
+    # ── FUZZY MATCH against existing_hotels ───────────────────────────
+    # Added 2026-05-04. Mirrors the potential_leads fuzzy match above
+    # but queries the existing_hotels table instead. Catches the case
+    # where a new scrape produces a name variation that exact-match
+    # missed (e.g. "Atlas Hotel Boston" vs "The Atlas Hotel" in
+    # existing_hotels — same property, different normalized strings).
+    #
+    # Critical policy difference vs potential_leads fuzzy match:
+    # we do NOT enrich the existing_hotel. Existing hotels are operating
+    # properties (often SAP clients) with verified data — we don't want
+    # ingestion-pipeline data overwriting human-verified records. Match
+    # found = silent skip, return duplicate.
+    if new_core and len(new_core) > 3:
+        from sqlalchemy import or_ as sql_or
+
+        # Filter to candidates whose city/state/country plausibly
+        # overlaps with this lead, same as the potential_leads pass.
+        # _build_location_filters returns ILIKE clauses against
+        # PotentialLead columns by default — we mirror them onto
+        # ExistingHotel columns inline so we don't have to refactor
+        # the helper.
+        eh_filters = []
+        raw_city = (lead_dict.get("city") or "").strip().lower()
+        raw_state = (lead_dict.get("state") or "").strip().lower()
+        raw_country = (lead_dict.get("country") or "").strip().lower()
+        city_n = _strip_diacritics(raw_city)
+        state_n = _strip_diacritics(raw_state)
+        country_n = _strip_diacritics(raw_country)
+
+        def _eh_both_spellings(column, raw: str, stripped: str):
+            out = [column.ilike(f"%{stripped}%")]
+            if raw and raw != stripped:
+                out.append(column.ilike(f"%{raw}%"))
+            return out
+
+        if city_n:
+            eh_filters.extend(_eh_both_spellings(ExistingHotel.city, raw_city, city_n))
+        if state_n:
+            eh_filters.extend(
+                _eh_both_spellings(ExistingHotel.state, raw_state, state_n)
+            )
+            eh_filters.extend(
+                _eh_both_spellings(ExistingHotel.city, raw_state, state_n)
+            )
+        if country_n and (not state_n or country_n in _SMALL_COUNTRIES):
+            eh_filters.extend(
+                _eh_both_spellings(ExistingHotel.country, raw_country, country_n)
+            )
+
+        eh_query = select(ExistingHotel)
+        if eh_filters:
+            eh_query = eh_query.where(sql_or(*eh_filters))
+
+        eh_candidates = (await session.execute(eh_query)).scalars().all()
+
+        for eh_cand in eh_candidates:
+            cand_name = eh_cand.hotel_name or eh_cand.name or ""
+            cand_core = _normalize_for_dedup(cand_name)
+            if not cand_core or len(cand_core) <= 3:
+                continue
+
+            # Same location-stripping logic as potential_leads fuzzy
+            # so shared geo terms ("Miami Beach") don't inflate the match.
+            new_stripped = _strip_location_words(
+                new_core,
+                lead_dict.get("city"),
+                lead_dict.get("state"),
+                lead_dict.get("country"),
+                eh_cand.city,
+                eh_cand.state,
+                eh_cand.country,
+            )
+            cand_stripped = _strip_location_words(
+                cand_core,
+                lead_dict.get("city"),
+                lead_dict.get("state"),
+                lead_dict.get("country"),
+                eh_cand.city,
+                eh_cand.state,
+                eh_cand.country,
+            )
+
+            if _names_match(new_stripped, cand_stripped):
+                logger.info(
+                    f"   ⏭ Skipped (fuzzy match against existing_hotels): "
+                    f"'{hotel_name}' → '{cand_name}' (EH#{eh_cand.id}) "
+                    f"(cores: '{new_stripped}' ~ '{cand_stripped}')"
+                )
+                # Do NOT enrich — existing_hotels data is verified and
+                # we don't want ingestion noise overwriting it.
+                return {
+                    "status": "duplicate",
+                    "id": None,
+                    "reason": (
+                        f"Fuzzy match in existing_hotels (EH#{eh_cand.id}): "
+                        f"{cand_name}"
+                    ),
                 }
 
     # ── PREPARE NEW LEAD ──────────────────────────────────────────────

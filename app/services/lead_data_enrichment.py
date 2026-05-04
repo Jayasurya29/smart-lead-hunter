@@ -22,6 +22,7 @@ import json
 import logging
 import os
 import re
+import time
 from typing import Dict, Optional
 import asyncio as _asyncio
 
@@ -301,6 +302,583 @@ async def _call_gemini(
     return None
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Grounded one-shot enrichment (Gemini googleSearch tool)
+# ─────────────────────────────────────────────────────────────────────────────
+#
+# Added 2026-05-01. Hybrid pattern: this is tried first by `enrich_lead_data`
+# when `use_grounding=True`. If it times out, returns garbage, or fills fewer
+# than 3 meaningful fields, the caller falls back to the existing 6-stage
+# Serper+Gemini pipeline. So the worst case with this enabled is identical
+# to today's behavior — never worse, often better.
+#
+# Why grounding wins for one-shot lead research:
+#   - Gemini chooses its own search queries (often better than our templated ones)
+#   - Single round-trip — half the latency of the 6-stage pipeline
+#   - Better at distinguishing brand licensor from operator (Hilton vs Landwin)
+#   - Catches conversions/rebrands the templated pipeline classifies as new_opening
+#
+# Cost: ~$0.04 per call ($0.035 grounded prompt + ~$0.005 tokens) vs ~$0.01 for
+# the 6-stage path. We only flip this on for batch_smart_fill / batch_full_refresh
+# (15 leads/day) — never for auto_enrich (50 calls/lead, would cost $220/mo).
+
+_GROUNDING_TIMEOUT_S = 60.0
+_GROUNDING_MIN_FIELDS = 3  # below this, we treat the result as a failure
+_GROUNDING_VALID_TIERS = {
+    "tier1_ultra_luxury",
+    "tier2_luxury",
+    "tier3_upper_upscale",
+    "tier4_upscale",
+    "tier5_upper_midscale",
+    "tier6_midscale",
+    "tier7_economy",
+}
+_GROUNDING_VALID_PROJECT_TYPES = {
+    "new_opening",
+    "renovation",
+    "rebrand",
+    "reopening",
+    "conversion",
+    "ownership_change",
+    "residences_only",
+}
+
+
+def _grounding_blank(v) -> bool:
+    """Return True if a grounded response field is effectively empty."""
+    if v is None:
+        return True
+    if isinstance(v, str):
+        s = v.strip().lower()
+        return s in ("", "unknown", "none", "n/a", "null", "tbd", "—")
+    if isinstance(v, (int, float)):
+        return v == 0
+    return False
+
+
+def _build_grounding_prompt(
+    hotel_name: str,
+    city: str,
+    state: str,
+    country: str,
+    brand: str,
+) -> str:
+    location = ", ".join(filter(None, [city, state, country]))
+    brand_line = f"BRAND: {brand}\n" if brand else ""
+    return f"""You are researching a specific hotel for a B2B uniform sales pipeline.
+
+HOTEL: {hotel_name}
+LOCATION: {location}
+{brand_line}
+Use Google Search to find the MOST CURRENT information about this hotel.
+Prefer sources from the last 12 months. Look for:
+  - Most recent announced opening / reopening date (delays count!)
+  - Full ownership and operator chain — distinguish brand LICENSOR
+    (e.g. "Hilton Worldwide", "Marriott") from day-to-day OPERATOR
+    (e.g. "Crescent Hotels", "Aimbridge"). The operator buys uniforms.
+  - Property details: room count, brand tier, project type
+  - Street address (only if officially announced)
+  - Official hotel website (the OPERATOR's site, not booking.com or expedia)
+  - Geographic coordinates (lat/lng) — only if you can find them on a
+    press release, developer site, or embedded map. Do NOT estimate
+    coordinates from a city name; return null if not directly stated.
+
+Return a JSON object with these fields. Use null for any field you
+cannot confidently determine — DO NOT guess.
+
+{{
+  "opening_date": "Most recent announced date — e.g. 'December 2026', 'Q4 2027', 'Spring 2028'",
+  "project_type": "new_opening | renovation | rebrand | reopening | conversion | ownership_change | residences_only",
+  "room_count": 250,
+  "brand": "Hotel brand / flag (e.g. 'Marriott', 'Four Seasons', 'Independent')",
+  "brand_tier": "tier1_ultra_luxury | tier2_luxury | tier3_upper_upscale | tier4_upscale | tier5_upper_midscale | tier6_midscale | tier7_economy",
+  "management_company": "Day-to-day hotel OPERATOR — the company running the hotel (NOT brand licensor like Marriott/Hilton/Hyatt)",
+  "owner": "Property owner / real estate holding entity",
+  "developer": "Entity BUILDING the property (often same as owner for new builds)",
+  "address": "Street address if officially announced — null if not yet public",
+  "hotel_website": "Official hotel/operator URL — exclude booking.com, expedia.com, hotels.com, tripadvisor.com, yelp.com, google.com",
+  "latitude": 25.7617,
+  "longitude": -80.1918,
+  "description": "1-2 sentence summary of the property",
+  "confidence": "high | medium | low"
+}}
+
+Return ONLY a single JSON object — no preamble, no markdown fences.
+Pick exactly ONE value for each enum field — never pipe-separated lists."""
+
+
+def _validate_grounding_response(parsed: Dict) -> Dict:
+    """Strip invalid enum values, coerce types, drop blanks. Raises nothing —
+    bad fields just get dropped so caller can fall back if too few survived."""
+    clean: Dict = {}
+
+    # opening_date — keep as-is if non-blank string
+    od = parsed.get("opening_date")
+    if isinstance(od, str) and not _grounding_blank(od):
+        clean["opening_date"] = od.strip()
+
+    # project_type — must be in allowed enum
+    pt = parsed.get("project_type")
+    if isinstance(pt, str):
+        pt_lower = pt.strip().lower()
+        # Reject pipe-separated values (Gemini sometimes hedges with "rebrand | renovation")
+        if "|" not in pt_lower and pt_lower in _GROUNDING_VALID_PROJECT_TYPES:
+            clean["project_type"] = pt_lower
+
+    # room_count — must be positive int
+    rc = parsed.get("room_count")
+    try:
+        rc_int = int(rc) if rc is not None else 0
+        if rc_int > 0:
+            clean["room_count"] = rc_int
+    except (TypeError, ValueError):
+        pass
+
+    # brand — keep non-blank string
+    br = parsed.get("brand")
+    if isinstance(br, str) and not _grounding_blank(br):
+        clean["brand"] = br.strip()
+
+    # brand_tier — must be in allowed enum
+    bt = parsed.get("brand_tier")
+    if isinstance(bt, str):
+        bt_lower = bt.strip().lower()
+        if "|" not in bt_lower and bt_lower in _GROUNDING_VALID_TIERS:
+            clean["brand_tier"] = bt_lower
+
+    # management_company / owner / developer / address — keep non-blank strings
+    for f in ("management_company", "owner", "developer", "address"):
+        v = parsed.get(f)
+        if isinstance(v, str) and not _grounding_blank(v):
+            clean[f] = v.strip()
+
+    # hotel_website — must be http(s) URL, reject aggregator/listing sites.
+    # Aggregators are excluded because they're not the hotel's identity —
+    # they're third-party listings. We want the operator's own domain.
+    _AGGREGATOR_DOMAINS = {
+        "booking.com",
+        "expedia.com",
+        "hotels.com",
+        "tripadvisor.com",
+        "yelp.com",
+        "trivago.com",
+        "kayak.com",
+        "hotwire.com",
+        "agoda.com",
+        "priceline.com",
+        "google.com",
+        "facebook.com",
+        "instagram.com",
+        "youtube.com",
+        "twitter.com",
+        "x.com",
+        "linkedin.com",
+        "wikipedia.org",
+        "wikimedia.org",
+    }
+    ws = parsed.get("hotel_website")
+    if isinstance(ws, str) and not _grounding_blank(ws):
+        ws_clean = ws.strip()
+        if ws_clean.startswith(("http://", "https://")):
+            try:
+                from urllib.parse import urlparse
+
+                host = urlparse(ws_clean).netloc.lower().lstrip("www.")
+                # accept if not in aggregator blocklist
+                if host and not any(
+                    host == d or host.endswith("." + d) for d in _AGGREGATOR_DOMAINS
+                ):
+                    clean["hotel_website"] = ws_clean
+            except Exception:
+                pass
+
+    # latitude / longitude — must be valid floats in plausible ranges.
+    # Sanity bounds: lat ∈ [-90, 90], lng ∈ [-180, 180]. Both must be present
+    # and non-zero (0,0 is the "Null Island" hallucination signature).
+    try:
+        lat = parsed.get("latitude")
+        lng = parsed.get("longitude")
+        if lat is not None and lng is not None:
+            lat_f = float(lat)
+            lng_f = float(lng)
+            in_range = -90 <= lat_f <= 90 and -180 <= lng_f <= 180
+            non_zero = not (lat_f == 0 and lng_f == 0)
+            if in_range and non_zero:
+                clean["latitude"] = lat_f
+                clean["longitude"] = lng_f
+    except (TypeError, ValueError):
+        pass
+
+    # description — keep if reasonable length
+    desc = parsed.get("description")
+    if isinstance(desc, str) and not _grounding_blank(desc) and len(desc.strip()) > 20:
+        clean["description"] = desc.strip()
+
+    # confidence
+    conf = parsed.get("confidence")
+    if isinstance(conf, str) and conf.strip().lower() in ("high", "medium", "low"):
+        clean["confidence"] = conf.strip().lower()
+    else:
+        clean["confidence"] = "medium"
+
+    return clean
+
+
+async def _enrich_lead_data_grounded(
+    hotel_name: str,
+    city: str,
+    state: str,
+    country: str,
+    brand: str,
+) -> Optional[Dict]:
+    """One-shot grounded enrichment via Gemini googleSearch tool.
+
+    Returns:
+        Dict with at least `_GROUNDING_MIN_FIELDS` meaningful fields filled,
+        or None if grounding timed out, errored, or returned too little.
+        Caller is responsible for falling back to the 6-stage pipeline on None.
+    """
+    import httpx
+    from app.services.gemini_client import get_gemini_headers
+
+    # Build the URL directly so we can pin grounding to a regional endpoint
+    # (us-central1) regardless of the system-wide VERTEX_LOCATION setting.
+    #
+    # Why: grounded calls on the "global" endpoint frequently come back with
+    # ZERO source citations — Gemini ignores the googleSearch tool and answers
+    # from training data instead ("phantom grounding"). Regional endpoints
+    # return reliable, cited grounding results.
+    #
+    # Other paths (auto_enrich, smart_scrape, weekly_discovery, contact
+    # research) keep using whatever VERTEX_LOCATION points at — usually
+    # "global" — because they don't use the googleSearch tool and the global
+    # endpoint is fine for plain text-in / text-out generation.
+    try:
+        from app.services.ai_client import _get_config, _ensure_init
+
+        _ensure_init()
+        config = _get_config()
+        project = config["vertex_project_id"]
+        model = config["model"]
+        # Hardcoded — grounding requires a regional endpoint.
+        # us-central1 picked because it's lowest-latency from Florida and has
+        # the broadest model availability for Gemini 2.5 Flash.
+        grounding_location = "us-central1"
+        url = (
+            f"https://{grounding_location}-aiplatform.googleapis.com/v1/"
+            f"projects/{project}/locations/{grounding_location}/"
+            f"publishers/google/models/{model}:generateContent"
+        )
+        headers = get_gemini_headers()
+    except Exception as e:
+        logger.warning(f"Grounding: cannot build Gemini URL/headers: {e}")
+        return None
+
+    payload = {
+        "contents": [
+            {
+                "role": "user",
+                "parts": [
+                    {
+                        "text": _build_grounding_prompt(
+                            hotel_name, city, state, country, brand
+                        )
+                    }
+                ],
+            }
+        ],
+        "tools": [{"googleSearch": {}}],
+        "generationConfig": {
+            "temperature": 1.0,  # grounding requires temp 1.0 per Vertex docs
+            "maxOutputTokens": 4096,
+        },
+    }
+
+    start = time.monotonic()
+    try:
+        async with httpx.AsyncClient(timeout=_GROUNDING_TIMEOUT_S) as client:
+            resp = await client.post(url, headers=headers, json=payload)
+        resp.raise_for_status()
+        data = resp.json()
+    except httpx.TimeoutException:
+        logger.warning(
+            f"Grounding TIMEOUT after {time.monotonic()-start:.1f}s for "
+            f"'{hotel_name}' — falling back to Serper+Gemini"
+        )
+        return None
+    except Exception as e:
+        logger.warning(
+            f"Grounding ERROR for '{hotel_name}': {type(e).__name__}: {e} "
+            f"— falling back to Serper+Gemini"
+        )
+        return None
+
+    elapsed = time.monotonic() - start
+
+    # Parse the JSON inside Gemini's text response
+    try:
+        candidate = data["candidates"][0]
+        content = candidate["content"]["parts"][0]["text"].strip()
+    except (KeyError, IndexError) as e:
+        logger.warning(
+            f"Grounding: couldn't parse response shape for '{hotel_name}': "
+            f"{e} — falling back"
+        )
+        return None
+
+    # Strip markdown fences if Gemini wrapped JSON
+    if content.startswith("```"):
+        parts = content.split("```")
+        if len(parts) >= 2:
+            inner = parts[1]
+            if inner.startswith("json"):
+                inner = inner[4:].strip()
+            content = inner.strip().rstrip("`").strip()
+
+    try:
+        parsed = json.loads(content)
+    except json.JSONDecodeError as e:
+        logger.warning(
+            f"Grounding: JSON decode failed for '{hotel_name}': {e} — falling back"
+        )
+        return None
+
+    if not isinstance(parsed, dict):
+        logger.warning(
+            f"Grounding: response not a dict for '{hotel_name}' — falling back"
+        )
+        return None
+
+    cleaned = _validate_grounding_response(parsed)
+
+    # Count meaningful fields (excluding confidence which is metadata)
+    meaningful = sum(1 for k in cleaned if k != "confidence")
+    if meaningful < _GROUNDING_MIN_FIELDS:
+        logger.info(
+            f"Grounding: only {meaningful} fields filled for '{hotel_name}' "
+            f"(min {_GROUNDING_MIN_FIELDS}) — falling back to Serper+Gemini"
+        )
+        return None
+
+    # Capture grounding metadata for source attribution
+    grounding_meta = candidate.get("groundingMetadata", {}) or {}
+    sources = []
+    for chunk in (grounding_meta.get("groundingChunks", []) or [])[:5]:
+        web = chunk.get("web", {}) or {}
+        title = web.get("title")
+        if title:
+            sources.append(title)
+
+    # Reject "phantom grounding" — Gemini sometimes ignores the googleSearch
+    # tool at temperature=1.0 and answers from training data instead.
+    # Symptom: well-formed JSON, plausible fields, but zero source citations
+    # in groundingMetadata. The data is then untrustworthy (potentially
+    # stale or hallucinated, especially for obscure hotels). Vertex doesn't
+    # bill grounding calls without citations, so falling back here costs
+    # only the Serper+Gemini path — which produces real sources.
+    if len(sources) == 0:
+        logger.warning(
+            f"Grounding PHANTOM for '{hotel_name}' — returned {meaningful} "
+            f"fields with ZERO sources (model answered from priors, not "
+            f"fresh search) — falling back to Serper+Gemini"
+        )
+        return None
+
+    logger.info(
+        f"Grounding SUCCESS for '{hotel_name}' in {elapsed:.1f}s "
+        f"(via us-central1): {meaningful} fields filled, "
+        f"{len(sources)} sources read"
+    )
+
+    # Build return shape compatible with what enrich_lead_data normally returns
+    cleaned["changes"] = [k for k in cleaned if k not in ("confidence",)]
+    cleaned["source_url"] = (
+        None  # grounding URLs are vertexaisearch redirects, not useful
+    )
+    cleaned["source_titles"] = sources
+    cleaned["enrichment_path"] = "grounding"  # for log/debug only
+
+    # Compute timeline_label if we got an opening_date
+    if "opening_date" in cleaned:
+        try:
+            cleaned["timeline_label"] = get_timeline_label(cleaned["opening_date"])
+            # already_opened flag for downstream consumers
+            cleaned["already_opened"] = cleaned["timeline_label"] == "EXPIRED"
+        except Exception:
+            pass
+
+    return cleaned
+
+
+async def _hybrid_geocode_and_website(
+    grounded_result: Dict,
+    hotel_name: str,
+    city: str,
+    state: str,
+    country: str,
+    brand: str,
+    existing_website: Optional[str] = None,
+) -> Dict:
+    """Resolve coordinates and website via the hybrid strategy.
+
+    Priority for COORDINATES (best to worst):
+      1. Geoapify(grounded_address) — if grounded has a real street address,
+         Geoapify returns rooftop accuracy
+      2. grounding's own lat/lng — used when no street address exists yet
+         (pre-permit hotels). Sanity-checked: must be within ~50km of
+         the stated city to reject hallucinations.
+      3. Geoapify(hotel_name + city/state) — last resort
+
+    Priority for WEBSITE:
+      1. existing_website (already manual or already auto-filled — don't trample)
+      2. grounded hotel_website (if grounding found one and it passed validation)
+      3. Serper-based find_hotel_website (existing function — still works fine)
+
+    Returns dict with fields ready to merge into the lead's enrichment result:
+      {"latitude": float, "longitude": float, "hotel_website": str,
+       "_geo_source": "geoapify_address" | "grounding_coords" | "geoapify_poi" | None}
+    """
+    out: Dict = {}
+
+    grounded_address = grounded_result.get("address")
+    grounded_lat = grounded_result.get("latitude")
+    grounded_lng = grounded_result.get("longitude")
+    grounded_website = grounded_result.get("hotel_website")
+
+    # ── COORDINATES: try Geoapify with the best available address first ──
+    coords: Optional[tuple] = None
+    geo_source: Optional[str] = None
+
+    try:
+        from app.services.lead_geo_enrichment import geocode_hotel
+
+        # Pass 1: full street address if grounding found one. This is the
+        # rooftop-accuracy path — Geoapify is purpose-built for it.
+        if grounded_address:
+            coords = await geocode_hotel(
+                hotel_name=hotel_name,
+                city=city,
+                state=state,
+                country=country,
+                address=grounded_address,
+                zip_code=None,
+            )
+            if coords:
+                geo_source = "geoapify_address"
+                logger.info(
+                    f"Hybrid geocode: Geoapify resolved '{grounded_address}' "
+                    f"to ({coords[0]:.4f}, {coords[1]:.4f})"
+                )
+    except Exception as e:
+        logger.warning(f"Hybrid geocode: Geoapify(address) failed: {e}")
+
+    # Pass 2: grounding's coordinates as fallback. Sanity-check against the
+    # city to reject hallucinations — coords more than ~50km from the city
+    # are presumed wrong (a 50km radius covers metro areas; hotels within
+    # the same metro should be inside this).
+    if not coords and grounded_lat is not None and grounded_lng is not None:
+        try:
+            from app.services.lead_geo_enrichment import geocode_hotel
+
+            # Geocode the city alone to get its center
+            city_coords = await geocode_hotel(
+                hotel_name="",  # POI search disabled for this pass
+                city=city,
+                state=state,
+                country=country,
+                address=None,
+                zip_code=None,
+            )
+        except Exception:
+            city_coords = None
+
+        if city_coords:
+            # Haversine distance, simplified — for a 50km bound at
+            # latitudes 0-60° the simple-distance formula is fine.
+            from math import radians, cos, sin, asin, sqrt
+
+            def _km(lat1, lng1, lat2, lng2):
+                R = 6371.0
+                dlat = radians(lat2 - lat1)
+                dlng = radians(lng2 - lng1)
+                a = (
+                    sin(dlat / 2) ** 2
+                    + cos(radians(lat1)) * cos(radians(lat2)) * sin(dlng / 2) ** 2
+                )
+                return 2 * R * asin(sqrt(a))
+
+            dist = _km(city_coords[0], city_coords[1], grounded_lat, grounded_lng)
+            if dist <= 50.0:
+                coords = (grounded_lat, grounded_lng)
+                geo_source = "grounding_coords"
+                logger.info(
+                    f"Hybrid geocode: using grounding coords "
+                    f"({grounded_lat:.4f}, {grounded_lng:.4f}) — "
+                    f"{dist:.1f}km from {city or 'city center'}"
+                )
+            else:
+                logger.warning(
+                    f"Hybrid geocode: rejecting grounding coords "
+                    f"({grounded_lat:.4f}, {grounded_lng:.4f}) — "
+                    f"{dist:.1f}km from {city or 'city'}, exceeds 50km bound "
+                    f"(likely hallucinated)"
+                )
+        else:
+            # No city coords to verify against. Accept grounding's coords
+            # but log it — better than nothing for unknown locations.
+            coords = (grounded_lat, grounded_lng)
+            geo_source = "grounding_coords"
+            logger.info(
+                f"Hybrid geocode: using grounding coords (no city anchor "
+                f"to verify): ({grounded_lat:.4f}, {grounded_lng:.4f})"
+            )
+
+    # Pass 3: last-resort POI lookup with hotel name only.
+    if not coords:
+        try:
+            from app.services.lead_geo_enrichment import geocode_hotel
+
+            coords = await geocode_hotel(
+                hotel_name=hotel_name,
+                city=city,
+                state=state,
+                country=country,
+                address=None,
+                zip_code=None,
+            )
+            if coords:
+                geo_source = "geoapify_poi"
+                logger.info(
+                    f"Hybrid geocode: Geoapify POI lookup resolved to "
+                    f"({coords[0]:.4f}, {coords[1]:.4f})"
+                )
+        except Exception as e:
+            logger.warning(f"Hybrid geocode: Geoapify(POI) failed: {e}")
+
+    if coords:
+        out["latitude"] = coords[0]
+        out["longitude"] = coords[1]
+        out["_geo_source"] = geo_source
+
+    # ── WEBSITE: prefer existing > grounded > Serper-based ──
+    if existing_website:
+        out["hotel_website"] = existing_website
+    elif grounded_website:
+        out["hotel_website"] = grounded_website
+        logger.info(f"Hybrid geocode: using grounded website {grounded_website}")
+    else:
+        try:
+            from app.services.lead_geo_enrichment import find_hotel_website
+
+            ws = await find_hotel_website(hotel_name, city, state, brand)
+            if ws:
+                out["hotel_website"] = ws
+        except Exception as e:
+            logger.warning(f"Hybrid geocode: Serper website lookup failed: {e}")
+
+    return out
+
+
 async def enrich_lead_data(
     hotel_name: str,
     city: str = "",
@@ -310,15 +888,22 @@ async def enrich_lead_data(
     current_opening_date: str = "",
     current_brand_tier: str = "",
     current_room_count: int = 0,
+    current_management_company: str = "",
     mode: str = "smart",
     search_name: str = "",
     progress_callback=None,
+    use_grounding: bool = False,
 ) -> Dict:
     """
-    Six-stage enrichment pipeline. Stages are always the same regardless of
-    what's missing — the `missing` list only changes WHAT each stage looks
-    for, not WHICH stages run.
+    Hybrid enrichment with optional grounded fast-path.
 
+    When `use_grounding=True` (set by batch_smart_fill, batch_full_refresh,
+    and the manual Smart Fill / Full Refresh endpoints), tries Gemini's
+    googleSearch tool first. If it returns >= 3 meaningful fields within
+    60s, we use that result. If it times out, errors, or fills too little,
+    we silently fall back to the 6-stage Serper+Gemini pipeline below.
+
+    Six-stage Serper+Gemini pipeline (always available, used as fallback):
       1. CLASSIFY project_type        (Gemini mini-call)
       2. BUILD queries                (free, based on project_type + missing)
       3. SEARCH                       (Serper × 5)
@@ -336,7 +921,128 @@ async def enrich_lead_data(
     each stage as `await cb(stage_num, total_stages, label)`. Used by the
     SSE endpoint to push live progress to the UI. Passing None (the default)
     preserves the old fire-and-forget behavior for Celery + batch jobs.
+
+    use_grounding (default False): opt-in for one-shot grounded research.
+    Only enabled by the four lead-research call sites (manual + batch
+    smart-fill, manual + batch full-refresh) — never by auto_enrich,
+    smart_scrape, weekly_discovery, or any other caller.
     """
+
+    # ── Hybrid grounded fast-path ──
+    # Try grounding first if opted in. On any failure, fall through silently
+    # to the 6-stage pipeline below.
+    if use_grounding:
+        if progress_callback is not None:
+            try:
+                await progress_callback(1, 1, "Researching via Gemini Search")
+            except Exception as e:
+                logger.debug(f"Smart Fill progress callback failed (non-fatal): {e}")
+        grounded = await _enrich_lead_data_grounded(
+            hotel_name=hotel_name,
+            city=city,
+            state=state,
+            country=country,
+            brand=brand,
+        )
+        if grounded is not None:
+            # Apply regression guard on opening_date — never replace a more-specific
+            # date with a vaguer one even if grounding "found" it
+            if "opening_date" in grounded and current_opening_date:
+                try:
+                    from app.services.utils import should_accept_opening_date
+
+                    accept, reason = should_accept_opening_date(
+                        current_opening_date, grounded["opening_date"]
+                    )
+                    if not accept:
+                        # `reason` distinguishes "no change" (boring no-op,
+                        # values already identical) from real rejections
+                        # ("specificity regression" / "year shifted back").
+                        # Log levels split: INFO for real rejections,
+                        # DEBUG for trivial no-ops so they don't spam logs.
+                        no_change = reason == "no change"
+                        log_fn = logger.debug if no_change else logger.info
+                        log_fn(
+                            f"Grounding: opening_date '{grounded['opening_date']}' "
+                            f"not applied — {reason} "
+                            f"(current: '{current_opening_date}')"
+                        )
+                        grounded.pop("opening_date", None)
+                        grounded.pop("timeline_label", None)
+                        grounded.pop("already_opened", None)
+                        if "opening_date" in grounded.get("changes", []):
+                            grounded["changes"].remove("opening_date")
+                except Exception:
+                    pass  # if guard import fails, accept the grounded value
+
+            # Management company guard — added 2026-05-04. If grounding
+            # returned a mgmt_co value but the lead already has one, only
+            # overwrite if the existing value looks like a placeholder.
+            # Manual edits (specific real-world operator names) win over
+            # grounding's guesses. Operators are sales-critical — wrong
+            # mgmt_co targets the wrong contact.
+            if "management_company" in grounded and current_management_company:
+                cur_mgmt = (current_management_company or "").strip()
+                cur_lower = cur_mgmt.lower()
+                _PLACEHOLDERS = {
+                    "",
+                    "unknown",
+                    "none",
+                    "n/a",
+                    "tbd",
+                    "to be determined",
+                    "—",
+                    "-",
+                }
+                if cur_lower not in _PLACEHOLDERS:
+                    new_mgmt = (grounded.get("management_company") or "").strip()
+                    if new_mgmt.lower() != cur_lower:
+                        logger.info(
+                            f"Grounding: management_company '{new_mgmt}' "
+                            f"not applied — current value '{cur_mgmt}' is "
+                            f"already set and not a placeholder"
+                        )
+                        grounded.pop("management_company", None)
+                        if "management_company" in grounded.get("changes", []):
+                            grounded["changes"].remove("management_company")
+
+            # Run hybrid geocode + website resolver. This is best-effort —
+            # if it fails, grounded already has whatever lat/lng/website it
+            # extracted directly and we just return that.
+            try:
+                if progress_callback is not None:
+                    try:
+                        await progress_callback(1, 1, "Resolving location & website")
+                    except Exception:
+                        pass
+                geo_extra = await _hybrid_geocode_and_website(
+                    grounded_result=grounded,
+                    hotel_name=hotel_name,
+                    city=city,
+                    state=state,
+                    country=country,
+                    brand=brand,
+                    existing_website=None,  # Smart Fill always overwrites if found
+                )
+                # Merge — hybrid result overrides grounded's raw lat/lng
+                # because hybrid is strictly better (Geoapify-validated or
+                # rejected-with-reason). _geo_source is for log/debug.
+                for k in ("latitude", "longitude", "hotel_website"):
+                    if k in geo_extra:
+                        grounded[k] = geo_extra[k]
+                        if k not in grounded.get("changes", []):
+                            grounded.setdefault("changes", []).append(k)
+                if "_geo_source" in geo_extra:
+                    grounded["_geo_source"] = geo_extra["_geo_source"]
+            except Exception as e:
+                logger.warning(
+                    f"Hybrid geocode failed (non-fatal) for '{hotel_name}': {e}"
+                )
+
+            return grounded
+        # else: silently fall through to the 6-stage pipeline below
+
+    # ── Original 6-stage Serper+Gemini pipeline (unchanged) ──
     _TOTAL = 6
 
     async def _emit(stage: int, label: str):
@@ -2166,13 +2872,26 @@ async def _enrich_lead_data_legacy(
 async def batch_smart_fill(limit: int = 10, mode: str = "smart") -> Dict:
     """
     Find leads with missing data and enrich them.
-    Called by scheduled task or manual trigger.
+    Called by scheduled task (auto_smart_fill) or manual trigger
+    (POST /api/leads/batch-smart-fill).
+
+    Targets `status='new'` leads where ANY of these is missing:
+      - opening_date
+      - brand_tier (NULL / "" / "unknown")
+      - room_count (NULL / 0)
+      - management_company  ← added 2026-05-01
+
+    Picks top `limit` by lead_score desc. For each, runs
+    `enrich_lead_data` (Gemini + Serper), persists the filled fields,
+    rescores, and — if the new opening_date lands in the EXPIRED bucket
+    — auto-transfers to existing_hotels (mirrors the sync/SSE
+    smart-fill paths so this task can't create ghosts).
     """
     from sqlalchemy import select, or_
     from app.database import async_session
     from app.models.potential_lead import PotentialLead
 
-    stats = {"checked": 0, "enriched": 0, "details": []}
+    stats = {"checked": 0, "enriched": 0, "transferred": 0, "details": []}
 
     async with async_session() as session:
         query = (
@@ -2187,6 +2906,8 @@ async def batch_smart_fill(limit: int = 10, mode: str = "smart") -> Dict:
                     PotentialLead.brand_tier == "",
                     PotentialLead.room_count.is_(None),
                     PotentialLead.room_count == 0,
+                    PotentialLead.management_company.is_(None),
+                    PotentialLead.management_company == "",
                 ),
             )
             .order_by(PotentialLead.lead_score.desc())
@@ -2201,6 +2922,10 @@ async def batch_smart_fill(limit: int = 10, mode: str = "smart") -> Dict:
 
         logger.info(f"Smart Fill: {len(leads)} leads need data enrichment")
 
+        # Track lead IDs that need post-commit transfer (must run in their
+        # own session because transfer_lead deletes the source row).
+        transfer_candidate_ids: list[int] = []
+
         for lead in leads:
             stats["checked"] += 1
 
@@ -2213,8 +2938,10 @@ async def batch_smart_fill(limit: int = 10, mode: str = "smart") -> Dict:
                 current_opening_date=lead.opening_date or "",
                 current_brand_tier=lead.brand_tier or "",
                 current_room_count=lead.room_count or 0,
+                current_management_company=lead.management_company or "",
                 mode=mode,
                 search_name=lead.search_name or "",
+                use_grounding=True,  # hybrid path — grounded first, falls back silently
             )
 
             if not enriched.get("changes"):
@@ -2224,12 +2951,33 @@ async def batch_smart_fill(limit: int = 10, mode: str = "smart") -> Dict:
                 continue
 
             changes = []
+            # Opening date with regression guard — rejects less-specific
+            # values ("Late 2026" → "2026") and backward-shifted years.
+            # Without this guard, a backfill batch could replace a good
+            # "September 2026" with a vague "2026" and silently push the
+            # lead into the wrong timeline bucket.
             if "opening_date" in enriched:
-                lead.opening_date = enriched["opening_date"]
-                lead.timeline_label = enriched.get(
-                    "timeline_label", get_timeline_label(enriched["opening_date"])
-                )
-                changes.append(f"opening_date={enriched['opening_date']}")
+                try:
+                    from app.services.utils import should_accept_opening_date
+
+                    accept, _reason = should_accept_opening_date(
+                        lead.opening_date, enriched["opening_date"]
+                    )
+                except Exception:
+                    accept = True  # if guard import fails, fall back to permissive
+                if accept:
+                    lead.opening_date = enriched["opening_date"]
+                    new_label = enriched.get(
+                        "timeline_label",
+                        get_timeline_label(enriched["opening_date"]),
+                    )
+                    lead.timeline_label = new_label
+                    changes.append(f"opening_date={enriched['opening_date']}")
+                    # Queue for auto-transfer if backfilled date lands in
+                    # EXPIRED bucket — same pattern as the patched
+                    # smart_fill_lead endpoint (scraping.py).
+                    if new_label == "EXPIRED":
+                        transfer_candidate_ids.append(lead.id)
             if "brand_tier" in enriched:
                 lead.brand_tier = enriched["brand_tier"]
                 changes.append(f"tier={enriched['brand_tier']}")
@@ -2239,6 +2987,13 @@ async def batch_smart_fill(limit: int = 10, mode: str = "smart") -> Dict:
             if "brand" in enriched:
                 lead.brand = enriched["brand"]
                 changes.append(f"brand={enriched['brand']}")
+            # Management company — added 2026-05-01. Backfill only fills
+            # empties (mode='smart' semantics) — we never trample a
+            # value already on the lead.
+            if "management_company" in enriched:
+                if not lead.management_company:
+                    lead.management_company = enriched["management_company"]
+                    changes.append(f"mgmt_co={enriched['management_company']}")
             if "description" in enriched:
                 if mode == "full" or not lead.description:
                     lead.description = enriched["description"]
@@ -2281,7 +3036,295 @@ async def batch_smart_fill(limit: int = 10, mode: str = "smart") -> Dict:
 
         await session.commit()
 
+    # Pass 2 — auto-transfer leads whose backfilled opening_date lands
+    # in EXPIRED. Runs in fresh sessions because transfer_lead deletes
+    # the source row and we don't want partial-batch failures to roll
+    # back the enrichment we just committed.
+    if transfer_candidate_ids:
+        from app.services.lead_transfer import transfer_lead
+
+        logger.info(
+            f"Smart Fill: auto-transferring {len(transfer_candidate_ids)} "
+            f"lead(s) whose backfilled opening_date is EXPIRED..."
+        )
+        for lid in transfer_candidate_ids:
+            try:
+                async with async_session() as transfer_session:
+                    tr = await transfer_lead(lid, transfer_session, commit=True)
+                if tr.get("status") in ("transferred", "merged"):
+                    stats["transferred"] += 1
+                    eh_id = tr.get("existing_hotel_id")
+                    logger.info(
+                        f"  ✓ Smart Fill auto-{tr['status']} lead #{lid} "
+                        f"→ existing_hotel #{eh_id}"
+                    )
+            except Exception as e:
+                logger.warning(f"  ✗ Smart Fill auto-transfer failed for #{lid}: {e}")
+
     logger.info(
-        f"Smart Fill complete: {stats['checked']} checked, {stats['enriched']} enriched"
+        f"Smart Fill complete: {stats['checked']} checked, "
+        f"{stats['enriched']} enriched, "
+        f"{stats['transferred']} graduated to existing_hotels"
+    )
+    return stats
+
+
+async def batch_full_refresh(limit: int = 5, stale_days: int = 14) -> Dict:
+    """
+    Re-enrich the staleest active leads to catch new info posted online.
+
+    Why this exists
+    ---------------
+    `batch_smart_fill` only touches leads with EMPTY core fields. But hotel
+    info changes over time — opening dates slip, brands rebrand, room
+    counts adjust, mgmt companies change hands. A lead with all four core
+    fields filled 6 weeks ago is probably stale.
+
+    Targets `status='new'` leads where `updated_at` is older than
+    `stale_days` days (or NULL). Picks `limit` staleest, sorted by
+    `updated_at ASC`, breaks ties by `lead_score DESC` (high-value leads
+    first when multiple are equally stale).
+
+    Runs in `mode='full'` — overwrites existing values when Gemini returns
+    fresher data. Same regression guards apply (won't replace a specific
+    date with a vague one, won't replace valid brand_tier with 'unknown').
+
+    Cost
+    ----
+    ~5 Gemini + ~10 Serper calls per lead. limit=5 → ~25 Gemini/day.
+    Modest. Self-throttling: refreshed leads sink to bottom of stale
+    queue, others rise. Cycles through the full pipeline every ~30-60
+    days depending on volume.
+
+    Created: 2026-05-01
+    """
+    from datetime import timedelta
+    from sqlalchemy import select, or_
+    from app.database import async_session
+    from app.models.potential_lead import PotentialLead
+    from app.services.utils import local_now
+
+    cutoff = local_now() - timedelta(days=stale_days)
+    stats = {
+        "checked": 0,
+        "enriched": 0,
+        "transferred": 0,
+        "skipped_no_changes": 0,
+        "details": [],
+    }
+
+    async with async_session() as session:
+        query = (
+            select(PotentialLead)
+            .where(
+                PotentialLead.status == "new",
+                or_(
+                    PotentialLead.updated_at < cutoff,
+                    PotentialLead.updated_at.is_(None),
+                ),
+            )
+            .order_by(
+                PotentialLead.updated_at.asc().nullsfirst(),
+                PotentialLead.lead_score.desc(),
+            )
+            .limit(limit)
+        )
+        result = await session.execute(query)
+        leads = result.scalars().all()
+
+        if not leads:
+            logger.info(f"Full Refresh: no leads stale > {stale_days} days")
+            return stats
+
+        logger.info(f"Full Refresh: {len(leads)} stale lead(s) (> {stale_days} days)")
+
+        transfer_candidate_ids: list[int] = []
+
+        for lead in leads:
+            stats["checked"] += 1
+
+            enriched = await enrich_lead_data(
+                hotel_name=lead.hotel_name,
+                city=lead.city or "",
+                state=lead.state or "",
+                country=lead.country or "",
+                brand=lead.brand or "",
+                current_opening_date=lead.opening_date or "",
+                current_brand_tier=lead.brand_tier or "",
+                current_room_count=lead.room_count or 0,
+                current_management_company=lead.management_company or "",
+                mode="full",
+                search_name=lead.search_name or "",
+                use_grounding=True,  # hybrid path — grounded first, falls back silently
+            )
+
+            if not enriched.get("changes"):
+                # Bump updated_at anyway — we DID check this lead, it's
+                # not stale even if nothing changed. Otherwise it stays
+                # at the top of the stale queue and we re-check it
+                # tomorrow burning credits for nothing.
+                lead.updated_at = local_now()
+                stats["skipped_no_changes"] += 1
+                stats["details"].append(
+                    {
+                        "name": lead.hotel_name,
+                        "status": "no_changes",
+                        "note": "checked, nothing new to update",
+                    }
+                )
+                continue
+
+            changes = []
+            # Opening date — regression guard prevents downgrading
+            # specific dates to vague ones.
+            if "opening_date" in enriched:
+                try:
+                    from app.services.utils import should_accept_opening_date
+
+                    accept, _reason = should_accept_opening_date(
+                        lead.opening_date, enriched["opening_date"]
+                    )
+                except Exception:
+                    accept = True
+                if accept:
+                    lead.opening_date = enriched["opening_date"]
+                    new_label = enriched.get(
+                        "timeline_label",
+                        get_timeline_label(enriched["opening_date"]),
+                    )
+                    lead.timeline_label = new_label
+                    changes.append(f"opening_date={enriched['opening_date']}")
+                    if new_label == "EXPIRED":
+                        transfer_candidate_ids.append(lead.id)
+
+            # Brand tier — only overwrite if new value is valid.
+            _VALID_TIERS = {
+                "tier1_ultra_luxury",
+                "tier2_luxury",
+                "tier3_upper_upscale",
+                "tier4_upscale",
+                "tier5_upper_midscale",
+                "tier6_midscale",
+                "tier7_economy",
+            }
+            _INVALID = {"", "unknown", "none", "n/a", "na", "tbd"}
+            if "brand_tier" in enriched:
+                new_tier = (enriched.get("brand_tier") or "").strip().lower()
+                current_tier = (lead.brand_tier or "").strip().lower()
+                if new_tier in _VALID_TIERS:
+                    lead.brand_tier = enriched["brand_tier"]
+                    changes.append(f"tier={enriched['brand_tier']}")
+                elif current_tier in _INVALID and new_tier:
+                    lead.brand_tier = enriched["brand_tier"]
+                    changes.append(f"tier={enriched['brand_tier']}")
+
+            # Room count — only overwrite with a positive integer.
+            if "room_count" in enriched:
+                try:
+                    new_rc = int(enriched.get("room_count") or 0)
+                except (TypeError, ValueError):
+                    new_rc = 0
+                if new_rc > 0:
+                    lead.room_count = new_rc
+                    changes.append(f"rooms={new_rc}")
+
+            # Brand — overwrite if valid.
+            if "brand" in enriched:
+                new_brand = (enriched.get("brand") or "").strip()
+                if new_brand and new_brand.lower() not in _INVALID:
+                    lead.brand = new_brand
+                    changes.append(f"brand={new_brand}")
+
+            # Management company — full refresh DOES overwrite (mode='full').
+            if "management_company" in enriched and enriched["management_company"]:
+                if lead.management_company != enriched["management_company"]:
+                    lead.management_company = enriched["management_company"]
+                    changes.append(f"mgmt_co={enriched['management_company']}")
+
+            # Owner / developer — fill if Gemini found them this time.
+            if "owner" in enriched and enriched["owner"]:
+                if not lead.owner or lead.owner != enriched["owner"]:
+                    lead.owner = enriched["owner"]
+                    changes.append(f"owner={enriched['owner']}")
+            if "developer" in enriched and enriched["developer"]:
+                if not lead.developer or lead.developer != enriched["developer"]:
+                    lead.developer = enriched["developer"]
+                    changes.append(f"developer={enriched['developer']}")
+
+            if "description" in enriched:
+                lead.description = enriched["description"]
+
+            lead.updated_at = local_now()
+
+            from app.services.scorer import calculate_lead_score
+
+            score_result = calculate_lead_score(
+                hotel_name=lead.hotel_name,
+                city=lead.city,
+                state=lead.state,
+                country=lead.country,
+                opening_date=lead.opening_date,
+                room_count=lead.room_count,
+                contact_name=lead.contact_name,
+                contact_email=lead.contact_email,
+                contact_phone=lead.contact_phone,
+                brand=lead.brand,
+            )
+            if score_result.get("should_save", True):
+                try:
+                    from app.services.rescore import rescore_lead
+
+                    await rescore_lead(lead.id, session)
+                except Exception as rescore_err:
+                    logger.warning(
+                        f"rescore after full refresh failed for "
+                        f"{lead.id}: {rescore_err}"
+                    )
+                    lead.lead_score = score_result["total_score"]
+
+            if changes:
+                stats["enriched"] += 1
+                stats["details"].append(
+                    {
+                        "name": lead.hotel_name,
+                        "status": "refreshed",
+                        "changes": changes,
+                        "confidence": enriched.get("confidence", "unknown"),
+                    }
+                )
+            else:
+                stats["skipped_no_changes"] += 1
+
+        await session.commit()
+
+    # Pass 2 — auto-transfer leads where refreshed opening_date is now
+    # EXPIRED. Same pattern as batch_smart_fill and the patched smart_fill
+    # routes — closes the ghost loophole.
+    if transfer_candidate_ids:
+        from app.services.lead_transfer import transfer_lead
+
+        logger.info(
+            f"Full Refresh: auto-transferring {len(transfer_candidate_ids)} "
+            f"lead(s) whose refreshed opening_date is EXPIRED..."
+        )
+        for lid in transfer_candidate_ids:
+            try:
+                async with async_session() as transfer_session:
+                    tr = await transfer_lead(lid, transfer_session, commit=True)
+                if tr.get("status") in ("transferred", "merged"):
+                    stats["transferred"] += 1
+                    eh_id = tr.get("existing_hotel_id")
+                    logger.info(
+                        f"  ✓ Full Refresh auto-{tr['status']} lead #{lid} "
+                        f"→ existing_hotel #{eh_id}"
+                    )
+            except Exception as e:
+                logger.warning(f"  ✗ Full Refresh auto-transfer failed for #{lid}: {e}")
+
+    logger.info(
+        f"Full Refresh complete: {stats['checked']} checked, "
+        f"{stats['enriched']} updated, "
+        f"{stats['skipped_no_changes']} no-changes, "
+        f"{stats['transferred']} graduated to existing_hotels"
     )
     return stats

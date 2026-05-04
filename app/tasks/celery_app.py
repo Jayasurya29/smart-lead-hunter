@@ -60,62 +60,114 @@ celery_app.conf.update(
         },
     },
     # Beat scheduler (periodic tasks)
+    #
+    # Schedule rationale (revised 2026-05-01)
+    # ────────────────────────────────────────
+    # Celery worker + beat run on Jay's local machine via start_slh.bat
+    # (Mon-Fri, ~9 AM-5 PM). They do NOT run at night or on weekends —
+    # the machine is off. Beat does NOT replay missed schedules either:
+    # if the trigger time elapses while beat is down, that fire is lost.
+    #
+    # Stretched window: 9:30 AM - 4:30 PM Mon-Fri.
+    # Tasks are spaced with 60-90 min gaps so Gemini / Serper / Geoapify
+    # never hit back-to-back load. AI-heavy tasks (auto_enrich, smart_scrape,
+    # auto_smart_fill) get the most breathing room — auto_enrich alone
+    # burns ~50+ Gemini calls per run on contact research. Bunched
+    # scheduling caused 429 RESOURCE_EXHAUSTED in the past.
+    #
+    # Daily flow:
+    #   morning   → DB maintenance (cheap)
+    #   late-AM   → smart_fill empty fields (so afternoon enrich works)
+    #   noon      → first scrape + enrich pass
+    #   afternoon → second scrape + enrich pass
+    #   late-PM   → final scrape (lighter, end-of-day catch-up)
     beat_schedule={
-        # ======================================================
-        # AUTONOMOUS BRAIN — Business Hours Only (9:30a-4:30p ET)
-        # Mon-Fri only. App is shutdown outside these hours.
-        # ======================================================
-        # Recompute timeline labels: 9:30 AM every day (incl. weekends)
-        # Dates advance on weekends too — labels must always be fresh.
+        # Recompute timeline labels: 9:30 AM Mon-Fri.
+        # DB-only — drains expired → existing, resurrects ghosts. Runs
+        # FIRST so the rest of the day operates on a clean dataset.
+        # Mon-Fri only (was "daily incl weekends" — but Celery doesn't
+        # run weekends in this setup, so the daily schedule was a lie).
+        # Monday's run sweeps any weekend drift in one pass.
         "recompute-timeline-labels": {
             "task": "recompute_timeline_labels",
-            "schedule": crontab(hour=9, minute=30),
+            "schedule": crontab(hour=9, minute=30, day_of_week="1-5"),
             "options": {"queue": "maintenance"},
         },
-        # Startup health check: 9:35 AM Mon-Fri
-        # Cleanup overnight gaps, rescore stale leads
+        # Daily health check: 9:45 AM Mon-Fri.
+        # DB-only — cleanup, deactivate dead sources, rescore up to 50
+        # stale leads. No external API calls.
         "startup-health-check": {
             "task": "daily_health_check",
-            "schedule": crontab(hour=9, minute=35, day_of_week="1-5"),
+            "schedule": crontab(hour=9, minute=45, day_of_week="1-5"),
             "options": {"queue": "maintenance"},
         },
-        # Smart Scrape Round 1: 10:00 AM Mon-Fri
-        # Brain picks which sources are due based on intelligence
-        "smart-scrape-am": {
-            "task": "smart_scrape",
-            "schedule": crontab(hour=10, minute=0, day_of_week="1-5"),
+        # Auto Smart Fill: 10:30 AM Mon-Fri (NEW 2026-05-01).
+        # Backfills opening_date / brand_tier / room_count /
+        # management_company on top 10 highest-score leads where any
+        # of these are empty. CRITICAL — auto_enrich filters by
+        # opening_date (HOT/URGENT bucket), so leads with empty dates
+        # never get contact-enriched. This task fills those fields
+        # BEFORE the noon auto_enrich runs.
+        "auto-smart-fill": {
+            "task": "auto_smart_fill",
+            "schedule": crontab(hour=10, minute=30, day_of_week="1-5"),
             "options": {"queue": "scraping"},
         },
-        # Auto-Enrich Round 1: 11:00 AM Mon-Fri
-        # Enrich top 5 unenriched HOT/URGENT leads
-        "auto-enrich-am": {
-            "task": "auto_enrich",
+        # Auto Full Refresh: 11:00 AM Mon-Fri (NEW 2026-05-04).
+        # Re-checks 5 staleest leads (>14 days since last update) via
+        # grounded research. Catches the Atlas-style failure mode where
+        # a lead's opening_date drifts behind reality. Auto-transfers
+        # leads that have actually opened to existing_hotels.
+        # Slotted between auto_smart_fill (10:30) and smart_scrape #1
+        # (11:30) — light load, doesn't compete for Gemini quota.
+        "auto-full-refresh": {
+            "task": "auto_full_refresh",
             "schedule": crontab(hour=11, minute=0, day_of_week="1-5"),
             "options": {"queue": "scraping"},
         },
-        # Smart Scrape Round 2: 12:30 PM Mon-Fri
+        # Smart Scrape Round 1: 11:30 AM Mon-Fri.
+        # Heavy: Serper + Gemini classification per source.
+        "smart-scrape-am": {
+            "task": "smart_scrape",
+            "schedule": crontab(hour=11, minute=30, day_of_week="1-5"),
+            "options": {"queue": "scraping"},
+        },
+        # Auto-Enrich Round 1: 1:00 PM Mon-Fri.
+        # HEAVIEST task — 6-iteration contact research, ~50+ Gemini
+        # calls + ~30 Serper calls for up to 5 leads. 90 min space
+        # after smart_scrape so Gemini quota recovers.
+        "auto-enrich-am": {
+            "task": "auto_enrich",
+            "schedule": crontab(hour=13, minute=0, day_of_week="1-5"),
+            "options": {"queue": "scraping"},
+        },
+        # Smart Scrape Round 2: 2:30 PM Mon-Fri.
         "smart-scrape-mid": {
             "task": "smart_scrape",
-            "schedule": crontab(hour=12, minute=30, day_of_week="1-5"),
+            "schedule": crontab(hour=14, minute=30, day_of_week="1-5"),
             "options": {"queue": "scraping"},
         },
-        # Auto-Enrich Round 2: 2:00 PM Mon-Fri
+        # Auto-Enrich Round 2: 3:30 PM Mon-Fri.
+        # Second contact-enrichment pass on whatever the morning scrape
+        # discovered.
         "auto-enrich-pm": {
             "task": "auto_enrich",
-            "schedule": crontab(hour=14, minute=0, day_of_week="1-5"),
-            "options": {"queue": "scraping"},
-        },
-        # Smart Scrape Round 3: 3:30 PM Mon-Fri (last scrape of the day)
-        "smart-scrape-pm": {
-            "task": "smart_scrape",
             "schedule": crontab(hour=15, minute=30, day_of_week="1-5"),
             "options": {"queue": "scraping"},
         },
-        # Weekly Discovery: Thursday 10:30 AM
-        # Finds new sources and leads from the web
+        # Smart Scrape Round 3: 4:30 PM Mon-Fri (last task of the day).
+        # Lighter end-of-day pull on remaining due sources.
+        "smart-scrape-pm": {
+            "task": "smart_scrape",
+            "schedule": crontab(hour=16, minute=30, day_of_week="1-5"),
+            "options": {"queue": "scraping"},
+        },
+        # Weekly Discovery: Thursday 12:00 PM.
+        # Finds new sources from the web. Slots between smart_scrape #1
+        # (11:30) and auto_enrich #1 (13:00) on Thursday only.
         "weekly-discovery": {
             "task": "weekly_discovery",
-            "schedule": crontab(hour=10, minute=30, day_of_week=4),
+            "schedule": crontab(hour=12, minute=0, day_of_week=4),
             "options": {"queue": "scraping"},
         },
     },

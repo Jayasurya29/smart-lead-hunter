@@ -80,25 +80,66 @@ def normalize_state(state: str) -> str:
     return _STATE_ABBR.get(state.upper(), state)
 
 
+def _strip_diacritics(s: str) -> str:
+    """Remove combining diacritical marks from a Latin-script string.
+
+    Examples:
+        "Curaçao"        → "Curacao"
+        "Cancún"         → "Cancun"
+        "São Paulo"      → "Sao Paulo"
+        "Saint-Barthélemy" → "Saint-Barthelemy"
+
+    Why this exists
+    ---------------
+    PostgreSQL `ILIKE` is case-insensitive but NOT diacritic-insensitive.
+    Without this, "Curaçao" (with cedilla) and "Curacao" (without) compare
+    as different strings, so dedup misses them. Same problem for every
+    Latin-American/Caribbean/European-accented hotel.
+
+    NFKD decomposition splits ç into c + combining cedilla, then we drop
+    all combining-mark codepoints (Unicode category "Mn"). The ASCII
+    base letters survive. Pure ASCII strings pass through unchanged.
+
+    Note: this is for matching/dedup ONLY. Display values keep their
+    original spelling — never call this on data being shown to humans.
+    """
+    if not s:
+        return s
+    import unicodedata
+
+    return "".join(
+        c for c in unicodedata.normalize("NFKD", s) if not unicodedata.combining(c)
+    )
+
+
 def normalize_hotel_name(name: str) -> str:
     """Normalize hotel name for deduplication.
 
-    Strips special characters, lowercases, and collapses whitespace.
+    Strips diacritics, special characters, lowercases, and collapses whitespace.
 
     Used by:
     - orchestrator.py (save_leads_to_database)
     - scraping_tasks.py (_save_lead_impl)
-    - Any future dedup logic
+    - lead_transfer.py, contact_enrichment.py, scraping.py routes,
+      contacts.py routes, dashboard.py routes — anywhere a normalized
+      hotel name is used for matching.
 
     Examples:
-        "Ritz-Carlton Miami" → "ritzcarlton miami"
-        "Four Seasons® Orlando" → "four seasons orlando"
-        "  The St. Regis  " → "the st regis"
+        "Ritz-Carlton Miami"     → "ritzcarlton miami"
+        "Four Seasons® Orlando"  → "four seasons orlando"
+        "  The St. Regis  "      → "the st regis"
+        "The Pyrmont Curaçao"    → "the pyrmont curacao"  ← fixed 2026-05-04
+        "Cancún Marriott"        → "cancun marriott"      ← fixed 2026-05-04
     """
     if not name:
         return ""
+    # Strip diacritics first so "Curaçao" → "Curacao" before regex.
+    # Without this, the regex strips the cedilla as a non-alpha char,
+    # leaving "Curaao" — which doesn't match "Curacao" from sources
+    # that already use the unaccented spelling.
+    cleaned = _strip_diacritics(name)
     # Remove all non-alphanumeric except spaces, then collapse whitespace
-    return re.sub(r"\s+", " ", re.sub(r"[^a-z0-9\s]", "", name.lower())).strip()
+    return re.sub(r"\s+", " ", re.sub(r"[^a-z0-9\s]", "", cleaned.lower())).strip()
 
 
 def clean_html_to_text(html: str) -> str:

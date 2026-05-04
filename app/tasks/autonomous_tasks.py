@@ -206,6 +206,14 @@ def smart_scrape(self) -> Dict[str, Any]:
                                     lead_dicts, save_session
                                 )
                                 saved = db_result.get("saved", 0)
+                                # Track enriched separately. A source that
+                                # consistently re-finds leads we already
+                                # have IS productive — it's giving us fresh
+                                # extractions on existing rows. Without
+                                # counting these, the brain marks the
+                                # source dead. Bug found 2026-05-04.
+                                enriched = db_result.get("enriched", 0)
+                                productive = saved + enriched
                                 results["leads_saved"] += saved
                                 results["leads_extracted"] += len(lead_dicts)
 
@@ -224,12 +232,33 @@ def smart_scrape(self) -> Dict[str, Any]:
                 if source.id in source_intel_map:
                     try:
                         src_intel = source_intel_map[source.id]
+                        # Pull pipeline funnel metrics if available — distinguishes
+                        # "source has no hotel content" from "extractor failed
+                        # on hotel content". Defaults to 0 if pipeline didn't run.
+                        _pages_classified = 0
+                        _pages_relevant = 0
+                        _leads_extracted = 0
+                        try:
+                            _pr = locals().get("pipeline_result")
+                            if _pr is not None:
+                                _pages_classified = (
+                                    getattr(_pr, "pages_classified", 0) or 0
+                                )
+                                _pages_relevant = getattr(_pr, "pages_relevant", 0) or 0
+                                _leads_extracted = (
+                                    getattr(_pr, "leads_extracted", 0) or 0
+                                )
+                        except Exception:
+                            pass
                         src_intel.record_scrape_run(
                             pages_scraped=scrape_result.pages_scraped,
                             leads_found=len(lead_dicts),
                             leads_saved=saved,
                             duration_seconds=0,
                             mode=scrape_result.mode,
+                            pages_classified=_pages_classified,
+                            pages_relevant=_pages_relevant,
+                            leads_extracted=_leads_extracted,
                         )
                         src_intel.save()
                         async with async_session() as intel_session:
@@ -240,9 +269,15 @@ def smart_scrape(self) -> Dict[str, Any]:
                             ).scalar_one_or_none()
                             if src_obj:
                                 src_obj.source_intelligence = dict(src_intel._data)
-                                leads_saved = len(lead_dicts) if lead_dicts else 0
-                                if leads_saved > 0:
-                                    src_obj.record_success(leads_saved)
+                                # Use 'productive' (saved + enriched), not
+                                # raw lead_dicts count. A source extracting
+                                # 6 leads where all 6 already exist is still
+                                # productive — record_success keeps it from
+                                # being demoted to LOW_YIELD by the brain.
+                                # See save block above for full reasoning.
+                                productive_leads = locals().get("productive", 0)
+                                if productive_leads > 0:
+                                    src_obj.record_success(productive_leads)
                                 else:
                                     src_obj.total_scrapes = (
                                         src_obj.total_scrapes or 0
@@ -438,6 +473,18 @@ def weekly_discovery(self) -> Dict[str, Any]:
     async def _discover():
         results = {"sources_found": 0, "leads_found": 0, "queries_run": 0}
         try:
+            # Defensive sys.path injection — Celery worker's CWD isn't
+            # always the project root, which made `from scripts.discover_sources`
+            # fail with "No module named 'scripts'". Adding the project
+            # root explicitly fixes this regardless of how the worker
+            # was launched. (Bug observed 2026-05-04.)
+            import sys as _sys
+            from pathlib import Path as _Path
+
+            _project_root = _Path(__file__).resolve().parent.parent.parent
+            if str(_project_root) not in _sys.path:
+                _sys.path.insert(0, str(_project_root))
+
             from scripts.discover_sources import WebDiscoveryEngine
 
             engine = WebDiscoveryEngine(
@@ -614,6 +661,119 @@ def daily_health_check(self) -> Dict[str, Any]:
         return results
 
     return run_async(_health_check())
+
+
+# =============================================================================
+# TASK 4.5: AUTO SMART FILL  (added 2026-05-01)
+# =============================================================================
+
+
+@celery_app.task(bind=True, base=BaseTask, name="auto_smart_fill")
+def auto_smart_fill(self) -> Dict[str, Any]:
+    """Backfill empty metadata on top-scoring new leads.
+
+    Targets `status='new'` leads missing any of:
+      - opening_date     (required for HOT/URGENT bucketing)
+      - brand_tier       (required for prioritization)
+      - room_count       (required for revenue projection)
+      - management_company (required for centralized procurement targeting)
+
+    Picks top 10 by lead_score, runs Gemini-powered enrichment, persists
+    the filled fields, rescores, and (if backfilled opening_date is now
+    EXPIRED) auto-transfers to existing_hotels.
+
+    Why this task exists
+    --------------------
+    Leads from smart_scrape arrive with whatever metadata the source page
+    had - often empty. Without this backfill:
+      - auto_enrich SKIPS them (filters by HOT/URGENT, which requires a
+        valid opening_date) - so they never get contact research
+      - revenue projections come back $0 (no room_count)
+      - Sandals/Beaches leads do not get HPI procurement targeting
+        (no management_company)
+      - The leads sit at the bottom of the pipeline forever
+
+    Scheduled at 10:30 AM Mon-Fri so it runs BEFORE the noon auto_enrich,
+    giving the enrich task fresh, fully-filled leads to work on.
+
+    Cost
+    ----
+    ~25 Gemini calls + ~40 Serper calls per run (10 leads x 2-3 Gemini,
+    3-5 Serper each). Modest. Spaced 60 min before smart_scrape and
+    150 min before auto_enrich so quotas stay healthy.
+    """
+    logger.info("Auto Smart Fill: backfilling empty lead metadata...")
+
+    async def _smart_fill():
+        from app.services.lead_data_enrichment import batch_smart_fill
+
+        result = await batch_smart_fill(limit=10, mode="smart")
+        logger.info(
+            f"Auto Smart Fill: {result.get('checked', 0)} checked, "
+            f"{result.get('enriched', 0)} enriched, "
+            f"{result.get('transferred', 0)} graduated to existing_hotels"
+        )
+        result["success"] = True
+        return result
+
+    return run_async(_smart_fill())
+
+
+# =============================================================================
+# TASK 4.6: AUTO FULL REFRESH  (added 2026-05-04)
+# =============================================================================
+
+
+@celery_app.task(bind=True, base=BaseTask, name="auto_full_refresh")
+def auto_full_refresh(self) -> Dict[str, Any]:
+    """Refresh stale lead metadata using grounding to catch new info.
+
+    Targets `status='new'` leads where `updated_at` is older than 14 days
+    (or NULL). Picks the 5 staleest by lead_score, runs full grounded
+    enrichment via Gemini googleSearch, persists improved values, and
+    auto-transfers to existing_hotels if the refreshed opening_date
+    lands in EXPIRED.
+
+    Why this task exists
+    --------------------
+    Hotel info changes constantly: opening dates slip, brands rebrand,
+    room counts adjust, mgmt companies change hands. A lead with all
+    fields filled 6 weeks ago is probably stale. Without periodic
+    refresh, leads degrade silently and Atlas-style cases happen
+    (DB says "Fall 2026", reality is "spring 2026 - already opened").
+
+    Self-throttling: refreshed leads bump their `updated_at`, so they
+    sink to the bottom of the stale queue. The next day's run picks up
+    different leads. Over ~30-60 days the entire pipeline cycles
+    through. Pre-opening leads (which change most) bubble back up first
+    because they're more likely to have actual updates.
+
+    Cost
+    ----
+    ~5 grounded calls + ~25 Serper calls per run = ~$0.20/day.
+    With grounding via us-central1 producing real source citations,
+    this is the cheapest reliable way to keep the pipeline current.
+
+    Scheduled at 11:00 AM Mon-Fri - between auto_smart_fill (10:30 AM)
+    and the first auto_enrich (1:00 PM). Light load, doesn't compete
+    for Gemini quota with the heavy enrichment tasks.
+    """
+    logger.info("Auto Full Refresh: re-checking stale lead metadata...")
+
+    async def _full_refresh():
+        from app.services.lead_data_enrichment import batch_full_refresh
+
+        result = await batch_full_refresh(limit=5, stale_days=14)
+        logger.info(
+            f"Auto Full Refresh: {result.get('checked', 0)} checked, "
+            f"{result.get('enriched', 0)} updated, "
+            f"{result.get('skipped_no_changes', 0)} no-changes, "
+            f"{result.get('transferred', 0)} graduated to existing_hotels"
+        )
+        result["success"] = True
+        return result
+
+    return run_async(_full_refresh())
 
 
 # â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•

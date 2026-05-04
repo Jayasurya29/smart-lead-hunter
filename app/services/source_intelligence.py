@@ -377,17 +377,29 @@ class SourceIntelligence:
         duration_seconds: float,
         errors: int = 0,
         mode: str = "discovery",
+        pages_relevant: int = 0,
+        pages_classified: int = 0,
+        leads_extracted: int = 0,
     ):
         """
         Record a complete scrape run for this source.
 
         Called once per source at the end of a scrape cycle.
         Updates history and recalculates efficiency.
+
+        New 2026-05-04: pages_relevant / pages_classified / leads_extracted
+        capture the funnel stages so we can distinguish "junk source"
+        from "broken extractor" later. A source where
+        pages_relevant > 0 but leads_extracted == 0 has the right
+        content but the extractor is failing on it.
         """
         run = {
             "at": datetime.now().isoformat(),
             "mode": mode,
             "pages": pages_scraped,
+            "pages_relevant": pages_relevant,
+            "pages_classified": pages_classified,
+            "leads_extracted": leads_extracted,
             "leads_found": leads_found,
             "leads_saved": leads_saved,
             "duration_s": round(duration_seconds, 1),
