@@ -2976,7 +2976,7 @@ async def batch_smart_fill(limit: int = 10, mode: str = "smart") -> Dict:
                     # Queue for auto-transfer if backfilled date lands in
                     # EXPIRED bucket — same pattern as the patched
                     # smart_fill_lead endpoint (scraping.py).
-                    if new_label == "EXPIRED":
+                    if new_label == "EXPIRED" or lead.status == "expired":
                         transfer_candidate_ids.append(lead.id)
             if "brand_tier" in enriched:
                 lead.brand_tier = enriched["brand_tier"]
@@ -3194,7 +3194,7 @@ async def batch_full_refresh(limit: int = 5, stale_days: int = 14) -> Dict:
                     )
                     lead.timeline_label = new_label
                     changes.append(f"opening_date={enriched['opening_date']}")
-                    if new_label == "EXPIRED":
+                    if new_label == "EXPIRED" or lead.status == "expired":
                         transfer_candidate_ids.append(lead.id)
 
             # Brand tier — only overwrite if new value is valid.

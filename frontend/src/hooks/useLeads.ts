@@ -73,6 +73,8 @@ export function useApproveLead() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['leads'] })
       qc.invalidateQueries({ queryKey: ['stats'] })
+      qc.invalidateQueries({ queryKey: ['map-leads'] })
+      qc.invalidateQueries({ queryKey: ['map-data'] })
     },
   })
 }
@@ -108,6 +110,7 @@ export function useDeleteLead() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['leads'] })
       qc.invalidateQueries({ queryKey: ['stats'] })
+      qc.invalidateQueries({ queryKey: ['map-leads'] })
     },
   })
 }
@@ -134,6 +137,9 @@ export function useEnrichLead() {
     onSuccess: (_data, id) => {
       qc.invalidateQueries({ queryKey: ['contacts', id] })
       qc.invalidateQueries({ queryKey: ['lead', id] })
+      qc.invalidateQueries({ queryKey: ['leads'] })
+      qc.invalidateQueries({ queryKey: ['stats'] })
+      qc.invalidateQueries({ queryKey: ['map-leads'] })
     },
   })
 }

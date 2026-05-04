@@ -2108,7 +2108,11 @@ async def smart_fill_lead(lead_id: int, request: Request, _csrf=Depends(require_
         # daily Celery task — turns into a ghost if Celery is down.
         try:
             fresh_label = get_timeline_label(lead.opening_date or "")
-            if fresh_label == "EXPIRED":
+            # Trigger on lead.status — the source of truth — not just on
+            # re-parsed opening_date. Catches the already_opened path which
+            # sets status='expired' but may leave opening_date as a future-
+            # sounding string like "Late 2026" that parses to HOT.
+            if fresh_label == "EXPIRED" or lead.status == "expired":
                 from app.services.lead_transfer import transfer_lead
 
                 async with async_session() as transfer_session:
@@ -2384,7 +2388,11 @@ async def _start_smart_fill_job(
                 # Auto-transfer to existing_hotels if opening date is now <3mo
                 try:
                     fresh_label = get_timeline_label(lead.opening_date or "")
-                    if fresh_label == "EXPIRED":
+                    # Trigger on lead.status — the source of truth — not
+                    # just on re-parsed opening_date. Catches the
+                    # already_opened path which sets status='expired' but
+                    # may leave opening_date as a future-sounding string.
+                    if fresh_label == "EXPIRED" or lead.status == "expired":
                         from app.services.lead_transfer import transfer_lead
 
                         async with async_session() as transfer_session:

@@ -982,6 +982,7 @@ function HotelDetail({ hotelId, tab, onClose }: { hotelId: number; tab: Pipeline
       qc.invalidateQueries({ queryKey: ['existing-hotels'] })
       qc.invalidateQueries({ queryKey: ['existing-hotels-stats'] })
       qc.invalidateQueries({ queryKey: ['existing-hotel', hotelId] })
+      qc.invalidateQueries({ queryKey: ['map-data'] })
     },
   })
   const rejectMut = useMutation({
@@ -990,6 +991,7 @@ function HotelDetail({ hotelId, tab, onClose }: { hotelId: number; tab: Pipeline
       qc.invalidateQueries({ queryKey: ['existing-hotels'] })
       qc.invalidateQueries({ queryKey: ['existing-hotels-stats'] })
       qc.invalidateQueries({ queryKey: ['existing-hotel', hotelId] })
+      qc.invalidateQueries({ queryKey: ['map-data'] })
     },
   })
   const restoreMut = useMutation({
@@ -998,6 +1000,7 @@ function HotelDetail({ hotelId, tab, onClose }: { hotelId: number; tab: Pipeline
       qc.invalidateQueries({ queryKey: ['existing-hotels'] })
       qc.invalidateQueries({ queryKey: ['existing-hotels-stats'] })
       qc.invalidateQueries({ queryKey: ['existing-hotel', hotelId] })
+      qc.invalidateQueries({ queryKey: ['map-data'] })
     },
   })
 
@@ -1346,6 +1349,7 @@ function HotelOverviewTab({
               onComplete={() => {
                 qc.invalidateQueries({ queryKey: ['existing-hotel', hotelId] })
                 qc.invalidateQueries({ queryKey: ['existing-hotels'] })
+                qc.invalidateQueries({ queryKey: ['map-data'] })
                 onSmartFillComplete()
               }}
               onCancel={onSmartFillComplete}
@@ -1623,6 +1627,7 @@ function HotelContactsTab({
           qc.invalidateQueries({ queryKey: ['hotel-contacts', hotelId] })
           qc.invalidateQueries({ queryKey: ['existing-hotel', hotelId] })
           qc.invalidateQueries({ queryKey: ['existing-hotels'] })
+          qc.invalidateQueries({ queryKey: ['map-data'] })
           onEnrichComplete()
         }}
         onCancel={onEnrichComplete}
@@ -1664,6 +1669,7 @@ function HotelContactsTab({
     await setPrimaryHotelContact(hotelId, contactId)
     qc.invalidateQueries({ queryKey: ['hotel-contacts', hotelId] })
     qc.invalidateQueries({ queryKey: ['existing-hotel', hotelId] })
+    qc.invalidateQueries({ queryKey: ['map-data'] })
   }
   async function handleToggleScope(contactId: number, currentScope: string) {
     const cycle = ['hotel_specific', 'chain_area', 'management_corporate', 'chain_corporate', 'owner']
@@ -2151,6 +2157,7 @@ function HotelEditTab({ hotel, hotelId }: { hotel: ExistingHotel; hotelId: numbe
       setSaveMsg('Saved!')
       qc.invalidateQueries({ queryKey: ['existing-hotel', hotelId] })
       qc.invalidateQueries({ queryKey: ['existing-hotels'] })
+      qc.invalidateQueries({ queryKey: ['map-data'] })
       setTimeout(() => setSaveMsg(''), 3000)
     } catch {
       setSaveMsg('Error saving')

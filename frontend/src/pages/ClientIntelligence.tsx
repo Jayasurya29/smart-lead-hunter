@@ -235,6 +235,8 @@ export default function ClientIntelligence() {
         queryClient.invalidateQueries({ queryKey: ['sap-clients'] })
         queryClient.invalidateQueries({ queryKey: ['sap-summary'] })
         queryClient.invalidateQueries({ queryKey: ['sap-filters'] })
+        queryClient.invalidateQueries({ queryKey: ['existing-hotels'] })
+        queryClient.invalidateQueries({ queryKey: ['map-data'] })
       } catch (err: any) {
         setToast({
           variant: 'error',

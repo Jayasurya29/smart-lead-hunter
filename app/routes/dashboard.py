@@ -205,11 +205,36 @@ async def dashboard_edit_lead(
     if "hotel_name" in data and data["hotel_name"]:
         lead.hotel_name_normalized = normalize_hotel_name(data["hotel_name"])
 
-    # Keep timeline_label in sync
-    if "opening_date" in data:
+    # Keep timeline_label in sync — and reconcile status / auto-transfer
+    # when opening_date changes. Manual edits must follow the same
+    # lifecycle rules as Smart Fill: a lead whose date crosses into the
+    # EXPIRED bucket (past or <3mo future) belongs in existing_hotels,
+    # not potential_leads. A lead whose date moves OUT of EXPIRED back
+    # into an active bucket should un-expire so it reappears in Pipeline.
+    opening_date_changed = "opening_date" in data
+    needs_transfer = False
+    if opening_date_changed:
         from app.services.utils import get_timeline_label
 
-        lead.timeline_label = get_timeline_label(data["opening_date"] or "")
+        new_label = get_timeline_label(data["opening_date"] or "")
+        lead.timeline_label = new_label
+        if new_label == "EXPIRED":
+            lead.status = "expired"
+            needs_transfer = True  # fire transfer_lead after commit
+            logger.info(
+                f"Dashboard edit auto-expired lead #{lead_id} "
+                f"{lead.hotel_name!r}: opening_date={data['opening_date']!r}"
+            )
+        elif (
+            new_label in ("URGENT", "HOT", "WARM", "COOL", "TBD")
+            and lead.status == "expired"
+        ):
+            lead.status = "new"
+            logger.info(
+                f"Dashboard edit un-expired lead #{lead_id} "
+                f"{lead.hotel_name!r}: opening_date={data['opening_date']!r} "
+                f"({new_label} bucket)"
+            )
 
     # Rescore lead after edits
     tier_points_map = {
@@ -300,6 +325,35 @@ async def dashboard_edit_lead(
 
     await db.commit()
     await db.refresh(lead)
+
+    # ─── Auto-transfer to existing_hotels if opening_date hit EXPIRED ──
+    # Mirrors the Smart Fill SSE handler so manual dashboard edits
+    # behave identically. transfer_lead runs in its own session because
+    # it commits internally and hard-deletes the source row.
+    if needs_transfer:
+        try:
+            from app.database import async_session
+            from app.services.lead_transfer import transfer_lead
+
+            async with async_session() as transfer_session:
+                tr = await transfer_lead(lead_id, transfer_session, commit=True)
+            if tr.get("status") in ("transferred", "merged"):
+                eh_id = tr.get("existing_hotel_id")
+                logger.info(
+                    f"Dashboard edit auto-{tr['status']} lead #{lead_id} "
+                    f"→ existing_hotel #{eh_id}"
+                )
+                return JSONResponse(
+                    content={
+                        "status": "transferred",
+                        "id": lead_id,
+                        "existing_hotel_id": eh_id,
+                        "transfer_status": tr["status"],
+                    }
+                )
+        except Exception as e:
+            logger.warning(f"Dashboard edit auto-transfer failed for #{lead_id}: {e}")
+
     return JSONResponse(
         content={
             "status": "ok",
