@@ -14,12 +14,14 @@ from dataclasses import dataclass, field
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi.responses import JSONResponse
 from sqlalchemy import select, func, case, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db, async_session
 from app.models.existing_hotel import ExistingHotel
 from app.shared import require_ajax, escape_like
+from app.services.utils import local_now
 
 logger = logging.getLogger(__name__)
 
@@ -1507,18 +1509,133 @@ async def update_existing_hotel(
     db: AsyncSession = Depends(get_db),
     _csrf=Depends(require_ajax),
 ):
+    """Edit an existing hotel.
+
+    AUDIT 2026-05-05 (bug #18): Was missing every guard the dashboard
+    edit handler has. Added: input validation, length caps, type coercion,
+    legacy<->canonical column sync, and audit-log integration. Brand-tier
+    accepts the full 7-tier set (see schemas.VALID_BRAND_TIERS).
+    """
+    from app.schemas import VALID_BRAND_TIERS, _EMAIL_RE
+    from app.services.audit import log_action
+
     body = await request.json()
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=400, detail="Body must be a JSON object")
+
     result = await db.execute(select(ExistingHotel).where(ExistingHotel.id == hotel_id))
     hotel = result.scalar_one_or_none()
     if not hotel:
         raise HTTPException(status_code=404, detail="Hotel not found")
 
-    # Allowed fields for PATCH. Includes BOTH legacy names (name, website,
-    # property_type, gm_*) and new canonical names (hotel_name, hotel_website,
-    # hotel_type, contact_*) — frontend can send either during the migration
-    # transition. Legacy `phone` was dropped in migration 018.
+    # ── Validation pass — collect all errors before mutating ──
+    errors: list[str] = []
+
+    _STRING_LIMITS = {
+        "name": 300,
+        "hotel_name": 255,
+        "brand": 150,
+        "chain": 150,
+        "brand_tier": 50,
+        "address": 500,
+        "city": 100,
+        "state": 100,
+        "country": 100,
+        "zip_code": 20,
+        "zone": 50,
+        "location_type": 20,
+        "website_verified": 10,
+        "contact_name": 200,
+        "contact_title": 100,
+        "contact_phone": 50,
+        "gm_name": 200,
+        "gm_title": 200,
+        "gm_phone": 50,
+        "property_type": 50,
+        "hotel_type": 50,
+        "project_type": 30,
+        "search_name": 255,
+        "data_source": 50,
+        "rejection_reason": 100,
+        "status": 20,
+        "sap_bp_code": 20,
+        "client_notes": 5000,
+        "notes": 5000,
+        "description": 5000,
+        "key_insights": 5000,
+        "management_company": 200,
+        "developer": 200,
+        "owner": 200,
+    }
+    _URL_LIMITS = {
+        "website": 500,
+        "hotel_website": 500,
+        "gm_email": 255,
+        "contact_email": 255,
+        "gm_linkedin": 500,
+    }
+
+    if "hotel_name" in body and body["hotel_name"] is not None:
+        n = str(body["hotel_name"]).strip()
+        if not n:
+            errors.append("hotel_name cannot be empty")
+
+    for fname, cap in {**_STRING_LIMITS, **_URL_LIMITS}.items():
+        if fname in body and isinstance(body[fname], str):
+            if len(body[fname]) > cap:
+                errors.append(f"{fname} must be {cap} characters or fewer")
+
+    for fname in ("contact_email", "gm_email"):
+        if fname in body and isinstance(body[fname], str) and body[fname].strip():
+            if not _EMAIL_RE.match(body[fname].strip()):
+                errors.append(f"Invalid email format for {fname}")
+
+    if "brand_tier" in body and body["brand_tier"]:
+        if str(body["brand_tier"]).strip() not in VALID_BRAND_TIERS:
+            errors.append(f"Invalid brand_tier: {body['brand_tier']}")
+
+    if "lead_score" in body and body["lead_score"] is not None:
+        try:
+            ls = int(body["lead_score"])
+            if ls < 0 or ls > 100:
+                errors.append("lead_score must be between 0 and 100")
+        except (TypeError, ValueError):
+            errors.append("lead_score must be a number")
+
+    if "room_count" in body and body["room_count"] is not None:
+        try:
+            rc = int(body["room_count"])
+            if rc < 0 or rc > 10000:
+                errors.append("room_count must be between 0 and 10000")
+        except (TypeError, ValueError):
+            errors.append("room_count must be a number")
+
+    for fname in ("latitude", "longitude"):
+        if fname in body and body[fname] is not None and body[fname] != "":
+            try:
+                float(body[fname])
+            except (TypeError, ValueError):
+                errors.append(f"{fname} must be a number")
+
+    if errors:
+        return JSONResponse(content={"detail": "; ".join(errors)}, status_code=422)
+
+    # ── Build allowed-fields whitelist + canonical/legacy sync map ──
+    # When the user sets a legacy field, mirror to the canonical column
+    # (and vice versa) so list pages reading either column stay in sync.
+    _LEGACY_TO_CANONICAL = {
+        "name": "hotel_name",
+        "website": "hotel_website",
+        "property_type": "hotel_type",
+        "gm_name": "contact_name",
+        "gm_title": "contact_title",
+        "gm_email": "contact_email",
+        "gm_phone": "contact_phone",
+    }
+    _CANONICAL_TO_LEGACY = {v: k for k, v in _LEGACY_TO_CANONICAL.items()}
+
     allowed = {
-        # Legacy names — still accepted for backwards compat
+        # Legacy
         "name",
         "website",
         "property_type",
@@ -1527,7 +1644,7 @@ async def update_existing_hotel(
         "gm_email",
         "gm_phone",
         "gm_linkedin",
-        # Canonical names (matches potential_leads + existing_hotel.py model)
+        # Canonical
         "hotel_name",
         "hotel_website",
         "hotel_type",
@@ -1535,7 +1652,7 @@ async def update_existing_hotel(
         "contact_title",
         "contact_email",
         "contact_phone",
-        # Common identity / location
+        # Identity / location
         "brand",
         "chain",
         "brand_tier",
@@ -1578,9 +1695,68 @@ async def update_existing_hotel(
         "notes",
         "data_source",
     }
-    for fld, value in body.items():
-        if fld in allowed:
-            setattr(hotel, fld, value)
+    _BOOL_FIELDS = {"is_client"}
+    _INT_FIELDS = {"room_count", "opening_year", "lead_score", "estimated_revenue"}
+    _FLOAT_FIELDS = {"latitude", "longitude", "revenue_opening", "revenue_annual"}
+
+    # Capture old values for audit log
+    old_values: dict = {}
+    for fname in body:
+        if fname in allowed:
+            old_values[fname] = getattr(hotel, field, None)
+
+    for fname, value in body.items():
+        if field not in allowed:
+            continue
+        # Coerce types
+        if value == "" or value is None:
+            coerced = None
+        elif field in _BOOL_FIELDS:
+            # Accept bool, "true"/"false" strings, 1/0 — explicit conversion
+            if isinstance(value, bool):
+                coerced = value
+            elif isinstance(value, str):
+                coerced = value.strip().lower() in ("true", "1", "yes", "on")
+            else:
+                coerced = bool(value)
+        elif field in _INT_FIELDS:
+            try:
+                coerced = int(value)
+            except (TypeError, ValueError):
+                continue
+        elif field in _FLOAT_FIELDS:
+            try:
+                coerced = float(value)
+            except (TypeError, ValueError):
+                continue
+        else:
+            coerced = value
+        setattr(hotel, fname, coerced)
+
+        # Sync legacy <-> canonical so both columns reflect the latest write.
+        # (Migration 019 will drop legacies; until then, list pages read both.)
+        partner = _LEGACY_TO_CANONICAL.get(fname) or _CANONICAL_TO_LEGACY.get(fname)
+        if partner and partner in {c.name for c in ExistingHotel.__table__.columns}:
+            setattr(hotel, partner, coerced)
+
+    hotel.updated_at = local_now()
+
+    # Audit log — log every changed field
+    new_values = {
+        k: getattr(hotel, k, None)
+        for k in old_values
+        if old_values[k] != getattr(hotel, k, None)
+    }
+    if new_values:
+        await log_action(
+            session=db,
+            action="edit_existing_hotel",
+            hotel_name=hotel.hotel_name or hotel.name,
+            user_email="system",  # No JWT helper exists for this route — track in follow-up
+            old_values={k: old_values[k] for k in new_values},
+            new_values=new_values,
+            detail=f"existing_hotel_id={hotel_id}",
+        )
 
     await db.commit()
     return hotel.to_dict()
@@ -1643,32 +1819,83 @@ async def approve_existing_hotel(
     if not hotel:
         raise HTTPException(status_code=404, detail="Hotel not found")
 
+    # AUDIT 2026-05-05 (bug #4): Multiple defects in this handler:
+    #   1. Referenced `hotel.phone` — column dropped in migration 018.
+    #      Caused AttributeError on every approve, swallowed by the
+    #      surrounding except, leaving the hotel marked approved with
+    #      ZERO Insightly push (silent CRM-sync failure).
+    #   2. `hotel.gm_name.split()[0]` raises IndexError on whitespace-only
+    #      values; `hotel.name[:50]` raises TypeError if name is None.
+    #   3. CRM failure was conflated with the status flip — a CRM failure
+    #      should NOT mark the hotel approved.
+    # Fixed by:
+    #   - Using contact_name / contact_phone (canonical columns post-018)
+    #     with gm_* fallbacks for legacy rows.
+    #   - Defensively splitting names with empty-list guards.
+    #   - Pushing to Insightly first; only flipping status='approved' on
+    #     success (or when CRM is disabled). Failed pushes return 502.
+
+    canonical_name = (hotel.contact_name or hotel.gm_name or "").strip() or "Hotel"
+    name_parts = canonical_name.split()
+    first_name = name_parts[0] if name_parts else "Hotel"
+    last_name = name_parts[-1] if len(name_parts) > 1 else first_name
+    organisation = (hotel.hotel_name or hotel.name or f"Hotel #{hotel.id}")[:255]
+    title = hotel.contact_title or hotel.gm_title or ""
+    email = hotel.contact_email or hotel.gm_email or ""
+    phone = hotel.contact_phone or hotel.gm_phone or ""
+
+    crm_error: str | None = None
+    crm_lead_id: int | None = None
+
     try:
         from app.services.insightly import get_insightly_client
 
         crm = get_insightly_client()
-        insightly_lead = await crm.create_lead(
-            {
-                "FIRST_NAME": hotel.gm_name.split()[0]
-                if hotel.gm_name and " " in hotel.gm_name
-                else (hotel.gm_name or "Hotel"),
-                "LAST_NAME": hotel.gm_name.split()[-1]
-                if hotel.gm_name and " " in hotel.gm_name
-                else hotel.name[:50],
-                "ORGANISATION_NAME": hotel.name,
-                "TITLE": hotel.gm_title or "",
-                "EMAIL": hotel.gm_email or "",
-                "PHONE": hotel.gm_phone or hotel.phone or "",
-                "LEAD_SOURCE_ID": 3859952,
-                "CUSTOMFIELDS": [
-                    {"FIELD_NAME": "SLH_Lead_ID__c", "FIELD_VALUE": f"EH-{hotel.id}"},
-                    {"FIELD_NAME": "SLH_Type__c", "FIELD_VALUE": "Existing Hotel"},
-                ],
-            }
-        )
-        hotel.insightly_id = insightly_lead.get("LEAD_ID")
+        if not crm.enabled:
+            # CRM disabled — proceed with the approval (no push).
+            crm_error = None
+        else:
+            insightly_lead = await crm.create_lead(
+                {
+                    "FIRST_NAME": first_name,
+                    "LAST_NAME": last_name,
+                    "ORGANISATION_NAME": organisation,
+                    "TITLE": title,
+                    "EMAIL": email,
+                    "PHONE": phone,
+                    "LEAD_SOURCE_ID": 3859952,
+                    "CUSTOMFIELDS": [
+                        {
+                            "FIELD_NAME": "SLH_Lead_ID__c",
+                            "FIELD_VALUE": f"EH-{hotel.id}",
+                        },
+                        {"FIELD_NAME": "SLH_Type__c", "FIELD_VALUE": "Existing Hotel"},
+                    ],
+                }
+            )
+            crm_lead_id = insightly_lead.get("LEAD_ID") if insightly_lead else None
+            if crm_lead_id is None:
+                crm_error = "Insightly returned no LEAD_ID"
     except Exception as e:
-        logger.error(f"Insightly push failed for existing hotel {hotel_id}: {e}")
+        crm_error = f"CRM push failed: {str(e)[:200]}"
+        logger.error(
+            f"Insightly push failed for existing hotel {hotel_id}: {e}",
+            exc_info=True,
+        )
+
+    if crm_error:
+        # CRM push failure — DO NOT mark approved. Return 502 so the UI
+        # surfaces the error instead of silently pretending it worked.
+        return JSONResponse(
+            status_code=502,
+            content={
+                "detail": f"Approve failed: {crm_error}",
+                "hotel_id": hotel_id,
+            },
+        )
+
+    if crm_lead_id is not None:
+        hotel.insightly_id = crm_lead_id
 
     hotel.status = "approved"
     await db.commit()

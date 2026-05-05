@@ -22,7 +22,7 @@ from app.database import get_db, async_session
 from app.models import PotentialLead
 from app.models.lead_contact import LeadContact
 from app.services.rescore import rescore_lead
-from app.services.utils import local_now, normalize_hotel_name
+from app.services.utils import local_now, normalize_person_name
 from app.shared import require_ajax
 
 logger = logging.getLogger(__name__)
@@ -101,6 +101,44 @@ async def enrich_lead(lead_id: int, _csrf=Depends(require_ajax)):
                 )
                 lead = lead_result.scalar_one_or_none()
                 if lead:
+                    # AUDIT 2026-05-05 (bug #33): Only auto-reject from
+                    # status='new'. Re-enriching an approved lead and
+                    # blindly flipping it to rejected loses the Insightly
+                    # link reference and DOES NOT delete the CRM record
+                    # (the explicit reject endpoint does that; this
+                    # auto-path doesn't). Result: Insightly stays stale
+                    # and CRM keeps pushing to a hidden-rejected lead.
+                    # For approved/pushed leads, surface the rejection
+                    # signal as a key_insights note instead and let
+                    # sales decide.
+                    if lead.status in ("approved", "pushed"):
+                        marker = (
+                            f"[auto-reject signal {local_now().isoformat()}]: "
+                            f"{enrichment_result.rejection_reason or 'auto_reject'} "
+                            f"— surfaced for review (lead is {lead.status}, "
+                            f"not auto-rejected)"
+                        )
+                        existing = (lead.key_insights or "").strip()
+                        lead.key_insights = (
+                            f"{existing}\n{marker}" if existing else marker
+                        )[:5000]
+                        await session.commit()
+                        logger.info(
+                            f"Lead {lead_id} auto-reject SUPPRESSED "
+                            f"(status={lead.status}); recorded as key_insights note"
+                        )
+                        return JSONResponse(
+                            content={
+                                "status": "skipped",
+                                "message": (
+                                    f"Auto-reject suppressed (lead is {lead.status}). "
+                                    f"Reason recorded as key_insights note."
+                                ),
+                                "reason": enrichment_result.rejection_reason,
+                            },
+                            status_code=200,
+                        )
+
                     lead.status = "rejected"
                     lead.rejection_reason = (
                         enrichment_result.rejection_reason or "auto_reject"
@@ -193,125 +231,129 @@ async def enrich_lead(lead_id: int, _csrf=Depends(require_ajax)):
 
             # Save contacts to lead_contacts table
             if enrichment_result.contacts:
-                existing_contacts = await session.execute(
+                # AUDIT 2026-05-05 (bugs #10, #32):
+                # Build a normalized-name → row dict ONCE and look up by
+                # normalized key for the rest of the loop. The previous
+                # code computed `existing_names` (a set of normalized names)
+                # for membership checks but then re-fetched with an
+                # UNNORMALIZED `LeadContact.name == name` — when the new
+                # payload had any whitespace/case difference from the
+                # stored name, the membership check was True but the
+                # SELECT returned nothing, the update silently no-op'd,
+                # and the new evidence/score/scope was thrown away.
+                # Also: track newly-inserted rows in the same dict so
+                # two payload entries with the same name in a single
+                # enrichment can't both insert and create duplicates.
+                existing_contacts_result = await session.execute(
                     select(LeadContact).where(LeadContact.lead_id == lead_id)
                 )
-                existing_names = {
-                    normalize_hotel_name(c.name)
-                    for c in existing_contacts.scalars().all()
-                }
+                existing_by_norm: dict = {}
+                for ec_pre in existing_contacts_result.scalars().all():
+                    # Bug #19: normalize_person_name (not normalize_hotel_name)
+                    # — the hotel normalizer strips chain suffixes which can
+                    # collide on real human names ("Bob Inn" vs hotels).
+                    norm = normalize_person_name(ec_pre.name or "")
+                    if norm:
+                        existing_by_norm[norm] = ec_pre
 
                 for i, c in enumerate(enrichment_result.contacts):
                     name = c.get("name", "").strip()
                     if not name:
                         continue
 
-                    normalized_name = normalize_hotel_name(name)
-                    if normalized_name in existing_names:
-                        # Update existing contact with new data
-                        ec_result = await session.execute(
-                            select(LeadContact).where(
-                                LeadContact.lead_id == lead_id,
-                                LeadContact.name == name,
-                            )
+                    normalized_name = normalize_person_name(name)
+                    ec = existing_by_norm.get(normalized_name)
+                    if ec is not None:
+                        filled = []
+                        if not ec.email and c.get("email"):
+                            ec.email = c["email"]
+                            filled.append("email")
+                        if not ec.phone and c.get("phone"):
+                            ec.phone = c["phone"]
+                            filled.append("phone")
+                        if not ec.linkedin and c.get("linkedin"):
+                            ec.linkedin = c["linkedin"]
+                            filled.append("linkedin")
+                        if not ec.title and c.get("title"):
+                            ec.title = c["title"]
+                            filled.append("title")
+                        if not ec.organization and c.get("organization"):
+                            ec.organization = c["organization"]
+                            filled.append("organization")
+                        if not ec.evidence_url and c.get("source"):
+                            ec.evidence_url = c["source"]
+                            filled.append("evidence_url")
+                        # Strategist verdict always refreshes (not fill-empty)
+                        if c.get("_final_priority"):
+                            if ec.strategist_priority != c["_final_priority"]:
+                                filled.append("strategist_priority")
+                            ec.strategist_priority = c["_final_priority"]
+                        if c.get("_final_reasoning"):
+                            ec.strategist_reasoning = c["_final_reasoning"]
+                        # Always refresh classification fields on
+                        # re-enrichment (bug fix 2026-04-22). Previously
+                        # these stayed frozen from the first insert —
+                        # so Elie Khoury kept score=5 from April 16
+                        # even after today's pipeline scored her P1
+                        # (floor=28).
+                        new_score = c.get("_validation_score")
+                        if new_score is not None and new_score != ec.score:
+                            filled.append(f"score({ec.score}->{new_score})")
+                            ec.score = new_score
+                        new_tier = c.get("_buyer_tier")
+                        if new_tier and new_tier != ec.tier:
+                            filled.append("tier")
+                            ec.tier = new_tier
+                        new_confidence = c.get("_validation_confidence") or c.get(
+                            "confidence"
                         )
-                        ec = ec_result.scalar_one_or_none()
-                        if ec:
-                            filled = []
-                            if not ec.email and c.get("email"):
-                                ec.email = c["email"]
-                                filled.append("email")
-                            if not ec.phone and c.get("phone"):
-                                ec.phone = c["phone"]
-                                filled.append("phone")
-                            if not ec.linkedin and c.get("linkedin"):
-                                ec.linkedin = c["linkedin"]
-                                filled.append("linkedin")
-                            if not ec.title and c.get("title"):
-                                ec.title = c["title"]
-                                filled.append("title")
-                            if not ec.organization and c.get("organization"):
-                                ec.organization = c["organization"]
-                                filled.append("organization")
-                            if not ec.evidence_url and c.get("source"):
-                                ec.evidence_url = c["source"]
-                                filled.append("evidence_url")
-                            # Strategist verdict always refreshes (not fill-empty)
-                            if c.get("_final_priority"):
-                                if ec.strategist_priority != c["_final_priority"]:
-                                    filled.append("strategist_priority")
-                                ec.strategist_priority = c["_final_priority"]
-                            if c.get("_final_reasoning"):
-                                ec.strategist_reasoning = c["_final_reasoning"]
-                            # ── Always refresh classification fields on
-                            #    re-enrichment (bug fix 2026-04-22). Previously
-                            #    these stayed frozen from the first insert —
-                            #    so Elie Khoury kept score=5 from April 16
-                            #    even after today's pipeline scored her P1
-                            #    (floor=28). Mismatch between strategist_priority
-                            #    (refreshed) and score (stuck) made the UI
-                            #    show "P1 / 5 LOW" instead of "P1 / 28 HIGH".
-                            new_score = c.get("_validation_score")
-                            if new_score is not None and new_score != ec.score:
-                                filled.append(f"score({ec.score}->{new_score})")
-                                ec.score = new_score
-                            new_tier = c.get("_buyer_tier")
-                            if new_tier and new_tier != ec.tier:
-                                filled.append("tier")
-                                ec.tier = new_tier
-                            new_confidence = c.get("_validation_confidence") or c.get(
-                                "confidence"
-                            )
-                            if new_confidence and new_confidence != ec.confidence:
-                                filled.append("confidence")
-                                ec.confidence = new_confidence
-                            # Scope may shift if Iter 6 or verifier
-                            # reclassified (e.g. chain_area -> owner)
-                            new_scope = c.get("scope")
-                            if new_scope and new_scope != ec.scope:
-                                filled.append(f"scope({ec.scope}->{new_scope})")
-                                ec.scope = new_scope
-                            # Merge new evidence items (dedupe by URL)
-                            new_evidence = c.get("_evidence_items") or []
-                            if new_evidence:
-                                existing_ev = ec.evidence or []
-                                existing_urls = {
-                                    e.get("source_url")
-                                    for e in existing_ev
-                                    if isinstance(e, dict)
-                                }
-                                added = 0
-                                for ev in new_evidence:
-                                    if ev.get("source_url") not in existing_urls:
-                                        existing_ev.append(ev)
-                                        existing_urls.add(ev.get("source_url"))
-                                        added += 1
-                                if added:
-                                    try:
-                                        from app.services.source_tier import (
-                                            trust_score as _ts,
-                                        )
+                        if new_confidence and new_confidence != ec.confidence:
+                            filled.append("confidence")
+                            ec.confidence = new_confidence
+                        new_scope = c.get("scope")
+                        if new_scope and new_scope != ec.scope:
+                            filled.append(f"scope({ec.scope}->{new_scope})")
+                            ec.scope = new_scope
+                        # Merge new evidence items (dedupe by URL)
+                        new_evidence = c.get("_evidence_items") or []
+                        if new_evidence:
+                            existing_ev = ec.evidence or []
+                            existing_urls = {
+                                e.get("source_url")
+                                for e in existing_ev
+                                if isinstance(e, dict)
+                            }
+                            added = 0
+                            for ev in new_evidence:
+                                if ev.get("source_url") not in existing_urls:
+                                    existing_ev.append(ev)
+                                    existing_urls.add(ev.get("source_url"))
+                                    added += 1
+                            if added:
+                                try:
+                                    from app.services.source_tier import (
+                                        trust_score as _ts,
+                                    )
 
-                                        existing_ev.sort(
-                                            key=lambda e: (
-                                                -_ts(e.get("trust_tier", "unknown")),
-                                                -(e.get("source_year") or 0),
-                                            )
+                                    existing_ev.sort(
+                                        key=lambda e: (
+                                            -_ts(e.get("trust_tier", "unknown")),
+                                            -(e.get("source_year") or 0),
                                         )
-                                    except Exception:
-                                        pass
-                                    ec.evidence = existing_ev[:8]
-                                    filled.append(f"evidence(+{added})")
-                            ec.last_enriched_at = local_now()
-                            # source_detail refreshes when new evidence arrives
-                            new_detail = c.get("source_detail")
-                            if new_detail and new_detail != ec.source_detail:
-                                ec.source_detail = new_detail
-                                filled.append("source_detail")
-                            if filled:
-                                logger.info(
-                                    f"Updated {ec.name}: filled {', '.join(filled)}"
-                                )
+                                    )
+                                except Exception:
+                                    pass
+                                ec.evidence = existing_ev[:8]
+                                filled.append(f"evidence(+{added})")
+                        ec.last_enriched_at = local_now()
+                        new_detail = c.get("source_detail")
+                        if new_detail and new_detail != ec.source_detail:
+                            ec.source_detail = new_detail
+                            filled.append("source_detail")
+                        if filled:
+                            logger.info(
+                                f"Updated {ec.name}: filled {', '.join(filled)}"
+                            )
                         continue
 
                     contact = LeadContact(
@@ -331,10 +373,6 @@ async def enrich_lead(lead_id: int, _csrf=Depends(require_ajax)):
                         # Unified scoring breakdown (migration 013)
                         score_breakdown=c.get("_score_breakdown"),
                         # Evidence array captured during snippet extraction (migration 014).
-                        # Without this line, new contacts insert with evidence=NULL even
-                        # though the capture ran — which is what happened on Hyatt Centric
-                        # run: the 4 survivors showed Ev=0 in the DB despite [EVIDENCE]
-                        # log lines showing items captured.
                         evidence=c.get("_evidence_items") or None,
                         # Iter 6 strategist verdict — the authoritative priority
                         strategist_priority=c.get("_final_priority"),
@@ -351,6 +389,10 @@ async def enrich_lead(lead_id: int, _csrf=Depends(require_ajax)):
                         last_enriched_at=local_now(),
                     )
                     session.add(contact)
+                    # Bug #32: register new contact so a second payload
+                    # entry with the same name doesn't insert a duplicate.
+                    if normalized_name:
+                        existing_by_norm[normalized_name] = contact
 
             await session.commit()
 

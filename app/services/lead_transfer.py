@@ -92,7 +92,13 @@ async def _find_existing_hotel_match(
         if match:
             return match
 
-    # Loose name match for legacy rows
+    # Loose name match for legacy rows (pre-018 may have NULL normalized).
+    # AUDIT 2026-05-05 (bug #9): Require BOTH city AND state to match —
+    # not OR. Previously matched on city OR state OR country, which meant
+    # any two unrelated US hotels with the same legacy name would merge
+    # because country='USA' applies to ~95% of rows. The single-candidate
+    # fallback ("if only one candidate, take it") was even worse — it
+    # bypassed location entirely. Both removed.
     name_lower = lead.hotel_name.lower().strip()
     if name_lower:
         from sqlalchemy import func
@@ -105,22 +111,22 @@ async def _find_existing_hotel_match(
         )
         candidates = result.scalars().all()
         for c in candidates:
+            # Strict match: both city AND state must align (case-insensitive).
+            # If either side is missing the field, skip the candidate —
+            # we don't merge under uncertainty.
+            lead_city = (lead.city or "").strip().lower()
+            cand_city = (c.city or "").strip().lower()
+            lead_state = (lead.state or "").strip().lower()
+            cand_state = (c.state or "").strip().lower()
             if (
-                (lead.city and c.city and lead.city.lower() == (c.city or "").lower())
-                or (
-                    lead.state
-                    and c.state
-                    and lead.state.lower() == (c.state or "").lower()
-                )
-                or (
-                    lead.country
-                    and c.country
-                    and lead.country.lower() == (c.country or "").lower()
-                )
+                lead_city
+                and cand_city
+                and lead_state
+                and cand_state
+                and lead_city == cand_city
+                and lead_state == cand_state
             ):
                 return c
-        if len(candidates) == 1:
-            return candidates[0]
 
     return None
 

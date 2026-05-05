@@ -89,3 +89,8 @@ enrichment_log.txt
 slh_master_import.csv
 
 vertex-key.json
+
+backup_*.dump
+*.dump
+
+frontend/tsconfig.tsbuildinfo

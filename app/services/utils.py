@@ -142,6 +142,51 @@ def normalize_hotel_name(name: str) -> str:
     return re.sub(r"\s+", " ", re.sub(r"[^a-z0-9\s]", "", cleaned.lower())).strip()
 
 
+# ═══════════════════════════════════════════════════════════════
+# PERSON NAME NORMALIZATION
+# ═══════════════════════════════════════════════════════════════
+# AUDIT 2026-05-05 (bug #19): A person-name normalizer separate from
+# normalize_hotel_name. The hotel normalizer aggressively strips chain
+# suffixes ("Hotels", "Inn", "Resort") which can collide person names
+# ("Bob Inn" vs "Bob Inn at the Park"). For deduping LeadContact rows
+# we want a person-aware function: lowercase, strip diacritics + common
+# honorifics (Mr/Ms/Mrs/Dr/Prof), normalize internal whitespace, drop
+# punctuation. Does NOT strip nouns that look like brands.
+
+_HONORIFICS_RE = re.compile(
+    r"^\s*(mr|mrs|ms|miss|dr|prof|professor|sir|madam|mx)\.?\s+",
+    re.IGNORECASE,
+)
+_PUNCT_RE = re.compile(r"[^\w\s'-]")  # keep apostrophes + hyphens
+_WS_RE = re.compile(r"\s+")
+
+
+def normalize_person_name(name: str) -> str:
+    """Normalize a person's name for deduplication of LeadContact rows.
+
+    Strips diacritics, leading honorifics, punctuation (except hyphens
+    and apostrophes for names like O'Brien / Smith-Jones), lowercases,
+    and collapses whitespace.
+
+    Examples:
+        "Mr. John Smith"      → "john smith"
+        "  Dr. Jane Doe  "    → "jane doe"
+        "Élise O'Brien"       → "elise o'brien"
+        "Mary-Anne Smith"     → "mary-anne smith"
+    """
+    if not name:
+        return ""
+    cleaned = _strip_diacritics(name)
+    # Strip leading honorific (run twice to catch chained ones, rare)
+    cleaned = _HONORIFICS_RE.sub("", cleaned)
+    cleaned = _HONORIFICS_RE.sub("", cleaned)
+    # Lowercase and strip punctuation except hyphens/apostrophes
+    cleaned = cleaned.lower()
+    cleaned = _PUNCT_RE.sub("", cleaned)
+    cleaned = _WS_RE.sub(" ", cleaned).strip()
+    return cleaned
+
+
 def clean_html_to_text(html: str) -> str:
     """Strip HTML to clean text for lead extraction.
 

@@ -6,6 +6,7 @@ Pure ASGI implementation — avoids BaseHTTPMiddleware's streaming cancellation 
 import logging
 import os
 import secrets
+import time
 
 from dotenv import load_dotenv
 from fastapi import HTTPException, Security, status
@@ -17,6 +18,65 @@ from starlette.types import ASGIApp, Receive, Scope, Send
 load_dotenv()
 
 logger = logging.getLogger(__name__)
+
+# AUDIT 2026-05-05 (bug #17): TTL cache for User.is_active lookups so the
+# middleware doesn't run a DB query on every authed request. 60-second TTL
+# means a deactivated user keeps access for at most 60s after deactivation —
+# acceptable for an internal LAN-only sales tool. Manual invalidation via
+# the public `_clear_user_active_cache()` helper from auth.py would shorten
+# this to zero if needed.
+_USER_ACTIVE_TTL_SECONDS = 60
+_user_active_cache: dict[str, tuple[bool, float]] = {}
+
+
+async def _is_user_active(user_id: str) -> bool:
+    """Return True if the user exists and User.is_active is True.
+
+    Cached for 60s per user_id. On any DB error, returns False
+    conservatively — better to reject one good request than to wave
+    through a deactivated user during a transient DB blip.
+    """
+    if not user_id:
+        return False
+    now = time.monotonic()
+    cached = _user_active_cache.get(user_id)
+    if cached is not None:
+        is_active, ts = cached
+        if now - ts < _USER_ACTIVE_TTL_SECONDS:
+            return is_active
+
+    try:
+        from app.database import async_session
+        from app.models.user import User
+        from sqlalchemy import select
+
+        # user_id from JWT 'sub' claim is a string; coerce to int for query
+        try:
+            uid_int = int(user_id)
+        except (TypeError, ValueError):
+            return False
+
+        async with async_session() as session:
+            result = await session.execute(
+                select(User.is_active).where(User.id == uid_int)
+            )
+            row = result.scalar_one_or_none()
+            is_active = bool(row) if row is not None else False
+    except Exception as e:
+        logger.warning(f"_is_user_active DB lookup failed for {user_id!r}: {e}")
+        return False
+
+    _user_active_cache[user_id] = (is_active, now)
+    return is_active
+
+
+def _clear_user_active_cache(user_id: str | None = None) -> None:
+    """Force re-fetch on next request. Call from auth.py on deactivate."""
+    if user_id is None:
+        _user_active_cache.clear()
+    else:
+        _user_active_cache.pop(user_id, None)
+
 
 # ─── Simple Dependency (per-endpoint) ───
 
@@ -84,11 +144,17 @@ class APIKeyMiddleware:
     )
 
     # Only these prefixes require auth
+    # AUDIT 2026-05-05 (bug #22): /stats was in both EXCLUDE_PREFIXES and
+    # PROTECTED_PREFIXES — exclude check fires first, so /stats has been
+    # publicly accessible all along. Removing the duplicate from PROTECTED
+    # so the policy is consistent. /stats stays public (matches today's
+    # behavior — sales dashboard widget polls it without auth headers).
+    # If sales policy later requires auth, remove it from EXCLUDE_PREFIXES
+    # above instead.
     PROTECTED_PREFIXES: tuple[str, ...] = (
         "/api/",
         "/leads",
         "/sources",
-        "/stats",
         "/scrape",
     )
 
@@ -161,15 +227,13 @@ class APIKeyMiddleware:
                 }
                 env = os.getenv("ENVIRONMENT", "development")
 
+                payload = None
                 if env == "production" and jwt_secret in _insecure_keys:
                     pass  # Reject JWT auth in production with no real secret
                 elif jwt_secret and jwt_secret not in _insecure_keys:
                     payload = jose_jwt.decode(
                         jwt_cookie, jwt_secret, algorithms=["HS256"]
                     )
-                    if payload.get("sub"):
-                        await self.app(scope, receive, send)
-                        return
                 elif env != "production":
                     fallback = (
                         jwt_secret or "dev-only-insecure-key-do-not-use-in-production"
@@ -177,9 +241,26 @@ class APIKeyMiddleware:
                     payload = jose_jwt.decode(
                         jwt_cookie, fallback, algorithms=["HS256"]
                     )
-                    if payload.get("sub"):
+
+                # AUDIT 2026-05-05 (bug #17): Verify User.is_active before
+                # accepting the JWT. Previously the middleware accepted any
+                # decoded JWT with a `sub` claim — a deactivated user kept
+                # full access until the token expired (8h or 30 days for
+                # "remember me"). Now we look up the user and check
+                # is_active. The result is cached for 60 seconds keyed by
+                # user_id to keep the hot path fast (single DB lookup per
+                # user per minute, not per request).
+                if payload and payload.get("sub"):
+                    user_id_str = str(payload["sub"])
+                    if await _is_user_active(user_id_str):
                         await self.app(scope, receive, send)
                         return
+                    else:
+                        # Deactivated user — fall through to deny
+                        logger.info(
+                            f"Auth middleware rejected JWT for deactivated "
+                            f"user_id={user_id_str}"
+                        )
             except Exception:
                 pass
 

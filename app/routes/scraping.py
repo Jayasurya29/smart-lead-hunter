@@ -1767,63 +1767,26 @@ async def smart_fill_lead(lead_id: int, request: Request, _csrf=Depends(require_
         if proj_type and (mode == "full" or not lead.project_type):
             lead.project_type = proj_type
 
-        if enriched.get("already_opened") and not is_live_reopening:
-            # Standard case — hotel is open and operating.
-            #
-            # FIX 2026-05-01 (Reflections-ghost bug): mark expired then
-            # IMMEDIATELY graduate to existing_hotels via transfer_lead.
-            # Without this inline transfer, the row sits at
-            # status='expired' invisible to the UI (Expired tab was
-            # removed) and waits for the daily Celery task
-            # `recompute_timeline_labels` to pick it up. If Celery beat
-            # is down — even briefly — the lead becomes a ghost.
-            # Mirrors the SSE-streamed Smart Fill at the bottom of this
-            # file so both endpoints behave identically.
+        # AUDIT 2026-05-05 (bug #6): Capture already_opened decision but
+        # DO NOT return early. Falling through ensures all later field
+        # updates (room_count, brand_tier, brand, mgmt_company, owner,
+        # developer, address, hotel_website, lat/lng, search_name,
+        # former_names) are applied BEFORE the auto-transfer block at the
+        # end of this handler graduates the row to existing_hotels.
+        # Previously this branch returned immediately, so the existing_hotels
+        # row inherited stale values even though Smart Fill found fresher
+        # ones. The auto-transfer at line ~2110 reads lead.status, so the
+        # status='expired' marker we set here still triggers graduation.
+        is_already_opened_sync = (
+            bool(enriched.get("already_opened")) and not is_live_reopening
+        )
+        if is_already_opened_sync:
             lead.status = "expired"
             lead.opening_date = enriched.get("opened_date", lead.opening_date)
             lead.timeline_label = "EXPIRED"
-            await session.commit()
-
-            opened_date_str = enriched.get("opened_date", "date unknown")
-            try:
-                from app.services.lead_transfer import transfer_lead
-
-                async with async_session() as transfer_session:
-                    tr = await transfer_lead(lead_id, transfer_session, commit=True)
-                if tr.get("status") in ("transferred", "merged"):
-                    eh_id = tr.get("existing_hotel_id")
-                    verb = (
-                        "Merged into" if tr["status"] == "merged" else "Transferred to"
-                    )
-                    logger.info(
-                        f"Smart Fill (already_opened) auto-{tr['status']} "
-                        f"lead #{lead_id} → existing_hotel #{eh_id}"
-                    )
-                    return {
-                        "status": "transferred",
-                        "message": (
-                            f"Hotel already opened ({opened_date_str}). "
-                            f"{verb} existing_hotel #{eh_id}."
-                        ),
-                        "existing_hotel_id": eh_id,
-                        "changes": ["status", "graduated_to_existing"],
-                    }
-            except Exception as e:
-                logger.warning(
-                    f"Smart Fill (already_opened) auto-transfer failed for "
-                    f"#{lead_id}: {e} — lead remains at status='expired' "
-                    f"and will be picked up by next pipeline run"
-                )
-
-            return {
-                "status": "expired",
-                "message": (
-                    f"Hotel already opened ({opened_date_str}). "
-                    f"Moved to Expired (auto-transfer to Existing Hotels "
-                    f"will retry on next pipeline run)."
-                ),
-                "changes": ["status"],
-            }
+            # Do NOT return here — fall through to apply all other fields,
+            # then the auto-transfer block at the end of this handler does
+            # the graduation in a single transaction.
 
         # Live-reopening path: treat as live lead at the reopening date
         if is_live_reopening:
@@ -1856,7 +1819,11 @@ async def smart_fill_lead(lead_id: int, request: Request, _csrf=Depends(require_
             # Don't return — continue the rest of the Full Refresh flow
             # (update brand_tier, mgmt_company, owner, etc.)
 
-        if "opening_date" in enriched and not is_live_reopening:
+        if (
+            "opening_date" in enriched
+            and not is_live_reopening
+            and not is_already_opened_sync
+        ):
             # Regression guard — reject the new value if it's less specific
             # than what we already have (e.g. "Late 2026" → "2026") or if
             # the year shifted backward without any specificity gain.
@@ -1894,13 +1861,12 @@ async def smart_fill_lead(lead_id: int, request: Request, _csrf=Depends(require_
         # gets blown away on every Full Refresh). Bug fixed 2026-04-22.
         _INVALID_TIER_SENTINELS = {"", "unknown", "none", "n/a", "na", "tbd"}
         _VALID_TIERS = {
+            # Canonical 5-tier — non-canonical writes are bugs.
             "tier1_ultra_luxury",
             "tier2_luxury",
             "tier3_upper_upscale",
             "tier4_upscale",
-            "tier5_upper_midscale",
-            "tier6_midscale",
-            "tier7_economy",
+            "tier5_skip",
         }
         if "brand_tier" in enriched:
             new_tier = (enriched.get("brand_tier") or "").strip().lower()
@@ -2607,13 +2573,12 @@ def _apply_enrichment_to_lead(lead, enriched: dict, mode: str, get_timeline_labe
     """
     _INVALID = {"", "unknown", "none", "n/a", "na", "tbd"}
     _VALID_TIERS = {
+        # Canonical 5-tier — non-canonical writes are bugs.
         "tier1_ultra_luxury",
         "tier2_luxury",
         "tier3_upper_upscale",
         "tier4_upscale",
-        "tier5_upper_midscale",
-        "tier6_midscale",
-        "tier7_economy",
+        "tier5_skip",
     }
     _REOPENING_TYPES = {
         "renovation",
@@ -2629,11 +2594,22 @@ def _apply_enrichment_to_lead(lead, enriched: dict, mode: str, get_timeline_labe
     if proj_type and (mode == "full" or not lead.project_type):
         lead.project_type = proj_type
 
-    if enriched.get("already_opened") and not is_live_reopening:
+    # AUDIT 2026-05-05 (bug #6): Capture already_opened decision but DO NOT
+    # return early. Previously this branch returned immediately, so all
+    # later field updates (room_count, brand_tier, brand, mgmt_company,
+    # owner, developer, address, hotel_website, lat/lng, search_name,
+    # former_names) were silently dropped. The auto-transfer block in the
+    # caller then copied the lead's STALE fields into existing_hotels via
+    # _build_existing_hotel_from_lead — graduating a row with stale data
+    # even though Smart Fill found fresher values.
+    is_already_opened = bool(enriched.get("already_opened")) and not is_live_reopening
+    if is_already_opened:
         lead.status = "expired"
         lead.opening_date = enriched.get("opened_date", lead.opening_date)
         lead.timeline_label = "EXPIRED"
-        return
+        # Fall through to apply remaining fields below. The caller will
+        # detect status='expired' and trigger transfer_lead, which then
+        # copies these freshly-updated fields into existing_hotels.
 
     if is_live_reopening:
         reopening = enriched["reopening_date"]
@@ -2643,7 +2619,7 @@ def _apply_enrichment_to_lead(lead, enriched: dict, mode: str, get_timeline_labe
         if lead.status == "expired" and lead.timeline_label not in ("EXPIRED", "LATE"):
             lead.status = "new"
 
-    if "opening_date" in enriched and not is_live_reopening:
+    if "opening_date" in enriched and not is_live_reopening and not is_already_opened:
         # Regression guard — reject less-specific or year-shifted-back values
         from app.services.utils import should_accept_opening_date
 

@@ -37,6 +37,11 @@ VALID_STATUSES = {
 }
 
 VALID_BRAND_TIERS = {
+    # Canonical 5-tier set — JA Uniforms targets 4-star+ properties only.
+    # tier5_skip = budget brands JA does NOT pursue (Hampton, Holiday Inn
+    # Express, Days Inn, etc.). Any non-canonical tier values seen in the
+    # codebase (tier5_upper_midscale, tier6_midscale, tier7_economy) are
+    # bugs — the canonical normalizer maps them to tier5_skip.
     "tier1_ultra_luxury",
     "tier2_luxury",
     "tier3_upper_upscale",

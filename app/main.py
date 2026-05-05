@@ -35,6 +35,17 @@ from app.routes.contacts import router as contacts_router
 from app.routes.auth import router as auth_router
 from app.routes.existing_hotels import router as existing_hotels_router
 
+# AUDIT 2026-05-05 (bug #5): existing_hotels_parity defines three POST
+# endpoints the frontend (api/existingHotels.ts) actively calls:
+#   /api/existing-hotels/{id}/contacts/{cid}/toggle-scope
+#   /api/existing-hotels/{id}/contacts/{cid}/enrich-email
+#   /api/existing-hotels/{id}/rescore
+# The router was defined and the docstring told us to wire it up here, but
+# the import + include_router calls were missing. Frontend got 404 on all
+# three endpoints — toggle-scope and Wiza enrichment were dead in the
+# existing-hotels UI for an unknown amount of time.
+from app.routes.existing_hotels_parity import router as existing_hotels_parity_router
+
 from app.routes.sap import router as sap_router, legacy_router as sap_legacy_router
 
 from app.routes.revenue import router as revenue_router
@@ -51,14 +62,43 @@ from app.routes.outreach import router as outreach_router
 
 logger = logging.getLogger(__name__)
 
-# SSE streaming paths — must bypass ALL BaseHTTPMiddleware wrapping
-_SSE_PATHS = frozenset(
+# SSE streaming paths — must bypass ALL BaseHTTPMiddleware wrapping.
+# AUDIT 2026-05-05 (bug #21): The original set covered only the dashboard
+# SSE paths. Smart Fill, existing-hotels enrich, existing-hotels Smart Fill,
+# and outreach generate-stream all stream too. Today's middlewares are
+# pure ASGI so the gap is latent — but if anyone ever adds a
+# BaseHTTPMiddleware these streams will be silently buffered (cancelled).
+# We use prefix matching for the parameterized routes since {lead_id} /
+# {hotel_id} make exact matching impossible.
+_SSE_EXACT_PATHS = frozenset(
     {
         "/api/dashboard/scrape/stream",
         "/api/dashboard/extract-url/stream",
         "/api/dashboard/discovery/stream",
+        "/api/outreach/generate-stream",
     }
 )
+_SSE_SUFFIXES = (
+    "/smart-fill-stream",  # /api/leads/{id}/smart-fill-stream and /api/existing-hotels/{id}/smart-fill-stream
+    "/enrich-stream",  # /api/existing-hotels/{id}/enrich-stream
+)
+
+
+def _is_sse_path(path: str) -> bool:
+    """True if the path is a streaming endpoint that must bypass middlewares."""
+    if path in _SSE_EXACT_PATHS:
+        return True
+    return any(path.endswith(suffix) for suffix in _SSE_SUFFIXES)
+
+
+# Backwards-compat alias — some code below still references _SSE_PATHS as a
+# membership test, so make it behave identically by overriding __contains__.
+class _SSEPathsCompat:
+    def __contains__(self, path: object) -> bool:
+        return isinstance(path, str) and _is_sse_path(path)
+
+
+_SSE_PATHS = _SSEPathsCompat()
 
 
 # -----------------------------------------------------------------------------
@@ -152,6 +192,12 @@ class RequestIDMiddleware:
         await self.app(scope, receive, send_with_header)
 
 
+# AUDIT 2026-05-05 (bug #25): In-memory rate-limit store. SAFE ONLY UNDER
+# SINGLE-WORKER DEPLOY. With multiple gunicorn / uvicorn workers, each
+# worker has its own copy of the dict so effective limits multiply by
+# worker count and lockouts become inconsistent. Migrate to Redis (which
+# the app already runs for Celery) before scaling out workers. Same
+# applies to the login-attempts dict in app/routes/auth.py.
 _rate_limit_store: dict = defaultdict(lambda: {"count": 0, "reset": 0.0})
 _RATE_LIMIT_MAX = 200
 _RATE_LIMIT_WINDOW = 60.0
@@ -266,6 +312,7 @@ app.include_router(dashboard_router)
 app.include_router(scraping_router)
 app.include_router(contacts_router)
 app.include_router(existing_hotels_router)
+app.include_router(existing_hotels_parity_router)
 app.include_router(sap_router)
 app.include_router(sap_legacy_router)
 app.include_router(revenue_router)
@@ -291,6 +338,17 @@ if _FRONTEND_DIR.is_dir():
         if file_path.is_file():
             return FileResponse(str(file_path))
         return FileResponse(str(_FRONTEND_DIR / "index.html"))
+
+    # AUDIT 2026-05-05 (bug #36): Return JSON 404 for unknown /api/* paths
+    # so API consumers get a real error instead of the React shell with
+    # status 200. Must be registered BEFORE serve_spa or the catch-all
+    # below shadows it.
+    @app.get("/api/{full_path:path}", include_in_schema=False)
+    async def api_404(full_path: str):
+        return JSONResponse(
+            status_code=404,
+            content={"detail": f"API route not found: /api/{full_path}"},
+        )
 
     @app.get("/{full_path:path}", include_in_schema=False)
     async def serve_spa(full_path: str):

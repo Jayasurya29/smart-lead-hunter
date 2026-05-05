@@ -229,21 +229,18 @@ async def rescore_lead(lead_id: int, session: AsyncSession) -> Optional[Dict]:
     #   2. Scorer has a non-empty value to offer
     new_tier = (score_result.get("brand_tier") or "").strip().lower()
     current_tier = (lead.brand_tier or "").strip().lower()
+    # Canonical 5-tier. Long-form aliases (ultra_luxury, luxury, etc.)
+    # kept for legacy data only — new writes use tierN_* form.
     VALID_TIERS = {
         "tier1_ultra_luxury",
         "tier2_luxury",
         "tier3_upper_upscale",
         "tier4_upscale",
-        "tier5_upper_midscale",
-        "tier6_midscale",
-        "tier7_economy",
+        "tier5_skip",
         "ultra_luxury",
         "luxury",
         "upper_upscale",
         "upscale",
-        "upper_midscale",
-        "midscale",
-        "economy",
     }
     _SENTINELS = {"", "unknown", "none", "n/a", "tbd"}
 
@@ -268,7 +265,16 @@ async def rescore_lead(lead_id: int, session: AsyncSession) -> Optional[Dict]:
     # Recalculate timeline label from opening date
     from app.services.utils import get_timeline_label
 
-    lead.timeline_label = get_timeline_label(lead.opening_date or "")
+    new_timeline = get_timeline_label(lead.opening_date or "")
+    lead.timeline_label = new_timeline
+
+    # AUDIT 2026-05-05 (bug #20): Surface "this lead has crossed into the
+    # EXPIRED bucket via rescore" so callers can route through transfer_lead.
+    # rescore is called from many sites (dashboard edit, smart_fill, batch
+    # tasks, contact CRUD); not all of them already check timeline. The
+    # returned `needs_transfer` flag lets each caller decide whether to
+    # graduate immediately or queue for the daily recompute.
+    needs_transfer = new_timeline == "EXPIRED" and lead.status != "expired"
 
     # NOTE: Score tier is derived from timeline_label (already set above)
     # and lead_score. No separate column needed — the frontend reads
@@ -283,6 +289,8 @@ async def rescore_lead(lead_id: int, session: AsyncSession) -> Optional[Dict]:
         "contacts_found": contact_result["detail"]["total_contacts"],
         "hotel_specific": contact_result["detail"]["hotel_specific"],
         "changed": new_score != old_score,
+        "needs_transfer": needs_transfer,
+        "timeline_label": new_timeline,
     }
 
 
@@ -290,9 +298,16 @@ async def rescore_all_leads(session: AsyncSession) -> Dict:
     """Rescore all active leads."""
     from app.models.potential_lead import PotentialLead
 
+    # AUDIT 2026-05-05 (bug #15): Include status='expired' in the rescore
+    # set. Previously this skipped them, which meant zombie expired leads
+    # (created when an auto-transfer failed) kept their stale lead_score
+    # forever — and stale scores affected list ordering, exports, and the
+    # Insightly Lead_Score__c custom field if the lead later got pushed.
+    # Including expired here also gives us a chance to retry the transfer
+    # for any whose timeline_label re-confirms EXPIRED.
     result = await session.execute(
         select(PotentialLead.id).where(
-            PotentialLead.status.notin_(["deleted", "expired", "rejected"])
+            PotentialLead.status.notin_(["deleted", "rejected"])
         )
     )
     lead_ids = [row[0] for row in result.all()]
@@ -302,6 +317,7 @@ async def rescore_all_leads(session: AsyncSession) -> Dict:
     increased = 0
     decreased = 0
     total_change = 0
+    transferred = 0
 
     for lead_id in lead_ids:
         score_result = await rescore_lead(lead_id, session)
@@ -312,6 +328,29 @@ async def rescore_all_leads(session: AsyncSession) -> Dict:
                 increased += 1
             else:
                 decreased += 1
+        # If the rescore moved the lead into EXPIRED, try graduating it.
+        # Run in a fresh session because transfer_lead deletes the row.
+        if score_result and score_result.get("needs_transfer"):
+            try:
+                from app.database import async_session
+                from app.services.lead_transfer import transfer_lead
+
+                # Commit the rescore first so the new fields are visible
+                # to the transfer (which builds existing_hotel from lead).
+                await session.commit()
+                async with async_session() as transfer_session:
+                    tr = await transfer_lead(lead_id, transfer_session, commit=True)
+                if tr.get("status") in ("transferred", "merged"):
+                    transferred += 1
+                    logger.info(
+                        f"rescore_all auto-{tr['status']} lead #{lead_id} "
+                        f"(opening_date now in EXPIRED bucket)"
+                    )
+            except Exception as e:
+                logger.warning(
+                    f"rescore_all transfer failed for #{lead_id}: {e} "
+                    f"— will retry on next recompute_timeline_labels"
+                )
 
     await session.commit()
 
@@ -320,5 +359,6 @@ async def rescore_all_leads(session: AsyncSession) -> Dict:
         "changed": changed,
         "increased": increased,
         "decreased": decreased,
+        "transferred": transferred,
         "avg_change": round(total_change / max(changed, 1), 1),
     }

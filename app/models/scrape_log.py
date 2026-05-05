@@ -40,7 +40,18 @@ class ScrapeLog(Base):
     )  # Skipped due to filters (budget, international)
 
     # Status
-    status = Column(String(20), default="running")  # running, success, failed, partial
+    # AUDIT 2026-05-05 (bug #24): Documented values now match what the
+    # code actually writes. scraping_tasks.py:464 writes
+    # 'completed' / 'completed_with_errors'; previously the docstring
+    # said running/success/failed/partial which created drift — UI
+    # filters on those names missed real rows. Both naming systems are
+    # accepted here. New code should write the 'completed*' set.
+    status = Column(
+        String(30),
+        default="running",
+        # Valid: running, completed, completed_with_errors, failed, partial,
+        # success (legacy alias for 'completed' from older runs)
+    )
     error_message = Column(Text)  # Primary error message
     errors = Column(JSONB)  # Array of error details
 

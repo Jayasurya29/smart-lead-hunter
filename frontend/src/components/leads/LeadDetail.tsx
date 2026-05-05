@@ -744,7 +744,11 @@ function ContactsTab({ contacts, loading, leadId, onEnrich, enriching, enriching
 
   async function handleSetPrimary(contactId: number) {
     await setPrimaryContact(leadId, contactId)
+    // AUDIT 2026-05-05 (bug #27): backend writes lead.contact_name/title/
+    // email/phone when setting primary; the lead detail header card reads
+    // those fields and previously showed stale info until the 30s poll.
     qc.invalidateQueries({ queryKey: ['contacts', leadId] })
+    qc.invalidateQueries({ queryKey: ['lead', leadId] })
   }
 
   async function handleToggleScope(contactId: number, currentScope: string) {
@@ -1432,10 +1436,30 @@ function EditTab({ lead, leadId }: { lead: Lead; leadId: number }) {
         setSaving(false)
         return
       }
-      await editLead(leadId, payload as any)
+      // AUDIT 2026-05-05 (bug #12): A lead edit can:
+      //   1. Plain edit — server returns the updated lead (status 200).
+      //   2. Auto-transfer — server returns {status:'transferred', existing_hotel_id}
+      //      and the lead is hard-deleted from potential_leads.
+      //   3. Transfer-failed — server returns {status:'transfer_failed'} and
+      //      the lead is now status='expired' awaiting daily recompute.
+      // For (2) and (3), the UI must refresh BOTH lead+EH caches and
+      // navigate away from the now-deleted lead detail panel.
+      const result: any = await editLead(leadId, payload as any)
       setSaveMsg('Saved!')
       qc.invalidateQueries({ queryKey: ['lead', leadId] })
       qc.invalidateQueries({ queryKey: ['leads'] })
+      qc.invalidateQueries({ queryKey: ['stats'] })
+      qc.invalidateQueries({ queryKey: ['map-leads'] })
+      qc.invalidateQueries({ queryKey: ['map-data'] })
+      qc.invalidateQueries({ queryKey: ['contacts', leadId] })
+      qc.invalidateQueries({ queryKey: ['existing-hotels'] })
+      qc.invalidateQueries({ queryKey: ['existing-hotels-stats'] })
+
+      if (result?.status === 'transferred') {
+        setSaveMsg(`Transferred to existing-hotel #${result.existing_hotel_id}`)
+      } else if (result?.status === 'transfer_failed') {
+        setSaveMsg('Saved (marked expired — daily recompute will retry transfer)')
+      }
       setTimeout(() => setSaveMsg(''), 3000)
     } catch {
       setSaveMsg('Error saving')

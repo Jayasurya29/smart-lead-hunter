@@ -454,8 +454,15 @@ def prepare_lead(
         contact_title=lead_dict.get("contact_title"),
         contact_email=lead_dict.get("contact_email"),
         contact_phone=lead_dict.get("contact_phone"),
-        description=lead_dict.get("key_insights") or lead_dict.get("description"),
-        key_insights=lead_dict.get("key_insights"),
+        # AUDIT 2026-05-05 (bug #34): Cap description and key_insights at
+        # 5000 chars. Some scrapers paste full article bodies into these
+        # fields; row sizes balloon and list pages slow to render. 5000
+        # is the same cap used by dashboard PATCH validation.
+        description=(
+            lead_dict.get("key_insights") or lead_dict.get("description") or ""
+        )[:5000]
+        or None,
+        key_insights=(lead_dict.get("key_insights") or "")[:5000] or None,
         management_company=lead_dict.get("management_company"),
         developer=lead_dict.get("developer"),
         owner=lead_dict.get("owner"),
@@ -465,9 +472,14 @@ def prepare_lead(
         or "manual",
         lead_score=final_score,
         score_breakdown=score_result.get("breakdown", {}),
-        status="expired"
-        if get_timeline_label(lead_dict.get("opening_date") or "") == "EXPIRED"
-        else "new",
+        # AUDIT 2026-05-05 (bug #1): Always create with status='new'.
+        # If the timeline is EXPIRED, save_lead_to_db()'s direct-to-existing
+        # branch graduates the row to existing_hotels in the same transaction.
+        # Previous behavior (status='expired' if EXPIRED) was a zombie source:
+        # any exception in the graduation branch fell through to session.add()
+        # at line 854 and persisted a status='expired' row to potential_leads,
+        # violating invariant #1 ("status='expired' must never persist").
+        status="new",
         raw_data=lead_dict.get("raw_data"),
         scraped_at=local_now(),
         created_at=local_now(),
@@ -623,7 +635,18 @@ async def save_lead_to_db(
         from sqlalchemy import or_ as sql_or
 
         fuzzy_query = select(PotentialLead).where(
-            PotentialLead.status.notin_(["expired", "rejected"])
+            # AUDIT 2026-05-05 (bug #11): Only fuzzy-match against ACTIVE
+            # pipeline leads. Previously also matched approved/pushed leads,
+            # so a re-scrape of an approved lead's source page came back as
+            # "duplicate" with no enrichment update — Insightly stays stale
+            # silently. New code can either (a) re-enrich an approved lead
+            # via Smart Fill or (b) treat them as out-of-pipeline. Excluding
+            # them from fuzzy here ensures (b): a name variation creates a
+            # new pipeline lead which sales can choose to re-approve, rather
+            # than the old "drop on the floor" behavior.
+            PotentialLead.status.notin_(
+                ["expired", "rejected", "approved", "pushed", "deleted"]
+            )
         )
         location_filters = _build_location_filters(lead_dict)
         if location_filters:
@@ -844,11 +867,32 @@ async def save_lead_to_db(
                 "reason": f"Opening < 3mo, created EH#{new_eh.id}",
             }
         except Exception as e:
-            # Fall through to normal potential_leads save if direct-to-existing fails
-            logger.warning(
-                f"Direct-to-existing failed for {hotel_name}: {e}. "
-                f"Falling back to potential_leads."
+            # AUDIT 2026-05-05 (bug #1): Do NOT fall through to potential_leads.
+            # Falling through would persist a row with timeline_label='EXPIRED'
+            # whose only safe destination is existing_hotels. The previous
+            # behavior left zombie rows in potential_leads that the daily
+            # recompute task had to clean up — which silently broke when
+            # Celery beat was down. Roll back the partial state and return
+            # an error so the caller can surface the failure (e.g., scrape
+            # log marks this lead as errored). The recompute task remains
+            # the safety net for any zombies created before this fix.
+            logger.error(
+                f"Direct-to-existing failed for EXPIRED lead {hotel_name!r}: {e}. "
+                f"NOT falling back to potential_leads (would create zombie). "
+                f"Returning error so caller can retry."
             )
+            try:
+                await session.rollback()
+            except Exception:
+                pass
+            return {
+                "status": "error",
+                "id": None,
+                "reason": (
+                    f"Direct-to-existing graduation failed for EXPIRED lead: "
+                    f"{str(e)[:200]}"
+                ),
+            }
 
     # ── SAVE to potential_leads ───────────────────────────────────────
     session.add(lead)
@@ -926,6 +970,12 @@ async def save_leads_batch(
     enriched = 0
     skipped = 0
     errors = 0
+    # AUDIT 2026-05-05 (bug #3): Count direct-to-existing graduations.
+    # The previous if/elif chain had no branches for these statuses, so
+    # leads that graduated directly to existing_hotels were committed but
+    # uncounted — UI/logs reported wrong volumes and ScrapeLog underwrote
+    # leads_new on every scrape that yielded an EXPIRED hotel.
+    graduated_to_existing = 0
 
     for lead_dict in lead_dicts:
         try:
@@ -942,6 +992,24 @@ async def save_leads_batch(
                 duplicates += 1  # Count enriched as duplicate for backward compat
             elif status == "skipped":
                 skipped += 1
+            elif status in ("saved_to_existing", "merged_to_existing"):
+                # Lead graduated directly to existing_hotels (opening date
+                # already in EXPIRED bucket). Counts as a saved unit of work
+                # — the row IS in the DB, just in a different table.
+                graduated_to_existing += 1
+                if status == "saved_to_existing":
+                    saved += 1
+                else:
+                    duplicates += 1
+            elif status == "error":
+                # Lead errored out (e.g. graduation failed). Don't count
+                # as saved/duplicate/skipped — surface as a real error so
+                # the caller can retry or alert.
+                logger.warning(
+                    f"   ⚠ Lead errored: {lead_dict.get('hotel_name', 'unknown')}: "
+                    f"{result.get('reason', 'unknown reason')}"
+                )
+                errors += 1
 
         except Exception as e:
             logger.error(f"   ❌ Error: {lead_dict.get('hotel_name', 'unknown')}: {e}")
@@ -950,12 +1018,15 @@ async def save_leads_batch(
     await session.commit()
 
     logger.info(
-        f"\n✅ SAVED: {saved} | Duplicates: {duplicates} | Skipped: {skipped} | Errors: {errors}"
+        f"\n✅ SAVED: {saved} | Duplicates: {duplicates} | "
+        f"Graduated→EH: {graduated_to_existing} | "
+        f"Skipped: {skipped} | Errors: {errors}"
     )
     return {
         "saved": saved,
         "duplicates": duplicates,
         "enriched": enriched,
+        "graduated_to_existing": graduated_to_existing,
         "skipped": skipped,
         "errors": errors,
     }

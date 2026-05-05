@@ -28,6 +28,12 @@ from app.shared import (
 
 logger = logging.getLogger(__name__)
 
+
+# AUDIT 2026-05-05 (bug #29): Admin dep for the legacy admin PATCH route.
+# Imported here at top-level — auth.py doesn't import this module, so no
+# circular concern.
+from app.routes.auth import require_admin as _require_admin  # noqa: E402
+
 router = APIRouter()
 
 
@@ -447,9 +453,20 @@ async def create_lead(lead_data: LeadCreate, db: AsyncSession = Depends(get_db))
 
 @router.patch("/leads/{lead_id}", response_model=LeadResponse, tags=["Leads"])
 async def update_lead(
-    lead_id: int, updates: LeadUpdate, db: AsyncSession = Depends(get_db)
+    lead_id: int,
+    updates: LeadUpdate,
+    db: AsyncSession = Depends(get_db),
+    _admin=Depends(_require_admin),
 ):
-    """Update a lead"""
+    """Admin-only edit endpoint.
+
+    AUDIT 2026-05-05 (bug #29): This route bypasses every lifecycle
+    invariant (no audit log, no transfer trigger, no timeline recompute).
+    It's documented as admin-only in the architecture notes, but the
+    code had no admin gate — any authed user could hit it. Added the
+    gate. Sales-facing edits go through `dashboard.py`'s edit handler
+    which has the full lifecycle plumbing.
+    """
     result = await db.execute(select(PotentialLead).where(PotentialLead.id == lead_id))
     lead = result.scalar_one_or_none()
     if not lead:

@@ -1,9 +1,9 @@
 # -*- coding: utf-8 -*-
 """
-SMART LEAD HUNTER â€” AUTONOMOUS TASKS v2
+SMART LEAD HUNTER — AUTONOMOUS TASKS v2
 =========================================
 Intelligence-driven Celery tasks using the unified smart_scraper service.
-Same logic as dashboard â€” no duplication.
+Same logic as dashboard — no duplication.
 """
 
 import asyncio
@@ -59,9 +59,9 @@ else:
             loop.close()
 
 
-# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+# =============================================================================================================================================================================================
 # TASK 1: SMART SCRAPE
-# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+# =============================================================================================================================================================================================
 
 
 @celery_app.task(bind=True, base=BaseTask, name="smart_scrape")
@@ -316,9 +316,9 @@ def smart_scrape(self) -> Dict[str, Any]:
     return run_async(_decide_and_scrape())
 
 
-# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+# =============================================================================================================================================================================================
 # TASK 2: AUTO-ENRICH
-# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+# =============================================================================================================================================================================================
 
 
 @celery_app.task(bind=True, base=BaseTask, name="auto_enrich")
@@ -460,9 +460,9 @@ def auto_enrich(self) -> Dict[str, Any]:
     return run_async(_enrich())
 
 
-# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+# =============================================================================================================================================================================================
 # TASK 3: WEEKLY DISCOVERY
-# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+# =============================================================================================================================================================================================
 
 
 @celery_app.task(bind=True, base=BaseTask, name="weekly_discovery")
@@ -512,9 +512,9 @@ def weekly_discovery(self) -> Dict[str, Any]:
     return run_async(_discover())
 
 
-# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+# =============================================================================================================================================================================================
 # TASK 4: DAILY HEALTH CHECK
-# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+# =============================================================================================================================================================================================
 
 
 @celery_app.task(bind=True, base=BaseTask, name="daily_health_check")
@@ -776,9 +776,9 @@ def auto_full_refresh(self) -> Dict[str, Any]:
     return run_async(_full_refresh())
 
 
-# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+# =============================================================================================================================================================================================
 # TASK 5: RESCORE ALL
-# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+# =============================================================================================================================================================================================
 
 
 @celery_app.task(bind=True, base=BaseTask, name="rescore_all_leads")
@@ -880,6 +880,12 @@ def recompute_timeline_labels(self) -> Dict[str, Any]:
         # cross-table dedup against existing_hotels (merge if match,
         # create if not), contact re-parenting, scoring under Option B,
         # revenue calculation, and hard-deletes the source lead.
+        # AUDIT 2026-05-05 (bug #23): Track failed-transfer ids so we can
+        # mark them status='expired' afterwards. This makes the resurrection
+        # branch (663-675) consistent — without this fix, transfer failures
+        # left status='new' and the resurrection branch (which only fires
+        # when status='expired') never ran for them.
+        failed_transfer_ids: list[int] = []
         if ids_to_transfer:
             logger.info(
                 f"Recompute Timeline Labels: auto-transferring "
@@ -909,12 +915,36 @@ def recompute_timeline_labels(self) -> Dict[str, Any]:
                         pass
                     else:
                         results["transfer_errors"] += 1
+                        failed_transfer_ids.append(lid)
                         logger.warning(
                             f"   ✗ Auto-transfer #{lid}: unexpected status {status!r}"
                         )
                 except Exception as e:
                     results["transfer_errors"] += 1
+                    failed_transfer_ids.append(lid)
                     logger.exception(f"   ✗ Auto-transfer failed for lead #{lid}: {e}")
+
+        # Mark failed-transfer leads as status='expired' so they're excluded
+        # from the Pipeline tab and the next recompute run's resurrection
+        # branch can find them by status. Done in a separate session so a
+        # failure here doesn't undo the labels we already wrote.
+        if failed_transfer_ids:
+            try:
+                from sqlalchemy import update as sql_update
+
+                async with async_session() as cleanup_session:
+                    await cleanup_session.execute(
+                        sql_update(PotentialLead)
+                        .where(PotentialLead.id.in_(failed_transfer_ids))
+                        .values(status="expired")
+                    )
+                    await cleanup_session.commit()
+                logger.info(
+                    f"   Marked {len(failed_transfer_ids)} failed-transfer "
+                    f"lead(s) status='expired' for retry on next run"
+                )
+            except Exception as e:
+                logger.error(f"   Cleanup of failed transfers errored: {e}")
 
         logger.info(
             f"Recompute Timeline Labels: checked={results['leads_checked']}, "

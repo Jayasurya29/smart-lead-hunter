@@ -207,6 +207,13 @@ class LeadContact(Base):
         return {
             "id": self.id,
             "lead_id": self.lead_id,
+            # AUDIT 2026-05-05 (bug #26): include existing_hotel_id (CHECK
+            # constraint enforces lead_id XOR existing_hotel_id, so callers
+            # need both) and last_enriched_at (UI shows freshness).
+            "existing_hotel_id": self.existing_hotel_id,
+            "last_enriched_at": (
+                self.last_enriched_at.isoformat() if self.last_enriched_at else None
+            ),
             "name": self.name,
             "title": self.title,
             "email": self.email,

@@ -266,6 +266,16 @@ def decode_token(token: str) -> Optional[dict]:
 
 
 def set_auth_cookie(response: Response, token: str, remember: bool = False):
+    """Set the slh_session JWT cookie.
+
+    AUDIT 2026-05-05 (bug #37): The Secure flag is keyed off IS_PRODUCTION
+    (read from ENVIRONMENT env var at module import). If you deploy to a
+    dev environment behind an HTTPS reverse proxy without setting
+    ENVIRONMENT=production, the cookie ships WITHOUT Secure. For LAN-only
+    deploys this is fine; if you ever expose the app over public HTTPS
+    in a non-production environment, set ENVIRONMENT=production or a
+    middleware that forces secure=True on all cookies.
+    """
     max_age = REMEMBER_DAYS * 86400 if remember else SESSION_HOURS * 3600
     response.set_cookie(
         key=COOKIE_NAME,
@@ -273,7 +283,7 @@ def set_auth_cookie(response: Response, token: str, remember: bool = False):
         httponly=True,
         samesite="lax",
         max_age=max_age,
-        secure=IS_PRODUCTION,  # FIX #7: True in production, False in dev
+        secure=IS_PRODUCTION,
     )
 
 
@@ -625,6 +635,18 @@ async def deactivate_user(
     user.is_active = False
     user.updated_at = datetime.now(timezone.utc)
     await db.commit()
+
+    # AUDIT 2026-05-05 (bug #17): Force the middleware to re-fetch this
+    # user's is_active flag on the next request instead of waiting for
+    # the 60s TTL to expire. Without this, a deactivated user keeps
+    # access for up to 60s after the deactivate call returns.
+    try:
+        from app.middleware.auth import _clear_user_active_cache
+
+        _clear_user_active_cache(str(user_id))
+    except Exception:
+        pass
+
     return {"status": "deactivated", "user_id": user_id}
 
 

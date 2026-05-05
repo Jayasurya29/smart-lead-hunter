@@ -117,6 +117,12 @@ async def dashboard_edit_lead(
             rc = int(data["room_count"])
             if rc < 0:
                 errors.append("Room count cannot be negative")
+            elif rc > 10000:
+                # AUDIT 2026-05-05 (bug #31): cap room_count at 10k. The
+                # largest real hotels (MGM Grand, Venetian) are ~7k rooms.
+                # 10k is a generous ceiling that catches typos / pasted
+                # garbage without rejecting any real property.
+                errors.append("Room count must be 10000 or fewer")
         except (ValueError, TypeError):
             errors.append("Room count must be a number")
 
@@ -124,13 +130,20 @@ async def dashboard_edit_lead(
         if str(data["brand_tier"]).strip() not in VALID_BRAND_TIERS:
             errors.append(f"Invalid brand tier: {data['brand_tier']}")
 
+    # AUDIT 2026-05-05 (bug #31): Length checks only run on values that
+    # are truthy AND string-like. Casting non-string values (lists, dicts)
+    # to str() and checking len() against a char cap was meaningless —
+    # `[1,2,3]` becomes "[1, 2, 3]" (len 9) which spuriously passes.
+    # The whitelist below is all string fields, so this is just defensive.
     for field, max_len in _EDIT_STRING_LIMITS.items():
-        if field in data and data[field] and len(str(data[field])) > max_len:
-            errors.append(f"{field} must be {max_len} characters or fewer")
+        if field in data and isinstance(data[field], str) and data[field]:
+            if len(data[field]) > max_len:
+                errors.append(f"{field} must be {max_len} characters or fewer")
 
     for field, max_len in _EDIT_LONG_LIMITS.items():
-        if field in data and data[field] and len(str(data[field])) > max_len:
-            errors.append(f"{field} must be {max_len} characters or fewer")
+        if field in data and isinstance(data[field], str) and data[field]:
+            if len(data[field]) > max_len:
+                errors.append(f"{field} must be {max_len} characters or fewer")
 
     if errors:
         return JSONResponse(content={"detail": "; ".join(errors)}, status_code=422)
@@ -211,6 +224,17 @@ async def dashboard_edit_lead(
     # EXPIRED bucket (past or <3mo future) belongs in existing_hotels,
     # not potential_leads. A lead whose date moves OUT of EXPIRED back
     # into an active bucket should un-expire so it reappears in Pipeline.
+    #
+    # AUDIT 2026-05-05 (bug #2): Reordered — we now compute new_label and
+    # mark `needs_transfer`, but we DO NOT set status='expired' here.
+    # Setting status='expired' before commit + then trying transfer in a
+    # separate session created a zombie state when transfer failed: the
+    # endpoint returned 200 OK with the lead permanently parked at
+    # status='expired'. New flow:
+    #   1. Commit the field updates (with status unchanged, label refreshed)
+    #   2. Try transfer in its own session
+    #   3. ONLY if transfer fails AND the lead is now in EXPIRED, set
+    #      status='expired' so the daily recompute task can retry it
     opening_date_changed = "opening_date" in data
     needs_transfer = False
     if opening_date_changed:
@@ -219,10 +243,9 @@ async def dashboard_edit_lead(
         new_label = get_timeline_label(data["opening_date"] or "")
         lead.timeline_label = new_label
         if new_label == "EXPIRED":
-            lead.status = "expired"
             needs_transfer = True  # fire transfer_lead after commit
             logger.info(
-                f"Dashboard edit auto-expired lead #{lead_id} "
+                f"Dashboard edit queued lead #{lead_id} for transfer "
                 f"{lead.hotel_name!r}: opening_date={data['opening_date']!r}"
             )
         elif (
@@ -237,6 +260,11 @@ async def dashboard_edit_lead(
             )
 
     # Rescore lead after edits
+    # Canonical 5-tier scoring. JA targets 4-star+ only — tier5_skip is
+    # 0 pts (budget brands we don't pursue). Any non-canonical tier values
+    # entering this map (tier5_upper_midscale, tier6_midscale, tier7_economy)
+    # mean upstream code wrote a wrong value and should be fixed there;
+    # `_get_tier_points()` below normalizes defensively.
     tier_points_map = {
         "tier1_ultra_luxury": 25,
         "tier2_luxury": 20,
@@ -298,22 +326,10 @@ async def dashboard_edit_lead(
     new_values = {k: data[k] for k in old_values if data.get(k) != old_values[k]}
     if new_values:
         changed_old = {k: old_values[k] for k in new_values}
-        # Extract user email from JWT cookie
-        user_email = "unknown"
-        cookie = request.cookies.get("slh_session", "")
-        if cookie:
-            try:
-                from jose import jwt as jose_jwt
-                import os
-
-                secret = (
-                    os.getenv("JWT_SECRET_KEY", "")
-                    or "dev-only-insecure-key-do-not-use-in-production"
-                )
-                payload = jose_jwt.decode(cookie, secret, algorithms=["HS256"])
-                user_email = payload.get("email", "unknown")
-            except Exception:
-                pass
+        # AUDIT 2026-05-05 (bug #30): Use the shared helper. Previously this
+        # block duplicated the JWT-decode boilerplate from _get_user_email
+        # at the top of this file — drift risk every time we touch auth.
+        user_email = _get_user_email(request)
         await log_action(
             session=db,
             action="edit",
@@ -327,10 +343,14 @@ async def dashboard_edit_lead(
     await db.refresh(lead)
 
     # ─── Auto-transfer to existing_hotels if opening_date hit EXPIRED ──
-    # Mirrors the Smart Fill SSE handler so manual dashboard edits
-    # behave identically. transfer_lead runs in its own session because
-    # it commits internally and hard-deletes the source row.
+    # AUDIT 2026-05-05 (bug #2): Reordered for zombie prevention. The lead
+    # is committed with timeline_label='EXPIRED' but status unchanged. We
+    # try transfer in a fresh session (which commits and hard-deletes the
+    # source row internally). On success, return transferred. On failure,
+    # NOW set status='expired' so the daily recompute task picks it up
+    # for retry — and so list/export queries filter it out of Pipeline.
     if needs_transfer:
+        transfer_succeeded = False
         try:
             from app.database import async_session
             from app.services.lead_transfer import transfer_lead
@@ -338,6 +358,7 @@ async def dashboard_edit_lead(
             async with async_session() as transfer_session:
                 tr = await transfer_lead(lead_id, transfer_session, commit=True)
             if tr.get("status") in ("transferred", "merged"):
+                transfer_succeeded = True
                 eh_id = tr.get("existing_hotel_id")
                 logger.info(
                     f"Dashboard edit auto-{tr['status']} lead #{lead_id} "
@@ -351,8 +372,49 @@ async def dashboard_edit_lead(
                         "transfer_status": tr["status"],
                     }
                 )
+            else:
+                logger.warning(
+                    f"Dashboard edit transfer for #{lead_id} returned "
+                    f"unexpected status {tr.get('status')!r}; will retry "
+                    f"in next recompute_timeline_labels run"
+                )
         except Exception as e:
             logger.warning(f"Dashboard edit auto-transfer failed for #{lead_id}: {e}")
+
+        # Transfer failed — flip status='expired' so the lead is excluded
+        # from the Pipeline tab while the daily recompute retries it.
+        if not transfer_succeeded:
+            try:
+                async with async_session() as retry_session:
+                    from sqlalchemy import update as sql_update
+
+                    await retry_session.execute(
+                        sql_update(PotentialLead)
+                        .where(PotentialLead.id == lead_id)
+                        .values(status="expired")
+                    )
+                    await retry_session.commit()
+                logger.info(
+                    f"Dashboard edit: marked #{lead_id} status='expired' "
+                    f"after transfer failure (will retry on next recompute)"
+                )
+            except Exception as e:
+                logger.error(
+                    f"Dashboard edit: failed to mark #{lead_id} expired "
+                    f"after transfer failure: {e}"
+                )
+
+            return JSONResponse(
+                content={
+                    "status": "transfer_failed",
+                    "id": lead_id,
+                    "message": (
+                        "Lead marked expired; daily recompute will retry "
+                        "the transfer to existing_hotels."
+                    ),
+                },
+                status_code=200,
+            )
 
     return JSONResponse(
         content={
@@ -562,6 +624,17 @@ async def dashboard_restore_lead(
     lead.rejection_reason = None
     lead.updated_at = local_now()
 
+    # AUDIT 2026-05-05 (bug #14): Recompute timeline_label on restore so a
+    # lead whose opening_date passed during its rejected/deleted phase
+    # doesn't reappear on Pipeline as a status='new' + timeline='EXPIRED'
+    # zombie. If the recomputed label is EXPIRED, route through transfer
+    # immediately — the lead has graduated, not returned to pipeline.
+    from app.services.utils import get_timeline_label
+
+    new_label = get_timeline_label(lead.opening_date or "")
+    lead.timeline_label = new_label
+    needs_transfer_after_restore = new_label == "EXPIRED"
+
     # Remove from Insightly if previously pushed — use stored IDs (fast path)
     if lead.insightly_id or lead.insightly_lead_ids:
         from app.services.insightly import get_insightly_client
@@ -584,12 +657,39 @@ async def dashboard_restore_lead(
         lead=lead,
         user_email=user_email,
         old_values={"status": old_status},
-        new_values={"status": "new"},
+        new_values={"status": "new", "timeline_label": new_label},
     )
 
     await db.commit()
     await db.refresh(lead)
     await _invalidate_stats_cache()
+
+    # Restored-into-EXPIRED: graduate immediately to existing_hotels.
+    if needs_transfer_after_restore:
+        try:
+            from app.database import async_session
+            from app.services.lead_transfer import transfer_lead
+
+            async with async_session() as transfer_session:
+                tr = await transfer_lead(lead_id, transfer_session, commit=True)
+            if tr.get("status") in ("transferred", "merged"):
+                eh_id = tr.get("existing_hotel_id")
+                logger.info(
+                    f"Dashboard restore auto-{tr['status']} lead #{lead_id} "
+                    f"→ existing_hotel #{eh_id} (opening_date now EXPIRED)"
+                )
+                return {
+                    "status": "transferred",
+                    "id": lead_id,
+                    "existing_hotel_id": eh_id,
+                    "transfer_status": tr["status"],
+                }
+        except Exception as e:
+            logger.warning(
+                f"Dashboard restore auto-transfer failed for #{lead_id}: {e} — "
+                f"lead is restored to status='new' but in EXPIRED bucket; "
+                f"daily recompute will retry"
+            )
 
     return {"status": "restored", "id": lead.id}
 

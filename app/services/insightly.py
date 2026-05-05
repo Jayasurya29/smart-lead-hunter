@@ -106,7 +106,13 @@ class InsightlyClient:
             logger.warning("Insightly not configured — skipping push.")
             return []
 
-        # Tier display names
+        # Tier display names. Canonical 5-tier; tier5_skip never reaches
+        # this code path because skip-tier leads never get approved/pushed
+        # — gated upstream by the brand registry filter in scorer.py. Any
+        # non-canonical tier (tier5_upper_midscale, tier6_midscale,
+        # tier7_economy) reaching here is upstream data corruption and is
+        # passed through raw so it surfaces in CRM rather than silently
+        # mapping to a wrong category.
         tier_display = {
             "tier1_ultra_luxury": "Ultra Luxury",
             "tier2_luxury": "Luxury",
@@ -334,11 +340,26 @@ class InsightlyClient:
         FIX C-01: Insightly returns max 500 per page by default.
         Previously only fetched the first page, missing leads beyond 500.
         Now paginates through all pages using $skip/$top.
+
+        AUDIT 2026-05-05 (bug #38): hard cap at 10,000 leads. Without it,
+        an account-wide list larger than that would walk every page on
+        every reject/restore call (since this fallback is invoked from
+        delete_leads_by_slh_id). 10k is generous for a sales CRM; if you
+        hit it, switch to delete_leads_by_ids using stored
+        `insightly_lead_ids` (already on every approved lead post-2026-04).
         """
+        _MAX_LEADS = 10_000
         all_leads: List[Dict] = []
         skip = 0
 
         while True:
+            if len(all_leads) >= _MAX_LEADS:
+                logger.warning(
+                    f"Insightly: hit {_MAX_LEADS}-lead cap in _fetch_all_leads. "
+                    f"Use delete_leads_by_ids with stored insightly_lead_ids "
+                    f"instead of this fallback to avoid full-table scans."
+                )
+                break
             try:
                 resp = await client.get(
                     f"{self.base_url}/Leads",

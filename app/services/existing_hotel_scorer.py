@@ -60,36 +60,40 @@ logger = logging.getLogger(__name__)
 # v2 weights reflect 4-star+ scope: Tier 4 is the floor at 20 pts (not 12),
 # because every hotel in the universe is already Upscale or above.
 #
-# Tier 5+ entries kept defensively at score=5 — they shouldn't appear,
-# but if they ever do (classification drift, manual override), they
-# trigger the out_of_scope_warning in the breakdown.
+# Canonical 5-tier system. tier5_skip is the only legitimate "out of scope"
+# value (budget/select brands JA never pursues). Non-canonical values
+# (tier5_upper_midscale, tier6_midscale, tier7_economy) are bugs — they
+# get normalized to tier5_skip and flagged with out_of_scope_warning so
+# sales can tell the row needs review or the upstream classifier needs a
+# fix.
 
 _BRAND_TIER_POINTS = {
     "tier1_ultra_luxury": 40,
     "tier2_luxury": 35,
     "tier3_upper_upscale": 28,
     "tier4_upscale": 20,
-    # Defensive — out of scope, shouldn't appear (auto-rejected at scrape):
-    "tier5_skip": 5,
-    "tier5_upper_midscale": 5,
-    "tier6_midscale": 5,
-    "tier7_economy": 5,
+    "tier5_skip": 5,  # JA does not pursue — score low, warn sales
 }
-_OUT_OF_SCOPE_TIERS = {
-    "tier5_skip",
+# Non-canonical tier strings that should never reach the DB. If we see them,
+# normalize to tier5_skip and flag the warning so the data error is visible.
+_NON_CANONICAL_TIERS = {
     "tier5_upper_midscale",
     "tier6_midscale",
     "tier7_economy",
 }
+_OUT_OF_SCOPE_TIERS = {"tier5_skip"} | _NON_CANONICAL_TIERS
 _BRAND_TIER_UNKNOWN = 8  # NULL / unrecognized — likely needs reclassification
 
 
 def _score_brand_tier(brand_tier: str | None) -> tuple[int, str, bool]:
     """Return (points, label, out_of_scope_warning).
 
-    out_of_scope_warning fires only if a Tier 5+ value is observed —
-    used by the breakdown to tell sales "this row may have slipped past
-    the scrape-time filter, please review."
+    out_of_scope_warning fires when:
+      - the value is the canonical out-of-scope marker (tier5_skip), OR
+      - the value is a non-canonical 7-tier string (data error — should
+        have been normalized at write time).
+
+    Either way, sales sees the warning and knows the row needs review.
     """
     if not brand_tier:
         return _BRAND_TIER_UNKNOWN, "unknown (NULL)", False
@@ -97,6 +101,10 @@ def _score_brand_tier(brand_tier: str | None) -> tuple[int, str, bool]:
     if key in _BRAND_TIER_POINTS:
         warning = key in _OUT_OF_SCOPE_TIERS
         return _BRAND_TIER_POINTS[key], key, warning
+    if key in _NON_CANONICAL_TIERS:
+        # Treat non-canonical as tier5_skip but preserve the original label
+        # so sales can see the bad data and root-cause it.
+        return _BRAND_TIER_POINTS["tier5_skip"], f"{key} → tier5_skip", True
     return _BRAND_TIER_UNKNOWN, f"unknown ({brand_tier!r})", False
 
 
