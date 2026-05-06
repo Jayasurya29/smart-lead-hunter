@@ -325,13 +325,13 @@ async def _call_gemini(
 _GROUNDING_TIMEOUT_S = 60.0
 _GROUNDING_MIN_FIELDS = 3  # below this, we treat the result as a failure
 _GROUNDING_VALID_TIERS = {
-    # Canonical 5-tier — non-canonical values are bugs and get normalized
-    # to tier5_skip at the apply layer.
     "tier1_ultra_luxury",
     "tier2_luxury",
     "tier3_upper_upscale",
     "tier4_upscale",
-    "tier5_skip",
+    "tier5_upper_midscale",
+    "tier6_midscale",
+    "tier7_economy",
 }
 _GROUNDING_VALID_PROJECT_TYPES = {
     "new_opening",
@@ -391,7 +391,7 @@ cannot confidently determine — DO NOT guess.
   "project_type": "new_opening | renovation | rebrand | reopening | conversion | ownership_change | residences_only",
   "room_count": 250,
   "brand": "Hotel brand / flag (e.g. 'Marriott', 'Four Seasons', 'Independent')",
-  "brand_tier": "tier1_ultra_luxury | tier2_luxury | tier3_upper_upscale | tier4_upscale | tier5_skip",
+  "brand_tier": "tier1_ultra_luxury | tier2_luxury | tier3_upper_upscale | tier4_upscale | tier5_upper_midscale | tier6_midscale | tier7_economy",
   "management_company": "Day-to-day hotel OPERATOR — the company running the hotel (NOT brand licensor like Marriott/Hilton/Hyatt)",
   "owner": "Property owner / real estate holding entity",
   "developer": "Entity BUILDING the property (often same as owner for new builds)",
@@ -688,6 +688,11 @@ async def _enrich_lead_data_grounded(
         f"Grounding SUCCESS for '{hotel_name}' in {elapsed:.1f}s "
         f"(via us-central1): {meaningful} fields filled, "
         f"{len(sources)} sources read"
+    )
+    logger.info(
+        f"Grounding raw [{hotel_name}] keys={list(parsed.keys())} "
+        f"opening_date={parsed.get('opening_date')!r} "
+        f"project_type={parsed.get('project_type')!r}"
     )
 
     # Build return shape compatible with what enrich_lead_data normally returns
@@ -1564,7 +1569,9 @@ Return JSON:
                     "tier2_luxury",
                     "tier3_upper_upscale",
                     "tier4_upscale",
-                    "tier5_skip",
+                    "tier5_upper_midscale",
+                    "tier6_midscale",
+                    "tier7_economy",
                 ],
             },
             "room_count": {"type": "integer"},
@@ -2734,7 +2741,9 @@ def _map_extraction_to_result(
         "tier2_luxury",
         "tier3_upper_upscale",
         "tier4_upscale",
-        "tier5_skip",
+        "tier5_upper_midscale",
+        "tier6_midscale",
+        "tier7_economy",
     }
     INVALID_TIER_SENTINELS = {"", "unknown", "none", "n/a", "tbd"}
     new_tier = (extraction.get("brand_tier") or "").strip().lower()
@@ -2947,24 +2956,6 @@ async def batch_smart_fill(limit: int = 10, mode: str = "smart") -> Dict:
                 continue
 
             changes = []
-            # AUDIT 2026-05-05 (bugs #8, #16): Apply enriched fields with
-            # the SAME validity guards used by batch_full_refresh — the two
-            # batch functions had drifted. Smart Fill (mode='smart') only
-            # fills empties; Full Refresh (mode='full') overwrites with
-            # validity checks. Without these guards, batch_smart_fill could
-            # trample manually-set tier2_luxury values with garbage.
-
-            _SMART_FILL_VALID_TIERS = {
-                # Canonical 5-tier. Non-canonical values get rejected here
-                # rather than written to the lead.
-                "tier1_ultra_luxury",
-                "tier2_luxury",
-                "tier3_upper_upscale",
-                "tier4_upscale",
-                "tier5_skip",
-            }
-            _SMART_FILL_INVALID = {"", "unknown", "none", "n/a", "na", "tbd"}
-
             # Opening date with regression guard — rejects less-specific
             # values ("Late 2026" → "2026") and backward-shifted years.
             # Without this guard, a backfill batch could replace a good
@@ -2987,52 +2978,23 @@ async def batch_smart_fill(limit: int = 10, mode: str = "smart") -> Dict:
                     )
                     lead.timeline_label = new_label
                     changes.append(f"opening_date={enriched['opening_date']}")
-                    # AUDIT 2026-05-05 (bug #8): Set status='expired' BEFORE
-                    # queueing for transfer. Previously left status='new'
-                    # which created zombies if transfer failed. Combined with
-                    # the inverse zombie cleanup in recompute_timeline_labels,
-                    # this gives the lead a consistent status that filters
-                    # exclude from Pipeline regardless of transfer outcome.
+                    # Queue for auto-transfer if backfilled date lands in
+                    # EXPIRED bucket — same pattern as the patched
+                    # smart_fill_lead endpoint (scraping.py).
                     if new_label == "EXPIRED" or lead.status == "expired":
-                        lead.status = "expired"
                         transfer_candidate_ids.append(lead.id)
-
-            # Brand tier — only overwrite with a valid value
             if "brand_tier" in enriched:
-                new_tier = (enriched.get("brand_tier") or "").strip().lower()
-                current_tier = (lead.brand_tier or "").strip().lower()
-                if new_tier in _SMART_FILL_VALID_TIERS:
-                    lead.brand_tier = enriched["brand_tier"]
-                    changes.append(f"tier={enriched['brand_tier']}")
-                elif current_tier in _SMART_FILL_INVALID and new_tier:
-                    lead.brand_tier = enriched["brand_tier"]
-                    changes.append(f"tier={enriched['brand_tier']}")
-
-            # Room count — only positive integers, only fill empty in smart mode
+                lead.brand_tier = enriched["brand_tier"]
+                changes.append(f"tier={enriched['brand_tier']}")
             if "room_count" in enriched:
-                try:
-                    new_rc = int(enriched.get("room_count") or 0)
-                except (TypeError, ValueError):
-                    new_rc = 0
-                if new_rc > 0:
-                    if mode == "full" or not lead.room_count or lead.room_count <= 0:
-                        lead.room_count = new_rc
-                        changes.append(f"rooms={new_rc}")
-
-            # Brand — overwrite if valid; only fill empty in smart mode
+                lead.room_count = enriched["room_count"]
+                changes.append(f"rooms={enriched['room_count']}")
             if "brand" in enriched:
-                new_brand = (enriched.get("brand") or "").strip()
-                current_brand = (lead.brand or "").strip()
-                if new_brand and new_brand.lower() not in _SMART_FILL_INVALID:
-                    if mode == "full" or not current_brand:
-                        lead.brand = new_brand
-                        changes.append(f"brand={new_brand}")
-                elif not current_brand and new_brand:
-                    lead.brand = new_brand
-                    changes.append(f"brand={new_brand}")
-
-            # Management company — backfill only fills empties (smart mode
-            # semantics) — we never trample a value already on the lead.
+                lead.brand = enriched["brand"]
+                changes.append(f"brand={enriched['brand']}")
+            # Management company — added 2026-05-01. Backfill only fills
+            # empties (mode='smart' semantics) — we never trample a
+            # value already on the lead.
             if "management_company" in enriched:
                 if not lead.management_company:
                     lead.management_company = enriched["management_company"]
@@ -3237,23 +3199,18 @@ async def batch_full_refresh(limit: int = 5, stale_days: int = 14) -> Dict:
                     )
                     lead.timeline_label = new_label
                     changes.append(f"opening_date={enriched['opening_date']}")
-                    # AUDIT 2026-05-05 (bug #8): Set status='expired' BEFORE
-                    # queueing transfer so failed transfers leave a
-                    # consistent zombie state (status='expired' +
-                    # label='EXPIRED') that the Pipeline filter excludes
-                    # and the daily recompute task retries.
                     if new_label == "EXPIRED" or lead.status == "expired":
-                        lead.status = "expired"
                         transfer_candidate_ids.append(lead.id)
 
             # Brand tier — only overwrite if new value is valid.
             _VALID_TIERS = {
-                # Canonical 5-tier (see tier5_skip notes elsewhere).
                 "tier1_ultra_luxury",
                 "tier2_luxury",
                 "tier3_upper_upscale",
                 "tier4_upscale",
-                "tier5_skip",
+                "tier5_upper_midscale",
+                "tier6_midscale",
+                "tier7_economy",
             }
             _INVALID = {"", "unknown", "none", "n/a", "na", "tbd"}
             if "brand_tier" in enriched:

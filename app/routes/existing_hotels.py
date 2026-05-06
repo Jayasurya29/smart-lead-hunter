@@ -1507,7 +1507,6 @@ async def update_existing_hotel(
     hotel_id: int,
     request: Request,
     db: AsyncSession = Depends(get_db),
-    _csrf=Depends(require_ajax),
 ):
     """Edit an existing hotel.
 
@@ -1700,18 +1699,19 @@ async def update_existing_hotel(
     _FLOAT_FIELDS = {"latitude", "longitude", "revenue_opening", "revenue_annual"}
 
     # Capture old values for audit log
+    # Capture old values for audit log
     old_values: dict = {}
     for fname in body:
         if fname in allowed:
-            old_values[fname] = getattr(hotel, field, None)
+            old_values[fname] = getattr(hotel, fname, None)
 
     for fname, value in body.items():
-        if field not in allowed:
+        if fname not in allowed:
             continue
         # Coerce types
         if value == "" or value is None:
             coerced = None
-        elif field in _BOOL_FIELDS:
+        elif fname in _BOOL_FIELDS:
             # Accept bool, "true"/"false" strings, 1/0 — explicit conversion
             if isinstance(value, bool):
                 coerced = value
@@ -1719,12 +1719,12 @@ async def update_existing_hotel(
                 coerced = value.strip().lower() in ("true", "1", "yes", "on")
             else:
                 coerced = bool(value)
-        elif field in _INT_FIELDS:
+        elif fname in _INT_FIELDS:
             try:
                 coerced = int(value)
             except (TypeError, ValueError):
                 continue
-        elif field in _FLOAT_FIELDS:
+        elif fname in _FLOAT_FIELDS:
             try:
                 coerced = float(value)
             except (TypeError, ValueError):
