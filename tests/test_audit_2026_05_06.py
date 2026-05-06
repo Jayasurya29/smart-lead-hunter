@@ -122,7 +122,7 @@ class TestCrit2CanonicalTierCoercion:
     def test_six_stage_schema_only_lists_canonical(self):
         # Source-level guard: scan the module text.
         path = Path("app/services/lead_data_enrichment.py")
-        src = path.read_text()
+        src = path.read_text(encoding="utf-8")
         # Scope the check to the schema enum block (line 1565ish).
         # If anyone resurrects a 7-tier list anywhere, fail loudly.
         offenders = [
@@ -154,7 +154,7 @@ class TestHv5NoDowngrade:
         # exercise the full apply layer without the DB, so we verify
         # the guard string is present in the apply path.
         path = Path("app/services/lead_data_enrichment.py")
-        src = path.read_text()
+        src = path.read_text(encoding="utf-8")
         assert "is_downgrade_to_skip" in src, (
             "HV-5 guard `is_downgrade_to_skip` must be present in "
             "lead_data_enrichment.py apply layer"
@@ -207,7 +207,7 @@ class TestCrit3Indexes:
     def test_migration_023_exists(self):
         path = Path("alembic/versions/023_hot_path_indexes_and_unaccent.py")
         assert path.exists(), "migration 023 missing"
-        src = path.read_text()
+        src = path.read_text(encoding="utf-8")
         # Spot-check the key DDL is present.
         assert "ix_potential_leads_hotel_name_normalized" in src
         assert "ix_existing_hotels_hotel_name_normalized" in src
@@ -283,7 +283,7 @@ class TestHigh2HV3UnaccentIlike:
 class TestHigh3ExportRowCap:
     def test_leads_export_has_row_cap(self):
         path = Path("app/routes/leads.py")
-        src = path.read_text()
+        src = path.read_text(encoding="utf-8")
         assert "EXPORT_ROW_CAP = 25_000" in src, (
             "/leads/export must cap at 25,000 rows (HIGH-3)"
         )
@@ -291,7 +291,7 @@ class TestHigh3ExportRowCap:
 
     def test_existing_hotels_export_csv_has_row_cap(self):
         path = Path("app/routes/existing_hotels.py")
-        src = path.read_text()
+        src = path.read_text(encoding="utf-8")
         assert "EXPORT_ROW_CAP = 25_000" in src, (
             "existing-hotels export-csv must cap at 25,000 rows (HIGH-3)"
         )
@@ -299,7 +299,7 @@ class TestHigh3ExportRowCap:
     def test_existing_hotels_export_csv_uses_canonical_phone(self):
         # HIGH-3 sweep also fixed `h.phone` → contact_phone/gm_phone.
         path = Path("app/routes/existing_hotels.py")
-        src = path.read_text()
+        src = path.read_text(encoding="utf-8")
         # Strip comments before checking — historical comments are
         # allowed to mention the old name. Code lines must not.
         code_lines = [
@@ -384,7 +384,7 @@ class TestHv4LastUserReview:
 
     def test_dashboard_handlers_stamp_review(self):
         path = Path("app/routes/dashboard.py")
-        src = path.read_text()
+        src = path.read_text(encoding="utf-8")
         # The stamp must appear in approve, reject, restore, and edit.
         # Crude but stable: we expect at least 4 distinct sets of the
         # stamp line.
@@ -395,7 +395,7 @@ class TestHv4LastUserReview:
 
     def test_leads_route_supports_review_stale_days(self):
         path = Path("app/routes/leads.py")
-        src = path.read_text()
+        src = path.read_text(encoding="utf-8")
         assert "review_stale_days" in src
         assert "last_user_review_at" in src
         # The sort key is exposed
