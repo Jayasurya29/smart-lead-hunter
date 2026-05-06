@@ -1909,6 +1909,16 @@ async def smart_fill_lead(lead_id: int, request: Request, _csrf=Depends(require_
             if mode == "full" or not lead.description:
                 lead.description = enriched["description"]
 
+        # key_insights — phase/construction/timeline sales intel from grounding.
+        # Append rather than overwrite so existing dedup warnings are preserved.
+        if "key_insights" in enriched and enriched["key_insights"]:
+            existing_ki = (lead.key_insights or "").strip()
+            new_ki = enriched["key_insights"].strip()
+            if new_ki not in existing_ki:
+                lead.key_insights = (
+                    f"{new_ki}\n{existing_ki}".strip() if existing_ki else new_ki
+                )
+
         # ── Name intelligence — correct hotel name + save operator/owner ──
         if "official_name" in enriched:
             old_name = lead.hotel_name
@@ -2685,6 +2695,16 @@ def _apply_enrichment_to_lead(lead, enriched: dict, mode: str, get_timeline_labe
     for fld in ("management_company", "owner", "developer", "address", "zip_code"):
         if fld in enriched and (mode == "full" or not getattr(lead, fld, None)):
             setattr(lead, fld, enriched[fld])
+
+    # key_insights — phase/construction/timeline sales intel from grounding.
+    # Append rather than overwrite so existing dedup warnings are preserved.
+    if "key_insights" in enriched and enriched["key_insights"]:
+        existing = (lead.key_insights or "").strip()
+        new_insight = enriched["key_insights"].strip()
+        if new_insight not in existing:
+            lead.key_insights = (
+                f"{new_insight}\n{existing}".strip() if existing else new_insight
+            )
 
     # Hybrid geocode + website fields (set by the grounded fast-path's
     # _hybrid_geocode_and_website helper). Always update — these are

@@ -8,6 +8,7 @@ export interface Filters {
   year: string
   added: string
   sort: string
+  review_stale_days: string   // HV-4: "last reviewed > N days ago" filter
 }
 
 export const DEFAULT_FILTERS: Filters = {
@@ -17,6 +18,7 @@ export const DEFAULT_FILTERS: Filters = {
   year: '',
   added: '',
   sort: 'newest',
+  review_stale_days: '',
 }
 
 interface Props {
@@ -153,6 +155,19 @@ export default function FilterBar({ filters, onChange }: Props) {
           { value: 'this_week', label: 'This Week' },
           { value: 'last_7',    label: 'Last 7 Days' },
           { value: 'last_30',   label: 'Last 30 Days' },
+        ]}
+      />
+
+      {/* HV-4: Stale review filter — leads sales hasn't touched in N days */}
+      <SimpleFilterSelect
+        value={filters.review_stale_days} onChange={(v) => set('review_stale_days', v)} placeholder="Review Status"
+        isActive={!!filters.review_stale_days}
+        options={[
+          { value: '7',   label: 'Not reviewed 7d+' },
+          { value: '14',  label: 'Not reviewed 14d+' },
+          { value: '30',  label: 'Not reviewed 30d+' },
+          { value: '60',  label: 'Not reviewed 60d+' },
+          { value: '0',   label: 'Never reviewed' },
         ]}
       />
 

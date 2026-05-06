@@ -373,6 +373,8 @@ def _coerce_brand_tier_to_canonical(value) -> Optional[str]:
     if v in _NON_CANONICAL_TIER_ALIASES:
         return _NON_CANONICAL_TIER_ALIASES[v]
     return None
+
+
 _GROUNDING_VALID_PROJECT_TYPES = {
     "new_opening",
     "renovation",
@@ -718,23 +720,94 @@ async def _enrich_lead_data_grounded(
     # bill grounding calls without citations, so falling back here costs
     # only the Serper+Gemini path — which produces real sources.
     if len(sources) == 0:
-        logger.warning(
-            f"Grounding PHANTOM for '{hotel_name}' — returned {meaningful} "
-            f"fields with ZERO sources (model answered from priors, not "
-            f"fresh search) — falling back to Serper+Gemini"
+        # Tiered phantom policy — Gemini sometimes answers from training data
+        # instead of actually searching (no citations returned). For obscure
+        # hotels this is dangerous (hallucination risk). For well-documented
+        # properties it's often correct — Sundance, major US resorts, etc.
+        #
+        # TRUST phantom if ALL of:
+        #   - confidence == "high"   (Gemini self-reports certainty)
+        #   - meaningful >= 8        (coherent, detailed answer — not vague)
+        #   - has opening_date       (the most critical field)
+        #   - has room_count         (specific number = not fabricated)
+        #   - has address            (specific location = not generic)
+        #
+        # REJECT otherwise — fall back to Serper+Gemini which uses real sources.
+        confidence = cleaned.get("confidence", "low")
+        has_specifics = (
+            bool(cleaned.get("opening_date"))
+            and bool(cleaned.get("room_count"))
+            and bool(cleaned.get("address"))
         )
-        return None
+        is_trustworthy = confidence == "high" and meaningful >= 8 and has_specifics
+
+        logger.debug(
+            f"Grounding PHANTOM data [{hotel_name}] "
+            f"({'TRUSTED' if is_trustworthy else 'rejected'} — no sources): "
+            + json.dumps(cleaned, default=str)
+        )
+
+        if is_trustworthy:
+            logger.warning(
+                f"Grounding PHANTOM-TRUSTED for '{hotel_name}' — "
+                f"confidence=high, {meaningful} fields filled, no citations. "
+                f"Gemini answered from training data (well-documented property). "
+                f"Proceeding without source verification."
+            )
+            # Fall through — treat like a real grounding success but mark
+            # the path so downstream logs can distinguish it.
+            sources = ["[training-data — no live citations]"]
+        else:
+            logger.warning(
+                f"Grounding PHANTOM for '{hotel_name}' — returned {meaningful} "
+                f"fields, confidence={confidence}, has_specifics={has_specifics}, "
+                f"ZERO sources — falling back to Serper+Gemini"
+            )
+            return None
 
     logger.info(
         f"Grounding SUCCESS for '{hotel_name}' in {elapsed:.1f}s "
         f"(via us-central1): {meaningful} fields filled, "
         f"{len(sources)} sources read"
     )
+    logger.info(f"Grounding raw [{hotel_name}]: " + json.dumps(parsed, default=str))
     logger.info(
-        f"Grounding raw [{hotel_name}] keys={list(parsed.keys())} "
-        f"opening_date={parsed.get('opening_date')!r} "
-        f"project_type={parsed.get('project_type')!r}"
+        f"Grounding cleaned [{hotel_name}]: " + json.dumps(cleaned, default=str)
     )
+
+    # ── Key insights: extract sales-critical intel from description ──
+    # If grounding's description contains phase/construction/timeline language,
+    # store it as key_insights so sales sees it in the dashboard panel.
+    # This captures info like "Phase 1 completion late 2026" that doesn't
+    # fit a structured field but is critical for knowing when to reach out.
+    _SALES_INTEL_KEYWORDS = {
+        "phase",
+        "completion",
+        "complete",
+        "construction",
+        "break ground",
+        "groundbreaking",
+        "expected to open",
+        "scheduled to open",
+        "projected",
+        "anticipated",
+        "redevelopment",
+        "mixed-use",
+        "first phase",
+        "phase 1",
+        "phase 2",
+        "phase one",
+        "phase two",
+    }
+    _grounding_desc = cleaned.get("description", "")
+    if _grounding_desc and any(
+        kw in _grounding_desc.lower() for kw in _SALES_INTEL_KEYWORDS
+    ):
+        cleaned["key_insights"] = _grounding_desc
+        logger.info(
+            f"Grounding: extracted key_insights from description for '{hotel_name}' "
+            f"(contains phase/construction/timeline language)"
+        )
 
     # Build return shape compatible with what enrich_lead_data normally returns
     cleaned["changes"] = [k for k in cleaned if k not in ("confidence",)]

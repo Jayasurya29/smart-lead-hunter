@@ -53,12 +53,17 @@ export function useLeads(
       page,
       per_page,
       search: search || undefined,
-      location:   filters.location || undefined,
-      brand_tier: filters.tier || undefined,
-      timeline:   filters.timeline || undefined,
-      year:       filters.year || undefined,
-      added:      filters.added || undefined,
-      sort:       filters.sort || undefined,
+      location:           filters.location || undefined,
+      brand_tier:         filters.tier || undefined,
+      timeline:           filters.timeline || undefined,
+      year:               filters.year || undefined,
+      added:              filters.added || undefined,
+      sort:               filters.sort || undefined,
+      // HV-4: pass as number; '0' means "never reviewed" → send 1 so the
+      // backend NULL check fires (last_user_review_at IS NULL catches those)
+      review_stale_days:  filters.review_stale_days
+        ? (filters.review_stale_days === '0' ? 1 : Number(filters.review_stale_days))
+        : undefined,
     }),
     refetchInterval: 30_000,
     refetchIntervalInBackground: false,

@@ -53,6 +53,8 @@ async def enrich_lead(lead_id: int, _csrf=Depends(require_ajax)):
         state = lead.state or ""
         country = lead.country or "USA"
         management_company = lead.management_company or ""
+        developer = lead.developer or ""
+        owner = lead.owner or ""
         opening_date = lead.opening_date or ""
         timeline_label = lead.timeline_label or ""
         description = lead.description or ""
@@ -74,6 +76,8 @@ async def enrich_lead(lead_id: int, _csrf=Depends(require_ajax)):
             state=state,
             country=country,
             management_company=management_company,
+            developer=developer,
+            owner=owner,
             opening_date=opening_date,
             timeline_label=timeline_label,
             description=description,
@@ -1369,6 +1373,8 @@ async def enrich_lead_stream(lead_id: int, request: Request):
                 "state": lead.state or "",
                 "country": lead.country or "USA",
                 "management_company": lead.management_company or "",
+                "developer": lead.developer or "",
+                "owner": lead.owner or "",
                 "opening_date": lead.opening_date or "",
                 "timeline_label": lead.timeline_label or "",
                 "description": lead.description or "",

@@ -742,6 +742,41 @@ async def dashboard_delete_lead(
 
 
 # ═══════════════════════════════════════════════════════════════
+#  MARK REVIEWED (HV-4)
+# ═══════════════════════════════════════════════════════════════
+
+
+@router.post("/api/dashboard/leads/{lead_id}/mark-reviewed", tags=["Dashboard"])
+async def dashboard_mark_reviewed(
+    lead_id: int,
+    db: AsyncSession = Depends(get_db),
+    _csrf=Depends(require_ajax),
+):
+    """Stamp last_user_review_at when a human opens a lead.
+
+    Called fire-and-forget by the frontend whenever a lead row is clicked.
+    Lightweight — no audit log, no CRM sync, no invalidation needed.
+    Only writes if the lead exists and the column isn't already stamped
+    within the last 60 seconds (prevents duplicate writes on rapid clicks).
+    """
+    result = await db.execute(select(PotentialLead).where(PotentialLead.id == lead_id))
+    lead = result.scalar_one_or_none()
+    if not lead:
+        return JSONResponse(content={"detail": "Lead not found"}, status_code=404)
+
+    now = local_now()
+    # Debounce: skip if already stamped in the last 60 seconds
+    if lead.last_user_review_at:
+        delta = (now - lead.last_user_review_at).total_seconds()
+        if delta < 60:
+            return {"status": "debounced", "id": lead_id}
+
+    lead.last_user_review_at = now
+    await db.commit()
+    return {"status": "ok", "id": lead_id}
+
+
+# ═══════════════════════════════════════════════════════════════
 #  SOURCES LIST
 # ═══════════════════════════════════════════════════════════════
 

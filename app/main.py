@@ -199,7 +199,7 @@ class RequestIDMiddleware:
 # the app already runs for Celery) before scaling out workers. Same
 # applies to the login-attempts dict in app/routes/auth.py.
 _rate_limit_store: dict = defaultdict(lambda: {"count": 0, "reset": 0.0})
-_RATE_LIMIT_MAX = 200
+_RATE_LIMIT_MAX = 400  # increased from 200 — internal tool fires 6 req/click
 _RATE_LIMIT_WINDOW = 60.0
 _RATE_LIMIT_MAX_ENTRIES = 10000
 _rate_limit_last_cleanup = 0.0
@@ -249,7 +249,13 @@ class RateLimitMiddleware:
         request = _Req(scope, receive)
         path = request.url.path
 
-        if path in _SSE_PATHS or not path.startswith(_RATE_LIMITED_PREFIXES):
+        # mark-reviewed is fire-and-forget (stamps last_user_review_at on click)
+        # — exempt from rate limiting so rapid lead browsing doesn't 429.
+        if (
+            path in _SSE_PATHS
+            or not path.startswith(_RATE_LIMITED_PREFIXES)
+            or path.endswith("/mark-reviewed")
+        ):
             await self.app(scope, receive, send)
             return
 

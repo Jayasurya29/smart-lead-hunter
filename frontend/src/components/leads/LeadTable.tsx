@@ -136,6 +136,14 @@ function sortLeads(leads: Lead[], sort: string): Lead[] {
       case 'oldest':
         return new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
 
+      // HV-4: stale review sort — never-reviewed (null) first, then oldest review first
+      case 'review_stale': {
+        const ra = a.last_user_review_at ? new Date(a.last_user_review_at).getTime() : 0
+        const rb = b.last_user_review_at ? new Date(b.last_user_review_at).getTime() : 0
+        if (ra === rb) return (b.lead_score ?? 0) - (a.lead_score ?? 0) // tie-break by score
+        return ra - rb // 0 (never reviewed) sorts first
+      }
+
       default:
         return 0
     }

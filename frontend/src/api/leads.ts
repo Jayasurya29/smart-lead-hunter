@@ -17,39 +17,42 @@ export interface LeadFilters {
   year?: string
   added?: string
   sort?: string
+  review_stale_days?: number  // HV-4: stale review filter
 }
 
 /* Map frontend sort keys → backend sort keys */
 const SORT_MAP: Record<string, string> = {
-  score_high:   'score_desc',
-  score_low:    'score_asc',
-  hotel_az:     'name_asc',
-  hotel_za:     'name_desc',
-  newest:       'newest',
-  oldest:       'oldest',
-  opening_soon: 'opening_asc',
-  opening_late: 'opening_desc',
-  tier_asc:     'tier_asc',
-  tier_desc:    'tier_desc',
-  time_asc:     'time_asc',
-  time_desc:    'time_desc',
-  location_az:  'location_asc',
-  location_za:  'location_desc',
+  score_high:    'score_desc',
+  score_low:     'score_asc',
+  hotel_az:      'name_asc',
+  hotel_za:      'name_desc',
+  newest:        'newest',
+  oldest:        'oldest',
+  opening_soon:  'opening_asc',
+  opening_late:  'opening_desc',
+  tier_asc:      'tier_asc',
+  tier_desc:     'tier_desc',
+  time_asc:      'time_asc',
+  time_desc:     'time_desc',
+  location_az:   'location_asc',
+  location_za:   'location_desc',
+  review_stale:  'review_stale',  // HV-4
 }
 
 export async function fetchLeads(filters: LeadFilters = {}): Promise<LeadListResponse> {
   const params = new URLSearchParams()
-  if (filters.page)       params.set('page', String(filters.page))
-  if (filters.per_page)   params.set('per_page', String(filters.per_page))
-  if (filters.status)     params.set('status', filters.status)
-  if (filters.search)     params.set('search', filters.search)
-  if (filters.min_score)  params.set('min_score', String(filters.min_score))
-  if (filters.location)   params.set('location', filters.location)
-  if (filters.brand_tier) params.set('brand_tier', filters.brand_tier)
-  if (filters.timeline)   params.set('timeline', filters.timeline)
-  if (filters.year)       params.set('year', filters.year)
-  if (filters.added)      params.set('added', filters.added)
-  if (filters.sort)       params.set('sort', SORT_MAP[filters.sort] || filters.sort)
+  if (filters.page)               params.set('page', String(filters.page))
+  if (filters.per_page)           params.set('per_page', String(filters.per_page))
+  if (filters.status)             params.set('status', filters.status)
+  if (filters.search)             params.set('search', filters.search)
+  if (filters.min_score)          params.set('min_score', String(filters.min_score))
+  if (filters.location)           params.set('location', filters.location)
+  if (filters.brand_tier)         params.set('brand_tier', filters.brand_tier)
+  if (filters.timeline)           params.set('timeline', filters.timeline)
+  if (filters.year)               params.set('year', filters.year)
+  if (filters.added)              params.set('added', filters.added)
+  if (filters.sort)               params.set('sort', SORT_MAP[filters.sort] || filters.sort)
+  if (filters.review_stale_days)  params.set('review_stale_days', String(filters.review_stale_days))
 
   const { data } = await api.get<LeadListResponse>(`/leads?${params}`)
   return data
@@ -66,6 +69,16 @@ export async function fetchLead(id: number): Promise<Lead> {
 
 export async function approveLead(id: number): Promise<void> {
   await api.post(`/api/dashboard/leads/${id}/approve`)
+}
+
+// HV-4: fire-and-forget — stamps last_user_review_at when a lead is opened.
+// No await needed at call site; failures are silently swallowed.
+export async function markLeadReviewed(id: number): Promise<void> {
+  try {
+    await api.post(`/api/dashboard/leads/${id}/mark-reviewed`)
+  } catch {
+    // non-critical — never surface this error to the user
+  }
 }
 
 export async function rejectLead(id: number, reason?: string): Promise<void> {
@@ -138,6 +151,7 @@ export async function toggleContactScope(leadId: number, contactId: number, scop
   const { data } = await api.post(`/api/dashboard/leads/${leadId}/contacts/${contactId}/toggle-scope`, { scope })
   return data
 }
+
 /* ════════════════════════════════════════
    SCRAPE
    ════════════════════════════════════════ */
@@ -188,28 +202,16 @@ export async function checkDiscoveryStatus(discoveryId: string): Promise<any> {
   return data
 }
 
-/* Cancel an in-flight contact enrichment for a lead. Idempotent —
-   returns {cancelled: false} if no job is running, {cancelled: true}
-   if the running job was cancelled. */
 export async function cancelEnrichment(leadId: number): Promise<any> {
   const { data } = await api.post(`/api/dashboard/leads/${leadId}/enrich-cancel`)
   return data
 }
 
-/* Cheap polling endpoint — is an enrichment running for this lead?
-   Used on lead detail mount to decide whether to attach to existing
-   progress or show the "Run Enrichment" button. */
-/* Get current Smart Fill (in-flight) status for a lead.
-   Used on lead detail mount to decide whether to attach to a running
-   Smart Fill or show the idle Smart Fill button. */
 export async function getSmartFillStatus(leadId: number): Promise<{ running: boolean; mode: string | null }> {
   const { data } = await api.get(`/api/leads/${leadId}/smart-fill-status`)
   return data
 }
 
-/* Get current contact enrichment status for a lead.
-   Used on lead detail mount to decide whether to attach to existing
-   progress or show the "Run Enrichment" button. */
 export async function getEnrichmentStatus(leadId: number): Promise<any> {
   const { data } = await api.get(`/api/dashboard/leads/${leadId}/enrich-status`)
   return data

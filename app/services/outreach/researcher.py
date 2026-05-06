@@ -18,6 +18,7 @@ Cost per call: ~$0.10 (6 Serper + 1 website scrape + 1 Gemini synthesis).
 from __future__ import annotations
 
 import concurrent.futures
+import datetime
 import logging
 
 import httpx
@@ -30,6 +31,9 @@ from ._helpers import (
     fmt_known_context,
     invoke_json,
 )
+
+_CY = datetime.datetime.now().year  # current year — auto-updates Jan 1
+_NY = _CY + 1  # next year
 
 logger = logging.getLogger(__name__)
 
@@ -50,8 +54,8 @@ def _build_search_queries(state: dict) -> dict[str, str]:
     # Always-on queries
     queries = {
         "contact": f"{contact_name} {contact_title} {hotel}",
-        "news": f"{hotel} news 2026 {location}".strip(),
-        "awards": f"{hotel} awards recognition 2025 2026",
+        "news": f"{hotel} news {_CY} {location}".strip(),
+        "awards": f"{hotel} awards recognition {_CY-1} {_CY}",
     }
 
     # Tailor remaining 3 by project_type

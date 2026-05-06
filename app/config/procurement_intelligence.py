@@ -35,8 +35,12 @@ OPERATING MODELS:
                   Management company is the only target.
 """
 
+import datetime
 from dataclasses import dataclass, field
 from typing import Optional
+
+_CY = datetime.datetime.now().year  # current year — auto-updates Jan 1
+_NY = _CY + 1  # next year
 
 
 @dataclass
@@ -323,7 +327,7 @@ def build_prospecting_strategy(
             extra_queries=[
                 f'"{brand_org}" "VP Operations" OR "Pre-Opening" OR "Regional Director" site:linkedin.com',
                 f'"{brand_org}" {hotel_name} "General Manager" OR "appointed" OR "opening"',
-                f'"{hotel_name}" "pre-opening" team OR staff OR appointment 2026',
+                f'"{hotel_name}" "pre-opening" team OR staff OR appointment {_CY} OR {_NY}',
             ],
         )
 
@@ -353,7 +357,7 @@ def build_prospecting_strategy(
         extra = [
             f'"{mgmt_org}" "procurement" OR "purchasing" OR "vendor" site:linkedin.com',
             f'"{mgmt_org}" {hotel_name} "pre-opening" OR "opening" OR "appointed"',
-            f'"{hotel_name}" "General Manager" OR "appointed" OR "opening team" 2025 OR 2026',
+            f'"{hotel_name}" "General Manager" OR "appointed" OR "opening team" 2025 OR {_CY} OR {_NY}',
         ]
         if mgmt_intel and mgmt_intel.get("known_contacts"):
             for contact in mgmt_intel["known_contacts"]:
@@ -423,7 +427,7 @@ def build_prospecting_strategy(
             ),
             extra_queries=[
                 f'"{hotel_name}" "General Manager" OR "appointed" site:linkedin.com',
-                f'"{hotel_name}" opening team OR staff OR leadership 2026',
+                f'"{hotel_name}" opening team OR staff OR leadership {_CY} OR {_NY}',
                 f'"{primary_org}" "General Manager" OR "Director" hotel',
             ],
         )

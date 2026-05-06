@@ -65,9 +65,13 @@ PHASE MAPPING BY TIMELINE (timeline_label) + PROJECT TYPE:
     mgmt same    → Phase 2 (existing GM)
 """
 
+import datetime
 from dataclasses import dataclass
 from typing import Optional
 import re
+
+_CY = datetime.datetime.now().year  # current year — auto-updates Jan 1
+_NY = _CY + 1  # next year
 
 
 @dataclass
@@ -757,12 +761,12 @@ def get_phase_queries(
         if mgmt:
             queries += [
                 f'"{hotel_name}" "pre-opening General Manager" OR "opening General Manager" site:linkedin.com',
-                f'"{hotel_name}" opens 2026 general manager OR appointed',
+                f'"{hotel_name}" opens {_CY} OR {_NY} general manager OR appointed',
                 f'{mgmt} "general manager" {location} 2026',
                 f'{mgmt} procurement OR "vice president" operations',
                 f'"{hotel_name}" transformation announcement management team',
             ]
-        queries.append(f'"{hotel_name}" opening team OR pre-opening 2026')
+        queries.append(f'"{hotel_name}" opening team OR pre-opening {_CY} OR {_NY}')
         return queries
 
     # ───────────────────────────────────────────────────────────
@@ -781,7 +785,9 @@ def get_phase_queries(
                 f'"{hotel_name}" reimagining OR renovation project team',
                 f'"{hotel_name}" "opening team" OR "pre-opening team" reopening',
             ]
-        queries.append(f'"{hotel_name}" reopening 2026 leadership OR executive')
+        queries.append(
+            f'"{hotel_name}" reopening {_CY} OR {_NY} leadership OR executive'
+        )
         queries.append(f'"{hotel_name}" closed temporarily reopening management')
         return queries
 
@@ -799,14 +805,16 @@ def get_phase_queries(
             queries.append(f'"{hotel_name}" developer OR owner OR "{mgmt}" leadership')
         else:
             queries.append(f'"{hotel_name}" developer OR owner OR leadership')
-        queries.append(f'"{hotel_name}" opening 2026 management OR operations team')
+        queries.append(
+            f'"{hotel_name}" opening {_CY} OR {_NY} management OR operations team'
+        )
 
     elif phase == 2:
         queries += [
             f'"{hotel_name}" "General Manager" appointed OR hired OR joins OR named site:linkedin.com',
             f'"{hotel_name}" "Pre-Opening General Manager" OR "Opening General Manager" site:linkedin.com',
-            f'"{hotel_name}" {location} "General Manager" 2026',
-            f'{hotel_name} appoints OR names OR hires "General Manager" 2026',
+            f'"{hotel_name}" {location} "General Manager" {_CY} OR {_NY}',
+            f'{hotel_name} appoints OR names OR hires "General Manager" {_CY} OR {_NY} OR {_NY}',
             f'"{hotel_name}" "General Manager" announcement OR appointment',
         ]
         if mgmt:
@@ -836,7 +844,7 @@ def get_phase_queries(
             queries.append(f'"{hotel_name}" "{title}" site:linkedin.com')
 
         queries += [
-            f'"{hotel_name}" {location} team OR staff OR leadership 2026',
+            f'"{hotel_name}" {location} team OR staff OR leadership {_CY} OR {_NY}',
             f'"{hotel_name}" hiring OR joins OR appointed department director',
         ]
 

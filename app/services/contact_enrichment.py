@@ -67,6 +67,13 @@ logger = logging.getLogger(__name__)
 
 MAX_CONTACTS_TO_SAVE = 6
 
+# ── GROUNDED CONTACT FAST-PATH ──
+# Single Gemini googleSearch call asks "who makes uniform decisions here?"
+# instead of running 6-iteration Serper+Gemini pipeline. Uses us-central1
+# regional endpoint (same as lead_data_enrichment.py grounding path).
+_CONTACT_GROUNDING_TIMEOUT_S = 45.0
+_CONTACT_GROUNDING_MIN_CONTACTS = 2  # below this, fall back to iterative pipeline
+
 # Smart-distribution targets: desired mix of contacts in the final cap.
 # Fills in priority order — any unfilled slots get backfilled with the
 # best remaining contacts regardless of category. This ensures the
@@ -301,13 +308,13 @@ async def _call_gemini_single(
     timeout: int = 90,
     response_schema: Optional[dict] = None,
     max_output_tokens: int = 16384,
+    endpoint: Optional[str] = None,
 ) -> Optional[dict]:
     """Call Gemini API with retry and exponential backoff (SINGLE model only).
 
-    Wrapped by `_call_gemini` which adds multi-model fallback. Most callers
-    should use that — only use this directly if you specifically want to
-    bypass the fallback chain (e.g., the caller is itself part of the
-    fallback chain implementation).
+    Wrapped by `_call_gemini` which adds multi-model + multi-endpoint fallback.
+    Most callers should use that — only use this directly if you specifically
+    want to bypass the fallback chain.
 
     Returns parsed JSON response or None on failure.
     Retries on 429 (rate limit), 500, 503 (server errors).
@@ -316,20 +323,35 @@ async def _call_gemini_single(
         prompt: The user prompt.
         model: Model name; defaults to enrichment model.
         timeout: Request timeout in seconds.
-        response_schema: Optional OpenAPI-3.0 subset JSON schema. When provided
-            AND the provider is Vertex AI, sets responseMimeType + responseSchema
-            in generationConfig so Gemini returns structurally valid JSON by
-            construction (eliminates the malformed-JSON recovery path). Ignored
-            for non-Vertex providers.
-        max_output_tokens: Gemini 2.5 Flash's "thinking" tokens share this budget
-            with actual output (thoughts_token_count + output_token_count <= max).
-            Default 16384 is tight for large extractions — bump to 32768 for
-            big pages with many contacts to avoid mid-object truncation. Cap
-            is 65536.
+        response_schema: Optional OpenAPI-3.0 subset JSON schema.
+        max_output_tokens: Output token budget (default 16384).
+        endpoint: Vertex AI endpoint location override. When set, builds the
+            URL directly for that region (e.g. "us-central1", "us-east4",
+            "us-west1") instead of using the configured VERTEX_LOCATION.
+            "global" uses the global endpoint (aiplatform.googleapis.com).
+            None = use configured default (VERTEX_LOCATION env var).
     """
     if not model:
         model = get_enrichment_gemini_model()
-    url = get_gemini_url(model)
+
+    # Build URL — either for a specific endpoint or the configured default
+    if endpoint is not None:
+        from app.services.ai_client import _get_config, _ensure_init
+
+        _ensure_init()
+        config = _get_config()
+        project = config["vertex_project_id"]
+        if endpoint == "global":
+            host = "aiplatform.googleapis.com"
+        else:
+            host = f"{endpoint}-aiplatform.googleapis.com"
+        url = (
+            f"https://{host}/v1/"
+            f"projects/{project}/locations/{endpoint}/"
+            f"publishers/google/models/{model}:generateContent"
+        )
+    else:
+        url = get_gemini_url(model)
     generation_config: dict = {
         "temperature": 0.1,
         "maxOutputTokens": max_output_tokens,
@@ -509,19 +531,42 @@ async def _call_gemini_single(
             logger.error(f"Gemini response parse error: {e}")
             return None
         except Exception as e:
-            delay = _retry_delay_with_jitter(attempt)
-            # Empty exception messages have plagued these logs forever —
-            # use repr() and type() so we can finally see what's failing.
             err_type = type(e).__name__
-            err_repr = repr(e) if str(e) else f"{err_type}(<empty msg>)"
+            err_repr = repr(e) or f"{err_type}(no details)"
+
+            # ── EARLY BAILOUT FOR TIMEOUT ERRORS ──
+            # ReadTimeout / ConnectTimeout mean Gemini received the request
+            # but didn't respond in time — the model's DSQ pool is overloaded.
+            # Retrying the SAME model 6 times wastes 7+ minutes (90s × 6).
+            # After 2 consecutive timeouts, bail out immediately so the
+            # multi-model fallback chain in _call_gemini() can try a
+            # different model with its own fresh DSQ pool.
+            is_timeout = err_type in (
+                "ReadTimeout",
+                "ConnectTimeout",
+                "PoolTimeout",
+                "TimeoutException",
+            )
+            if is_timeout and attempt >= 1:
+                logger.warning(
+                    f"Gemini [{err_type}] on attempt {attempt + 1} — "
+                    f"bailing out to try fallback model (same model keeps timing out)"
+                )
+                last_error = err_repr
+                break  # exit retry loop → _call_gemini() tries next model
+
+            delay = _retry_delay_with_jitter(attempt)
             logger.warning(
                 f"Gemini call failed (attempt {attempt + 1}/{_GEMINI_RETRY_ATTEMPTS}): "
-                f"{err_repr}, retrying in {delay:.1f}s..."
+                f"[{err_type}] {err_repr}, retrying in {delay:.1f}s..."
             )
             await asyncio.sleep(delay)
             last_error = err_repr
 
-    logger.error(f"Gemini failed after {_GEMINI_RETRY_ATTEMPTS} attempts: {last_error}")
+    logger.error(
+        f"Gemini [{model}] failed after {attempt + 1} attempt(s) "
+        f"(max={_GEMINI_RETRY_ATTEMPTS}): {last_error}"
+    )
     return None
 
 
@@ -544,30 +589,30 @@ async def _call_gemini_single(
 #
 # Order matters — best model first, lighter fallbacks after.
 
-_GEMINI_FALLBACK_CHAIN = [
-    # Primary — env-controlled. Defaults to gemini-2.5-flash via ai_client.
-    None,  # placeholder, resolved at call time to the env-configured model
-    # ── First fallback: gemini-3-flash-preview ──
-    # Google's newest Flash (released April 2026). Different model family
-    # from 2.5-flash → SEPARATE DSQ pool. Few customers have migrated yet,
-    # so pool is much less crowded. Quality matches or BEATS 2.5-flash on
-    # extraction tasks (per Google's launch benchmarks). Verified working
-    # on this project 2026-05-01 via test_gemini_models.py.
-    "gemini-3-flash-preview",
-    # ── Second fallback: gemini-3.1-flash-lite-preview ──
-    # Newest Flash-Lite tier, separate pool again. Optimized for high-volume
-    # cost-sensitive traffic. Worse than 3-flash on complex reasoning but
-    # still competitive with 2.5-flash on simple extractions. Verified
-    # working on this project 2026-05-01.
-    "gemini-3.1-flash-lite-preview",
-    # ── Last resort: gemini-2.5-flash-lite ──
-    # Stable GA model, separate pool from 2.5-flash. Quality drop is real
-    # (~5-10% on extraction) but better than failing. Always available.
-    # Verified working on this project 2026-05-01.
-    "gemini-2.5-flash-lite",
-    # NOT in chain (verified inaccessible on this project 2026-05-01):
-    #   gemini-2.0-flash-001 — returns 404. Per Google's docs, access was
-    #   frozen for new customers on 2026-03-06.
+# ── FALLBACK CHAIN: (model, endpoint) tuples ──
+# Verified 2026-05-06 via scripts/test_endpoints.py + scripts/test_endpoints2.py
+#
+# Working combinations:
+#   gemini-2.5-flash      global ✅  us-central1 ✅  us-east4 ✅  us-west1 ✅
+#   gemini-3-flash-preview global ✅  us-central1 ❌  us-east4 ❌  us-west1 ❌
+#   gemini-2.5-flash-lite  global ✅  us-central1 ✅  us-east4 ✅  us-west1 ✅
+#
+# Strategy: exhaust all ENDPOINTS for the primary model before downgrading
+# quality. Each region is separate physical infrastructure + separate DSQ pool.
+# None in model position = resolved at call time to env-configured primary.
+_GEMINI_FALLBACK_CHAIN: list[tuple] = [
+    # ── Primary model (gemini-2.5-flash) — 4 endpoints ──
+    (None, "global"),  # 1. primary default
+    (None, "us-central1"),  # 2. regional — proven reliable
+    (None, "us-east4"),  # 3. east coast region
+    (None, "us-west1"),  # 4. west coast region
+    # ── gemini-3-flash-preview — global only ──
+    ("gemini-3-flash-preview", "global"),  # 5. different model family/pool
+    # ── gemini-2.5-flash-lite — 4 endpoints, last resort ──
+    ("gemini-2.5-flash-lite", "global"),  # 6.
+    ("gemini-2.5-flash-lite", "us-central1"),  # 7.
+    ("gemini-2.5-flash-lite", "us-east4"),  # 8.
+    ("gemini-2.5-flash-lite", "us-west1"),  # 9. absolute last resort
 ]
 
 
@@ -578,11 +623,20 @@ async def _call_gemini(
     response_schema: Optional[dict] = None,
     max_output_tokens: int = 16384,
 ) -> Optional[dict]:
-    """Multi-model wrapper — tries each model in the fallback chain until
-    one succeeds or all are exhausted. The original retry-with-backoff
-    logic lives in _call_gemini_single (each call to the wrapper does
-    its own retry loop)."""
-    # If caller specified a model, honor that — single model, no fallback
+    """Multi-model + multi-endpoint fallback wrapper.
+
+    Iterates through _GEMINI_FALLBACK_CHAIN — a list of (model, endpoint)
+    tuples verified 2026-05-06. Each tuple is a genuinely separate DSQ pool:
+    - Different models → different model family quota
+    - Different endpoints → different regional infrastructure
+
+    Strategy: exhaust all endpoints for primary model first (same quality),
+    then try fallback models. This keeps output quality high for as long as
+    possible before degrading to the lite model.
+
+    If caller specifies model= explicitly, honor that — single model, no chain.
+    """
+    # Caller pinned a specific model — single attempt, no fallback
     if model is not None:
         return await _call_gemini_single(
             prompt,
@@ -592,41 +646,47 @@ async def _call_gemini(
             max_output_tokens=max_output_tokens,
         )
 
-    # Build the chain: primary model + the rest
     primary_model = get_enrichment_gemini_model()
-    chain = [primary_model] + [
-        m
-        for m in _GEMINI_FALLBACK_CHAIN[1:]  # skip placeholder
-        if m and m != primary_model  # don't repeat primary
-    ]
 
-    last_error_model: Optional[str] = None
-    for idx, attempt_model in enumerate(chain):
+    # Resolve None placeholders to primary model, skip exact duplicates
+    chain: list[tuple[str, str]] = []
+    seen = set()
+    for m, ep in _GEMINI_FALLBACK_CHAIN:
+        resolved_model = m if m else primary_model
+        key = (resolved_model, ep)
+        if key not in seen:
+            seen.add(key)
+            chain.append((resolved_model, ep))
+
+    last_label = None
+    for idx, (attempt_model, attempt_endpoint) in enumerate(chain):
         is_fallback = idx > 0
+        label = f"{attempt_model} @ {attempt_endpoint}"
+
         if is_fallback:
             logger.warning(
-                f"[FALLBACK] Primary model {primary_model!r} exhausted retries — "
-                f"trying fallback model {attempt_model!r} (different DSQ pool)"
+                f"[FALLBACK #{idx}] Trying {label} " f"(prev failed: {last_label})"
             )
+
         result = await _call_gemini_single(
             prompt,
             model=attempt_model,
             timeout=timeout,
             response_schema=response_schema,
             max_output_tokens=max_output_tokens,
+            endpoint=attempt_endpoint,
         )
+
         if result is not None:
             if is_fallback:
-                logger.info(
-                    f"[FALLBACK] ✓ Recovered via fallback model {attempt_model!r} "
-                    f"after primary {primary_model!r} failed"
-                )
+                logger.info(f"[FALLBACK] ✓ Recovered via {label}")
             return result
-        last_error_model = attempt_model
+
+        last_label = label
 
     logger.error(
-        f"All {len(chain)} models in fallback chain failed (last: {last_error_model!r}). "
-        f"Falling back to non-AI heuristics in caller."
+        f"All {len(chain)} fallback combinations exhausted "
+        f"(last: {last_label}). Returning None."
     )
     return None
 
@@ -1911,6 +1971,623 @@ async def _extract_contacts_with_gemini(
     except Exception as e:
         logger.error(f"Gemini extraction failed: {e}")
         return None
+
+
+# ═══════════════════════════════════════════════════════════════
+# GROUNDED CONTACT FAST-PATH — one-shot Gemini googleSearch
+# ═══════════════════════════════════════════════════════════════
+# Instead of searching role-by-role (GM, Director of Housekeeping, etc.),
+# ask Gemini the *business question* directly: "Who at this hotel or its
+# management company is responsible for uniform purchasing decisions?"
+#
+# Advantages over the iterative pipeline:
+#   - Intent-based search — Gemini understands WHAT we need, not just titles
+#   - Surfaces centralized procurement at the management company (P1 priority)
+#     without us having to know which titles to look for
+#   - Finds press releases + LinkedIn + trade publications in one shot
+#   - ~15-20s vs 2-3 minutes for the 6-iteration pipeline
+#   - Falls back cleanly if grounding returns < 2 named contacts
+
+
+def _build_contact_grounding_prompt(
+    hotel_name: str,
+    management_company: Optional[str],
+    developer: Optional[str],
+    owner: Optional[str],
+    brand: Optional[str],
+    city: Optional[str],
+    state: Optional[str],
+    country: Optional[str],
+    opening_date: Optional[str],
+) -> str:
+    """Build a context-aware grounding prompt using full SLH intelligence stack.
+
+    Uses BrandRegistry, procurement_intelligence, and MANAGEMENT_COMPANY_INTEL
+    to tell Gemini EXACTLY who to search for based on:
+    - Operating model (managed / franchised / collection / all_inclusive / independent)
+    - Procurement model (avendra_gpo / brand_managed / owner_managed / fully_open)
+    - Management company known intel (procurement titles, portfolio size)
+    - Developer/owner involvement (pre-opening budget control)
+    - Pre-opening vs open status
+    """
+    from app.config.brand_registry import BrandRegistry
+    from app.config.procurement_intelligence import (
+        build_prospecting_strategy,
+        get_management_company_intel,
+    )
+
+    location = ", ".join(filter(None, [city, state, country]))
+    mode = _get_search_mode(opening_date)
+    is_pre_opening = mode == "pre_opening"
+
+    # ── Pull brand intelligence ──
+    brand_info = None
+    operating_model = "unknown"
+    procurement_model = "unknown"
+    uniform_freedom = "medium"
+    gpo = None
+    pre_opening_titles = []
+    try:
+        if brand:
+            brand_info = BrandRegistry.lookup(brand)
+            operating_model = brand_info.operating_model or "unknown"
+            procurement_model = brand_info.procurement_model or "unknown"
+            uniform_freedom = brand_info.uniform_freedom or "medium"
+            gpo = brand_info.gpo
+            pre_opening_titles = brand_info.pre_opening_contact_titles or []
+    except Exception:
+        pass
+
+    # ── Pull management company intelligence ──
+    mgmt_intel = get_management_company_intel(management_company or "")
+    mgmt_procurement_titles = []
+    mgmt_ops_titles = []
+    mgmt_known_contacts = []
+    mgmt_portfolio = ""
+    mgmt_note = ""
+    if mgmt_intel:
+        mgmt_procurement_titles = mgmt_intel.get("procurement_titles", [])
+        mgmt_ops_titles = mgmt_intel.get("ops_titles", [])
+        mgmt_known_contacts = mgmt_intel.get("known_contacts", [])
+        mgmt_portfolio = mgmt_intel.get("portfolio_size", "")
+        mgmt_note = mgmt_intel.get("note", "")
+
+    # ── Build prospecting strategy ──
+    try:
+        strategy = build_prospecting_strategy(
+            hotel_name=hotel_name,
+            brand=brand,
+            management_company=management_company,
+            operating_model=operating_model,
+            procurement_model=procurement_model,
+            gpo=gpo,
+            months_until_opening=None,
+        )
+        primary_titles = strategy.primary_titles[:6]
+        secondary_titles = strategy.secondary_titles[:4]
+        approach_note = strategy.approach_note
+    except Exception:
+        primary_titles = [
+            "Director of Procurement",
+            "VP Procurement",
+            "Director of Purchasing",
+            "Director of Operations",
+            "General Manager",
+            "SVP Operations",
+        ]
+        secondary_titles = [
+            "Director of Housekeeping",
+            "Executive Housekeeper",
+            "Purchasing Manager",
+        ]
+        approach_note = ""
+
+    # Merge brand-specific titles at the front
+    all_primary = []
+    seen = set()
+    for t in pre_opening_titles[:3] + primary_titles:
+        if t.lower() not in seen:
+            seen.add(t.lower())
+            all_primary.append(t)
+    all_primary = all_primary[:7]
+
+    # ── Build context blocks ──
+
+    # GPO warning
+    gpo_block = ""
+    if gpo and uniform_freedom == "low":
+        gpo_block = f"""
+⚠️ GPO ALERT: {brand or hotel_name} uses {gpo} for procurement.
+JA Uniforms must be {gpo}-approved to easily sell to this brand.
+Focus on PROPERTY-LEVEL contacts (GM, Dir of Housekeeping) who have
+more flexibility than corporate procurement on non-mandated items like uniforms."""
+
+    # Developer block (pre-opening budget control)
+    developer_block = ""
+    if developer and is_pre_opening:
+        developer_block = f"""
+DEVELOPER: {developer}
+The developer controls the ENTIRE FF&E and OS&E budget during construction.
+For pre-opening hotels, the developer signs vendor contracts BEFORE the operator
+takes over — including uniforms. They are P1 contacts RIGHT NOW.
+Search for: CEO, President, CFO, Managing Director at {developer}"""
+
+    # Owner block
+    owner_block = ""
+    if owner and owner != developer:
+        owner_block = f"""
+PROPERTY OWNER: {owner}
+The property owner approves all major vendor spend.
+{"For this independent/boutique property, the owner IS the procurement decision-maker." if operating_model in ("independent", "unknown") else ""}
+Search for: Principal, President, Managing Partner, CEO at {owner}"""
+
+    # Management company block
+    mgmt_block = ""
+    if management_company:
+        titles_to_show = (mgmt_procurement_titles + mgmt_ops_titles)[:5]
+        if not titles_to_show:
+            titles_to_show = all_primary[:4]
+        portfolio_str = f" ({mgmt_portfolio})" if mgmt_portfolio else ""
+        known_str = ""
+        if mgmt_known_contacts:
+            known_str = "\n  Known contacts: " + ", ".join(mgmt_known_contacts)
+        mgmt_block = f"""
+MANAGEMENT COMPANY: {management_company}{portfolio_str}
+{mgmt_note}
+ONE relationship at {management_company} = access to ALL their properties.
+Search for these titles at {management_company}:{known_str}
+{chr(10).join(f"  - {t}" for t in titles_to_show)}"""
+
+    # Operating model context
+    if operating_model == "all_inclusive":
+        model_context = f"""
+OPERATING MODEL: ALL-INCLUSIVE (fully centralized procurement)
+ALL procurement decisions are made at {management_company or brand} corporate.
+Property GMs have ZERO purchasing authority.
+ONLY search corporate-level procurement and operations executives."""
+
+    elif operating_model == "managed":
+        model_context = """
+OPERATING MODEL: BRAND-MANAGED (e.g. Four Seasons, Aman, EDITION)
+The brand's regional operations team controls vendor standards.
+For pre-opening: search brand corporate VP Operations / Pre-Opening Director.
+The incoming GM (announced 6-12 months before opening) is also P1."""
+
+    elif operating_model in ("franchised", "collection"):
+        model_context = f"""
+OPERATING MODEL: {operating_model.upper()} (management company controls day-to-day)
+The management company ({management_company or "unknown"}) is the PRIMARY target.
+Their corporate procurement team buys uniforms for ALL their properties.
+Brand corporate (e.g. Marriott HQ) does NOT control procurement here."""
+
+    elif uniform_freedom == "high" or operating_model == "independent":
+        model_context = """
+OPERATING MODEL: INDEPENDENT / BOUTIQUE (owner controls everything)
+No corporate procurement layer — the owner/operator makes all vendor decisions.
+The owner, managing director, or GM is the uniform buyer.
+Include owner/founder-level contacts — they ARE the decision-makers here."""
+
+    else:
+        model_context = ""
+
+    # Pre-opening vs open status
+    if is_pre_opening:
+        status_context = f"""
+STATUS: PRE-OPENING — uniforms must be ordered 6+ months before opening.
+The management company's PRE-OPENING TEAM is being assembled RIGHT NOW.
+Search specifically for:
+  - Pre-Opening Project Manager / Pre-Opening Director at {management_company or brand or "the operator"}
+  - Incoming General Manager (announced via press release / LinkedIn)
+  - Corporate procurement VP at {management_company or brand or "the operator"}"""
+    else:
+        status_context = """
+STATUS: OPEN AND OPERATING
+Search for property-level operational staff first:
+  - Director of Housekeeping / Executive Housekeeper (specifies uniforms)
+  - Director of Purchasing / Purchasing Manager (issues POs)
+  - General Manager (approves vendor relationships)"""
+
+    # Build LinkedIn search guidance
+    li_searches = []
+    primary_org = management_company or brand or hotel_name
+    for title in all_primary[:3]:
+        li_searches.append(f'  site:linkedin.com/in "{primary_org}" "{title}"')
+    if developer and is_pre_opening:
+        li_searches.append(
+            f'  site:linkedin.com/in "{developer}" CEO OR President OR CFO'
+        )
+    li_searches.append(
+        f'  "{hotel_name}" "General Manager" OR "appointed" site:linkedin.com'
+    )
+
+    li_block = "LinkedIn searches to run:\n" + "\n".join(li_searches)
+
+    return f"""You are a B2B sales researcher for JA Uniforms — a hotel uniform supplier
+in Miami, FL. JA Uniforms sells staff uniforms EXCLUSIVELY to 4-star and above
+hotels (luxury, upper-upscale, upscale). NOT for budget or economy hotels.
+
+═══════════════════════════════════════════════════════
+TARGET PROPERTY
+═══════════════════════════════════════════════════════
+HOTEL: {hotel_name}
+LOCATION: {location}
+{"BRAND: " + brand if brand else ""}
+{"OPENING DATE: " + opening_date if opening_date else ""}
+{gpo_block}
+{model_context}
+{status_context}
+{developer_block}
+{owner_block}
+{mgmt_block}
+
+═══════════════════════════════════════════════════════
+SEARCH STRATEGY — WHO TO FIND
+═══════════════════════════════════════════════════════
+{approach_note}
+
+PRIORITY 1 — These titles at {primary_org}:
+{chr(10).join(f"  • {t}" for t in all_primary)}
+
+PRIORITY 2 — Property-level operational staff:
+{chr(10).join(f"  • {t}" for t in secondary_titles)}
+
+{"PRIORITY 3 — Developer/Owner:" + chr(10) + "  • CEO, President, Managing Director, CFO at " + (developer or owner or "") if (developer or owner) and is_pre_opening else ""}
+
+{li_block}
+
+Also search: press releases, appointment announcements, trade publications
+(Hotel Management, Hospitality Net, HotelNewsNow), contact directories
+(RocketReach, ZoomInfo, SignalHire), hotel/operator websites.
+
+⚠️ DO NOT prioritize: generic CEO/Founder/Investor/Board Member unless they
+are explicitly the property owner or developer with budget control.
+
+═══════════════════════════════════════════════════════
+RETURN FORMAT
+═══════════════════════════════════════════════════════
+Return up to 5 contacts as JSON, ranked by procurement authority:
+{{
+  "contacts": [
+    {{
+      "name": "Full Name",
+      "title": "Current Job Title",
+      "organization": "Their employer (hotel OR management company OR developer)",
+      "linkedin_url": "https://linkedin.com/in/slug — include if found, else null",
+      "email": "work@email.com — only if publicly available, else null",
+      "decision_role": "specifier|buyer|approver",
+      "why_relevant": "1 sentence explaining their procurement authority",
+      "confidence": "high|medium|low"
+    }}
+  ],
+  "search_summary": "What sources were found and any limitations"
+}}
+
+CONFIDENCE:
+- high = Named in press release, official website, or trade article with title + hotel
+- medium = Found on LinkedIn with clear current role
+- low = Inferred from context
+
+RANKING (most important first):
+1. Management company procurement/operations (controls ALL their properties)
+2. Incoming GM announced for this specific property
+3. Director of Housekeeping / Purchasing at property or management company
+4. Developer/Owner (for pre-opening budget authority)
+5. Brand corporate (last resort — only for brand-managed or all-inclusive)
+
+Return ONLY valid JSON — no preamble, no markdown fences.
+If no contacts found: {{"contacts": [], "search_summary": "reason"}}"""
+
+
+async def _enrich_contacts_grounded(
+    hotel_name: str,
+    brand: Optional[str],
+    management_company: Optional[str],
+    developer: Optional[str],
+    owner: Optional[str],
+    city: Optional[str],
+    state: Optional[str],
+    country: Optional[str],
+    opening_date: Optional[str],
+) -> Optional[list[dict]]:
+    """One-shot grounded contact enrichment via Gemini googleSearch.
+
+    Returns list of contact dicts (2+ found) or None to trigger pipeline fallback.
+
+    Uses the us-central1 regional endpoint — global endpoint produces phantom
+    grounding (zero citations, unverified data) for the same reason as in
+    lead_data_enrichment.py.
+    """
+    import time as _time
+
+    try:
+        from app.services.gemini_client import get_gemini_headers
+        from app.services.ai_client import _get_config, _ensure_init
+
+        _ensure_init()
+        config = _get_config()
+        project = config["vertex_project_id"]
+        model = config["model"]
+        grounding_location = "us-central1"
+        url = (
+            f"https://{grounding_location}-aiplatform.googleapis.com/v1/"
+            f"projects/{project}/locations/{grounding_location}/"
+            f"publishers/google/models/{model}:generateContent"
+        )
+        headers = get_gemini_headers()
+    except Exception as e:
+        logger.warning(f"Contact grounding: cannot build URL/headers: {e}")
+        return None
+
+    prompt = _build_contact_grounding_prompt(
+        hotel_name=hotel_name,
+        management_company=management_company,
+        developer=developer,
+        owner=owner,
+        brand=brand,
+        city=city,
+        state=state,
+        country=country,
+        opening_date=opening_date,
+    )
+
+    payload = {
+        "contents": [{"role": "user", "parts": [{"text": prompt}]}],
+        "tools": [{"googleSearch": {}}],
+        "generationConfig": {
+            "temperature": 1.0,  # required for grounding per Vertex docs
+            "maxOutputTokens": 4096,
+        },
+    }
+
+    _get_client()  # ensure client is initialized
+    start = _time.monotonic()
+    try:
+        async with httpx.AsyncClient(timeout=_CONTACT_GROUNDING_TIMEOUT_S) as gc:
+            resp = await gc.post(url, headers=headers, json=payload)
+        resp.raise_for_status()
+        data = resp.json()
+    except httpx.TimeoutException:
+        logger.warning(
+            f"Contact grounding TIMEOUT after {_time.monotonic()-start:.1f}s "
+            f"for '{hotel_name}' — falling back to pipeline"
+        )
+        return None
+    except Exception as e:
+        logger.warning(
+            f"Contact grounding ERROR for '{hotel_name}': {e} — falling back"
+        )
+        return None
+
+    elapsed = _time.monotonic() - start
+
+    try:
+        candidate = data["candidates"][0]
+        content_text = candidate["content"]["parts"][0]["text"].strip()
+    except (KeyError, IndexError) as e:
+        logger.warning(f"Contact grounding: bad response shape for '{hotel_name}': {e}")
+        return None
+
+    # Strip markdown fences if Gemini wrapped the JSON
+    if content_text.startswith("```"):
+        parts = content_text.split("```")
+        if len(parts) >= 2:
+            inner = parts[1]
+            if inner.startswith("json"):
+                inner = inner[4:].strip()
+            content_text = inner.strip().rstrip("`").strip()
+
+    try:
+        parsed = json.loads(content_text)
+    except json.JSONDecodeError as e:
+        logger.warning(f"Contact grounding: JSON parse failed for '{hotel_name}': {e}")
+        return None
+
+    if not isinstance(parsed, dict):
+        return None
+
+    contacts_raw = parsed.get("contacts", [])
+    if not isinstance(contacts_raw, list):
+        return None
+
+    # Capture source citations — both title AND uri from groundingChunks
+    grounding_meta = candidate.get("groundingMetadata", {}) or {}
+    sources = []  # titles (for logging/display)
+    source_urls = []  # actual URLs (for evidence links)
+    for chunk in (grounding_meta.get("groundingChunks", []) or [])[:5]:
+        web = chunk.get("web", {}) or {}
+        title = web.get("title")
+        uri = web.get("uri") or ""
+        # Vertex AI grounding URIs are vertexaisearch redirects — strip to base URL
+        # e.g. "https://vertexaisearch.cloud.google.com/grounding-api-redirect/..."
+        # These ARE clickable and open the real source page, so we keep them as-is.
+        if title:
+            sources.append(title)
+            source_urls.append(uri)  # may be empty string if not provided
+
+    logger.info(
+        f"Contact grounding raw for '{hotel_name}': {len(contacts_raw)} contacts, "
+        f"{len(sources)} citations. Summary: {parsed.get('search_summary', '')[:100]}"
+    )
+
+    # ── PHANTOM GROUNDING CHECK ──
+    # If groundingChunks is empty, Gemini answered from training data instead
+    # of actually searching Google. Contact data is especially risky as phantom —
+    # people change roles, training data is stale, hallucinated names are common.
+    # Unlike lead_data_enrichment.py (where we trust high-confidence phantoms for
+    # well-documented properties), contact grounding ALWAYS requires real citations.
+    # People change jobs; a 2023 GM may be at a different hotel by 2026.
+    if len(sources) == 0:
+        # Log the phantom contacts so we can inspect them in the logs
+        for i, pc in enumerate(contacts_raw[:5], 1):
+            if isinstance(pc, dict):
+                logger.info(
+                    f"  PHANTOM contact {i}: {pc.get('name','?')} | "
+                    f"{pc.get('title','?')} | {pc.get('organization','?')} | "
+                    f"role={pc.get('decision_role','?')} conf={pc.get('confidence','?')} | "
+                    f"{(pc.get('why_relevant') or '')[:80]}"
+                )
+
+        # ── TIERED PHANTOM POLICY ──
+        # Zero citations = Gemini answered from training data.
+        # For MANAGEMENT COMPANY contacts this is often reliable — a named
+        # SVP of Procurement at Hotel Equities or Crescent Hotels is a real
+        # person documented in press releases that Gemini learned. Trust if:
+        #   - All contacts are from the known management_company OR developer OR owner
+        #   - All contacts have confidence=high
+        #   - At least 2 contacts found
+        # Otherwise fall back to iterative pipeline.
+        known_orgs = set(
+            filter(
+                None,
+                [
+                    (management_company or "").lower().strip(),
+                    (developer or "").lower().strip(),
+                    (owner or "").lower().strip(),
+                ],
+            )
+        )
+        high_conf_contacts = [
+            c
+            for c in contacts_raw
+            if isinstance(c, dict) and (c.get("confidence") or "").lower() == "high"
+        ]
+        all_from_known_org = (
+            all(
+                any(
+                    org in (c.get("organization") or "").lower()
+                    for org in known_orgs
+                    if org
+                )
+                for c in high_conf_contacts
+            )
+            if (known_orgs and high_conf_contacts)
+            else False
+        )
+
+        is_trustworthy = len(high_conf_contacts) >= 2 and all_from_known_org
+
+        if is_trustworthy:
+            logger.warning(
+                f"Contact grounding PHANTOM-TRUSTED for '{hotel_name}' — "
+                f"{len(high_conf_contacts)} high-confidence contacts all from known "
+                f"org(s) {known_orgs}. Management company contacts are reliably "
+                f"documented in training data. Proceeding without citations."
+            )
+            # fall through — use the contacts
+        else:
+            logger.warning(
+                f"Contact grounding PHANTOM for '{hotel_name}' — Gemini returned "
+                f"{len(contacts_raw)} contacts but ZERO source citations. "
+                f"Conditions for trust not met (known_orgs={known_orgs}, "
+                f"high_conf={len(high_conf_contacts)}, all_from_known={all_from_known_org}). "
+                f"Falling back to iterative pipeline."
+            )
+            return None
+
+    # Filter: must have a real name
+    valid_contacts = [
+        c
+        for c in contacts_raw
+        if isinstance(c, dict)
+        and (c.get("name") or "").strip()
+        and len((c.get("name") or "").strip()) > 3
+        and _looks_like_real_person((c.get("name") or "").strip())
+    ]
+
+    if len(valid_contacts) < _CONTACT_GROUNDING_MIN_CONTACTS:
+        logger.info(
+            f"Contact grounding: only {len(valid_contacts)} valid contacts for "
+            f"'{hotel_name}' (min {_CONTACT_GROUNDING_MIN_CONTACTS}) — falling back to pipeline"
+        )
+        return None
+
+    logger.info(
+        f"Contact grounding SUCCESS for '{hotel_name}' in {elapsed:.1f}s: "
+        f"{len(valid_contacts)} contacts, {len(sources)} sources"
+    )
+
+    # Convert to internal contact dict format
+    mgmt_lower = (management_company or "").lower()
+    hotel_lower = hotel_name.lower()
+    result_contacts = []
+    for c in valid_contacts:
+        org = (c.get("organization") or hotel_name).strip()
+        org_lower = org.lower()
+        confidence = (c.get("confidence") or "medium").lower()
+        if confidence not in ("high", "medium", "low"):
+            confidence = "medium"
+
+        # Assign scope based on organization
+        if mgmt_lower and (mgmt_lower in org_lower or org_lower in mgmt_lower):
+            scope = "management_corporate"
+        elif any(w in org_lower for w in hotel_lower.split() if len(w) > 3):
+            scope = "hotel_specific"
+        else:
+            scope = "chain_area"
+
+        # Map decision_role → scope hint for scorer
+        # specifier (housekeeping) and buyer (purchasing) are hotel_specific ops
+        # approver (GM/owner) may be management_corporate or owner
+        decision_role = (c.get("decision_role") or "").lower().strip()
+        if decision_role == "approver" and scope == "management_corporate":
+            scope = "management_corporate"
+        elif decision_role == "approver" and "owner" in (c.get("title") or "").lower():
+            scope = "owner"
+
+        # ── LinkedIn URL sanity check ──
+        # Grounding sometimes returns crossed or hallucinated LinkedIn URLs.
+        # Validate: the URL slug must contain at least one token from the
+        # person's name. If not, null it out — the LinkedIn lookup pass
+        # below will find the correct URL via Serper.
+        raw_li = (c.get("linkedin_url") or c.get("linkedin") or "").strip()
+        validated_li = None
+        if raw_li and "linkedin.com/in/" in raw_li:
+            slug = raw_li.lower().split("linkedin.com/in/")[-1].rstrip("/")
+            name_tokens = [
+                t for t in (c.get("name") or "").lower().split() if len(t) >= 3
+            ]
+            if name_tokens and any(t in slug for t in name_tokens):
+                validated_li = raw_li
+            else:
+                logger.info(
+                    f"Grounding LinkedIn URL rejected for {c.get('name')!r}: "
+                    f"slug {slug!r} contains none of {name_tokens} — "
+                    f"will re-lookup via Serper"
+                )
+
+        contact = {
+            "name": (c.get("name") or "").strip(),
+            "title": _clean_title(c.get("title") or ""),
+            "organization": org,
+            "linkedin": validated_li,
+            "email": c.get("email"),
+            "phone": None,
+            "scope": scope,
+            "confidence": confidence,
+            "confidence_note": c.get("why_relevant") or "Found via grounding search",
+            "source": sources[0] if sources else "[grounding]",
+            "source_type": "grounding",
+            "_decision_role": decision_role,  # specifier | buyer | approver
+            "_raw_snippet": c.get("why_relevant") or "",
+            "_raw_title": c.get("title") or "",
+            "_evidence_items": [
+                {
+                    "quote": c.get("why_relevant") or "",
+                    "source_url": source_urls[0] if source_urls else "",
+                    "source_title": sources[0] if sources else "Grounding search",
+                    "source_domain": sources[0].split(" ")[0]
+                    if sources
+                    else "grounding",
+                    "trust_tier": "official" if confidence == "high" else "trade",
+                    "source_year": None,
+                }
+            ]
+            if sources
+            else [],
+        }
+        result_contacts.append(contact)
+
+    return result_contacts
 
 
 async def _layer_web_search(
@@ -3639,6 +4316,518 @@ async def _verify_contacts_with_gemini(
 # ═══════════════════════════════════════════════════════════════
 
 
+# ═══════════════════════════════════════════════════════════════════════
+# LINKEDIN SERP VALIDATION — shared by grounding + iterative pipeline
+# ═══════════════════════════════════════════════════════════════════════
+#
+# Five failure scenarios this covers (2026-05-06 audit):
+#
+# 1. ROLE TITLE MISMATCH — searched "Resort Manager", bio says "VP Operations"
+#    Fix: role families group equivalent titles together
+#
+# 2. ORG NAME ALIAS — searched "Marriott Vacations Worldwide", bio says "MVW"
+#    Fix: org alias table maps abbreviations to canonical names
+#
+# 3. NAME VARIATION — "Lindsay Meadows" vs "Lindsay A. Meadows-Johnson"
+#    Fix: relaxed name check allows middle initials and hyphenated surnames
+#
+# 4. NON-ENGLISH TITLES — Caribbean GMs list titles in Spanish/French
+#    Fix: role families include Spanish/French equivalents
+#
+# 5. HOTEL NAME IN TITLE — "General Manager - Canopy by Hilton at Deer Valley"
+#    Fix: if hotel name tokens appear in SERP title → strong accept
+#
+# Both the grounding LinkedIn lookup AND the iterative pipeline LinkedIn
+# lookup call _linkedin_serp_valid() so the same logic applies everywhere.
+
+_ROLE_FAMILIES: dict[str, set[str]] = {
+    "gm": {
+        "general manager",
+        "resort manager",
+        "hotel manager",
+        "property manager",
+        "managing director",
+        "vp operations",
+        "vice president operations",
+        "vp hotel operations",
+        "vp, operations",
+        "v.p. operations",
+        "regional vp",
+        "cluster gm",
+        "area general manager",
+        "managing partner",
+        "chief operating officer",
+        "coo",
+        "director of operations",
+        "director, operations",
+        "interim gm",
+        "acting general manager",
+        # Spanish / French
+        "gerente general",
+        "directeur général",
+        "directeur des operations",
+        "director general",
+    },
+    "purchasing": {
+        "purchasing",
+        "procurement",
+        "sourcing",
+        "buyer",
+        "supply chain",
+        "vendor",
+        "ff&e",
+        "ose",
+        "os&e",
+        "purchasing manager",
+        "director of purchasing",
+        "vp procurement",
+        "vp supply chain",
+        "strategic sourcing",
+        "category manager",
+        "accounting & procurement",
+        "accounting and procurement",
+        "svp accounting",
+        "vp accounting",
+        # Spanish / French
+        "compras",
+        "abastecimiento",
+        "approvisionnement",
+        "achats",
+        "responsable achats",
+        "directeur des achats",
+    },
+    "housekeeping": {
+        "housekeeping",
+        "housekeeper",
+        "rooms",
+        "rooms division",
+        "director of rooms",
+        "laundry",
+        "uniform",
+        "wardrobe",
+        "executive housekeeper",
+        "head housekeeper",
+        "rooms & housekeeping",
+        # Spanish / French
+        "ama de llaves",
+        "gouvernante",
+        "gouvernante générale",
+        "directeur hébergement",
+    },
+    "fb": {
+        "food and beverage",
+        "f&b",
+        "food & beverage",
+        "culinary",
+        "executive chef",
+        "restaurant",
+        "banquet",
+        "catering",
+        "food beverage",
+        "director of food",
+        "director of catering",
+        "director of banquets",
+        # Spanish / French
+        "alimentos y bebidas",
+        "ayb",
+        "directeur restauration",
+        "directeur de la restauration",
+    },
+    "hr": {
+        "human resources",
+        "people and culture",
+        "talent",
+        "hr director",
+        "people & culture",
+        "hr manager",
+        "talent acquisition",
+        "director of people",
+        "vp human resources",
+        # Spanish / French
+        "recursos humanos",
+        "ressources humaines",
+        "directeur des ressources",
+    },
+    "finance": {
+        "accounting",
+        "finance",
+        "controller",
+        "cfo",
+        "financial",
+        "director of finance",
+        "vp finance",
+        "chief financial",
+        "director of accounting",
+        # Spanish / French
+        "finanzas",
+        "contabilidad",
+        "comptabilité",
+        "directeur financier",
+    },
+    "ops": {
+        "operations",
+        "operational",
+        "chief operating",
+        "vp operations",
+        "director of operations",
+        "svp operations",
+        "senior vice president",
+        "svp",
+        "evp",
+        "executive vice president",
+        # Spanish / French
+        "operaciones",
+        "opérations",
+    },
+    "sales_events": {
+        "director of sales",
+        "sales manager",
+        "catering sales",
+        "director of catering",
+        "director of events",
+        "banquet sales",
+        "director of banquets",
+        "convention services",
+        "group sales",
+    },
+    "owner_dev": {
+        "owner",
+        "principal",
+        "founder",
+        "co-founder",
+        "chairman",
+        "managing member",
+        "managing partner",
+        "president",
+        "ceo",
+        "chief executive",
+        "developer",
+        "development",
+        "investment",
+    },
+}
+
+# Flattened set for quick "is this a hospitality role?" check
+_ALL_ROLE_KEYWORDS: set[str] = {
+    kw for family in _ROLE_FAMILIES.values() for kw in family
+}
+
+# Org name aliases — LinkedIn profiles often abbreviate company names.
+# Key = lowercase canonical form, values = aliases seen on LinkedIn.
+_ORG_ALIASES: dict[str, set[str]] = {
+    "marriott vacations worldwide": {
+        "mvw",
+        "marriott vacations",
+        "marriott vacation club",
+        "marriott vacations worldwide corporation",
+    },
+    "hotel equities": {
+        "he hospitality",
+        "hotel equities group",
+        "hotel equities inc",
+        "he hotel",
+    },
+    "hyatt inclusive collection": {
+        "hic",
+        "apple leisure group",
+        "alg",
+        "alg vacations",
+    },
+    "aimbridge hospitality": {
+        "aimbridge",
+        "interstate hotels",
+        "interstate hotels & resorts",
+    },
+    "crescent hotels": {
+        "crescent hotels & resorts",
+        "crescent hotels and resorts",
+        "crescent",
+    },
+    "hilton": {
+        "hilton hotels",
+        "hilton worldwide",
+        "hilton hotels & resorts",
+        "hilton international",
+    },
+    "marriott": {
+        "marriott international",
+        "marriott hotels",
+        "marriott hotels & resorts",
+    },
+    "hyatt": {"hyatt hotels", "hyatt hotels corporation", "hyatt hotels & resorts"},
+    "ihg": {
+        "intercontinental hotels",
+        "ihg hotels & resorts",
+        "intercontinental hotels group",
+    },
+    "sandals": {
+        "sandals resorts",
+        "beaches resorts",
+        "sandals & beaches",
+        "sandals resorts international",
+    },
+    "blue diamond resorts": {"blue diamond", "royalton hotels", "royalton"},
+    "davidson hospitality": {"davidson hotels", "davidson hotel company"},
+    "highgate": {"highgate hotels", "highgate hotel"},
+    "concord hospitality": {"concord hospitality enterprises"},
+    "pyramid global hospitality": {"pyramid hotel group", "pyramid global"},
+}
+
+
+def _org_tokens_match(org_name: str, haystack: str) -> bool:
+    """Check if org name (or any known alias) appears in haystack.
+
+    Handles:
+    - Direct token match (≥2 distinctive tokens from org name in haystack)
+    - Alias match (e.g. "MVW" matches "Marriott Vacations Worldwide")
+    - Partial match on any alias abbreviation
+    """
+    if not org_name or not haystack:
+        return False
+
+    org_lower = org_name.lower().strip()
+
+    # Direct substring match — most common case
+    if org_lower in haystack:
+        return True
+
+    # Check canonical → alias table
+    for canonical, aliases in _ORG_ALIASES.items():
+        if org_lower == canonical or org_lower in aliases:
+            # Check if canonical OR any alias appears in haystack
+            if canonical in haystack:
+                return True
+            if any(alias in haystack for alias in aliases):
+                return True
+
+    # Reverse: haystack might contain an alias that maps to our org
+    for canonical, aliases in _ORG_ALIASES.items():
+        for alias in aliases:
+            if alias in haystack and (
+                org_lower == canonical or org_lower in aliases or canonical in org_lower
+            ):
+                return True
+
+    # Token overlap: 2+ distinctive org words (≥4 chars) appear in haystack
+    _ORG_STOPWORDS = {
+        "the",
+        "and",
+        "of",
+        "for",
+        "at",
+        "a",
+        "an",
+        "&",
+        "hotel",
+        "hotels",
+        "resort",
+        "resorts",
+        "hospitality",
+        "group",
+        "inc",
+        "llc",
+        "ltd",
+        "corp",
+        "company",
+        "international",
+        "global",
+        "management",
+        "services",
+    }
+    org_words = [
+        w
+        for w in re.split(r"[^a-z0-9]+", org_lower)
+        if len(w) >= 4 and w not in _ORG_STOPWORDS
+    ]
+    if len(org_words) >= 2:
+        matched = sum(1 for w in org_words if w in haystack)
+        if matched >= 2:
+            return True
+    elif len(org_words) == 1 and len(org_words[0]) >= 5:
+        # Single distinctive word ≥5 chars (e.g. "equities", "sandals")
+        if org_words[0] in haystack:
+            return True
+
+    return False
+
+
+def _name_in_serp(name: str, serp_title: str) -> bool:
+    """Check if person name appears in SERP title.
+
+    Handles middle initials, hyphenated surnames, name order, and suffixes.
+    """
+    if not name or not serp_title:
+        return False
+
+    name_lower = name.lower().strip()
+    title_lower = serp_title.lower()
+
+    if name_lower in title_lower:
+        return True
+
+    # Strip common suffixes
+    clean_name = re.sub(r"\b(jr|sr|ii|iii|iv|phd|mba|cha)\b\.?", "", name_lower).strip()
+
+    # Split into parts, drop titles and single chars
+    _NAME_STOP = {"dr", "mr", "mrs", "ms", "miss", "prof", "sir"}
+    strip_chars = ".,;:'\""
+    parts = [
+        p.strip(strip_chars)
+        for p in clean_name.split()
+        if len(p.strip(strip_chars)) >= 2
+        and p.strip(strip_chars).lower() not in _NAME_STOP
+    ]
+
+    if not parts:
+        return False
+
+    first = parts[0]
+    last = parts[-1].split("-")[0]  # "meadows" from "meadows-johnson"
+
+    if first in title_lower and last in title_lower:
+        return True
+
+    # All hyphenated last name components
+    if len(parts) >= 2:
+        last_parts = parts[-1].split("-")
+        if first in title_lower and all(lp in title_lower for lp in last_parts):
+            return True
+
+    return False
+
+
+def _role_family_match(contact_title: str, haystack: str) -> bool:
+    """Check if the contact's title role family appears in the SERP haystack.
+
+    If the contact is a "Resort Manager" and the SERP says "VP Operations" —
+    both are in the "gm" family → match.
+    If the contact is a "Director of Procurement" and the SERP says
+    "SVP Accounting & Procurement" → both in "purchasing" family → match.
+    """
+    if not contact_title or not haystack:
+        return False
+
+    title_lower = contact_title.lower()
+
+    # Find which family the contact's title belongs to
+    contact_families = set()
+    for family_name, keywords in _ROLE_FAMILIES.items():
+        if any(kw in title_lower for kw in keywords):
+            contact_families.add(family_name)
+
+    if not contact_families:
+        # Contact title not in any family — check raw hospitality keywords
+        return any(kw in haystack for kw in _ALL_ROLE_KEYWORDS)
+
+    # Check if ANY keyword from the SAME family appears in the SERP
+    for family_name in contact_families:
+        if any(kw in haystack for kw in _ROLE_FAMILIES[family_name]):
+            return True
+
+    return False
+
+
+# Country-specific LinkedIn subdomains — these indicate the VIEWER's country,
+# not the profile owner's country. A US-based hotel executive will always
+# appear at www.linkedin.com/in/ regardless of where the searcher is located.
+# If Serper returns an au./jm./za./etc. URL, it's often the wrong person
+# (a local namesake) — require stronger evidence before accepting.
+_LINKEDIN_COUNTRY_SUBDOMAINS = re.compile(
+    r"^https?://([a-z]{2})\.linkedin\.com/in/",
+    re.IGNORECASE,
+)
+
+
+def _linkedin_serp_valid(
+    name: str,
+    serp_result: dict,
+    query_tokens: list[str],
+    hotel_name: str = "",
+    management_company: str = "",
+    developer: str = "",
+    owner: str = "",
+    contact_title: str = "",
+) -> tuple[bool, str]:
+    """Validate a LinkedIn SERP result for a specific contact.
+
+    Returns (is_valid, reason_string).
+
+    Decision tree:
+    1. Name must appear in SERP title (flexible — allows middle initials, hyphenated)
+    2. If org token found in haystack → ACCEPT (strongest signal)
+    3. If hotel name tokens found in SERP title → ACCEPT (e.g. "GM - Canopy by Hilton")
+    4. If role family match found → ACCEPT (VP Ops matches Resort Manager)
+    5. If query token found IN SERP TITLE (not snippet) → ACCEPT
+       (snippet-only match too weak — query words bleed into unrelated profiles)
+    6. If any hospitality keyword → ACCEPT only if NOT a country-subdomain URL
+    7. Otherwise REJECT
+
+    Country-subdomain URLs (au., jm., za., etc.) require org-level evidence
+    (steps 2-4) — the weaker signals (5-6) are insufficient because country
+    subdomains frequently surface local namesakes rather than the target person.
+    """
+    serp_title = (serp_result.get("title") or "").lower()
+    serp_snippet = (serp_result.get("snippet") or "").lower()
+    haystack = serp_title + " " + serp_snippet
+    r_url = serp_result.get("url", "")
+
+    # Detect country-subdomain URLs — require stronger evidence for these
+    country_subdomain_match = _LINKEDIN_COUNTRY_SUBDOMAINS.match(r_url)
+    is_country_subdomain = bool(country_subdomain_match)
+    if is_country_subdomain:
+        country_code = country_subdomain_match.group(1).upper()
+
+    # ── Step 1: Name check (required) ──
+    if not _name_in_serp(name, serp_title):
+        return False, f"name '{name}' not found in SERP title"
+
+    # ── Step 2: Org token match (strongest — accepted for all URLs) ──
+    for org in [management_company, developer, owner]:
+        if org and _org_tokens_match(org, haystack):
+            return True, f"org match: '{org}' in SERP"
+
+    # Also check raw query tokens as org-level signal
+    # (but only count if they appear in the SERP TITLE, not just snippet —
+    # snippet can contain query echoes from unrelated profile sections)
+    if any(t in serp_title for t in query_tokens):
+        return True, "query token in SERP title"
+
+    # ── Step 3: Hotel name in SERP title ──
+    if hotel_name:
+        hotel_words = [
+            w
+            for w in re.split(r"[^a-z0-9]+", hotel_name.lower())
+            if len(w) >= 4
+            and w not in {"hotel", "resort", "the", "and", "collection", "suites"}
+        ]
+        if hotel_words:
+            matched_hotel = sum(1 for w in hotel_words if w in serp_title)
+            if matched_hotel >= min(2, len(hotel_words)):
+                return True, "hotel name tokens in SERP title"
+
+    # ── Step 4: Role family match ──
+    if contact_title and _role_family_match(contact_title, haystack):
+        return True, f"role family match for '{contact_title}'"
+
+    # ── Steps 5-6: Weaker signals — REJECT for country subdomains ──
+    if is_country_subdomain:
+        return False, (
+            f"country subdomain URL ({country_code}.linkedin.com) with only weak "
+            f"evidence — likely local namesake, not target person. "
+            f"Requires org/title match to accept."
+        )
+
+    # Query token in snippet only (weaker than title match)
+    if any(t in serp_snippet for t in query_tokens):
+        return True, "query token in SERP snippet"
+
+    # Any hospitality keyword (weakest — only for www. URLs)
+    if any(kw in haystack for kw in _ALL_ROLE_KEYWORDS):
+        return True, "hospitality keyword in SERP (weak)"
+
+    return False, "no org/role/hotel match in SERP — likely wrong person"
+
+
 async def enrich_lead_contacts(
     lead_id: int,
     hotel_name: str,
@@ -3647,6 +4836,8 @@ async def enrich_lead_contacts(
     state: Optional[str] = None,
     country: Optional[str] = None,
     management_company: Optional[str] = None,
+    developer: Optional[str] = None,
+    owner: Optional[str] = None,
     opening_date: Optional[str] = None,
     timeline_label: Optional[str] = None,
     description: Optional[str] = None,
@@ -3703,6 +4894,253 @@ async def enrich_lead_contacts(
         + (" [LEAN MODE — open hotel]" if is_existing_hotel else "")
     )
 
+    # ── Grounded fast-path: try one-shot grounding before iterative pipeline ──
+    # Single Gemini googleSearch call asks the business question directly:
+    # "Who at [Hotel/Management Company] makes uniform purchasing decisions?"
+    # If 2+ named contacts found → use them, skip the 2-3 minute pipeline.
+    # Falls back to iterative researcher on failure or < 2 contacts found.
+    if progress_callback is not None:
+        try:
+            await progress_callback(1, 11, "Researching contacts via Gemini Search")
+        except Exception:
+            pass
+
+    grounded_contacts = await _enrich_contacts_grounded(
+        hotel_name=hotel_name,
+        brand=brand,
+        management_company=management_company,
+        developer=developer,
+        owner=owner,
+        city=city,
+        state=state,
+        country=country,
+        opening_date=opening_date,
+    )
+
+    if grounded_contacts is not None:
+        logger.info(
+            f"Contact grounding fast-path SUCCESS for {hotel_name}: "
+            f"{len(grounded_contacts)} contacts — ALSO running iterative pipeline "
+            f"to find operational staff (Directors of Operations/Housekeeping/Purchasing)"
+        )
+        result.contacts = grounded_contacts
+        result.layers_tried = ["grounding"]
+        result.management_company = management_company
+
+        # Run Gemini verification to assign proper scopes + reject false positives
+        if progress_callback is not None:
+            try:
+                await progress_callback(10, 11, "Verifying contact scope (Gemini)")
+            except Exception:
+                pass
+        if result.contacts:
+            try:
+                result.contacts = await _verify_contacts_with_gemini(
+                    contacts=result.contacts,
+                    hotel_name=hotel_name,
+                    brand=brand,
+                    management_company=management_company,
+                    city=city,
+                    state=state,
+                    country=country,
+                    opening_date=opening_date,
+                    project_type=project_type_str,
+                )
+            except Exception as ex:
+                logger.warning(
+                    f"Grounding contact verification failed (keeping raw): {ex}"
+                )
+
+        # ── LinkedIn URL lookup for grounded contacts missing a URL ──
+        # Grounding sometimes finds names but not their LinkedIn profile URL.
+        # Run the same targeted lookup the iterative pipeline uses:
+        # site:linkedin.com/in + name + hotel/operator tokens.
+        # Capped at 3 contacts to stay fast (grounding already got us the names).
+        _LI_STOPWORDS = {
+            "the",
+            "and",
+            "of",
+            "for",
+            "at",
+            "a",
+            "an",
+            "&",
+            "in",
+            "on",
+            "to",
+            "by",
+            "or",
+            "hotel",
+            "hotels",
+            "resort",
+            "resorts",
+            "spa",
+            "inn",
+            "suites",
+            "suite",
+            "lodge",
+            "club",
+            "property",
+            "hospitality",
+            "collection",
+            "collections",
+            "autograph",
+            "curio",
+            "tribute",
+            "luxury",
+            "group",
+            "company",
+            "corp",
+            "inc",
+            "llc",
+            "ltd",
+            "international",
+            "global",
+            "management",
+            "services",
+            "grand",
+            "plaza",
+            "palace",
+        }
+
+        def _li_tokens(sources_list):
+            out = set()
+            for s in sources_list:
+                for word in re.split(r"[^a-z0-9]+", (s or "").lower()):
+                    if len(word) >= 3 and word not in _LI_STOPWORDS:
+                        out.add(word)
+            return out
+
+        li_lookup_count = 0
+        for c in result.contacts:
+            if li_lookup_count >= 3:
+                continue
+            # NOTE: always run Serper lookup even if grounding returned a LinkedIn URL.
+            # Grounding URLs are frequently garbled (e.g. matt-fowler-91004a4 instead of
+            # matt-fowler). Serper verifies the URL by checking the SERP title contains
+            # the person's name — this replaces the bad grounding URL with the correct one.
+            name = (c.get("name") or "").strip()
+            if not name:
+                continue
+            try:
+                tokens = _li_tokens([hotel_name, management_company])
+                if not tokens:
+                    tokens = _li_tokens([c.get("organization")])
+                if not tokens:
+                    continue
+                tokens_clause = " OR ".join(f'"{t}"' for t in sorted(tokens)[:3])
+                li_q = f'"{name}" ({tokens_clause}) site:linkedin.com/in'
+                li_results = await _search_web(li_q, max_results=3)
+                query_tokens = [t.strip('"') for t in tokens_clause.split(" OR ")]
+                for r in li_results:
+                    r_url = r.get("url", "")
+                    if "linkedin.com/in/" not in r_url:
+                        continue
+                    valid, reason = _linkedin_serp_valid(
+                        name=name,
+                        serp_result=r,
+                        query_tokens=query_tokens,
+                        hotel_name=hotel_name,
+                        management_company=management_company or "",
+                        developer=developer or "",
+                        owner=owner or "",
+                        contact_title=c.get("title") or "",
+                    )
+                    if not valid:
+                        logger.info(f"LinkedIn REJECTED for {name}: {reason}")
+                        continue
+                    c["linkedin"] = r_url
+                    logger.info(
+                        f"Grounding LinkedIn URL found for {name}: {r_url} ({reason})"
+                    )
+                    li_lookup_count += 1
+                    break
+            except Exception as li_e:
+                logger.debug(f"Grounding LinkedIn lookup failed for {name}: {li_e}")
+
+        # Score contacts using unified scoring module
+        from app.services.contact_scoring import score_contact_dict
+
+        for c in result.contacts:
+            score_contact_dict(c)
+
+        # Sort by score desc, then smart cap
+        result.contacts.sort(key=lambda c: -(c.get("_validation_score") or 0))
+        result.contacts = _apply_smart_cap(result.contacts, MAX_CONTACTS_TO_SAVE)
+
+        if progress_callback is not None:
+            try:
+                await progress_callback(11, 11, "Saving & scoring contacts")
+            except Exception:
+                pass
+
+        # ── Grounding succeeded — check quality ──
+        # Grounding is designed to find the BEST contacts at this moment:
+        #   • Hotel-specific GM / Dir of Housekeeping / Dir of Purchasing → IDEAL
+        #   • Management company operational staff (SVP Procurement, Dir of Ops) → GREAT
+        #   • Management company leadership (COO, VP) → OK
+        #   • CEO / Founder / Owner only → run iterative to supplement
+        #
+        # We only run iterative if grounding returned ONLY pure C-suite/investor
+        # contacts — those people don't buy uniforms. Everything else is good enough.
+        _CXO_ONLY_KW = {
+            "ceo",
+            "chief executive officer",
+            "founder",
+            "co-founder",
+            "chairman",
+            "board member",
+            "investor",
+            "angel investor",
+        }
+
+        def _is_cxo_only(contact):
+            title = (contact.get("title") or "").lower()
+            scope = (contact.get("scope") or "").lower()
+            # Owner scope is intentional (check-writer) — keep it
+            if scope == "owner":
+                return False
+            return any(kw in title for kw in _CXO_ONLY_KW) and not any(
+                kw in title
+                for kw in {
+                    "operations",
+                    "procurement",
+                    "purchasing",
+                    "housekeeping",
+                    "rooms",
+                    "general manager",
+                    "hotel manager",
+                    "resort manager",
+                }
+            )
+
+        all_cxo = result.contacts and all(_is_cxo_only(c) for c in result.contacts)
+
+        if not all_cxo:
+            # Grounding found useful contacts (operational staff, mgmt company,
+            # or properly scoped owners) — trust it, skip iterative
+            logger.info(
+                f"Contact grounding complete for {hotel_name}: "
+                f"{len(result.contacts)} contacts — skipping iterative pipeline ✅"
+            )
+            return result
+        else:
+            # Grounding only found pure C-suite (CEO/Founder) — these don't
+            # buy uniforms. Run iterative to find operational staff.
+            logger.info(
+                f"Contact grounding found only C-suite contacts for {hotel_name} "
+                f"— running iterative to find operational staff"
+            )
+            # Fall through — grounding contacts saved, merged after iterative
+
+    # Run iterative researcher — fallback (grounding failed/timed out/C-suite only)
+    grounding_had_contacts = len(result.contacts) > 0
+    if not grounding_had_contacts:
+        logger.info(
+            f"Contact grounding insufficient for {hotel_name} — "
+            f"falling back to iterative pipeline"
+        )
+
     # ── Build research state from lead facts ──
     research_state = ResearchState(
         hotel_name=hotel_name,
@@ -3746,6 +5184,10 @@ async def enrich_lead_contacts(
         )
 
     # ── Convert ResearchState into EnrichmentResult ──
+    # Merge grounding contacts (CEO/COO level) with iterative contacts
+    # (operational Directors). Grounding contacts go first so they don't
+    # get pushed out by the smart cap — they're still valid P2/P3 contacts.
+    grounding_contacts = list(result.contacts)  # save grounding results
     result.contacts = []
     for n in research_state.discovered_names:
         result.contacts.append(
@@ -3775,8 +5217,26 @@ async def enrich_lead_contacts(
                 ),  # Iter 6: strategist reasoning
             }
         )
+    # Merge grounding contacts in — dedupe by normalized name
+    if grounding_contacts:
+        existing_names = {
+            (c.get("name") or "").lower().strip() for c in result.contacts
+        }
+        added_from_grounding = 0
+        for gc in grounding_contacts:
+            gc_name = (gc.get("name") or "").lower().strip()
+            if gc_name and gc_name not in existing_names:
+                result.contacts.append(gc)
+                existing_names.add(gc_name)
+                added_from_grounding += 1
+        if added_from_grounding:
+            logger.info(
+                f"Merged {added_from_grounding} grounding contacts into "
+                f"iterative results for {hotel_name}"
+            )
+
     result.sources_used = list(set(research_state.urls_scraped))
-    result.layers_tried = [
+    result.layers_tried = ["grounding"] + [
         f"iter_{i}" for i in range(1, research_state.iterations_done + 1)
     ]
     # Prefer SmartFill's management_company (actual operator like "Crescent")
@@ -4618,49 +6078,28 @@ async def _enrich_lead_contacts_v4_legacy(
                 li_results = await _search_web(li_query, max_results=3)
 
                 attached = False
+                iter_query_tokens = [t.strip('"') for t in tokens_clause.split(" OR ")]
                 for r in li_results:
                     r_url = r.get("url", "")
                     if "linkedin.com/in/" not in r_url:
                         continue
-
-                    # Sanity: SERP title must contain the contact's name.
-                    # LinkedIn SERP format is "Name - Title - Company |
-                    # LinkedIn"; if the name isn't present, Google fell
-                    # back to fuzzy matching and returned a different
-                    # profile. Reject and move to the next candidate.
-                    serp_title_lower = (r.get("title") or "").lower()
-                    name_parts = [p for p in name.lower().split() if len(p) >= 2]
-                    if name_parts and not all(
-                        p in serp_title_lower for p in name_parts
-                    ):
-                        logger.debug(
-                            f"LinkedIn rejected for {name}: SERP title "
-                            f"{(r.get('title') or '')[:60]!r} missing name parts"
-                        )
+                    valid, reason = _linkedin_serp_valid(
+                        name=name,
+                        serp_result=r,
+                        query_tokens=iter_query_tokens,
+                        hotel_name=hotel_name,
+                        management_company=management_company or "",
+                        developer="",
+                        owner="",
+                        contact_title=c.get("title") or "",
+                    )
+                    if not valid:
+                        logger.debug(f"LinkedIn rejected for {name}: {reason}")
                         continue
-
-                    # Log whether tokens are visible in SERP snippet (high
-                    # confidence) or only in the indexed Experience
-                    # section (still valid, just less visible).
-                    haystack = (
-                        (r.get("snippet") or "") + " " + (r.get("title") or "")
-                    ).lower()
-                    visible_tokens = [t for t in distinctive if t in haystack]
-
                     c["linkedin"] = r_url
-                    if visible_tokens:
-                        logger.info(
-                            f"LinkedIn URL found for {name}: {r_url} "
-                            f"(visible tokens in SERP: {visible_tokens}, "
-                            f"scope={scope})"
-                        )
-                    else:
-                        logger.info(
-                            f"LinkedIn URL found for {name}: {r_url} "
-                            f"(verified via Experience section - tokens "
-                            f"{tokens_for_query} matched in profile's "
-                            f"indexed content, scope={scope})"
-                        )
+                    logger.info(
+                        f"LinkedIn URL found for {name}: {r_url} ({reason}, scope={scope})"
+                    )
                     attached = True
                     break
 

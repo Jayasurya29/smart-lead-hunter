@@ -48,6 +48,7 @@ export interface Lead {
   insightly_id: number | null
   created_at: string
   updated_at: string | null
+  last_user_review_at: string | null  // HV-4
 }
 
 export interface LeadListResponse {

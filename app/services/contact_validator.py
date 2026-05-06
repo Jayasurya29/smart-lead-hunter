@@ -21,6 +21,7 @@ USAGE:
     )
 """
 
+import datetime
 import re
 import logging
 from dataclasses import dataclass, field
@@ -30,6 +31,10 @@ from app.config.procurement_intelligence import get_management_company_intel
 from app.config.project_type_intelligence import get_phase_queries
 
 from app.config.sap_title_classifier import BuyerTier, title_classifier
+
+_CY = datetime.datetime.now().year  # current year — auto-updates Jan 1
+_NY = _CY + 1  # next year
+
 
 logger = logging.getLogger(__name__)
 
@@ -735,7 +740,7 @@ class SmartQueryBuilder:
         elif retry_attempt >= 2:
             # ── LAST RESORT: Very broad searches ──
             if brand:
-                queries.append(f"{brand} {location} hotel opening 2026")
+                queries.append(f"{brand} {location} hotel opening {_CY}")
             queries.append(f"{hotel_name} hotel staff")
 
         return queries

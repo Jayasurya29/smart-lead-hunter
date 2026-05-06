@@ -267,7 +267,16 @@ def _enrich_existing_from_lead(existing: ExistingHotel, lead: PotentialLead) -> 
     for field in fields_to_check:
         existing_val = getattr(existing, field, None)
         lead_val = getattr(lead, field, None)
-        if not existing_val and lead_val:
+        if not lead_val:
+            continue
+        if field == "opening_date":
+            # opening_date is the REASON a lead gets transferred — the lead's
+            # date (discovered by grounding) is authoritative and must always
+            # overwrite the stale value on the existing_hotel row.
+            # Example: existing has "Late 2026" but grounding found "November 21, 2024"
+            # → the real date must win, not the stale placeholder.
+            setattr(existing, field, lead_val)
+        elif not existing_val:
             setattr(existing, field, lead_val)
 
     # Union source URLs

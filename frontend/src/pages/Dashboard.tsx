@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { useLeads } from '@/hooks/useLeads'
 import type { LeadTab } from '@/api/types'
@@ -9,6 +9,7 @@ import FilterBar, { DEFAULT_FILTERS, type Filters } from '@/components/leads/Fil
 import { cn } from '@/lib/utils'
 import { Inbox, CheckCircle2, XCircle, Search, X, Download, Loader2 } from 'lucide-react'
 import api from '@/api/client'
+import { markLeadReviewed } from '@/api/leads'
 
 const TABS: { key: LeadTab; label: string; icon: React.ElementType }[] = [
   { key: 'pipeline', label: 'Pipeline', icon: Inbox },
@@ -88,6 +89,13 @@ export default function Dashboard() {
     setPage(1)
     setSelectedLeadId(null)
   }
+
+  // HV-4: stamp last_user_review_at whenever a human opens a lead.
+  // Fire-and-forget — never blocks the UI, errors swallowed in the API fn.
+  const handleSelectLead = useCallback((id: number) => {
+    setSelectedLeadId(id)
+    markLeadReviewed(id)
+  }, [])
 
   return (
     <div className="h-full flex flex-col">
@@ -210,7 +218,7 @@ export default function Dashboard() {
             totalPages={totalPages}
             tab={tab}
             selectedId={selectedLeadId}
-            onSelect={setSelectedLeadId}
+            onSelect={handleSelectLead}
             onPageChange={setPage}
             onSort={handleSort}
             currentSort={filters.sort}

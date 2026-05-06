@@ -1213,14 +1213,18 @@ function ContactsTab({ contacts, loading, leadId, onEnrich, enriching, enriching
                                         "{item.quote}"
                                       </p>
                                     )}
-                                    <a
-                                      href={item.source_url}
-                                      target="_blank"
-                                      rel="noopener noreferrer"
-                                      className="inline-flex items-center gap-1 text-[11px] text-blue-600 hover:underline"
-                                    >
-                                      <ExternalLink className="w-2.5 h-2.5" /> Open source
-                                    </a>
+                                    {item.source_url && item.source_url.startsWith('http') ? (
+                                      <a
+                                        href={item.source_url}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className="inline-flex items-center gap-1 text-[11px] text-blue-600 hover:underline"
+                                      >
+                                        <ExternalLink className="w-2.5 h-2.5" /> Open source
+                                      </a>
+                                    ) : (
+                                      <span className="text-[11px] text-stone-400 italic">Source URL not available</span>
+                                    )}
                                   </div>
                                 )
                               })}

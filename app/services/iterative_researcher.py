@@ -25,12 +25,17 @@ so callers (routes, tasks) don't need to change.
 
 from __future__ import annotations
 
+import datetime
 import logging
 import re
 from dataclasses import dataclass, field
 from typing import Optional
 
 from app.config.brand_registry import BrandRegistry
+
+_CY = datetime.datetime.now().year  # current year — auto-updates Jan 1
+_NY = _CY + 1  # next year
+
 
 logger = logging.getLogger(__name__)
 
@@ -338,7 +343,7 @@ async def _verify_operating_companies(state: ResearchState) -> None:
             continue
 
         verify_name = state.search_name or _shorten_hotel_name(state.hotel_name)
-        query = f'"{company}" "{verify_name}" 2025 OR 2026 management OR operator'
+        query = f'"{company}" "{verify_name}" 2025 OR {_CY} management OR operator'
         if query in state.queries_run:
             continue
         state.queries_run.append(query)
@@ -446,7 +451,7 @@ async def _extract_owner_with_gemini(state, ce_module) -> Optional[dict]:
     evidence = "\n\n---\n\n".join(texts)[:12000]
 
     prompt = f"""You are extracting property ownership information from trade-press
-articles about a specific hotel. Current date: April 2026.
+articles about a specific hotel. Current date: May 2026.
 
 HOTEL: {state.hotel_name}
 LOCATION: {", ".join(filter(None, [state.city, state.state, state.country]))}
@@ -559,7 +564,7 @@ async def _check_company_currency_with_gemini(
         return "unknown"
 
     prompt = f"""Evidence snippets below describe the relationship between a company
-and a hotel. Current date: April 2026.
+and a hotel. Current date: May 2026.
 
 COMPANY: {company}
 HOTEL: {target_hotel}
@@ -642,7 +647,7 @@ async def iteration_2_gm_hunt(state: ResearchState) -> int:
         # Press releases with appointment announcements
         f'"{short_name}" "general manager" appointed OR named OR hired',
         # Generic GM mention with year filter
-        f'"{short_name}" general manager 2025 OR 2026',
+        f'"{short_name}" general manager 2025 OR {_CY} OR {_NY}',
     ]
 
     # If this is a cluster reopening, also search for a cluster GM
@@ -1511,7 +1516,7 @@ async def iteration_5_verify_current_role(state: ResearchState) -> int:
         # All-Inclusive Resort – Adults Only" returns ZERO Google results.
         # "Royalton Vessence Barbados" works perfectly.
         verify_name = state.search_name or _shorten_hotel_name(state.hotel_name)
-        query = f'"{name}" "{verify_name}" 2025 OR 2026 OR current OR present'
+        query = f'"{name}" "{verify_name}" 2025 OR {_CY} OR current OR present'
         if query in state.queries_run:
             continue
         state.queries_run.append(query)
@@ -1662,7 +1667,7 @@ async def iteration_5_verify_current_role(state: ResearchState) -> int:
                 continue
 
             # Quick search: is this person still at the operator company?
-            query = f'"{name}" "{operator}" 2025 OR 2026 OR current'
+            query = f'"{name}" "{operator}" 2025 OR {_CY} OR current'
             if query in state.queries_run:
                 continue
             state.queries_run.append(query)
@@ -2128,7 +2133,8 @@ async def _check_title_currency_with_gemini(
     # Search for recent announcements of this title. Covers both
     # "[Name] appointed [Title]" and "[Title] announced as..." phrasings.
     query = (
-        f'"{company}" "{title}" appointed OR named OR new OR announces ' f"2025 OR 2026"
+        f'"{company}" "{title}" appointed OR named OR new OR announces '
+        f"2025 OR {_CY}"
     )
     if query in state.queries_run:
         return None
@@ -2152,7 +2158,7 @@ async def _check_title_currency_with_gemini(
     )[:6000]
 
     prompt = f"""You are verifying who CURRENTLY holds a specific executive
-title at a specific company. Current date: April 2026.
+title at a specific company. Current date: May 2026.
 
 COMPANY: {company}
 TITLE: {title}
@@ -2586,7 +2592,7 @@ async def iteration_6_reasoning_pass(state: ResearchState) -> int:
 
     prompt = f"""You are a senior hospitality sales strategist for JA Uniforms,
 a hotel uniform supplier. JA Uniforms needs 6 months of lead time to deliver
-uniforms for a new opening or major renovation. Current date: April 2026.
+uniforms for a new opening or major renovation. Current date: May 2026.
 
 LEAD CONTEXT:
 - Hotel: {state.hotel_name}
@@ -2985,8 +2991,8 @@ async def iteration_6_5_employment_verification(state: ResearchState) -> int:
         title = (contact.get("title") or "").strip()
         org = (contact.get("organization") or "").strip()
 
-        # Run a focused Google search: "Name" "Company" 2024 OR 2025 OR 2026
-        query = f'"{name}" "{org}" 2024 OR 2025 OR 2026'
+        # Run a focused Google search: "Name" "Company" 2024 OR 2025 OR {_CY}
+        query = f'"{name}" "{org}" 2024 OR 2025 OR {_CY}'
         if query in state.queries_run:
             continue
         state.queries_run.append(query)
@@ -3005,7 +3011,7 @@ async def iteration_6_5_employment_verification(state: ResearchState) -> int:
             )
             contact["_final_priority"] = "P3"
             contact["_final_reasoning"] = (
-                f"⚠ No 2024-2026 mentions found confirming {name} is still "
+                f"⚠ No 2024-{_CY} mentions found confirming {name} is still "
                 f"at {org}. Only older evidence available. "
                 f"Verify current employment before outreach. "
                 + (contact.get("_final_reasoning") or "")
@@ -3468,6 +3474,7 @@ For each person mentioned who works at or is associated with this hotel (or its 
 CRITICAL CO-EXTRACTION RULE:
 When you extract a person's name, you MUST ALSO extract their title and organization
 from the SAME snippet if they appear anywhere in it. Do NOT return a name with empty
+
 title/organization when that information is sitting in the same snippet text.
 
 Look at the ENTIRE snippet — the title may appear before OR after the name:
