@@ -151,11 +151,23 @@ class APIKeyMiddleware:
     # behavior — sales dashboard widget polls it without auth headers).
     # If sales policy later requires auth, remove it from EXCLUDE_PREFIXES
     # above instead.
+    #
+    # AUDIT 2026-05-06 (CRIT-1): Added /revenue and /discovery. The
+    # revenue router (mounted at prefix /revenue) had two POST endpoints
+    # that mutate DB state — bulk-update and update/{lead_id} — and was
+    # reachable without any auth at all because /revenue matched none of
+    # the prefixes below. Same problem for /discovery/queries (read-only
+    # but leaks operational query intelligence). Per-route deps were also
+    # missing on these routes; lifting auth into the prefix list keeps the
+    # protection symmetric with /leads, /sources, /scrape and avoids
+    # depending on every future route adding its own require_admin.
     PROTECTED_PREFIXES: tuple[str, ...] = (
         "/api/",
         "/leads",
         "/sources",
         "/scrape",
+        "/revenue",
+        "/discovery",
     )
 
     def __init__(self, app: ASGIApp, exclude_paths: list[str] | None = None):

@@ -181,6 +181,12 @@ async def _patch_engine():
         async with test_engine.begin() as conn:
             await conn.execute(text("SELECT 1"))
             await conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
+            # AUDIT 2026-05-06 (HIGH-2 / HV-3): the unaccent_ilike helper
+            # in app/shared.py emits unaccent(...) on Postgres; tests
+            # need the extension enabled too. Idempotent; matches
+            # alembic migration 023.
+            await conn.execute(text("CREATE EXTENSION IF NOT EXISTS unaccent"))
+            await conn.execute(text("CREATE EXTENSION IF NOT EXISTS pg_trgm"))
             await conn.run_sync(database.Base.metadata.create_all)
 
         database.engine = test_engine

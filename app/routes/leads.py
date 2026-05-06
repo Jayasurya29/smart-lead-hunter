@@ -58,6 +58,16 @@ async def list_leads(
     sort: Optional[str] = "score_desc",
     location: Optional[str] = None,
     has_coords: Optional[str] = None,
+    review_stale_days: Optional[int] = Query(
+        None,
+        ge=1,
+        le=365,
+        description=(
+            "HV-4: only return leads whose last_user_review_at is older than "
+            "this many days (or never reviewed). Powers the 'stale review' "
+            "filter that flags leads sales has lost track of."
+        ),
+    ),
     db: AsyncSession = Depends(get_db),
 ):
     """List leads with full filtering, pagination, and sorting."""
@@ -99,6 +109,20 @@ async def list_leads(
         count_query = count_query.where(
             PotentialLead.opening_date.ilike(f"%{safe_year}%")
         )
+
+    # AUDIT 2026-05-06 (HV-4): "stale review" filter. Returns leads
+    # last reviewed > N days ago OR never reviewed (NULL). Pairs with
+    # the sort key `review_stale` below.
+    if review_stale_days:
+        from sqlalchemy import or_ as sql_or
+
+        stale_cutoff = today_start - timedelta(days=review_stale_days)
+        stale_filter = sql_or(
+            PotentialLead.last_user_review_at.is_(None),
+            PotentialLead.last_user_review_at < stale_cutoff,
+        )
+        query = query.where(stale_filter)
+        count_query = count_query.where(stale_filter)
 
     # has_coords filter — used by map to get only geocoded leads
     if has_coords == "true":
@@ -206,6 +230,11 @@ async def list_leads(
         "time_desc": PotentialLead.timeline_label.desc().nullslast(),
         "location_asc": PotentialLead.city.asc().nullslast(),
         "location_desc": PotentialLead.city.desc().nullslast(),
+        # AUDIT 2026-05-06 (HV-4): "stale review" sort — staleest first.
+        # NULLs (never reviewed) sort first because those are the most
+        # urgent to surface to sales. Tie-break by lead_score DESC so a
+        # never-reviewed HOT-grade lead lands at the very top.
+        "review_stale": PotentialLead.last_user_review_at.asc().nullsfirst(),
     }
     order_by = sort_map.get(
         sort or "score_desc", PotentialLead.lead_score.desc().nullslast()
@@ -336,28 +365,41 @@ async def export_leads_excel(
     if min_score:
         q = q.where(PotentialLead.lead_score >= min_score)
     if location:
-        loc_lower = f"%{location.lower()}%"
+        # AUDIT 2026-05-06 (HIGH-2): diacritic-insensitive location match.
+        from app.shared import unaccent_ilike
+
         q = q.where(
             or_(
-                PotentialLead.city.ilike(loc_lower),
-                PotentialLead.state.ilike(loc_lower),
-                PotentialLead.country.ilike(loc_lower),
+                unaccent_ilike(PotentialLead.city, location),
+                unaccent_ilike(PotentialLead.state, location),
+                unaccent_ilike(PotentialLead.country, location),
             )
         )
     if search:
-        search_lower = f"%{search.lower()}%"
+        from app.shared import unaccent_ilike
+
         q = q.where(
             or_(
-                PotentialLead.hotel_name.ilike(search_lower),
-                PotentialLead.brand.ilike(search_lower),
-                PotentialLead.city.ilike(search_lower),
-                PotentialLead.state.ilike(search_lower),
+                unaccent_ilike(PotentialLead.hotel_name, search),
+                unaccent_ilike(PotentialLead.brand, search),
+                unaccent_ilike(PotentialLead.city, search),
+                unaccent_ilike(PotentialLead.state, search),
             )
         )
 
-    q = q.order_by(PotentialLead.lead_score.desc().nullslast())
+    # AUDIT 2026-05-06 (HIGH-3): cap export at 25,000 rows to prevent
+    # OOM at scale. The previous unlimited pull loaded all matching rows
+    # into memory, then built a full openpyxl workbook in a single
+    # synchronous pass inside the request handler. At 100k leads a
+    # default "All Active" export was a guaranteed event-loop stall +
+    # ~1GB memory spike. 25k matches the largest plausible single-export
+    # use case (a year's worth of US + Caribbean inventory). When the
+    # cap is hit we set `X-Result-Truncated` so the client can tell.
+    EXPORT_ROW_CAP = 25_000
+    q = q.order_by(PotentialLead.lead_score.desc().nullslast()).limit(EXPORT_ROW_CAP)
     result = await db.execute(q)
     leads = list(result.scalars().all())
+    truncated = len(leads) >= EXPORT_ROW_CAP
 
     # ── Fetch all contacts grouped by lead ──
     primary_contacts: dict[int, LeadContact] = {}
@@ -404,10 +446,14 @@ async def export_leads_excel(
     filename = (
         f"JA_NewHotels_{tab_label.replace(' ', '')}_" f"{date.today().isoformat()}.xlsx"
     )
+    headers = {"Content-Disposition": f'attachment; filename="{filename}"'}
+    if truncated:
+        headers["X-Result-Truncated"] = "1"
+        headers["X-Result-Cap"] = str(EXPORT_ROW_CAP)
     return StreamingResponse(
         io.BytesIO(xlsx_bytes),
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        headers=headers,
     )
 
 

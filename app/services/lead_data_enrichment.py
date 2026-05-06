@@ -324,15 +324,55 @@ async def _call_gemini(
 
 _GROUNDING_TIMEOUT_S = 60.0
 _GROUNDING_MIN_FIELDS = 3  # below this, we treat the result as a failure
+# AUDIT 2026-05-06 (CRIT-2): Canonical 5-tier set ONLY. JA Uniforms
+# targets 4-star+ properties. Any other tier value the AI returns is
+# normalized to tier5_skip (see _coerce_brand_tier_to_canonical below) so
+# downstream apply layers and DB writes never see non-canonical strings.
+# The audit on 2026-05-05 (Bug #7) declared this fixed but the prompt
+# enums and these accept-lists still produced/accepted tier5_upper_midscale,
+# tier6_midscale, tier7_economy. Fixed end-to-end now.
 _GROUNDING_VALID_TIERS = {
     "tier1_ultra_luxury",
     "tier2_luxury",
     "tier3_upper_upscale",
     "tier4_upscale",
-    "tier5_upper_midscale",
-    "tier6_midscale",
-    "tier7_economy",
+    "tier5_skip",
 }
+# Non-canonical AI outputs we still occasionally see — coerce them to
+# tier5_skip rather than silently dropping the field. tier5_skip means
+# "out of scope for JA"; keeping the signal lets the existing-hotel
+# scorer fire out_of_scope_warning so sales sees the data error.
+_NON_CANONICAL_TIER_ALIASES = {
+    "tier5_upper_midscale": "tier5_skip",
+    "tier5_midscale": "tier5_skip",
+    "tier6_midscale": "tier5_skip",
+    "tier6_economy": "tier5_skip",
+    "tier7_economy": "tier5_skip",
+    "tier8_budget": "tier5_skip",
+}
+
+
+def _coerce_brand_tier_to_canonical(value) -> Optional[str]:
+    """Normalize a raw brand_tier string from the AI / extraction layer to
+    the canonical 5-tier set, or None if the value is empty / unrecognized.
+
+    Returns one of: tier1_ultra_luxury, tier2_luxury, tier3_upper_upscale,
+                    tier4_upscale, tier5_skip, or None.
+
+    Used by every writeback path in this module (grounded one-shot, the
+    6-stage extraction result builder, batch_full_refresh apply layer)
+    so a single rule defines what the DB will ever see.
+    """
+    if not isinstance(value, str):
+        return None
+    v = value.strip().lower()
+    if not v or "|" in v:
+        return None
+    if v in _GROUNDING_VALID_TIERS:
+        return v
+    if v in _NON_CANONICAL_TIER_ALIASES:
+        return _NON_CANONICAL_TIER_ALIASES[v]
+    return None
 _GROUNDING_VALID_PROJECT_TYPES = {
     "new_opening",
     "renovation",
@@ -391,7 +431,7 @@ cannot confidently determine — DO NOT guess.
   "project_type": "new_opening | renovation | rebrand | reopening | conversion | ownership_change | residences_only",
   "room_count": 250,
   "brand": "Hotel brand / flag (e.g. 'Marriott', 'Four Seasons', 'Independent')",
-  "brand_tier": "tier1_ultra_luxury | tier2_luxury | tier3_upper_upscale | tier4_upscale | tier5_upper_midscale | tier6_midscale | tier7_economy",
+  "brand_tier": "tier1_ultra_luxury | tier2_luxury | tier3_upper_upscale | tier4_upscale | tier5_skip — pick tier5_skip for any 1-3 star / budget / select-service / extended-stay brand (Holiday Inn Express, Hampton, Days Inn, etc.). JA Uniforms only sells to 4-star+ properties; if it's not 4-star+, it's tier5_skip.",
   "management_company": "Day-to-day hotel OPERATOR — the company running the hotel (NOT brand licensor like Marriott/Hilton/Hyatt)",
   "owner": "Property owner / real estate holding entity",
   "developer": "Entity BUILDING the property (often same as owner for new builds)",
@@ -439,12 +479,13 @@ def _validate_grounding_response(parsed: Dict) -> Dict:
     if isinstance(br, str) and not _grounding_blank(br):
         clean["brand"] = br.strip()
 
-    # brand_tier — must be in allowed enum
+    # brand_tier — coerce to canonical 5-tier set (CRIT-2 fix). Anything
+    # the AI returns that isn't a canonical tier is mapped to tier5_skip
+    # via the alias map, or dropped entirely if unrecognizable.
     bt = parsed.get("brand_tier")
-    if isinstance(bt, str):
-        bt_lower = bt.strip().lower()
-        if "|" not in bt_lower and bt_lower in _GROUNDING_VALID_TIERS:
-            clean["brand_tier"] = bt_lower
+    coerced_bt = _coerce_brand_tier_to_canonical(bt)
+    if coerced_bt:
+        clean["brand_tier"] = coerced_bt
 
     # management_company / owner / developer / address — keep non-blank strings
     for f in ("management_company", "owner", "developer", "address"):
@@ -1569,9 +1610,7 @@ Return JSON:
                     "tier2_luxury",
                     "tier3_upper_upscale",
                     "tier4_upscale",
-                    "tier5_upper_midscale",
-                    "tier6_midscale",
-                    "tier7_economy",
+                    "tier5_skip",
                 ],
             },
             "room_count": {"type": "integer"},
@@ -2736,25 +2775,38 @@ def _map_extraction_to_result(
         result["opened_date"] = opened_date
 
     # ── brand_tier ──
-    VALID_TIERS = {
-        "tier1_ultra_luxury",
-        "tier2_luxury",
-        "tier3_upper_upscale",
-        "tier4_upscale",
-        "tier5_upper_midscale",
-        "tier6_midscale",
-        "tier7_economy",
-    }
+    # AUDIT 2026-05-06 (CRIT-2): Coerce to canonical 5-tier set BEFORE we
+    # decide whether to write. Anything non-canonical from the AI ends up
+    # as tier5_skip (or None if completely garbage). Previously this set
+    # included tier5_upper_midscale, tier6_midscale, tier7_economy and
+    # those values flowed straight into the result dict and into the DB.
+    # AUDIT 2026-05-06 (HV-5): Even with a valid coerced new tier, do NOT
+    # downgrade an already-valid current tier to tier5_skip on full mode.
+    # Grounding can be wrong; manual edits + scorer-derived tiers should
+    # win over a single AI confidence dip.
     INVALID_TIER_SENTINELS = {"", "unknown", "none", "n/a", "tbd"}
-    new_tier = (extraction.get("brand_tier") or "").strip().lower()
+    coerced_new_tier = _coerce_brand_tier_to_canonical(extraction.get("brand_tier"))
     current_tier_l = (current_brand_tier or "").strip().lower()
-    if new_tier in VALID_TIERS:
-        if mode == "full":
-            result["brand_tier"] = extraction["brand_tier"]
+    current_is_valid = current_tier_l in _GROUNDING_VALID_TIERS
+    is_downgrade_to_skip = (
+        coerced_new_tier == "tier5_skip"
+        and current_is_valid
+        and current_tier_l != "tier5_skip"
+    )
+    if coerced_new_tier and not is_downgrade_to_skip:
+        if mode == "full" and not current_is_valid:
+            result["brand_tier"] = coerced_new_tier
+            if "brand_tier" not in result["changes"]:
+                result["changes"].append("brand_tier")
+        elif mode == "full" and current_is_valid and coerced_new_tier != "tier5_skip":
+            # Full mode allowed to overwrite a valid tier with another
+            # valid non-skip tier (legit reclassification: tier4_upscale
+            # → tier3_upper_upscale after a brand promotion).
+            result["brand_tier"] = coerced_new_tier
             if "brand_tier" not in result["changes"]:
                 result["changes"].append("brand_tier")
         elif current_tier_l in INVALID_TIER_SENTINELS:
-            result["brand_tier"] = extraction["brand_tier"]
+            result["brand_tier"] = coerced_new_tier
             if "brand_tier" not in result["changes"]:
                 result["changes"].append("brand_tier")
 
@@ -3202,26 +3254,26 @@ async def batch_full_refresh(limit: int = 5, stale_days: int = 14) -> Dict:
                     if new_label == "EXPIRED" or lead.status == "expired":
                         transfer_candidate_ids.append(lead.id)
 
-            # Brand tier — only overwrite if new value is valid.
-            _VALID_TIERS = {
-                "tier1_ultra_luxury",
-                "tier2_luxury",
-                "tier3_upper_upscale",
-                "tier4_upscale",
-                "tier5_upper_midscale",
-                "tier6_midscale",
-                "tier7_economy",
-            }
+            # Brand tier — coerce to canonical 5-tier (CRIT-2) and never
+            # downgrade a valid current tier to tier5_skip (HV-5).
             _INVALID = {"", "unknown", "none", "n/a", "na", "tbd"}
             if "brand_tier" in enriched:
-                new_tier = (enriched.get("brand_tier") or "").strip().lower()
+                coerced = _coerce_brand_tier_to_canonical(enriched.get("brand_tier"))
                 current_tier = (lead.brand_tier or "").strip().lower()
-                if new_tier in _VALID_TIERS:
-                    lead.brand_tier = enriched["brand_tier"]
-                    changes.append(f"tier={enriched['brand_tier']}")
-                elif current_tier in _INVALID and new_tier:
-                    lead.brand_tier = enriched["brand_tier"]
-                    changes.append(f"tier={enriched['brand_tier']}")
+                current_is_valid = current_tier in _GROUNDING_VALID_TIERS
+                is_downgrade_to_skip = (
+                    coerced == "tier5_skip"
+                    and current_is_valid
+                    and current_tier != "tier5_skip"
+                )
+                if coerced and not is_downgrade_to_skip:
+                    if current_is_valid and coerced == "tier5_skip":
+                        # Refuse to clobber a valid tier with skip, even
+                        # in full mode. Caller can manually flip.
+                        pass
+                    elif current_is_valid or current_tier in _INVALID:
+                        lead.brand_tier = coerced
+                        changes.append(f"tier={coerced}")
 
             # Room count — only overwrite with a positive integer.
             if "room_count" in enriched:

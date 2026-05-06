@@ -321,6 +321,11 @@ async def dashboard_edit_lead(
         lead.score_breakdown = bd
 
     lead.updated_at = local_now()
+    # AUDIT 2026-05-06 (HV-4): Stamp last_user_review_at on every manual
+    # edit so the "stale review" filter knows when sales last touched
+    # this lead. Distinct from updated_at, which any system process
+    # (Smart Fill, rescore, geo-enrich, batch_full_refresh) bumps too.
+    lead.last_user_review_at = local_now()
 
     # A-01: Audit log for edits — only log fields that actually changed
     new_values = {k: data[k] for k in old_values if data.get(k) != old_values[k]}
@@ -462,6 +467,8 @@ async def dashboard_approve_lead(
     old_status = lead.status
     lead.status = "approved"
     lead.updated_at = local_now()
+    # AUDIT 2026-05-06 (HV-4): record sales-side review timestamp.
+    lead.last_user_review_at = local_now()
 
     # Push contacts as Insightly Leads
     from app.services.insightly import get_insightly_client
@@ -561,6 +568,8 @@ async def dashboard_reject_lead(
     lead.rejection_reason = reason
     lead.notes = f"{lead.notes or ''}\nRejected: {reason or 'No reason given'}".strip()
     lead.updated_at = local_now()
+    # AUDIT 2026-05-06 (HV-4): record sales-side review timestamp.
+    lead.last_user_review_at = local_now()
 
     # Remove from Insightly if previously pushed — use stored IDs (fast path)
     if lead.insightly_id or lead.insightly_lead_ids:
@@ -623,6 +632,8 @@ async def dashboard_restore_lead(
     lead.status = "new"
     lead.rejection_reason = None
     lead.updated_at = local_now()
+    # AUDIT 2026-05-06 (HV-4): record sales-side review timestamp.
+    lead.last_user_review_at = local_now()
 
     # AUDIT 2026-05-05 (bug #14): Recompute timeline_label on restore so a
     # lead whose opening_date passed during its rejected/deleted phase

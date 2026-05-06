@@ -35,10 +35,14 @@ class PotentialLead(Base):
 
     # Hotel Information
     hotel_name = Column(String(255), nullable=False)
-    hotel_name_normalized = Column(String(255))  # Lowercase, no special chars for dedup
+    # AUDIT 2026-05-06 (CRIT-3): index for dedup exact-match path —
+    # save_lead_to_db queries this on every save. Migration 023.
+    hotel_name_normalized = Column(
+        String(255), index=True
+    )  # Lowercase, no special chars for dedup
     brand = Column(String(100))
     brand_tier = Column(
-        String(20)
+        String(20), index=True
     )  # tier1_ultra_luxury, tier2_luxury, tier3_upper_upscale, tier4_upscale, tier5_skip
     hotel_type = Column(String(50))  # resort, hotel, boutique, all-inclusive
     hotel_website = Column(String(500))
@@ -62,9 +66,13 @@ class PotentialLead(Base):
 
     # Hotel Details
     opening_date = Column(String(50))  # Flexible: "Q2 2026", "June 2026", "2026"
-    opening_year = Column(Integer)  # Extracted year for filtering
+    # AUDIT 2026-05-06 (CRIT-3): index opening_year for the year filter on
+    # /leads and /leads/export. Migration 023.
+    opening_year = Column(Integer, index=True)  # Extracted year for filtering
+    # AUDIT 2026-05-06 (CRIT-3): index timeline_label for Pipeline tab
+    # filter (HOT/URGENT/WARM/COOL/EXPIRED). Migration 023.
     timeline_label = Column(
-        String(10)
+        String(10), index=True
     )  # HOT, URGENT, WARM, COOL, LATE, EXPIRED, TBD (computed on save/rescore)
     # Project type (migration 015) — distinguishes how the property is coming
     # to market. Drives whether timeline is based on opening_date (new_opening,
@@ -96,7 +104,8 @@ class PotentialLead(Base):
     # Added so a property carries the same information through both
     # lifecycle stages (pipeline → opened). Map page can route by zone
     # the moment a lead enters the pipeline, not waiting for opening.
-    zone = Column(String(50))  # South Florida, Orlando, Tampa Bay, etc.
+    # AUDIT 2026-05-06 (CRIT-3): index zone for map filter. Migration 023.
+    zone = Column(String(50), index=True)  # South Florida, Orlando, Tampa Bay, etc.
     chain = Column(String(150))  # Brand parent (Hilton Worldwide, Marriott Intl)
     data_source = Column(String(50))  # scraping_run / manual / google_places / etc.
 
@@ -139,6 +148,15 @@ class PotentialLead(Base):
 
     # Raw data
     raw_data = Column(JSONB)
+
+    # AUDIT 2026-05-06 (HV-4): When sales last reviewed this lead via the
+    # dashboard (edit / approve / reject / restore). Distinct from
+    # `updated_at` (which any system process may bump — Smart Fill,
+    # rescore, geo-enrich) and `claimed_at` (which is just the first
+    # claim). Powers a "stale review" filter so sales doesn't lose a
+    # 9-month-out HOT lead they last touched 21 days ago. NULL means
+    # never reviewed. Indexed for the filter sort.
+    last_user_review_at = Column(DateTime(timezone=True), index=True)
 
     # Timestamps
     created_at = Column(
@@ -218,4 +236,9 @@ class PotentialLead(Base):
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
             "scraped_at": self.scraped_at.isoformat() if self.scraped_at else None,
+            "last_user_review_at": (
+                self.last_user_review_at.isoformat()
+                if self.last_user_review_at
+                else None
+            ),
         }

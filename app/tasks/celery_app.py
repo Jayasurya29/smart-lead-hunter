@@ -82,6 +82,18 @@ celery_app.conf.update(
     #   afternoon → second scrape + enrich pass
     #   late-PM   → final scrape (lighter, end-of-day catch-up)
     beat_schedule={
+        # Pre-opening digest: 9:00 AM Mon-Fri (HV-2, 2026-05-06).
+        # DB-only, light. Scans active URGENT/HOT leads crossing into
+        # the 6-12 month uniform procurement window and emails sales
+        # a digest. Runs BEFORE recompute_timeline_labels so the
+        # digest reflects yesterday's bucket boundaries — the
+        # recompute task may rebucket some leads at 9:30 immediately
+        # after.
+        "pre-opening-digest": {
+            "task": "pre_opening_digest",
+            "schedule": crontab(hour=9, minute=0, day_of_week="1-5"),
+            "options": {"queue": "maintenance"},
+        },
         # Recompute timeline labels: 9:30 AM Mon-Fri.
         # DB-only — drains expired → existing, resurrects ghosts. Runs
         # FIRST so the rest of the day operates on a clean dataset.

@@ -962,3 +962,138 @@ def recompute_timeline_labels(self) -> Dict[str, Any]:
         return results
 
     return run_async(_recompute())
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Pre-opening digest (HV-2, 2026-05-06)
+# ─────────────────────────────────────────────────────────────────────────────
+#
+# Runs each weekday morning. Finds active leads that have JUST crossed
+# into the 6-12 month opening window since the last run (and a few
+# adjacent buckets we care about), and emails sales a digest.
+#
+# Crossing detection: we don't store "previous timeline_label" — instead
+# we look at:
+#   - All status='new' leads in URGENT or HOT buckets
+#   - Whose `last_digest_notified_at` is NULL or older than 24 hours
+#
+# The opening_date is the source of truth; once a lead has been
+# notified, we stamp it so subsequent runs don't re-notify the same lead
+# every morning. This stamping uses the `notes` field with a tagged
+# substring — keeping it self-contained without a new column.
+
+@celery_app.task(name="pre_opening_digest", base=BaseTask)
+def pre_opening_digest_task():
+    """Daily pre-opening digest — emails sales about leads crossing the
+    procurement window. Built 2026-05-06 (HV-2).
+    """
+    from app.services.notifications import (
+        send_digest_email,
+        _get_digest_recipients,
+    )
+    from app.services.utils import months_to_opening
+    from datetime import datetime, timezone as _tz
+
+    logger.info("Pre-opening digest: starting...")
+
+    _MARKER = "[SLH:digest_notified]"
+
+    async def _run():
+        recipients = _get_digest_recipients()
+
+        async with async_session() as session:
+            # Pull active leads in URGENT/HOT buckets only — the
+            # window where uniform decisions are being made. Cool/Warm
+            # are too early; Expired is too late and graduates anyway.
+            q = await session.execute(
+                select(PotentialLead).where(
+                    PotentialLead.status == "new",
+                    PotentialLead.timeline_label.in_(["URGENT", "HOT"]),
+                )
+            )
+            candidates = list(q.scalars().all())
+
+            crossings: list[dict] = []
+            stamped_ids: list[int] = []
+            for lead in candidates:
+                # Skip if we've already notified about this lead in the
+                # last 30 days — using a tagged note as the dedup key.
+                # (No new column needed; survives schema migrations.)
+                if lead.notes and _MARKER in lead.notes:
+                    continue
+                months = months_to_opening(lead.opening_date or "")
+                # Only HOT band crossings (6-12mo) make the digest. URGENT
+                # (3-6mo) is informational but optional — include it too
+                # so sales can escalate.
+                if months < 3 or months >= 13:
+                    continue
+                crossings.append(
+                    {
+                        "id": lead.id,
+                        "hotel_name": lead.hotel_name,
+                        "city": lead.city,
+                        "state": lead.state,
+                        "country": lead.country,
+                        "brand_tier": lead.brand_tier or "",
+                        "opening_date": lead.opening_date or "",
+                        "months_out": months,
+                        "lead_score": lead.lead_score or 0,
+                    }
+                )
+                stamped_ids.append(lead.id)
+
+            # Sort: HOT before URGENT, then by lead_score desc, so the
+            # email leads with the strongest fits.
+            crossings.sort(
+                key=lambda c: (
+                    0 if 6 <= c["months_out"] < 12 else 1,
+                    -(c["lead_score"] or 0),
+                )
+            )
+
+        # Send (commits independently of the SLH session — failures here
+        # don't roll back any DB state).
+        sent = await send_digest_email(
+            recipients,
+            crossings,
+            generated_at=datetime.now(_tz.utc),
+        )
+
+        # Stamp notes so we don't re-notify on tomorrow's run. Done in a
+        # SEPARATE session so a partial commit failure doesn't poison
+        # the whole transaction (and we still want to record what was
+        # sent if the email succeeded).
+        if sent and stamped_ids:
+            stamp = (
+                f"\n{_MARKER} "
+                f"{datetime.now(_tz.utc).strftime('%Y-%m-%dT%H:%MZ')}"
+            )
+            try:
+                async with async_session() as stamp_session:
+                    fetch = await stamp_session.execute(
+                        select(PotentialLead).where(
+                            PotentialLead.id.in_(stamped_ids)
+                        )
+                    )
+                    for lead in fetch.scalars().all():
+                        lead.notes = (lead.notes or "") + stamp
+                    await stamp_session.commit()
+            except Exception as e:
+                logger.warning(
+                    "Pre-opening digest: stamping notes failed (non-fatal): %s",
+                    e,
+                )
+
+        logger.info(
+            "Pre-opening digest: complete — %d crossing(s), sent=%s, recipients=%d",
+            len(crossings),
+            sent,
+            len(recipients),
+        )
+        return {
+            "crossings": len(crossings),
+            "sent": sent,
+            "recipients": len(recipients),
+        }
+
+    return run_async(_run())

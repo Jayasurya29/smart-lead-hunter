@@ -605,11 +605,31 @@ async def update_user(
     body = await request.json()
     if "role" in body and body["role"] in VALID_ROLES:
         user.role = body["role"]
+    is_active_changed = False
     if "is_active" in body:
-        user.is_active = bool(body["is_active"])
+        new_active = bool(body["is_active"])
+        if new_active != user.is_active:
+            is_active_changed = True
+        user.is_active = new_active
 
     user.updated_at = datetime.now(timezone.utc)
     await db.commit()
+
+    # AUDIT 2026-05-06 (HIGH-1): If is_active changed (in either
+    # direction) we must invalidate the middleware's TTL cache for this
+    # user. Without this, a deactivation via PATCH leaves the user with
+    # up to 60s of access — same bug class as Bug #17 fixed for the
+    # DELETE handler. Invalidate on EITHER direction so a re-activated
+    # user doesn't have to wait 60s for a stale "is_active=False"
+    # entry to expire either.
+    if is_active_changed:
+        try:
+            from app.middleware.auth import _clear_user_active_cache
+
+            _clear_user_active_cache(str(user_id))
+        except Exception:
+            pass
+
     return user.to_dict()
 
 

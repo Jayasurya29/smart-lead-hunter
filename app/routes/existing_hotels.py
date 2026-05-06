@@ -20,7 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db, async_session
 from app.models.existing_hotel import ExistingHotel
-from app.shared import require_ajax, escape_like
+from app.shared import require_ajax, escape_like, unaccent_ilike
 
 from app.services.utils import local_now
 
@@ -79,30 +79,31 @@ async def list_existing_hotels(
     count_query = select(func.count(ExistingHotel.id))
 
     if search:
-        safe = escape_like(search)
-        # Search BOTH old (name, website) and new (hotel_name, hotel_website)
-        # column names. Backfill from migration 018 keeps both populated, but
-        # any field updates after that will only land in the canonical column.
+        # AUDIT 2026-05-06 (HIGH-2 / HV-3): diacritic-insensitive search
+        # backed by migration 023's GIN trigram + unaccent indexes.
+        # Search BOTH legacy (name) and canonical (hotel_name) columns —
+        # backfill from migration 018 keeps both populated, but any
+        # field updates after that only land on the canonical column.
         search_filter = or_(
-            ExistingHotel.hotel_name.ilike(f"%{safe}%"),
-            ExistingHotel.name.ilike(f"%{safe}%"),
-            ExistingHotel.city.ilike(f"%{safe}%"),
-            ExistingHotel.brand.ilike(f"%{safe}%"),
-            ExistingHotel.chain.ilike(f"%{safe}%"),
-            ExistingHotel.state.ilike(f"%{safe}%"),
+            unaccent_ilike(ExistingHotel.hotel_name, search),
+            unaccent_ilike(ExistingHotel.name, search),
+            unaccent_ilike(ExistingHotel.city, search),
+            unaccent_ilike(ExistingHotel.brand, search),
+            unaccent_ilike(ExistingHotel.chain, search),
+            unaccent_ilike(ExistingHotel.state, search),
         )
         query = query.where(search_filter)
         count_query = count_query.where(search_filter)
 
     if state:
-        safe = escape_like(state)
-        query = query.where(ExistingHotel.state.ilike(f"%{safe}%"))
-        count_query = count_query.where(ExistingHotel.state.ilike(f"%{safe}%"))
+        state_filter = unaccent_ilike(ExistingHotel.state, state)
+        query = query.where(state_filter)
+        count_query = count_query.where(state_filter)
 
     if city:
-        safe = escape_like(city)
-        query = query.where(ExistingHotel.city.ilike(f"%{safe}%"))
-        count_query = count_query.where(ExistingHotel.city.ilike(f"%{safe}%"))
+        city_filter = unaccent_ilike(ExistingHotel.city, city)
+        query = query.where(city_filter)
+        count_query = count_query.where(city_filter)
 
     if brand_tier:
         query = query.where(ExistingHotel.brand_tier == brand_tier)
@@ -1999,6 +2000,11 @@ async def export_csv(
     elif is_client == "false":
         query = query.where(ExistingHotel.is_client.is_(False))
 
+    # AUDIT 2026-05-06 (HIGH-3): cap export at 25k rows for the same
+    # OOM/event-loop reasons as /leads/export above.
+    EXPORT_ROW_CAP = 25_000
+    query = query.limit(EXPORT_ROW_CAP)
+
     result = await db.execute(query)
     hotels = result.scalars().all()
 
@@ -2008,10 +2014,15 @@ async def export_csv(
         notes = f"Brand: {h.brand or 'Independent'} | Tier: {tier_label}"
         if h.room_count:
             notes += f" | Rooms: {h.room_count}"
-        if h.phone:
-            notes += f" | Phone: {h.phone}"
-        if h.gm_name:
-            notes += f" | GM: {h.gm_name}"
+        # AUDIT 2026-05-06: Use canonical contact_phone with gm_phone
+        # legacy fallback. `h.phone` was dropped in migration 018 — same
+        # class of bug as audit-1 Bug #4 (approve_existing_hotel).
+        phone = h.contact_phone or h.gm_phone
+        if phone:
+            notes += f" | Phone: {phone}"
+        gm = h.contact_name or h.gm_name
+        if gm:
+            notes += f" | GM: {gm}"
 
         group = "Client" if h.is_client else "Prospect"
         tags = ",".join(filter(None, [h.state, h.brand, tier_label]))
@@ -2030,4 +2041,10 @@ async def export_csv(
             }
         )
 
-    return {"rows": rows, "count": len(rows)}
+    truncated = len(rows) >= EXPORT_ROW_CAP
+    return {
+        "rows": rows,
+        "count": len(rows),
+        "truncated": truncated,
+        "cap": EXPORT_ROW_CAP if truncated else None,
+    }

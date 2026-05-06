@@ -78,10 +78,13 @@ class ExistingHotel(Base):
 
     # ── Hotel Information ─────────────────────────────────────────────
     hotel_name = Column(String(255), nullable=False, index=True)
-    hotel_name_normalized = Column(String(255))
+    # AUDIT 2026-05-06 (CRIT-3): index for transfer_lead._find_existing_hotel_match
+    # exact-match path and direct-to-existing dedup. Migration 023.
+    hotel_name_normalized = Column(String(255), index=True)
     brand = Column(String(150))
     chain = Column(String(150))  # Brand parent (Hilton Worldwide, Marriott Intl)
-    brand_tier = Column(String(50))
+    # AUDIT 2026-05-06 (CRIT-3): index brand_tier for list filter.
+    brand_tier = Column(String(50), index=True)
     hotel_type = Column(String(50))  # resort, hotel, boutique, all-inclusive
     hotel_website = Column(String(500))
 
@@ -94,7 +97,8 @@ class ExistingHotel(Base):
     location_type = Column(String(20))  # florida/caribbean/usa/international
     latitude = Column(Float)
     longitude = Column(Float)
-    zone = Column(String(50))  # South Florida, Orlando, Tampa Bay, etc.
+    # AUDIT 2026-05-06 (CRIT-3): index zone for map + list filter.
+    zone = Column(String(50), index=True)  # South Florida, Orlando, Tampa Bay, etc.
     website_verified = Column(String(10))  # "auto" | "manual" | None
 
     # ── Contact Information ───────────────────────────────────────────

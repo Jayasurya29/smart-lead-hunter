@@ -203,7 +203,14 @@ _RATE_LIMIT_MAX = 200
 _RATE_LIMIT_WINDOW = 60.0
 _RATE_LIMIT_MAX_ENTRIES = 10000
 _rate_limit_last_cleanup = 0.0
-_RATE_LIMITED_PREFIXES = ("/api/", "/leads", "/sources", "/scrape")
+_RATE_LIMITED_PREFIXES = (
+    "/api/",
+    "/leads",
+    "/sources",
+    "/scrape",
+    "/revenue",
+    "/discovery",
+)
 
 
 def _cleanup_rate_limit_store(now: float) -> None:

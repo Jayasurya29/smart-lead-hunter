@@ -14,7 +14,9 @@ from datetime import timedelta
 from typing import Optional
 
 from fastapi import HTTPException, Request
-from sqlalchemy import select, func, case
+from sqlalchemy import select, func, case, literal
+from sqlalchemy.sql import expression
+from sqlalchemy.ext.compiler import compiles
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import PotentialLead, Source
@@ -96,6 +98,64 @@ def pop_pending(store: dict, key: str, default=None):
 def escape_like(value: str) -> str:
     """Escape LIKE-special characters (%, _) so user input is treated literally."""
     return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
+# AUDIT 2026-05-06 (HIGH-2 / HV-3): diacritic-insensitive search helper.
+# ─────────────────────────────────────────────────────────────────────
+# `ILIKE` is case-insensitive but not accent-insensitive — searching
+# "cafe" against "Hôtel du Café" was missing. The migration 023
+# enables Postgres `unaccent` and adds GIN trigram indexes on
+# unaccent(lower(hotel_name)) for both potential_leads and
+# existing_hotels. This helper produces an ILIKE predicate that uses
+# those indexes.
+#
+# Dialect support: on Postgres, the `unaccent` extension is enabled at
+# migration time (idempotent). On SQLite (test-only), a @compiles hook
+# below makes `unaccent(x)` a pure pass-through so the same query
+# compiles. The SQLite tests no longer assert on accented strings
+# matching unaccented ones, but they still build and execute.
+
+
+class _Unaccent(expression.FunctionElement):
+    """SQLAlchemy function-element that compiles to `unaccent(arg)` on
+    Postgres and pass-through on SQLite. Use via `_unaccent(col)`.
+    """
+
+    name = "unaccent"
+    inherit_cache = True
+    type = expression.ColumnClause("u").type  # opaque text
+
+
+@compiles(_Unaccent, "postgresql")
+def _compile_unaccent_pg(element, compiler, **kw):
+    return "unaccent(%s)" % compiler.process(list(element.clauses)[0], **kw)
+
+
+@compiles(_Unaccent)
+def _compile_unaccent_default(element, compiler, **kw):
+    # SQLite + others: no extension available — pass-through. Only
+    # changes the cosmetic correctness of the test fixtures, not the
+    # production query plan.
+    return compiler.process(list(element.clauses)[0], **kw)
+
+
+def _unaccent(col):
+    """Wrap a column / expression in unaccent(...) — dialect-safe."""
+    return _Unaccent(col)
+
+
+def unaccent_ilike(column, value: str):
+    """Build a SQLAlchemy clause: unaccent(lower(col)) ILIKE unaccent(lower(?))
+
+    Use this in route filters wherever sales is searching a hotel /
+    city / brand name typed by a human. Diacritic-insensitive.
+
+    The escape_like() call is still required to neutralize % and _
+    in the user value.
+    """
+    safe = escape_like(value)
+    pattern = f"%{safe}%"
+    return _unaccent(func.lower(column)).ilike(_unaccent(func.lower(literal(pattern))))
 
 
 def safe_error(e: Exception, fallback: str = "Operation failed") -> str:
@@ -273,9 +333,11 @@ def apply_lead_filters(
         query = query.where(PotentialLead.lead_score >= min_score)
         count_query = count_query.where(PotentialLead.lead_score >= min_score)
     if state:
-        safe_state = escape_like(state)
-        query = query.where(PotentialLead.state.ilike(f"%{safe_state}%"))
-        count_query = count_query.where(PotentialLead.state.ilike(f"%{safe_state}%"))
+        # AUDIT 2026-05-06 (HIGH-2): diacritic-insensitive — "Quebec"
+        # finds rows stored as "Québec".
+        state_filter = unaccent_ilike(PotentialLead.state, state)
+        query = query.where(state_filter)
+        count_query = count_query.where(state_filter)
     if location_type:
         query = query.where(PotentialLead.location_type == location_type)
         count_query = count_query.where(PotentialLead.location_type == location_type)
@@ -283,11 +345,13 @@ def apply_lead_filters(
         query = query.where(PotentialLead.brand_tier == brand_tier)
         count_query = count_query.where(PotentialLead.brand_tier == brand_tier)
     if search:
-        safe_search = escape_like(search)
+        # AUDIT 2026-05-06 (HIGH-2 / HV-3): diacritic-insensitive search
+        # across name + city + brand. The new GIN index from migration
+        # 023 makes this index-friendly on Postgres.
         search_filter = (
-            PotentialLead.hotel_name.ilike(f"%{safe_search}%")
-            | PotentialLead.city.ilike(f"%{safe_search}%")
-            | PotentialLead.brand.ilike(f"%{safe_search}%")
+            unaccent_ilike(PotentialLead.hotel_name, search)
+            | unaccent_ilike(PotentialLead.city, search)
+            | unaccent_ilike(PotentialLead.brand, search)
         )
         query = query.where(search_filter)
         count_query = count_query.where(search_filter)
