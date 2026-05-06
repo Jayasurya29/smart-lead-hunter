@@ -21,7 +21,34 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db, async_session
 from app.models.existing_hotel import ExistingHotel
 from app.shared import require_ajax, escape_like
+
 from app.services.utils import local_now
+
+
+# ── Helper: extract user email from JWT cookie for audit logs ──
+# Mirrors the same helper in dashboard.py — a small duplication is
+# preferable to a circular import. If we ever add more route modules
+# that need this, lift it into app/shared.py.
+def _get_user_email(request: Request) -> str:
+    """Extract user email from JWT cookie without DB lookup. Returns
+    'unknown' if no cookie or decode fails."""
+    import os
+
+    cookie = request.cookies.get("slh_session", "")
+    if not cookie:
+        return "unknown"
+    try:
+        from jose import jwt as jose_jwt
+
+        secret = (
+            os.getenv("JWT_SECRET_KEY", "")
+            or "dev-only-insecure-key-do-not-use-in-production"
+        )
+        payload = jose_jwt.decode(cookie, secret, algorithms=["HS256"])
+        return payload.get("email", "unknown")
+    except Exception:
+        return "unknown"
+
 
 logger = logging.getLogger(__name__)
 
@@ -1752,7 +1779,7 @@ async def update_existing_hotel(
             session=db,
             action="edit_existing_hotel",
             hotel_name=hotel.hotel_name or hotel.name,
-            user_email="system",  # No JWT helper exists for this route — track in follow-up
+            user_email=_get_user_email(request),
             old_values={k: old_values[k] for k in new_values},
             new_values=new_values,
             detail=f"existing_hotel_id={hotel_id}",
