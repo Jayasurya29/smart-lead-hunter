@@ -1446,7 +1446,7 @@ async def iteration_4_linkedin_lookup(state: ResearchState) -> int:
                         )
                         continue
 
-                    contact["linkedin"] = r_url
+                    contact["linkedin"] = ce._canonicalize_linkedin_url(r_url)
                     matched_context = [t for t in context_tokens if t in haystack][:3]
                     matched_roles = [t for t in role_tokens if t in haystack][:3]
                     if matched_context or matched_roles:
@@ -3872,9 +3872,10 @@ async def _run_queries_and_extract(
                 if len(part) > 2
             )
             if name_in_snippet or name_in_slug:
-                contact["linkedin"] = url
+                contact["linkedin"] = ce_module._canonicalize_linkedin_url(url)
                 logger.info(
-                    f"[LINKEDIN] Captured URL for {contact['name']} from search results: {url}"
+                    f"[LINKEDIN] Captured URL for {contact['name']} from "
+                    f"search results: {contact['linkedin']}"
                 )
                 break  # one URL per contact
 

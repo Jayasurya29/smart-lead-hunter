@@ -65,7 +65,7 @@ load_dotenv()
 
 logger = logging.getLogger(__name__)
 
-MAX_CONTACTS_TO_SAVE = 6
+MAX_CONTACTS_TO_SAVE = 8
 
 # ── GROUNDED CONTACT FAST-PATH ──
 # Single Gemini googleSearch call asks "who makes uniform decisions here?"
@@ -79,12 +79,57 @@ _CONTACT_GROUNDING_MIN_CONTACTS = 2  # below this, fall back to iterative pipeli
 # best remaining contacts regardless of category. This ensures the
 # sales team always sees an owner/check-writer at the top if available,
 # plus a balanced mix of operator execs.
+# Total = 8 slots (= MAX_CONTACTS_TO_SAVE):
+#   2 owner slots so we can keep both the owner principal AND the
+#     developer principal (frequently distinct people, e.g. Vista
+#     Development partners + Alpha Tech CEO for Andaz T&C)
+#   3 P1 operator slots so we can keep on-property GM + Dir Ops + the
+#     brand regional decision-maker (e.g. Hyatt SVP Development LatAm)
+#   2 P2 operator slots for property dept heads / regional VPs
+#   1 backfill for whatever's left (sales/F&B/etc. — the Trevor pattern)
 _SMART_CAP_TARGETS = {
-    "owner": 1,  # Owner / check-writer — critical for pre-opening
-    "p1_operator": 2,  # Top 2 P1 at management_corporate / hotel_specific
+    "owner": 2,  # Owner principal + developer principal
+    "p1_operator": 3,  # Top 3 P1 at management_corporate / hotel_specific
     "p2_operator": 2,  # Top 2 P2 at management_corporate / hotel_specific
     "backfill": 1,  # Best remaining (any scope/priority)
 }
+
+
+# ═══════════════════════════════════════════════════════════════
+# LINKEDIN URL CANONICALIZATION
+# ═══════════════════════════════════════════════════════════════
+# LinkedIn serves the same profile under country-specific subdomains
+# based on where the profile owner has set their location:
+#   https://tc.linkedin.com/in/adelphine-pitter-...   (Turks & Caicos)
+#   https://za.linkedin.com/in/stephen-meredith-...   (South Africa)
+#   https://uk.linkedin.com/in/...                    (UK), de., fr., etc.
+# These all redirect to the canonical https://www.linkedin.com/in/...
+# but stored as-is they look unprofessional in the dashboard and may
+# trip up downstream tools (Wiza expects www.). Canonicalize at every
+# write site so the DB only ever holds www.linkedin.com URLs.
+_LINKEDIN_SUBDOMAIN_RE = re.compile(
+    r"^https?://([a-z]{2,3})\.linkedin\.com/", re.IGNORECASE
+)
+
+
+def _canonicalize_linkedin_url(url: Optional[str]) -> Optional[str]:
+    """Normalize country subdomains (tc., za., uk., de., fr., etc.) to www.
+    Returns the URL unchanged if already canonical or not a LinkedIn URL.
+    Returns None / empty for None / empty input."""
+    if not url:
+        return url
+    s = url.strip()
+    if not s:
+        return s
+    m = _LINKEDIN_SUBDOMAIN_RE.match(s)
+    if not m:
+        return s
+    sub = m.group(1).lower()
+    if sub == "www":
+        return s
+    # Replace the matched [a-z]{2,3} subdomain with www
+    return _LINKEDIN_SUBDOMAIN_RE.sub("https://www.linkedin.com/", s, count=1)
+
 
 # ═══════════════════════════════════════════════════════════════
 # SHARED HTTP CLIENT — connection pooling for Serper/Gemini
@@ -2064,7 +2109,6 @@ def _build_contact_grounding_prompt(
             months_until_opening=None,
         )
         primary_titles = strategy.primary_titles[:6]
-        secondary_titles = strategy.secondary_titles[:4]
         approach_note = strategy.approach_note
     except Exception:
         primary_titles = [
@@ -2074,11 +2118,6 @@ def _build_contact_grounding_prompt(
             "Director of Operations",
             "General Manager",
             "SVP Operations",
-        ]
-        secondary_titles = [
-            "Director of Housekeeping",
-            "Executive Housekeeper",
-            "Purchasing Manager",
         ]
         approach_note = ""
 
@@ -2170,38 +2209,79 @@ Include owner/founder-level contacts — they ARE the decision-makers here."""
     else:
         model_context = ""
 
-    # Pre-opening vs open status
+    # ──────────────────────────────────────────────────────────────────
+    # STATUS CONTEXT — both modes lead with property-level staff.
+    # The "property-first" cascade is the PRIMARY directive; status only
+    # changes whether the property GM is "incoming" (announced but not
+    # started) vs already on site, and whether mgmt-company corporate is
+    # available as a graceful fallback for not-yet-hired property roles.
+    # ──────────────────────────────────────────────────────────────────
     if is_pre_opening:
         status_context = f"""
 STATUS: PRE-OPENING — uniforms must be ordered 6+ months before opening.
-The management company's PRE-OPENING TEAM is being assembled RIGHT NOW.
-Search specifically for:
-  - Pre-Opening Project Manager / Pre-Opening Director at {management_company or brand or "the operator"}
-  - Incoming General Manager (announced via press release / LinkedIn)
-  - Corporate procurement VP at {management_company or brand or "the operator"}"""
+For pre-opening, an INCOMING GM (announced but not yet started) IS the
+property-level buyer right now. That announcement IS the buying moment.
+Search property-level FIRST:
+  - Incoming GM / Pre-Opening GM (announced via press release / LinkedIn)
+  - Pre-Opening Director of Operations or Director of Housekeeping
+  - Pre-Opening Project Manager (when assigned to THIS property)
+Only fall back to {management_company or brand or "operator"} corporate if
+no on-property pre-opening team has been named yet."""
     else:
         status_context = """
 STATUS: OPEN AND OPERATING
-Search for property-level operational staff first:
-  - Director of Housekeeping / Executive Housekeeper (specifies uniforms)
-  - Director of Purchasing / Purchasing Manager (issues POs)
-  - General Manager (approves vendor relationships)"""
+The on-property team IS hired. Property-level staff are the day-to-day
+uniform buyers — they are ALWAYS the primary targets:
+  - Director of Housekeeping / Executive Housekeeper (specs uniforms,
+    largest uniform category, repeat buyer for life)
+  - General Manager / Hotel Manager (approves vendor + signs PO)
+  - Director of Human Resources / People & Culture (owns the uniform
+    program, runs onboarding, sets dress-code policy)
+  - Director of Purchasing / Purchasing Manager (issues PO)
+  - F&B Director / Executive Chef (specs F&B uniforms)
+For an OPEN hotel, mgmt-company corporate is a LAST-RESORT fallback,
+not a substitute. Always exhaust property-level searches first."""
 
-    # Build LinkedIn search guidance
+    # ──────────────────────────────────────────────────────────────────
+    # LINKEDIN SEARCH GUIDANCE — property-first.
+    # Lead Gemini's grounding searches at THIS hotel's roster before
+    # anything else. Only fall back to operator-org searches afterward.
+    # ──────────────────────────────────────────────────────────────────
     li_searches = []
+    # Property-level searches FIRST — anchored to the hotel name itself.
+    li_searches.append(
+        f'  site:linkedin.com/in "{hotel_name}" "Director of Housekeeping"'
+    )
+    li_searches.append(
+        f'  site:linkedin.com/in "{hotel_name}" "General Manager" OR "Hotel Manager"'
+    )
+    li_searches.append(
+        f'  site:linkedin.com/in "{hotel_name}" '
+        f'"Director of Human Resources" OR "Director of People" OR "HR Director"'
+    )
+    li_searches.append(
+        f'  site:linkedin.com/in "{hotel_name}" "Director of Purchasing" OR "Purchasing Manager"'
+    )
+    li_searches.append(
+        f'  "{hotel_name}" "appointed" OR "joins" OR "named" site:linkedin.com'
+    )
+    # Mgmt-company fallback searches — only run AFTER property-level.
     primary_org = management_company or brand or hotel_name
-    for title in all_primary[:3]:
-        li_searches.append(f'  site:linkedin.com/in "{primary_org}" "{title}"')
+    if management_company:
+        for title in all_primary[:2]:
+            li_searches.append(
+                f'  (FALLBACK) site:linkedin.com/in "{primary_org}" "{title}"'
+            )
     if developer and is_pre_opening:
         li_searches.append(
-            f'  site:linkedin.com/in "{developer}" CEO OR President OR CFO'
+            f'  (FALLBACK) site:linkedin.com/in "{developer}" CEO OR President OR CFO'
         )
-    li_searches.append(
-        f'  "{hotel_name}" "General Manager" OR "appointed" site:linkedin.com'
-    )
 
-    li_block = "LinkedIn searches to run:\n" + "\n".join(li_searches)
+    li_block = "LinkedIn searches in CASCADE ORDER:\n" + "\n".join(li_searches)
 
+    # ──────────────────────────────────────────────────────────────────
+    # The actual prompt — property-first cascade as the PRIMARY directive.
+    # ──────────────────────────────────────────────────────────────────
     return f"""You are a B2B sales researcher for JA Uniforms — a hotel uniform supplier
 in Miami, FL. JA Uniforms sells staff uniforms EXCLUSIVELY to 4-star and above
 hotels (luxury, upper-upscale, upscale). NOT for budget or economy hotels.
@@ -2221,61 +2301,345 @@ LOCATION: {location}
 {mgmt_block}
 
 ═══════════════════════════════════════════════════════
-SEARCH STRATEGY — WHO TO FIND
+STEP 1 — IDENTIFY HOW THIS HOTEL OPERATES (do this FIRST)
 ═══════════════════════════════════════════════════════
+
+Different hotels have completely different buyers. Before searching for
+contacts, decide which OPERATING MODEL fits {hotel_name}, then target
+the role that owns uniform decisions for THAT model.
+
+┌─────────────────────────────────────────────────────────────────┐
+│ MODEL A — INDEPENDENT / BOUTIQUE / FAMILY-OWNED                 │
+│ Signals: no chain affiliation, single property, "boutique" or   │
+│   "lifestyle" in marketing, founder named in press              │
+│ Buyer: OWNER / FOUNDER personally                               │
+│ Find: Owner, Founder, Principal, Managing Director              │
+│ Note: A property GM may exist but defers to owner on vendors    │
+├─────────────────────────────────────────────────────────────────┤
+│ MODEL B — BRANDED FULL-SERVICE (chain-direct flag)              │
+│ Examples: Marriott, Hilton, Sheraton, Westin, Hyatt Regency,    │
+│   Conrad, Doubletree, Crowne Plaza, InterContinental            │
+│ Buyer: PROPERTY-LEVEL within brand's approved-vendor list       │
+│ Find: Director of Housekeeping (specs), GM (approves vendor),   │
+│   Director of Purchasing (issues PO)                            │
+│ Note: Brand HQ sets the approved-vendor list but does NOT pick  │
+│   the winner — property picks within the list                   │
+├─────────────────────────────────────────────────────────────────┤
+│ MODEL C — SOFT BRAND / COLLECTION (operator runs day-to-day)    │
+│ Examples: Autograph Collection, Curio Collection, Tribute       │
+│   Portfolio, Tapestry Collection, Unbound Collection, JdV,      │
+│   MGallery, The Unbound Collection                              │
+│ Buyer: PROPERTY GM + OPERATOR'S CORPORATE PROCUREMENT (combo)   │
+│ Find: Property Dir of Housekeeping FIRST (runs day-to-day),     │
+│   then operator's VP/Director Procurement (signs master         │
+│   contract for the operator's whole portfolio)                  │
+│ Note: Brand parent (Marriott / Hilton / Hyatt HQ) is NOT the    │
+│   buyer here — IGNORE brand corporate. The mgmt company is the  │
+│   actual operator and they own procurement.                     │
+├─────────────────────────────────────────────────────────────────┤
+│ MODEL D — LUXURY BRAND-MANAGED (brand controls standards)       │
+│ Examples: Ritz-Carlton, Four Seasons, Aman, EDITION, St. Regis, │
+│   Park Hyatt, Andaz, Mandarin Oriental, Rosewood, Bulgari,      │
+│   Peninsula, Auberge Resorts, Conrad, Waldorf Astoria, LXR      │
+│ Buyer: PROPERTY GM + brand regional ops team (joint decision)   │
+│ Find — IN ORDER:                                                │
+│   1. Property GM at this hotel (incl. INCOMING GM if announced) │
+│   2. Property Director of Housekeeping at this hotel            │
+│   3. Brand regional VP/SVP Operations covering this property's  │
+│      region (e.g. "VP Operations, Ritz-Carlton Americas",       │
+│      "SVP, The Ritz-Carlton & EDITION", "VP Hotel Operations    │
+│      Four Seasons North America"). For Marriott luxury (Ritz,   │
+│      St. Regis, EDITION), search Marriott Luxury Group.         │
+│   4. Chief Development Officer / VP Development covering this   │
+│      property's region (e.g. "Chief Development Officer,        │
+│      Caribbean & Latin America" at Marriott — they signed the   │
+│      management agreement and oversee brand integration into    │
+│      pre-opening; key contact for pre-opening uniform decisions)│
+│   5. Pre-Opening Project Director at the brand (pre-opening)    │
+│ Note: Brand sets STRICT standards (specific fabric weights,     │
+│   colors, suppliers). Property executes within them but picks   │
+│   the actual vendor relationship. The brand parent here IS the  │
+│   operator — their regional team is management_corporate scope, │
+│   NOT chain_corporate.                                          │
+│ ⚠️ DO NOT default to owners/developers for Model D. Even if the │
+│   property is pre-opening and only owners are findable in press, │
+│   the brand has a regional ops team that exists right now and is │
+│   reachable. Search Marriott / Four Seasons / Aman / etc.       │
+│   regional ops on LinkedIn before falling back to owners.       │
+├─────────────────────────────────────────────────────────────────┤
+│ MODEL E — FRANCHISE (owner-franchisee runs the property)        │
+│ Examples: most Holiday Inn / Express, many Best Western, many   │
+│   Hampton Inn, La Quinta, Choice brands                         │
+│ Buyer: FRANCHISEE OWNER + property GM                           │
+│ Find: Franchisee owner (often a small hotel-investment group),  │
+│   property GM, Dir Housekeeping                                 │
+│ Note: Many of these are below 4-star — may be SKIP for JA       │
+│   Uniforms. Confirm property is actually 4-star+ before chasing │
+├─────────────────────────────────────────────────────────────────┤
+│ MODEL F — ALL-INCLUSIVE (FULLY CENTRALIZED procurement)         │
+│ Examples: Sandals, Beaches, Karisma, Palace Resorts, Bahia      │
+│   Principe, Iberostar, RIU, Hard Rock all-inclusive, Royalton,  │
+│   Excellence, Atelier, Couples Resorts, Club Med, Posadas       │
+│   (Fiesta Americana / Live Aqua / Fiesta Inn)                   │
+│ Buyer: CENTRALIZED PROCUREMENT at chain HQ                      │
+│ Find — IN ORDER (call all of these for max coverage):           │
+│   1. Property General Manager (specs needs, local input —       │
+│      INFLUENCER not buyer; still keep as primary)               │
+│   2. Director / VP / SVP of Procurement at chain HQ             │
+│      (THE actual vendor relationship — owns the PO)             │
+│   3. Chief Operating Officer / Director General at chain HQ     │
+│      (oversees brand standards; uniform spec changes cross      │
+│      their desk for operational sign-off)                       │
+│   4. VP / Director of Development at chain HQ                   │
+│      (for pre-opening properties, sets up vendor contracts      │
+│      during launch phase — same pattern as Mauricio Elizondo    │
+│      at Posadas, equivalent role in every Model F chain)        │
+│ Note: Property GMs have ZERO buying authority — DO NOT contact  │
+│   them as the SOLE primary. They influence specs but the chain  │
+│   HQ procurement team awards the contract.                      │
+│ Specific brand carve-outs:                                      │
+│   • SANDALS / BEACHES → HPI (Hospitality Purveyors Inc., Miami) │
+│     is the EXCLUSIVE procurement arm — one HPI relationship =   │
+│     access to all ~20 Sandals/Beaches properties globally.      │
+│   • POSADAS (Fiesta Americana / Live Aqua) → Mexico City HQ;    │
+│     target Director Compras / Director de Procurement plus      │
+│     Director General (COO) for brand-standards sign-off.        │
+│     Family owners (Azcárraga family) approve but do not pick    │
+│     vendors directly — operational layer is the actual buyer.   │
+├─────────────────────────────────────────────────────────────────┤
+│ MODEL G — CASINO RESORT                                         │
+│ Examples: MGM, Wynn, Caesars, Hard Rock casino-attached, Sands, │
+│   Las Vegas Sands, Boyd Gaming, Penn Entertainment              │
+│ Buyer: CASINO GROUP'S CORPORATE PROCUREMENT                     │
+│ Find: Director of Procurement at the casino group + property    │
+│   Director of Housekeeping for spec input                       │
+├─────────────────────────────────────────────────────────────────┤
+│ MODEL H — PRE-OPENING, NO NAMED OPERATOR YET                    │
+│ Signals: Construction phase, brand announced but no mgmt        │
+│   company named, opening 12+ months out                         │
+│ Buyer: DEVELOPER / OWNER (controls FF&E + OS&E budget)          │
+│ Find: CEO / President / Managing Director at the developing or  │
+│   owning entity                                                 │
+│ Note: Once an operator is named, decision shifts to the         │
+│   operator's pre-opening team (then becomes Model B/C/D)        │
+└─────────────────────────────────────────────────────────────────┘
+
+How to figure out the model from the lead context:
+  - Brand name "Autograph Collection / Curio / Tribute / Tapestry" + named
+    independent operator like "Crescent / Aimbridge / Highgate" → MODEL C
+  - Brand "Sandals" or "Beaches" anywhere → MODEL F (target HPI)
+  - Brand "Ritz-Carlton / Four Seasons / Aman / EDITION / St. Regis /
+    Rosewood / Mandarin Oriental / Auberge / Park Hyatt" → MODEL D
+  - Brand "Marriott / Hilton / Hyatt Regency / Sheraton / Westin /
+    Conrad / InterContinental" (chain-direct, no soft-brand suffix) → MODEL B
+  - Brand "RIU / Iberostar / Karisma / Palace / Bahia Principe / Royalton /
+    Hard Rock all-inclusive / Excellence / Atelier / Fiesta Americana /
+    Live Aqua / Fiesta Inn" → MODEL F
+  - Brand "MGM / Wynn / Caesars / Sands / Boyd / Penn / Hard Rock casino" → MODEL G
+  - No chain brand at all, founder named → MODEL A
+  - Pre-opening + no operator named → MODEL H
+  - Default if uncertain → MODEL B (branded full-service, property-level)
+
+Mention which model you picked in the search_summary so we can audit.
+
+═══════════════════════════════════════════════════════
+STEP 2 — RUN THE SEARCH CASCADE FOR THAT MODEL
+═══════════════════════════════════════════════════════
+
+Once you've picked the model, search in CASCADE ORDER. The cascade
+default is property-first (Tier 1 → Tier 2 → Tier 3), but Models F
+and G start at Tier 2 because property has zero authority for those.
+Models A, B, C, D, E, H all start at Tier 1.
+
+JA Uniforms sells uniforms TO HOTELS. For most operating models, the
+people who actually buy uniforms work AT THE HOTEL — Director of
+Housekeeping orders 30-50% of staff uniforms, the GM signs the PO,
+the Executive Chef specs the F&B uniforms. Talk to THEM first unless
+the operating model says otherwise.
+
+Run searches in CASCADE ORDER. Only drop to the next tier when the
+previous tier genuinely returns no qualified contacts at this property.
+Do NOT skip a tier because the next one is easier to find.
+
+╔══════════════════════════════════════════════════════════════════╗
+║ TIER 1 — PROPERTY-LEVEL  (PRIMARY for Models A, B, C, D, E, H)   ║
+╠══════════════════════════════════════════════════════════════════╣
+║ Operational staff working AT {hotel_name}:
+║
+║   • Director of Housekeeping / Executive Housekeeper
+║       └─ THE primary uniform buyer (housekeeping = 30-50% of
+║          headcount, biggest uniform line item)
+║   • General Manager / Hotel Manager / Resort Manager
+║       └─ Approves vendor + signs PO
+║   • Director of Human Resources / Director of People & Culture /
+║     HR Director / People & Culture Director
+║       └─ Owns the uniform PROGRAM — every new hire gets uniforms
+║          through HR onboarding; HR sets dress-code policy and
+║          owns staff appearance standards. CRITICAL CONTACT for
+║          uniform vendor decisions, especially at pre-opening
+║          where HR sets up the entire onboarding pipeline.
+║   • Director of Purchasing / Purchasing Manager
+║       └─ Issues POs day-to-day
+║   • F&B Director / Director of Food & Beverage
+║       └─ Specs F&B staff uniforms
+║   • Executive Chef / Director of Culinary
+║       └─ Specs kitchen uniforms
+║   • Director of Operations / Director of Rooms
+║       └─ Backup decision-maker / approver
+║
+║ For PRE-OPENING properties:
+║   An "incoming" or "pre-opening" version of any role above IS
+║   property-level. The announcement IS the buying moment.
+║
+║ How to confirm someone is property-level:
+║   - Their LinkedIn / press release / bio names "{hotel_name}"
+║     specifically (not just the brand or chain)
+║   - Their job title contains the hotel name or distinctive city
+║   - Their employer is a mgmt-company BUT their headline names
+║     this specific hotel (textbook GM-via-operator pattern)
+╚══════════════════════════════════════════════════════════════════╝
+
+╔══════════════════════════════════════════════════════════════════╗
+║ TIER 2 — MANAGEMENT COMPANY CORPORATE  (BACKUP only)             ║
+╠══════════════════════════════════════════════════════════════════╣
+║ Run these searches ONLY when Tier 1 returns nobody at this
+║ property. Corporate procurement does not pick fabric or fit;
+║ they rubber-stamp the property's pick. Use them only as a route
+║ in when no property-level contact exists yet.
+║
+║ At {management_company or "the operator (find from press/web)"}:
+║   • SVP / VP / Director of Procurement
+║   • SVP / VP / Director of Operations
+║   • Pre-Opening Director (pre-opening properties only)
+╚══════════════════════════════════════════════════════════════════╝
+
+╔══════════════════════════════════════════════════════════════════╗
+║ TIER 3 — OWNER / DEVELOPER  (LAST RESORT — pre-opening only)     ║
+╠══════════════════════════════════════════════════════════════════╣
+║ Owner/developer entities are check-writers, not operators. Use
+║ them only when Tiers 1 + 2 produce nothing AND the property is
+║ pre-opening (developer controls FF&E + uniform spend before the
+║ operator's pre-opening team is hired).
+║
+║   • Principal / Managing Partner at {owner or "the owning entity"}
+║   • CEO / President at {developer or "the developing entity"}
+╚══════════════════════════════════════════════════════════════════╝
+
+EXCEPTION — when Tier 1 is structurally absent:
+  - All-inclusive resorts: procurement is fully centralized at corporate;
+    property GMs have ZERO buying authority. Tier 2 IS the primary.
+  - GPO-locked brands (Avendra etc.): corporate procurement is locked
+    in to mandated suppliers; pivot to property-level Director of
+    Housekeeping who has flexibility on non-mandated items like uniforms.
+  - Independent / boutique / founder-led: founders ARE the buyers (no
+    corporate layer exists). Treat the founder as Tier 1.
+
+⚠️ DO NOT include generic CEO / Founder / Board Member / Investor
+unless they are explicitly the property owner or developer with budget
+control AND Tier 1 returned nobody.
+
+⚠️ HOWEVER — owner-side HOTEL-OPERATIONS execs are NOT "generic" and
+ARE always valid contacts. When the lead has a known owner or developer
+(see OWNER / DEVELOPER context above) and the owner entity has hotel-
+specific titles, INCLUDE THEM. Examples that ARE valid (do NOT skip):
+  • VP / SVP / EVP of Hotels at the owner REIT
+  • VP / Director of Hotel Operations at the owner / developer
+  • Director of Hotel Finance at the owner
+  • Director of Construction / MD of Construction at the owner
+These are owner-side staff who specifically run the hotel portfolio
+and have FF&E/OS&E budget authority. They are TIER 3 contacts (owner
+side) but they ARE the buyers when no operator is in place yet.
+
+⚠️ NEVER return zero contacts if the lead has ANY of: a known owner,
+developer, management_company, or brand. There is ALWAYS someone to
+contact. At minimum, return one of:
+  - The property GM (especially for OPEN or REOPENING properties — the
+    GM exists publicly and is announced via the operator's PR or trade
+    press, ALWAYS findable)
+  - The owner-side hotel-portfolio execs (VP Hotel Operations etc.)
+  - The owner / developer principals (Chairman, Founder, Managing Partner)
+  - The management company's regional VP/SVP of Operations or President
+  - The brand parent's regional Development VP or CDO who signed the deal
+
+Returning empty when ANY of these entities is known on the lead means
+the search wasn't thorough enough. RETRY by searching:
+  - "{hotel_name}" "General Manager" appointment OR named OR joins
+  - site:linkedin.com/in "{hotel_name}" "General Manager"
+  - the operator's website /leadership or /executive-team page
+  - "{management_company}" "President" OR "SVP Operations"
+
+⚠️ FOR REOPENING PROPERTIES SPECIFICALLY: the property already operates
+or has operated, the entire staff exists, the GM is named publicly. If
+your search returns 0 contacts on a reopening property, you missed
+something — search for the property's pre-closure GM, who very likely
+returns post-reopening, and search for the SVP of Operations at the
+chain who oversees the recovery / reopening.
+
 {approach_note}
 
-PRIORITY 1 — These titles at {primary_org}:
-{chr(10).join(f"  • {t}" for t in all_primary)}
-
-PRIORITY 2 — Property-level operational staff:
-{chr(10).join(f"  • {t}" for t in secondary_titles)}
-
-{"PRIORITY 3 — Developer/Owner:" + chr(10) + "  • CEO, President, Managing Director, CFO at " + (developer or owner or "") if (developer or owner) and is_pre_opening else ""}
-
+═══════════════════════════════════════════════════════
+SEARCH PLAN
+═══════════════════════════════════════════════════════
 {li_block}
 
 Also search: press releases, appointment announcements, trade publications
-(Hotel Management, Hospitality Net, HotelNewsNow), contact directories
-(RocketReach, ZoomInfo, SignalHire), hotel/operator websites.
-
-⚠️ DO NOT prioritize: generic CEO/Founder/Investor/Board Member unless they
-are explicitly the property owner or developer with budget control.
+(Hotel Management, Hospitality Net, HotelNewsNow, Skift), contact directories
+(RocketReach, ZoomInfo, SignalHire), hotel/operator websites — but ALWAYS
+filter by Tier 1 (property-level) before falling back to Tier 2.
 
 ═══════════════════════════════════════════════════════
 RETURN FORMAT
 ═══════════════════════════════════════════════════════
-Return up to 5 contacts as JSON, ranked by procurement authority:
+Return up to 8 contacts as JSON, in CASCADE ORDER (Tier 1 first, then
+Tier 2 only if Tier 1 didn't fill, then Tier 3 only if Tiers 1+2 didn't):
+
 {{
+  "operating_model_inferred": "A|B|C|D|E|F|G|H — which model fits this hotel from STEP 1",
+  "model_reasoning": "1 sentence — why you chose that model based on the brand/operator/context",
   "contacts": [
     {{
       "name": "Full Name",
       "title": "Current Job Title",
-      "organization": "Their employer (hotel OR management company OR developer)",
+      "organization": "Their employer (hotel OR management company OR owner entity)",
       "linkedin_url": "https://linkedin.com/in/slug — include if found, else null",
       "email": "work@email.com — only if publicly available, else null",
+      "tier": "property|mgmt_corporate|owner_developer|brand_corporate",
       "decision_role": "specifier|buyer|approver",
-      "why_relevant": "1 sentence explaining their procurement authority",
+      "why_relevant": "1 sentence — name THIS hotel and explain why this person buys uniforms for it given the operating model (e.g. 'Director of Housekeeping at {hotel_name} — Model C soft-brand operator, day-to-day uniform spec lives at property')",
       "confidence": "high|medium|low"
     }}
   ],
-  "search_summary": "What sources were found and any limitations"
+  "search_summary": "Which model you picked + which tier each contact came from + what you searched"
 }}
 
 CONFIDENCE:
-- high = Named in press release, official website, or trade article with title + hotel
-- medium = Found on LinkedIn with clear current role
+- high = Named in press release, official website, or trade article with title + this hotel
+- medium = Found on LinkedIn with clear current role at this hotel
 - low = Inferred from context
 
-RANKING (most important first):
-1. Management company procurement/operations (controls ALL their properties)
-2. Incoming GM announced for this specific property
-3. Director of Housekeeping / Purchasing at property or management company
-4. Developer/Owner (for pre-opening budget authority)
-5. Brand corporate (last resort — only for brand-managed or all-inclusive)
+RANKING WITHIN THE RESPONSE (most important first — DO NOT REORDER):
+1. Property-level Director of Housekeeping / Executive Housekeeper at {hotel_name}
+   (Models A, B, C, D — primary spec authority for uniforms)
+2. Property-level General Manager / Hotel Manager at {hotel_name} (incl. incoming GM)
+   (Models A, B, C, D — vendor approval authority)
+3. Property-level Director of Purchasing / F&B Director / Exec Chef at {hotel_name}
+   (Models A, B, C, D — purchasing execution + F&B uniform specs)
+4. Mgmt-company / chain corporate procurement / operations
+   (Models C, F, G — primary for centralized models; Tier 2 backup elsewhere)
+5. Owner / Developer principal
+   (Models A, H — primary for independent / pre-opening with no operator)
+6. Brand corporate
+   (extreme last resort — only when no other tier produced a name)
+
+For MODELS F and G (centralized), the order flips: corporate procurement
+goes first because property has zero authority.
+
+If Tier 1 only returns 2 property contacts, fill remaining 6 slots from Tier 2.
+If Tier 1 returns 8+ property contacts, return all 8 from Tier 1 — do NOT pad
+with mgmt corporate just to hit a quota.
 
 Return ONLY valid JSON — no preamble, no markdown fences.
-If no contacts found: {{"contacts": [], "search_summary": "reason"}}"""
+If no contacts found at all: {{"operating_model_inferred": "X", "model_reasoning": "...", "contacts": [], "search_summary": "reason"}}"""
 
 
 async def _enrich_contacts_grounded(
@@ -2335,7 +2699,13 @@ async def _enrich_contacts_grounded(
         "tools": [{"googleSearch": {}}],
         "generationConfig": {
             "temperature": 1.0,  # required for grounding per Vertex docs
-            "maxOutputTokens": 4096,
+            "maxOutputTokens": 8192,  # bigger prompt (model map + cascade) needs room
+            # Skip extended thinking for this focused JSON-output task. With the
+            # operating-model map + cascade in the prompt, thinking was burning
+            # 1-2K output tokens on reasoning that's already specified in the
+            # prompt, leaving no room for the actual JSON. Result was empty
+            # `text` field with finishReason=MAX_TOKENS → JSON parse failed.
+            "thinkingConfig": {"thinkingBudget": 0},
         },
     }
 
@@ -2360,18 +2730,38 @@ async def _enrich_contacts_grounded(
 
     elapsed = _time.monotonic() - start
 
+    # Defensive parsing — Gemini can return:
+    #   1) Normal: candidates[0].content.parts[0].text = JSON string
+    #   2) MAX_TOKENS / SAFETY blocked: candidates[0].finishReason set, parts empty
+    #   3) Bad shape: missing candidates entirely
+    # We capture finishReason in every error path so token-cap / safety blocks
+    # are diagnosable from logs without needing to repro the call.
     try:
         candidate = data["candidates"][0]
-        content_text = candidate["content"]["parts"][0]["text"].strip()
+        finish_reason = candidate.get("finishReason", "UNKNOWN")
+        parts = (candidate.get("content") or {}).get("parts") or []
+        content_text = (parts[0].get("text") if parts else "") or ""
+        content_text = content_text.strip()
     except (KeyError, IndexError) as e:
-        logger.warning(f"Contact grounding: bad response shape for '{hotel_name}': {e}")
+        logger.warning(
+            f"Contact grounding: bad response shape for '{hotel_name}': {e}. "
+            f"data keys={list(data.keys())}"
+        )
+        return None
+
+    if not content_text:
+        logger.warning(
+            f"Contact grounding: EMPTY text for '{hotel_name}' "
+            f"(finishReason={finish_reason}). "
+            f"If MAX_TOKENS, bump maxOutputTokens; if SAFETY, check prompt content."
+        )
         return None
 
     # Strip markdown fences if Gemini wrapped the JSON
     if content_text.startswith("```"):
-        parts = content_text.split("```")
-        if len(parts) >= 2:
-            inner = parts[1]
+        parts_split = content_text.split("```")
+        if len(parts_split) >= 2:
+            inner = parts_split[1]
             if inner.startswith("json"):
                 inner = inner[4:].strip()
             content_text = inner.strip().rstrip("`").strip()
@@ -2379,7 +2769,11 @@ async def _enrich_contacts_grounded(
     try:
         parsed = json.loads(content_text)
     except json.JSONDecodeError as e:
-        logger.warning(f"Contact grounding: JSON parse failed for '{hotel_name}': {e}")
+        preview = content_text[:200].replace("\n", " ")
+        logger.warning(
+            f"Contact grounding: JSON parse failed for '{hotel_name}': {e}. "
+            f"finishReason={finish_reason}, text[:200]={preview!r}"
+        )
         return None
 
     if not isinstance(parsed, dict):
@@ -2406,7 +2800,10 @@ async def _enrich_contacts_grounded(
 
     logger.info(
         f"Contact grounding raw for '{hotel_name}': {len(contacts_raw)} contacts, "
-        f"{len(sources)} citations. Summary: {parsed.get('search_summary', '')[:100]}"
+        f"{len(sources)} citations. "
+        f"Model={parsed.get('operating_model_inferred', '?')} "
+        f"({(parsed.get('model_reasoning') or '')[:80]}). "
+        f"Summary: {parsed.get('search_summary', '')[:100]}"
     )
 
     # ── PHANTOM GROUNDING CHECK ──
@@ -3581,12 +3978,54 @@ GATEWAY CONTACTS (DO NOT REJECT — classify normally for scope):
 - Classify their scope normally (hotel_specific vs chain_area) based on evidence.
 
 NOT operational hotel staff (REJECT these):
-- C-suite executives: CEO, COO, CFO, Chairman, Board Member, Investor, Founder, President
-- Regional/corporate roles: Regional Director, VP of Development, SVP, Area Manager
-- Construction contractors, architects, project managers for building projects
-- Sales, marketing, revenue management, catering sales roles
+- C-suite executives at the chain parent: CEO, COO, CFO, Chairman, Board
+  Member, Investor, Founder, President of the ENTIRE company
+  (UNLESS the contact is at the lead's owner entity)
+- Pure regional roles at the chain that aren't Development or Operations:
+  Regional Director (sales/area), Area Manager, etc.
+- Construction contractors, architects, project managers AT BUILDING FIRMS
+  (working at architecture/contracting/engineering firms, NOT at the
+  brand parent — see Development exception below)
+- Pure marketing / branding / revenue / sales roles regardless of seniority:
+  Director of Marketing, AVP Marketing, VP Marketing, Chief Marketing
+  Officer, Director of Branding, Director of PR, Director of Revenue,
+  Director of Key Accounts, National Sales Manager
 - People at other hotels, not the target hotel
 - People mentioned in a LinkedIn post who are NOT the post author
+
+CONCRETE REJECT EXAMPLES (make sure these get rejected):
+  • Mark Hoplamazian (CEO Hyatt Hotels Corporation) → REJECT
+    Reason: CEO of the entire chain, too senior for property uniform buying
+  • Joan Bottarini (CFO Hyatt Hotels Corporation) → REJECT
+    Reason: CFO at brand parent, not owner-side, not procurement
+  • Anthony Capuano (CEO Marriott International) → REJECT
+  • Melanie Benozich (AVP Marketing & Global Branding, Hyatt Inclusive
+    Collection) → REJECT
+    Reason: Pure marketing role, doesn't manage uniformed staff
+
+EXCEPTION — VP/Director of Development at the BRAND PARENT or MGMT COMPANY → KEEP:
+"VP of Development", "SVP of Development", "Chief Development Officer",
+"Regional VP Development" at the management company / brand parent
+(Hyatt, Marriott, Hilton, IHG, Accor, Posadas, etc.) are NOT construction
+contractors — they are the brand executives who sign management
+agreements and own pre-opening vendor relationships. KEEP these as
+corrected_scope="management_corporate".
+  • Cristiano Goncalves (VP Development South America, Hyatt) → management_corporate
+  • Camilo Bolaños (SVP Development LatAm/Caribbean, Hyatt) → management_corporate
+  • Laurent de Kousemaeker (CDO Caribbean & LatAm, Marriott) → management_corporate
+  • Mauricio Elizondo (VP Development, Posadas) → management_corporate
+  • Maria Zarraluqui (SVP Hyatt Inclusive Collection Growth) → management_corporate
+
+⚠️ The Development exception is NARROW — it only applies to titles
+containing "Development" or "CDO". It does NOT extend to:
+  - CFO / CEO / COO of the chain (still REJECT)
+  - VP/Director of Marketing or Branding (still REJECT)
+  - VP/Director of Sales (still REJECT, except Sales & Events / Catering /
+    Banquets which manage uniformed event staff)
+
+ONLY reject "Development" titles when the organization is clearly a
+construction/architecture/contracting firm (e.g., HBA, Wimberly Interiors,
+Gensler, Turner Construction) — those are vendors, not buyers.
 
 CRITICAL RULE FOR LINKEDIN POSTS: If source_url contains /posts/, the contact name is the POST AUTHOR.
 Titles mentioned in the snippet may refer to SOMEONE ELSE discussed in the post, NOT the author.
@@ -3594,18 +4033,34 @@ Read the snippet carefully to determine the post author actual role vs who they 
 
 IMPORTANT RULES FOR KEEPING vs REJECTING:
 ALWAYS REJECT these even if they appear connected to the hotel:
-- C-suite/corporate: CEO, COO, CFO, Chairman, Investor, Founder, President, Board Member
-- Regional/area roles: Regional Director, VP of Development, SVP, Area Manager
-- Construction: contractors, architects, project managers for building projects
+- C-suite/corporate at the BRAND PARENT level: CEO, COO, CFO, Chairman,
+  President of the entire chain (Mark Hoplamazian at Hyatt, Anthony
+  Capuano at Marriott — too senior for property-level uniform decisions)
+- C-suite at OWNER entities → KEEP as corrected_scope="owner"
+- Regional/area roles at NON-hotel-operator entities: Regional Director,
+  SVP, Area Manager at construction firms or unrelated companies
+- Construction: contractors, architects, project managers AT BUILDING
+  FIRMS (NOT at the brand parent — see exception below)
 - Pure marketing/revenue roles (Revenue Manager, National Accounts, PR Director)
   BUT KEEP: Director of Sales & Events, Director of Catering,
   Director of Banquets — they manage staff who NEED uniforms
 - People confirmed to work at a DIFFERENT hotel than the target
 - People with NO title whose snippet context mentions construction, building site, onsite progress, or groundbreaking
   (these are typically contractors visiting the construction site, NOT hotel operational staff)
-- People whose ORGANIZATION name contains: Construction, Capital, Development, Holdings, Investment, Architecture,
-  Contracting, Consulting, Engineering (these are vendors/developers, NOT hotel operational staff)
-  Exception: only keep them if they hold a clear operational hotel title like General Manager or Director of Housekeeping
+- People whose ORGANIZATION name contains: Construction, Capital, Holdings,
+  Investment, Architecture, Contracting, Consulting, Engineering
+  (these are vendors/developers, NOT hotel operational staff)
+  Exception 1: keep them if they hold a clear operational hotel title like
+    General Manager or Director of Housekeeping
+  Exception 2: keep them as scope="owner" if their org is the lead's owner
+    or developer entity (e.g. Daniel Zuleta at Cotton Bay Holdings)
+
+EXCEPTION — Brand-side Development execs are KEPT:
+"VP/SVP/Director of Development" or "Chief Development Officer" at the
+hotel chain (Hyatt, Marriott, Hilton, IHG, Posadas etc.) are KEPT as
+management_corporate — they are brand executives who sign management
+agreements and own pre-opening relationships, NOT construction
+contractors.
 
 CRITICAL: A contact MUST be confirmed at the EXACT target hotel to be kept as hotel_specific.
 Same city is NOT enough. Same brand/chain is NOT enough.
@@ -3707,7 +4162,16 @@ WHEN IN DOUBT about hotel connection:
 - If snippet/org mentions only the parent brand → chain_area (NEVER reject these)
 - If snippet/org has NO hotel mentioned at all → chain_area (NOT hotel_specific)
 - Only assign hotel_specific when the TARGET hotel name or its unique location appears in the snippet
-- ALWAYS REJECT CEO, Investor, Sales, Construction regardless
+- ALWAYS REJECT pure Sales (Director of Key Accounts, National Sales, etc.)
+  EXCEPT Director of Sales & Events / Director of Catering / Banquets
+- REJECT chain-parent CEO/COO/CFO (Mark Hoplamazian, Anthony Capuano)
+  unless the lead's owner field IS the chain — then they're the owner
+- REJECT pure investor / board-member roles
+- REJECT construction/architecture firm roles UNLESS the contact is at
+  the lead's owner / developer entity (Daniel Zuleta at Cotton Bay)
+- KEEP Brand-side VP/SVP/Director of Development at the chain
+  (Cristiano Goncalves at Hyatt, Camilo Bolaños at Hyatt, Laurent de
+  Kousemaeker at Marriott — they sign management agreements)
 
 PRE-OPENING HOTEL RULE: If the hotel has NOT yet opened (see HOTEL STATUS above), contacts at the
 parent brand in the target city are EXPECTED — the property has no LinkedIn presence yet.
@@ -3754,20 +4218,108 @@ they are the property's CHECK-WRITER. Keep them and return corrected_scope="owne
   → is_hotel_ops=false, is_at_target_hotel=false, corrected_scope="owner",
   rejection_reason=null.
 
+CRITICAL DISTINCTION — FAMILY-OWNED CHAINS vs FUNCTIONAL CORPORATE EXECS:
+
+⚠️ DO NOT do this:
+   "This contact's organization is Grupo Posadas, and Posadas owns this
+   property, so this contact must be scope=owner."
+   → WRONG. Working at a chain that owns hotels does NOT make someone
+   an owner. Family-owned chains have BOTH owner-principals (family) AND
+   professional functional execs. They get DIFFERENT scopes.
+
+⚠️ DO NOT change scope from management_corporate → owner just because the
+contact's organization happens to be the family-owned chain operator.
+That's the WHOLE POINT — most chain executives are NOT family. Only flip
+to owner if the contact has POSITIVE evidence of family-membership.
+
+Some hotel chains are family-owned (Posadas — Azcárraga family; Mardin —
+Hashimoto family; Riu — Riu family; Iberostar — Fluxà family; etc.). At
+these chains, the C-suite includes BOTH family-owner principals AND
+professional executives running operations. They get DIFFERENT scopes:
+
+- Family-owner C-suite at the holdco / chain parent → corrected_scope="owner"
+  (Chairman, Vice-Chairman, Founder, Family Member-CEO of holdco,
+  family-named Board members)
+  • Pablo Azcárraga Andrade (Chairman of Grupo Posadas, family member) → owner
+  • José Carlos Azcárraga Andrade (CEO Grupo Posadas, family member) → owner
+
+- Professional / functional execs at the SAME family-owned chain →
+  corrected_scope="management_corporate" (NOT owner)
+  (VP Development, COO, Chief Financial Officer, Director General who is
+  not a family member, Director of Procurement, Director of Operations,
+  Director of Investor Relations, VP HR, Director of IT, etc.)
+  • Mauricio Elizondo (VP Development at Posadas) → management_corporate,
+    NOT owner — Elizondo is NOT an Azcárraga, his title is functional.
+  • Gerardo de Prevoisin (Director Investor Relations at Posadas) →
+    management_corporate, NOT owner — Prevoisin is NOT an Azcárraga.
+  • Enrique Calderón (Director General/COO Posadas) → management_corporate,
+    NOT owner — Calderón is NOT an Azcárraga.
+  • Antonio García at Posadas → management_corporate UNLESS title is
+    Chairman/Founder/family-Owner → García is not the founder family.
+
+DECISION RULE — apply STRICTLY when scope arrives as management_corporate:
+1. Does the contact's SURNAME match the founder family of the chain?
+   (Azcárraga at Posadas, Riu at RIU, Fluxà at Iberostar, Sarmiento at
+   Cotton Bay, Stewart at Sandals, etc.)
+2. AND does their title indicate ownership (Chairman, Vice-Chairman,
+   Founder, Owner, family-named C-suite role)?
+
+If BOTH yes → flip to corrected_scope="owner".
+If EITHER no → KEEP corrected_scope="management_corporate".
+
+Owner scope is reserved for the actual owners. A functional title at a
+family-owned chain ≠ owner.
+
 MANAGEMENT COMPANY vs BRAND PARENT SCOPE DISTINCTION (CRITICAL):
-Soft-brand properties (Autograph Collection, Curio, Tribute, MGallery, etc.)
-are BRANDED by Marriott/Hilton/Hyatt but OPERATED by an independent management
-company (Crescent Hotels, Aimbridge, Highgate, Pyramid, etc.). The operator's
-corporate executives are the ACTUAL uniform buyers — not the brand parent's.
-- Contacts at the MANAGEMENT COMPANY's corporate HQ (Crescent CEO/COO/SVP
-  Procurement) → corrected_scope="management_corporate". These are P1/P2 buyers.
-- Contacts at the BRAND PARENT's HQ (Marriott VP of Autograph Brand, Hilton
-  Curio team) → corrected_scope="chain_corporate". These are usually P3/P4
-  because they don't control procurement for soft-brand properties.
-- If unsure whether a contact's org is the management company or the brand
-  parent, check their organization field: "Crescent Hotels & Resorts" is
-  management_corporate; "Marriott International" / "Marriott Luxury Group"
-  is chain_corporate.
+The same parent company (Marriott / Hilton / Hyatt) plays TWO different
+roles depending on the brand. Read carefully — this determines whether
+their execs are P1 or P4 for this lead.
+
+ROLE 1 — BRAND PARENT for SOFT-BRAND PROPERTIES (P3/P4):
+Soft-brand properties (Autograph Collection, Curio Collection, Tribute
+Portfolio, MGallery, Tapestry Collection, JdV) are BRANDED by Marriott/
+Hilton/Hyatt but OPERATED by an independent management company (Crescent
+Hotels, Aimbridge, Highgate, Pyramid, etc.).
+- Operator's corporate execs → corrected_scope="management_corporate" (P1/P2)
+- Brand parent execs (Marriott VP of Autograph Brand, Hilton Curio team)
+  → corrected_scope="chain_corporate" (P3/P4 — they don't control
+  procurement for soft-brand properties).
+Detect: management_company is something LIKE Crescent / Aimbridge /
+Highgate, NOT Marriott/Hilton/Hyatt itself.
+
+ROLE 2 — BRAND PARENT IS THE OPERATOR for BRAND-MANAGED PROPERTIES (P1/P2):
+Direct flags Ritz-Carlton, St. Regis, EDITION, W Hotels (Marriott direct);
+Conrad, Waldorf Astoria, LXR (Hilton direct); Park Hyatt, Andaz, Grand
+Hyatt (Hyatt direct); Four Seasons, Aman, Mandarin Oriental, Rosewood,
+Bulgari, Peninsula, Auberge are operated by the brand itself or its own
+hospitality company. There is NO separate independent management company.
+- Brand parent's regional execs → corrected_scope="management_corporate" (P1/P2)
+  because the brand parent IS the operator. Examples that should be
+  management_corporate, NOT chain_corporate:
+  • "President, Caribbean & Latin America" at Marriott (for a Ritz-Carlton)
+  • "VP Operations, Ritz-Carlton Americas" / "SVP, The Ritz-Carlton & EDITION"
+  • "VP Hotel Operations, Four Seasons North America"
+  • "Regional VP, Hyatt Luxury" (for a Park Hyatt)
+Detect: management_company equals or contains the brand parent (e.g.
+management_company = "Marriott International" AND brand = "Ritz-Carlton"
+or "Ritz-Carlton Reserve" or "St. Regis" or "EDITION" — direct Marriott
+luxury). For these, Marriott execs covering this property's region are
+the actual operator's ops team and should be management_corporate.
+
+DECISION CHECKLIST — apply in this order:
+1. Look at the management_company string for this lead: {management_company}
+2. Look at the contact's organization (Marriott / Hilton / etc.).
+3. If management_company contains the same parent name as the contact's
+   organization → this is ROLE 2 (brand-managed). Mark management_corporate.
+4. If management_company is a separate independent operator (Crescent,
+   Aimbridge, Highgate, Pyramid, etc.) → this is ROLE 1 (soft brand).
+   Mark Marriott/Hilton/Hyatt execs as chain_corporate.
+5. When unsure, look at the brand:
+   - Direct luxury brands (Ritz-Carlton, St. Regis, EDITION, Four Seasons,
+     Aman, Conrad, Waldorf, Park Hyatt, Mandarin Oriental, Rosewood,
+     Auberge, Bulgari, Peninsula) → ROLE 2 → management_corporate
+   - Soft-brand collections (Autograph, Curio, Tribute, MGallery,
+     Tapestry, JdV, Unbound, Hilton Curio etc.) → ROLE 1 → chain_corporate
 
 CONTACTS TO VERIFY:
 {contacts_json}
@@ -3787,10 +4339,17 @@ async def _verify_contacts_with_gemini(
     country: Optional[str] = None,
     opening_date: Optional[str] = None,
     project_type: Optional[str] = None,
+    developer: Optional[str] = None,
+    owner: Optional[str] = None,
 ) -> list[dict]:
     """
     AI verification layer: Gemini reads raw snippets to determine each contact
     real title, org, and relevance. Fixes false positives from regex parsing.
+
+    `developer` and `owner` are the entities for THIS lead (e.g. "Cotton Bay
+    Holdings Limited"). When supplied, they anchor an owner-entity rule that
+    prevents Gemini from rejecting owner-side execs (Construction MD, General
+    Counsel, etc.) as generic contractors or unrelated C-suite.
     """
     # Build verification payload with raw snippet context
     contacts_for_verification = []
@@ -3994,6 +4553,53 @@ async def _verify_contacts_with_gemini(
             "═══════════════════════════════════════════════════════════════\n"
         )
 
+    # ── OWNER ENTITY ANCHOR ──
+    # Lead-specific override: tell verification WHO the owner/developer is
+    # for THIS hotel. Without this, Gemini sees "Daniel Zuleta - Managing
+    # Director of Construction at Cotton Bay Holdings" and rejects him as a
+    # construction contractor — even though Cotton Bay IS the owner/developer
+    # for this lead and Daniel is its top construction-side exec, who literally
+    # picks vendors. Same failure mode for Jonnell Rigby-Knowles (General
+    # Counsel at Cotton Bay) — owner-side legal handles vendor agreements.
+    owner_entity_anchor = ""
+    owner_entities: list[str] = []
+    if developer:
+        owner_entities.append(developer.strip())
+    if owner and (not developer or owner.strip().lower() != developer.strip().lower()):
+        owner_entities.append(owner.strip())
+    if owner_entities:
+        entities_str = " / ".join(f'"{e}"' for e in owner_entities)
+        owner_entity_anchor = (
+            "\n═══════════════════════════════════════════════════════════════\n"
+            "OWNER ENTITY ANCHOR — lead-specific (READ THIS FIRST)\n"
+            "═══════════════════════════════════════════════════════════════\n"
+            f"For THIS lead, the owner / developer entity is: {entities_str}\n\n"
+            "ABSOLUTE RULE: If a contact's organization matches this entity\n"
+            "(or contains it as a substring), they are OWNER-SIDE for this\n"
+            "property. KEEP them and assign corrected_scope='owner', regardless\n"
+            "of what their title says. Specifically:\n"
+            "- 'Managing Director of Construction' AT the owner entity is the\n"
+            "  owner's top construction exec who personally picks vendors.\n"
+            "  KEEP — this is NOT a third-party contractor.\n"
+            "- 'General Counsel' / 'Chief Legal Officer' / 'VP Legal' AT the\n"
+            "  owner entity drafts and signs vendor agreements (incl. uniforms).\n"
+            "  KEEP — this is NOT generic C-suite.\n"
+            "- 'CEO' / 'President' / 'Managing Partner' / 'Principal' /\n"
+            "  'Chairman' / 'Founder' AT the owner entity is the check-writer.\n"
+            "  KEEP — this is the textbook pre-opening procurement decider.\n"
+            "- 'CFO' / 'CIO' AT the owner entity controls budgets. KEEP.\n"
+            "- 'Development Director' / 'VP Development' / 'Project Director'\n"
+            "  AT the owner entity manages the build-out. KEEP.\n"
+            "- 'Director of Procurement' / 'VP Procurement' AT the owner\n"
+            "  entity does literal vendor selection. KEEP — assign scope='owner'\n"
+            "  and priority=P1.\n\n"
+            "The 'reject construction contractors' and 'reject C-suite' rules\n"
+            "below DO NOT apply to anyone at the owner entity. Those rules are\n"
+            "for THIRD-PARTY general contractors, sub-contractors, architects,\n"
+            "and unrelated C-suite at OTHER companies.\n"
+            "═══════════════════════════════════════════════════════════════\n"
+        )
+
     # ── PRE-OPENING OWNER / DEVELOPER OVERRIDE ──
     # CRITICAL for new-build leads before the operator has taken over.
     # The property owner / developer SIGNS the management agreement and FUNDS
@@ -4006,8 +4612,14 @@ async def _verify_contacts_with_gemini(
     #   Tony Birkla (Birkla Investment Group) → owner of Hyatt Centric Cincinnati
     #   Zafir Rashid (Teramir Group / Everest Place) → owner of Nickelodeon Orlando
     #   Khalid Muneer (Everest Place) → Managing Director, same project
+    #   Daniel Zuleta (Cotton Bay Holdings) → owner-side Managing Director of
+    #     Construction for Ritz-Carlton Reserve Eleuthera (committed to 60%
+    #     Bahamian vendors — actively choosing suppliers)
+    #   Jonnell Rigby-Knowles (Cotton Bay Holdings) → General Counsel,
+    #     drafts vendor agreements for the same project
     #
-    # These are NOT construction contractors. They're the check-writers.
+    # These are NOT construction contractors. They're the check-writers and
+    # signers.
     pre_opening_override = ""
     # Trigger on new_opening project types. Also trigger when project_type is
     # None/unknown (conservative default — better to include owner contacts
@@ -4026,14 +4638,25 @@ async def _verify_contacts_with_gemini(
             "KEEP — do NOT reject these roles for pre-opening properties:\n"
             "- Owner, Principal, Managing Partner at the ownership entity\n"
             "- CEO, Managing Director, President at the OWNING / DEVELOPING company\n"
-            "  (Birkla Investment Group, Teramir Group, Everest Place, etc.)\n"
+            "  (Birkla Investment Group, Teramir Group, Everest Place,\n"
+            "  Cotton Bay Holdings, TMGOC Ventures, etc.)\n"
             "- CFO / CIO at the ownership entity (controls budgets + FF&E spend)\n"
             "- Development Director, VP Development AT THE OWNERSHIP ENTITY\n"
-            "  (these are the people signing the hotel into existence)\n\n"
+            "- Managing Director of Construction / Director of Construction\n"
+            "  Management AT THE OWNERSHIP ENTITY (owner-side construction\n"
+            "  lead — picks vendors; NOT a third-party contractor)\n"
+            "- General Counsel / Chief Legal Officer / VP Legal AT THE\n"
+            "  OWNERSHIP ENTITY (signs vendor agreements)\n"
+            "- Project Director / VP Project Management AT THE OWNERSHIP\n"
+            "  ENTITY (manages the build-out, NOT a GC firm)\n\n"
             "Key distinction: these roles at a DEVELOPMENT / INVESTMENT / OWNERSHIP\n"
-            "company are the CHECK-WRITERS for pre-opening procurement. Do NOT\n"
-            "confuse them with construction contractors (GC, subcontractors) or\n"
+            "company are the CHECK-WRITERS and CONTRACT-SIGNERS for pre-opening\n"
+            "procurement. Do NOT confuse them with construction contractors\n"
+            "(GC, subcontractors) at SEPARATE general-contracting firms, or\n"
             "unrelated real-estate professionals (realtors, brokers).\n\n"
+            "TEST: is the contact's organization the SAME as the owner/developer\n"
+            "for this lead? Yes → KEEP, scope='owner'. No, they're at a\n"
+            "general-contracting / architecture / engineering firm → reject.\n\n"
             "For these contacts: assign scope='owner' and priority=P1 (or P2 if\n"
             "the role is finance/CFO rather than CEO/principal).\n"
             "═══════════════════════════════════════════════════════════════\n"
@@ -4074,7 +4697,8 @@ async def _verify_contacts_with_gemini(
         brand=brand or "Independent",
         management_company=management_company or "Unknown",
         hotel_status=hotel_status,
-        procurement_guidance=procurement_guidance
+        procurement_guidance=owner_entity_anchor
+        + procurement_guidance
         + conversion_override
         + pre_opening_override
         + independent_override,
@@ -4270,7 +4894,91 @@ async def _verify_contacts_with_gemini(
         "uniform manager",
         "wardrobe manager",
         "laundry manager",
+        # ── Owner-side hotel-operations patterns ──
+        # Owner / developer entities (REITs, real-estate firms, family
+        # offices) often have their own internal hotel-operations team.
+        # These titles indicate the contact runs hotel ops for the
+        # owner — same buying authority as a property GM but on the
+        # capital-side. Examples: Pam Ryan "VP Hotel Operations" at
+        # Ensemble Real Estate Investments; Kristi Allen "EVP Hotels".
+        "hotel operations",
+        "hotels operations",
+        "hotel finance",  # Samuel Grant pattern
+        "vp hotel",
+        "svp hotel",
+        "evp hotel",
+        "vice president, hotel",
+        "vice president hotel",
+        "vice president of hotel",
+        "vice president, hotels",
+        "vice president hotels",
+        "vp, hotel",
+        "vp, hotels",
+        "head of hotel",
+        "head of hotels",
+        "managing director, hotel",
+        "managing director hotel",
+        # Owner-side construction/development titles (Daniel Zuleta
+        # pattern at Cotton Bay Holdings)
+        "managing director of construction",
+        "director of construction",
     ]
+
+    # ── Owner-entity tokens (build once per call) ──
+    # If the contact's org matches the lead's owner or developer entity,
+    # they are owner-side staff and should be KEPT regardless of whether
+    # their title matches the operational keyword list. This catches
+    # patterns like "VP, Finance" at the owner REIT — they're not
+    # generic finance VPs, they're the owner's hotel-portfolio finance
+    # lead with FF&E/OS&E budget signoff.
+    def _owner_entity_tokens(*entities):
+        toks = set()
+        STOPWORDS = {
+            "the",
+            "and",
+            "of",
+            "for",
+            "at",
+            "a",
+            "an",
+            "in",
+            "on",
+            "to",
+            "by",
+            "or",
+            "&",
+            "llc",
+            "ltd",
+            "inc",
+            "corp",
+            "corporation",
+            "company",
+            "companies",
+            "group",
+            "holdings",
+            "limited",
+            "international",
+            "global",
+            "the",
+            "investments",
+            "investment",
+            "partners",
+            "ventures",
+            "capital",
+            "real",
+            "estate",
+            "realty",
+            "development",
+            "developments",
+        }
+        for e in entities:
+            for w in re.split(r"[^a-z0-9]+", (e or "").lower()):
+                if len(w) >= 4 and w not in STOPWORDS:
+                    toks.add(w)
+        return toks
+
+    owner_dev_tokens = _owner_entity_tokens(owner, developer)
+
     final_contacts = []
     for c in verified_contacts:
         org = (c.get("organization") or "").lower()
@@ -4278,6 +4986,7 @@ async def _verify_contacts_with_gemini(
         scope = (c.get("scope") or "").lower()
         has_non_hotel_org = any(kw in org for kw in NON_HOTEL_ORG_KEYWORDS)
         has_operational_title = any(kw in title for kw in OPERATIONAL_TITLES)
+
         # ── Owner/principal whitelist (Bug #7 fix — 2026-04-22) ──
         # Contacts flagged scope=="owner" are the property's check-writers
         # (e.g. Dr. Kali P. Chaudhuri / KPC Development Company). By
@@ -4289,7 +4998,22 @@ async def _verify_contacts_with_gemini(
         # defeating Bug #4's entire purpose. Owners are P2 per the Iter 6
         # strategist; they belong in the final contact list.
         is_owner_principal = scope == "owner"
-        if has_non_hotel_org and not has_operational_title and not is_owner_principal:
+
+        # ── Owner-entity match (2026-05-07 — The Waylen / Ensemble fix) ──
+        # If the contact's org tokens overlap with the lead's owner /
+        # developer entity, they are owner-side staff — KEEP them
+        # regardless of operational title pattern. This catches the
+        # owner's internal hotel-operations team (VP Hotel Ops, EVP
+        # Hotels, Hotel Finance) at REITs / investment firms.
+        org_tokens = set(re.split(r"[^a-z0-9]+", org)) - {"", "the"}
+        is_at_owner_entity = bool(owner_dev_tokens and (org_tokens & owner_dev_tokens))
+
+        if (
+            has_non_hotel_org
+            and not has_operational_title
+            and not is_owner_principal
+            and not is_at_owner_entity
+        ):
             logger.info(
                 f"Org-filter REJECTED: {c.get('name')} -- org='{c.get('organization')}' "
                 f"title='{c.get('title', '')}' (non-hotel org, no operational title)"
@@ -4301,6 +5025,16 @@ async def _verify_contacts_with_gemini(
                 f"org='{c.get('organization')}' title='{c.get('title', '')}' "
                 f"(scope=owner exempt from non-hotel-org reject)"
             )
+        elif is_at_owner_entity and has_non_hotel_org:
+            logger.info(
+                f"Org-filter KEPT owner-side staff: {c.get('name')} -- "
+                f"org='{c.get('organization')}' title='{c.get('title', '')}' "
+                f"(org matches lead's owner/developer entity)"
+            )
+            # Also auto-correct scope to 'owner' if it isn't set — these
+            # are owner-side staff with FF&E budget authority.
+            if not scope or scope in ("unknown", "chain_area"):
+                c["scope"] = "owner"
         final_contacts.append(c)
 
     rejected_count = len(contacts) - len(final_contacts)
@@ -4654,13 +5388,24 @@ def _org_tokens_match(org_name: str, haystack: str) -> bool:
 def _name_in_serp(name: str, serp_title: str) -> bool:
     """Check if person name appears in SERP title.
 
-    Handles middle initials, hyphenated surnames, name order, and suffixes.
+    Handles middle initials, hyphenated surnames, name order, suffixes,
+    AND diacritics (Bolaños matches bolanos, de Kousemaeker etc).
     """
     if not name or not serp_title:
         return False
 
-    name_lower = name.lower().strip()
-    title_lower = serp_title.lower()
+    # Strip diacritics so accented names match across SERP responses
+    # that may or may not preserve the accents (e.g. LinkedIn often
+    # returns 'Camilo Bolanos' even when the profile is 'Bolaños').
+    import unicodedata
+
+    def _strip_accents(s: str) -> str:
+        return (
+            unicodedata.normalize("NFKD", s).encode("ascii", "ignore").decode().lower()
+        )
+
+    name_lower = _strip_accents(name.strip())
+    title_lower = _strip_accents(serp_title)
 
     if name_lower in title_lower:
         return True
@@ -4737,6 +5482,133 @@ _LINKEDIN_COUNTRY_SUBDOMAINS = re.compile(
     re.IGNORECASE,
 )
 
+# Extract the slug portion of a LinkedIn /in/ URL, e.g.
+#   https://bs.linkedin.com/in/daniel-zuleta/  → "daniel-zuleta"
+#   https://www.linkedin.com/in/daniel-zuleta-074246b → "daniel-zuleta-074246b"
+_LINKEDIN_SLUG_RE = re.compile(r"linkedin\.com/in/([^/?#]+)/?", re.IGNORECASE)
+
+
+def _is_clean_name_slug(url: str, name: str) -> bool:
+    """Detect whether a LinkedIn URL slug is a clean canonical match to the
+    person's full name — i.e., the slug is exactly 'first-last', 'last-first',
+    'firstlast' (concatenated), or hyphenated full-name with no random hash.
+
+    LinkedIn assigns clean slugs (no hash) only to ONE profile per name claim,
+    so a clean slug match is provably the right person. Hash-suffixed slugs
+    (e.g. 'daniel-zuleta-074246b') could be one of many namesakes.
+
+    Examples:
+      url='bs.linkedin.com/in/daniel-zuleta', name='Daniel Zuleta' → True
+      url='jm.linkedin.com/in/mariodavalos', name='Mario Davalos' → True (NEW)
+      url='www.linkedin.com/in/daniel-zuleta-074246b', name='Daniel Zuleta' → False
+      url='www.linkedin.com/in/dz', name='Daniel Zuleta' → False
+    """
+    if not url or not name:
+        return False
+    m = _LINKEDIN_SLUG_RE.search(url)
+    if not m:
+        return False
+    slug = m.group(1).lower().rstrip("/")
+
+    # Build the candidate clean slug from the name (diacritic-stripped)
+    import unicodedata
+
+    name_norm = (
+        unicodedata.normalize("NFKD", name).encode("ascii", "ignore").decode().lower()
+    )
+    name_norm = re.sub(r"[^a-z\s-]", "", name_norm).strip()
+    # Two parsings: (a) drop initials/short tokens for hyphenated forms,
+    # (b) keep all tokens for concatenated forms (handles "Steven M Rubin")
+    parts = [p for p in re.split(r"[\s-]+", name_norm) if p and len(p) >= 2]
+    parts_with_initials = [p for p in re.split(r"[\s-]+", name_norm) if p]
+    if len(parts) < 2:
+        return False  # need at least first + last
+
+    first, last = parts[0], parts[-1]
+    candidates = {
+        # Hyphenated forms (skip 1-letter middle initials)
+        f"{first}-{last}",
+        f"{last}-{first}",
+        "-".join(parts),  # 'luis-carlos-sarmiento'
+        # Concatenated (no-hyphen) forms — many LinkedIn users use these
+        # (e.g. mariodavalos, juansanchez)
+        f"{first}{last}",
+        f"{last}{first}",
+        "".join(parts),
+        # Concatenated WITH middle initials — handles "Steven M Rubin"
+        # → "stevenmrubin"
+        "".join(parts_with_initials),
+        # Initial + last name — early-LinkedIn-user pattern (gsindhi for
+        # Gaurav Sindhi, jdoe for John Doe). Also reverse: first + last_initial
+        # (gauravs for Gaurav S.)
+        f"{first[0]}{last}",
+        f"{first}{last[0]}",
+        f"{first[0]}-{last}",  # hyphenated variant: "g-sindhi"
+    }
+    return slug in candidates
+
+
+def _slug_obviously_wrong_person(url: str, name: str) -> bool:
+    """Permissive sanity check — return True only when the LinkedIn slug
+    OBVIOUSLY belongs to a different named person.
+
+    Used as the gate for the sparse-SERP fallback. We accept LinkedIn URLs
+    when Serper returns few results (specific query → high signal), but we
+    don't want to accept URLs that are clearly someone else.
+
+    Logic: extract name tokens from the slug (stripping hyphens/numbers).
+    If NONE of the contact's name tokens (first/last) appear in the slug
+    AND NONE appear in the URL path at all → wrong person.
+    Otherwise → trust it.
+
+    Examples (name='Mario Davalos'):
+      url='linkedin.com/in/john-smith'          → True (obviously wrong)
+      url='linkedin.com/in/mariodavalos'        → False (right person)
+      url='linkedin.com/in/davalos-mario-1234'  → False (right person, hash)
+      url='linkedin.com/in/m-davalos'           → False (initial+last)
+      url='linkedin.com/in/marioleonardo'       → False (could be middle name)
+      url='linkedin.com/in/sindhi'              → False (last-name only, ambiguous)
+    """
+    if not url or not name:
+        return False
+    m = _LINKEDIN_SLUG_RE.search(url)
+    if not m:
+        return False
+    slug = m.group(1).lower().rstrip("/")
+
+    import unicodedata
+
+    name_norm = (
+        unicodedata.normalize("NFKD", name).encode("ascii", "ignore").decode().lower()
+    )
+    name_norm = re.sub(r"[^a-z\s-]", "", name_norm).strip()
+    name_tokens = [p for p in re.split(r"[\s-]+", name_norm) if p and len(p) >= 3]
+    if not name_tokens:
+        return False  # name too short to validate; trust the SERP
+
+    # Check 1: any name token (3+ chars) appears as substring in slug?
+    slug_clean = slug.replace("-", "").replace("_", "")
+    for tok in name_tokens:
+        if tok in slug_clean:
+            return False  # token found → trust this URL
+
+    # Check 2: first or last initial + 2+ chars of other name token in slug?
+    # Handles "g-sindhi" / "gsindhi" patterns where first token isn't full
+    if len(name_tokens) >= 2:
+        first_init = name_tokens[0][0]
+        last_init = name_tokens[-1][0]
+        if name_tokens[-1] in slug_clean or name_tokens[0] in slug_clean:
+            return False
+        # initial+last fragment
+        if (
+            f"{first_init}{name_tokens[-1][:3]}" in slug_clean
+            or f"{name_tokens[0][:3]}{last_init}" in slug_clean
+        ):
+            return False
+
+    # Nothing matched → likely wrong person
+    return True
+
 
 def _linkedin_serp_valid(
     name: str,
@@ -4808,6 +5680,59 @@ def _linkedin_serp_valid(
     # ── Step 4: Role family match ──
     if contact_title and _role_family_match(contact_title, haystack):
         return True, f"role family match for '{contact_title}'"
+
+    # ── Step 4.5: Clean URL slug exact-name match (high confidence) ──
+    # If the LinkedIn URL slug is exactly "first-last" with no random hash,
+    # this is provably the right person — LinkedIn assigns clean slugs to
+    # only ONE profile per name. Accept even on country subdomains.
+    # This catches cases like bs.linkedin.com/in/daniel-zuleta where the
+    # profile is hosted on the country subdomain because the person is
+    # based there, but it IS the right person.
+    if _is_clean_name_slug(r_url, name):
+        return True, "clean URL slug exact-name match"
+
+    # ── Step 4.6: Role-token from contact's title appears in SERP ──
+    # If the contact is "Director of Procurement" and the SERP haystack
+    # contains "procurement" — that's strong proof we're on the right
+    # profile. A random "Adam Butts" elsewhere on LinkedIn (accountant,
+    # plumber, doctor) wouldn't have "procurement" or "housekeeping" or
+    # "development" in their headline. The contact's KNOWN title from
+    # grounding is independent evidence.
+    if contact_title:
+        _ROLE_STOPWORDS = {
+            "the",
+            "and",
+            "of",
+            "for",
+            "at",
+            "a",
+            "an",
+            "&",
+            "in",
+            "on",
+            "to",
+            "by",
+            "or",
+            "senior",
+            "junior",
+            "assistant",
+            "associate",
+            "head",
+            "chief",
+            "executive",
+            "manager",
+            "director",
+        }
+        role_tokens = set()
+        for w in re.split(r"[^a-z0-9]+", contact_title.lower()):
+            if len(w) >= 4 and w not in _ROLE_STOPWORDS:
+                role_tokens.add(w)
+        # Distinctive tokens like: procurement, purchasing, housekeeping,
+        # construction, development, hospitality, operations, culinary,
+        # banquet, sales, design. These rarely appear in unrelated profiles.
+        if role_tokens and any(t in haystack for t in role_tokens):
+            matched = [t for t in role_tokens if t in haystack][:2]
+            return True, f"role keyword match: {matched}"
 
     # ── Steps 5-6: Weaker signals — REJECT for country subdomains ──
     if is_country_subdomain:
@@ -4945,6 +5870,8 @@ async def enrich_lead_contacts(
                     country=country,
                     opening_date=opening_date,
                     project_type=project_type_str,
+                    developer=developer,
+                    owner=owner,
                 )
             except Exception as ex:
                 logger.warning(
@@ -5013,7 +5940,7 @@ async def enrich_lead_contacts(
 
         li_lookup_count = 0
         for c in result.contacts:
-            if li_lookup_count >= 3:
+            if li_lookup_count >= 5:
                 continue
             # NOTE: always run Serper lookup even if grounding returned a LinkedIn URL.
             # Grounding URLs are frequently garbled (e.g. matt-fowler-91004a4 instead of
@@ -5023,19 +5950,53 @@ async def enrich_lead_contacts(
             if not name:
                 continue
             try:
-                tokens = _li_tokens([hotel_name, management_company])
-                if not tokens:
-                    tokens = _li_tokens([c.get("organization")])
+                # ── Scope-aware token selection ──
+                # For hotel_specific contacts → hotel + brand tokens (their
+                # LinkedIn names the property)
+                # For owner / management_corporate / chain_* contacts → use
+                # their OWN organization (Grupo Posadas, Cotton Bay Holdings,
+                # Marriott International) since their LinkedIn profile is
+                # about the parent company, not a specific property.
+                scope = (c.get("scope") or "").lower()
+                contact_org = (c.get("organization") or "").strip()
+                is_corporate = scope in (
+                    "management_corporate",
+                    "chain_corporate",
+                    "chain_area",
+                    "owner",
+                )
+
+                if is_corporate:
+                    # Try contact's own org first, then mgmt company / owner
+                    # / developer as fallbacks
+                    tokens = _li_tokens([contact_org])
+                    if not tokens:
+                        tokens = _li_tokens([management_company, owner, developer])
+                    if not tokens:
+                        tokens = _li_tokens([hotel_name])
+                else:
+                    # hotel_specific or unknown — hotel name first
+                    tokens = _li_tokens([hotel_name, management_company])
+                    if not tokens:
+                        tokens = _li_tokens([contact_org])
+
                 if not tokens:
                     continue
                 tokens_clause = " OR ".join(f'"{t}"' for t in sorted(tokens)[:3])
                 li_q = f'"{name}" ({tokens_clause}) site:linkedin.com/in'
                 li_results = await _search_web(li_q, max_results=3)
                 query_tokens = [t.strip('"') for t in tokens_clause.split(" OR ")]
-                for r in li_results:
-                    r_url = r.get("url", "")
-                    if "linkedin.com/in/" not in r_url:
-                        continue
+
+                # ── Filter to actual /in/ profile URLs ──
+                profile_results = [
+                    r for r in li_results if "linkedin.com/in/" in (r.get("url") or "")
+                ]
+
+                # ── Strict-filter pass: try each result against full validation ──
+                accepted = False
+                strict_rejection_reasons = []
+                for r in profile_results:
+                    r_url = r["url"]
                     valid, reason = _linkedin_serp_valid(
                         name=name,
                         serp_result=r,
@@ -5046,15 +6007,46 @@ async def enrich_lead_contacts(
                         owner=owner or "",
                         contact_title=c.get("title") or "",
                     )
-                    if not valid:
+                    if valid:
+                        c["linkedin"] = _canonicalize_linkedin_url(r_url)
+                        logger.info(
+                            f"Grounding LinkedIn URL found for {name}: "
+                            f"{c['linkedin']} ({reason})"
+                        )
+                        li_lookup_count += 1
+                        accepted = True
+                        break
+                    strict_rejection_reasons.append((r_url, reason))
+
+                # ── Sparse-result fallback (Jay's principle, 2026-05-07) ──
+                # If the strict filter rejected everything BUT Serper only
+                # returned 1-2 results for our specific quoted-name + org
+                # query, those results are likely correct — Serper's query
+                # specificity makes few-result responses high-signal. Adding
+                # more slug patterns to the strict filter is whack-a-mole;
+                # trusting a sparse SERP is the correct architectural choice.
+                # We only require: (a) it's a real LinkedIn /in/ URL, and
+                # (b) the URL does NOT obviously belong to a different
+                # named person (e.g. slug starts with a totally different
+                # first-name token).
+                if not accepted and 1 <= len(profile_results) <= 2:
+                    for r_url, prev_reason in strict_rejection_reasons:
+                        if not _slug_obviously_wrong_person(r_url, name):
+                            c["linkedin"] = _canonicalize_linkedin_url(r_url)
+                            logger.info(
+                                f"Grounding LinkedIn URL found for {name}: "
+                                f"{c['linkedin']} (sparse SERP fallback — "
+                                f"{len(profile_results)} result(s), strict "
+                                f"check said: {prev_reason})"
+                            )
+                            li_lookup_count += 1
+                            accepted = True
+                            break
+
+                # ── Log final rejections only if we couldn't accept any ──
+                if not accepted:
+                    for r_url, reason in strict_rejection_reasons:
                         logger.info(f"LinkedIn REJECTED for {name}: {reason}")
-                        continue
-                    c["linkedin"] = r_url
-                    logger.info(
-                        f"Grounding LinkedIn URL found for {name}: {r_url} ({reason})"
-                    )
-                    li_lookup_count += 1
-                    break
             except Exception as li_e:
                 logger.debug(f"Grounding LinkedIn lookup failed for {name}: {li_e}")
 
@@ -5064,8 +6056,27 @@ async def enrich_lead_contacts(
         for c in result.contacts:
             score_contact_dict(c)
 
-        # Sort by score desc, then smart cap
-        result.contacts.sort(key=lambda c: -(c.get("_validation_score") or 0))
+        # ── Sort: property-first cascade, score is tie-breaker within scope ──
+        # Pure score sorting let mgmt-corporate Tier-1 SVP Procurement (1.5×20=30)
+        # tie with property-level Tier-3 GM (3.0×10=30) and corporate often won
+        # on Gemini's confidence boost. The cascade is the business rule:
+        # property staff > owner > mgmt corporate > chain corporate. Score is
+        # only a tie-breaker WITHIN a scope bucket.
+        _GROUNDING_SCOPE_RANK = {
+            "hotel_specific": 0,  # at THIS hotel — primary uniform buyer
+            "owner": 1,  # check-writer (pre-opening) — second-best
+            "chain_area": 2,  # regional cluster covering this property
+            "management_corporate": 3,  # operator HQ — backup only
+            "chain_corporate": 4,  # brand parent — almost never the buyer
+        }
+
+        def _grounding_sort_key(c: dict) -> tuple:
+            scope = (c.get("scope") or "unknown").lower()
+            scope_rank = _GROUNDING_SCOPE_RANK.get(scope, 5)
+            score = c.get("_validation_score") or 0
+            return (scope_rank, -score)
+
+        result.contacts.sort(key=_grounding_sort_key)
         result.contacts = _apply_smart_cap(result.contacts, MAX_CONTACTS_TO_SAVE)
 
         if progress_callback is not None:
@@ -5081,8 +6092,16 @@ async def enrich_lead_contacts(
         #   • Management company leadership (COO, VP) → OK
         #   • CEO / Founder / Owner only → run iterative to supplement
         #
-        # We only run iterative if grounding returned ONLY pure C-suite/investor
-        # contacts — those people don't buy uniforms. Everything else is good enough.
+        # Two reasons to fall through to iterative:
+        #   (1) all_cxo: only pure C-suite/investor contacts (don't buy uniforms)
+        #   (2) no_operational: only owners and/or brand-parent corporate, with
+        #       NO operational buyer (hotel_specific / management_corporate /
+        #       chain_area). Owners are check-writers and worth keeping, but
+        #       they don't run housekeeping or sign vendor POs. We need at least
+        #       one operational contact before calling grounding "complete."
+        #       This was the Ritz-Carlton Savannah failure: 2 owners at TMGOC
+        #       Ventures came back, system said "complete" and never searched
+        #       for the incoming GM or Marriott's Ritz-Carlton regional ops.
         _CXO_ONLY_KW = {
             "ceo",
             "chief executive officer",
@@ -5092,6 +6111,12 @@ async def enrich_lead_contacts(
             "board member",
             "investor",
             "angel investor",
+        }
+
+        _OPERATIONAL_SCOPES = {
+            "hotel_specific",
+            "management_corporate",
+            "chain_area",
         }
 
         def _is_cxo_only(contact):
@@ -5116,7 +6141,13 @@ async def enrich_lead_contacts(
 
         all_cxo = result.contacts and all(_is_cxo_only(c) for c in result.contacts)
 
-        if not all_cxo:
+        # has_operational = at least one contact with operational buying authority
+        has_operational = any(
+            (c.get("scope") or "").lower() in _OPERATIONAL_SCOPES
+            for c in result.contacts
+        )
+
+        if not all_cxo and has_operational:
             # Grounding found useful contacts (operational staff, mgmt company,
             # or properly scoped owners) — trust it, skip iterative
             logger.info(
@@ -5124,12 +6155,28 @@ async def enrich_lead_contacts(
                 f"{len(result.contacts)} contacts — skipping iterative pipeline ✅"
             )
             return result
-        else:
+        elif all_cxo:
             # Grounding only found pure C-suite (CEO/Founder) — these don't
             # buy uniforms. Run iterative to find operational staff.
             logger.info(
                 f"Contact grounding found only C-suite contacts for {hotel_name} "
                 f"— running iterative to find operational staff"
+            )
+            # Fall through — grounding contacts saved, merged after iterative
+        else:
+            # Grounding returned contacts but no operational buyer — only owners
+            # and/or brand-parent corporate. Owners are check-writers worth
+            # keeping, but the property GM, Director of Housekeeping, and
+            # operator's procurement team are still missing. Run iterative
+            # to fill those slots, then merge results.
+            scope_summary = ", ".join(
+                sorted({(c.get("scope") or "unknown") for c in result.contacts})
+            )
+            logger.info(
+                f"Contact grounding for {hotel_name}: {len(result.contacts)} "
+                f"contacts but NO operational buyer (scopes: {scope_summary}) — "
+                f"running iterative to find property staff / mgmt-company ops, "
+                f"will merge with grounding results"
             )
             # Fall through — grounding contacts saved, merged after iterative
 
@@ -5306,6 +6353,8 @@ async def enrich_lead_contacts(
                 country=country,
                 opening_date=opening_date,
                 project_type=research_state.project_stage,
+                developer=developer,
+                owner=owner,
             )
         except Exception as ex:
             logger.warning(f"Gemini verification failed (keeping raw contacts): {ex}")
@@ -6096,9 +7145,10 @@ async def _enrich_lead_contacts_v4_legacy(
                     if not valid:
                         logger.debug(f"LinkedIn rejected for {name}: {reason}")
                         continue
-                    c["linkedin"] = r_url
+                    c["linkedin"] = _canonicalize_linkedin_url(r_url)
                     logger.info(
-                        f"LinkedIn URL found for {name}: {r_url} ({reason}, scope={scope})"
+                        f"LinkedIn URL found for {name}: "
+                        f"{c['linkedin']} ({reason}, scope={scope})"
                     )
                     attached = True
                     break
@@ -6469,7 +7519,7 @@ async def persist_enrichment_contacts(
                     existing.phone = c["phone"]
                     filled.append("phone")
                 if not existing.linkedin and c.get("linkedin"):
-                    existing.linkedin = c["linkedin"]
+                    existing.linkedin = _canonicalize_linkedin_url(c["linkedin"])
                     filled.append("linkedin")
                 if not existing.title and c.get("title"):
                     existing.title = c["title"]
@@ -6578,7 +7628,7 @@ async def persist_enrichment_contacts(
                     title=c.get("title"),
                     email=c.get("email"),
                     phone=c.get("phone"),
-                    linkedin=c.get("linkedin"),
+                    linkedin=_canonicalize_linkedin_url(c.get("linkedin")),
                     organization=c.get("organization"),
                     scope=c.get("scope", "unknown"),
                     confidence=c.get(
