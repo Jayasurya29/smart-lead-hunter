@@ -28,6 +28,7 @@
  * Created: 2026-04-28
  */
 import { useState, useEffect, useMemo } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import api from '@/api/client'
 import {
@@ -226,6 +227,29 @@ export default function ExistingHotels() {
   const [selectedId, setSelectedId] = useState<number | null>(null)
   const [activeTab, setActiveTab] = useState<PipelineTab>('pipeline')
   const [exporting, setExporting] = useState(false)
+
+  // ── Map → Existing Hotels deep link ──
+  // The Map page's "Open in Existing Hotels" button navigates to
+  // /existing-hotels?hotel=NNN. Read the param and auto-select the hotel
+  // so the user lands directly in its detail view. Clear the param after
+  // consumption so it doesn't stick around on tab switches / page reloads.
+  const [searchParams, setSearchParams] = useSearchParams()
+  useEffect(() => {
+    const hotelParam = searchParams.get('hotel')
+    if (hotelParam) {
+      const id = Number(hotelParam)
+      if (!Number.isNaN(id)) {
+        setSelectedId(id)
+      }
+      // Drop the param without adding a history entry
+      const next = new URLSearchParams(searchParams)
+      next.delete('hotel')
+      setSearchParams(next, { replace: true })
+    }
+    // Run once on mount; deliberately not depending on searchParams to
+    // avoid re-firing when the user updates filters that share the URL.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   // Page-size persists across sessions via localStorage. Defaults to 25.
   // Separate key from the New Hotels page so each can be tuned independently.

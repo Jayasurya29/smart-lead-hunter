@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { useLead, useContacts, useApproveLead, useRejectLead, useRestoreLead, useDeleteLead, useEnrichLead, useSmartFill } from '@/hooks/useLeads'
+import { useLead, useContacts, useApproveLead, useRejectLead, useRestoreLead, useDeleteLead, useEnrichLead, useSmartFill, invalidateLeadEverywhere } from '@/hooks/useLeads'
 import RevenuePotential from './RevenuePotential'
 import EnrichProgress from './EnrichProgress'
 import SmartFillProgress from './SmartFillProgress'
@@ -429,9 +429,12 @@ function OverviewTab({ lead, leadId, contactList, onEnrich, enriching, onSmartFi
               leadId={leadId}
               mode={smartFillLive}
               onComplete={() => {
-                qc.invalidateQueries({ queryKey: ['lead', leadId] })
-                qc.invalidateQueries({ queryKey: ['leads'] })
-                qc.invalidateQueries({ queryKey: ['revenue-estimate', leadId] })
+                // Use the canonical helper — it invalidates lead, leads,
+                // map-leads, map-data, revenue-estimate, and everything
+                // else. Without map-leads/map-data invalidation, leads
+                // that just got geocoded by Smart Fill wouldn't appear
+                // on the map until a manual refresh.
+                invalidateLeadEverywhere(qc, leadId)
                 onSmartFillComplete?.()
               }}
               onCancel={() => onSmartFillComplete?.()}
@@ -511,7 +514,10 @@ function OverviewTab({ lead, leadId, contactList, onEnrich, enriching, onSmartFi
               try {
                 const res = await api.post(`/leads/${leadId}/enrich-geo`)
                 setGeoResult({ website: res.data.hotel_website, lat: res.data.latitude, lng: res.data.longitude })
-                qc.invalidateQueries({ queryKey: ['lead', leadId] })
+                // Geo-enrich populated lat/lng → must invalidate map caches
+                // so the lead appears on the map immediately. Use the
+                // canonical helper instead of partial invalidation.
+                invalidateLeadEverywhere(qc, leadId)
               } catch(e) { /* silent */ }
               finally { setGeoEnriching(false) }
             }}

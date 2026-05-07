@@ -26,7 +26,7 @@ const STATUS_MAP: Record<LeadTab, string> = {
 // Calling all of these on success keeps every page consistent without
 // waiting for the 30s poll, especially after a transferred response
 // where the lead has moved tables.
-function invalidateLeadEverywhere(qc: QueryClient, id?: number) {
+export function invalidateLeadEverywhere(qc: QueryClient, id?: number) {
   qc.invalidateQueries({ queryKey: ['leads'] })
   qc.invalidateQueries({ queryKey: ['stats'] })
   qc.invalidateQueries({ queryKey: ['map-leads'] })

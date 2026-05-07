@@ -77,6 +77,7 @@ interface LeadPin {
   lead_score: number | null
   revenue_opening: number | null
   hotel_website: string | null
+  status: string | null
 }
 
 interface MapFilters { type: '' | 'client' | 'prospect'; tier: string; zone: string }
@@ -397,75 +398,29 @@ const leadClusterIconFn = (cluster: any) => {
 
 // ─── Memoized lead pin layer with clustering ───────────────────────────────────
 const LeadMarkers = memo(function LeadMarkers({
-  leadPins, onNavigate,
+  leadPins, onLeadClick,
 }: {
   leadPins: LeadPin[]
-  onNavigate: (id: number) => void
+  onLeadClick: (lead: LeadPin) => void
 }) {
-  const TIMELINE_COLORS: Record<string, string> = {
-    URGENT: '#dc2626', HOT: '#ea580c', WARM: '#d97706', COOL: '#2563eb', TBD: '#7c3aed',
-  }
+  // No clustering for leads — there are only ~20-30 active leads at any
+  // time, and each one is high-priority. Clustering them hides individual
+  // properties (e.g. Royalton Blue Waters disappearing inside a "6"
+  // cluster over Jamaica). Existing hotels still cluster (2333 of them).
+  // No inline <Popup> either — clicks open a side detail card via
+  // selectedLead state, matching the existing-hotel UX for consistency.
   return (
-    <MarkerClusterGroup
-      chunkedLoading
-      maxClusterRadius={60}
-      animate={false}
-      showCoverageOnHover={false}
-      spiderfyOnMaxZoom
-      iconCreateFunction={leadClusterIconFn}
-    >
+    <>
       {leadPins.map(lead => (
         <Marker
           key={`lead-${lead.id}`}
           position={[lead.lat, lead.lng]}
           icon={createLeadIcon(lead.timeline_label, lead.lead_score)}
           zIndexOffset={500}
-        >
-          <Popup>
-            <div style={{ minWidth: 210, fontFamily: 'system-ui, sans-serif' }}>
-              {/* Header */}
-              <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8 }}>
-                <span style={{
-                  background: TIMELINE_COLORS[lead.timeline_label || 'TBD'] || '#7c3aed',
-                  color: '#fff', fontSize: 10, padding: '2px 6px',
-                  borderRadius: 3, fontWeight: 700, flexShrink: 0,
-                }}>{lead.timeline_label || 'TBD'}</span>
-                <span style={{ fontWeight: 700, fontSize: 13, color: '#0f172a' }}>{lead.name}</span>
-              </div>
-              {/* Details */}
-              {lead.brand && <p style={{ color: '#64748b', fontSize: 11, margin: '2px 0' }}>{lead.brand}</p>}
-              <p style={{ color: '#64748b', fontSize: 11, margin: '2px 0' }}>
-                {[lead.city, lead.state].filter(Boolean).join(', ')}
-              </p>
-              {lead.revenue_opening && (
-                <p style={{ color: '#059669', fontWeight: 700, fontSize: 12, margin: '6px 0 2px' }}>
-                  Opening Revenue: {fmtRevenue(lead.revenue_opening)}
-                </p>
-              )}
-              {lead.hotel_website && (
-                <a href={lead.hotel_website} target="_blank" rel="noopener noreferrer"
-                  style={{ color: '#2563eb', fontSize: 11, display: 'block', marginTop: 4 }}>
-                  🌐 {lead.hotel_website.replace(/^https?:\/\/(www\.)?/, '')}
-                </a>
-              )}
-              {/* Open in pipeline button */}
-              <button
-                onClick={() => onNavigate(lead.id)}
-                style={{
-                  marginTop: 10, width: '100%', padding: '6px 0',
-                  background: '#0f1d32', color: '#fff', border: 'none',
-                  borderRadius: 6, fontSize: 11, fontWeight: 700,
-                  cursor: 'pointer', display: 'flex', alignItems: 'center',
-                  justifyContent: 'center', gap: 4,
-                }}
-              >
-                → View in New Hotels
-              </button>
-            </div>
-          </Popup>
-        </Marker>
+          eventHandlers={{ click: () => onLeadClick(lead) }}
+        />
       ))}
-    </MarkerClusterGroup>
+    </>
   )
 })
 
@@ -496,6 +451,10 @@ const HotelMarkers = memo(function HotelMarkers({
       disableClusteringAtZoom={nearbyMode && nearbyAnchor ? 1 : undefined}
       iconCreateFunction={clusterIconFn}
     >
+      {/* No inline <Popup> on each Marker — the selectedHotel detail
+          card (rendered in MapPage) shows the same info via React state
+          when a marker is clicked. Building a Popup component into each
+          of 2333 markers was the primary cause of pan/zoom lag. */}
       {hotels.filter(h => !routeStopIds.has(h.id)).map(hotel => {
         const color = getMarkerColor(hotel, colorMode, maxRevenue)
         const sz = markerSize(hotel.room_count)
@@ -506,9 +465,7 @@ const HotelMarkers = memo(function HotelMarkers({
             icon={hotel.id === nearbyAnchor?.id ? anchorIcon : createIcon(isDimmed ? '#cbd5e1' : color, isNH ? sz + 4 : sz)}
             opacity={isDimmed ? 0.3 : 1}
             eventHandlers={{ click: () => onMarkerClick(hotel) }}
-          >
-            {!routeMode && !nearbyMode && <Popup><div dangerouslySetInnerHTML={{ __html: hotelPopupHTML(hotel) }} /></Popup>}
-          </Marker>
+          />
         )
       })}
     </MarkerClusterGroup>
@@ -520,6 +477,7 @@ export default function MapPage() {
   const [filters, setFilters] = useState<MapFilters>(DEFAULT_FILTERS)
   const [showFilters, setShowFilters] = useState(false)
   const [selectedHotel, setSelectedHotel] = useState<MapHotel | null>(null)
+  const [selectedLead, setSelectedLead] = useState<LeadPin | null>(null)
   const [tileStyle, setTileStyle] = useState<TileStyle>('street')
   const [colorMode, setColorMode] = useState<ColorMode>('type')
 
@@ -556,17 +514,26 @@ export default function MapPage() {
   const { data: leadPins = [] } = useQuery<LeadPin[]>({
     queryKey: ['map-leads'],
     queryFn: async () => {
+      // Show all geocoded potential leads from the active pipeline.
+      // Excluded: rejected (we said no), deleted (manually trashed),
+      // expired (auto-transferred to existing_hotels via transfer_lead).
+      // Included: new, qualified, contacted, in_progress, won — every
+      // status that represents a live lead worth seeing on the map.
+      const HIDE_STATUSES = new Set(['rejected', 'deleted', 'expired'])
       const res = await api.get('/leads', { params: {
-        per_page: 500, has_coords: 'true', status: 'new'
+        per_page: 500, has_coords: 'true'
       }})
       const pins = (res.data.leads || [])
-        .filter((l: any) => l.latitude && l.longitude)
+        .filter((l: any) =>
+          l.latitude && l.longitude && !HIDE_STATUSES.has(l.status)
+        )
         .map((l: any) => ({
           id: l.id, name: l.hotel_name, brand: l.brand,
           brand_tier: l.brand_tier, city: l.city, state: l.state,
           lat: l.latitude, lng: l.longitude,
           timeline_label: l.timeline_label, lead_score: l.lead_score,
           revenue_opening: l.revenue_opening, hotel_website: l.hotel_website,
+          status: l.status,
         }))
       return pins
     },
@@ -593,8 +560,41 @@ export default function MapPage() {
   const searchResults = useMemo(() => {
     if (!searchQuery.trim()) return []
     const q = searchQuery.toLowerCase()
-    return filtered.filter(h => h.name.toLowerCase().includes(q) || (h.brand || '').toLowerCase().includes(q) || (h.city || '').toLowerCase().includes(q)).slice(0, 8)
-  }, [searchQuery, filtered])
+    // Search BOTH existing hotels AND leads. Leads come first because
+    // they're a smaller, more curated set the user is actively working.
+    const leadMatches = leadPins
+      .filter(l =>
+        l.name.toLowerCase().includes(q) ||
+        (l.brand || '').toLowerCase().includes(q) ||
+        (l.city || '').toLowerCase().includes(q)
+      )
+      .map(l => ({
+        // Adapt LeadPin to look like MapHotel for the dropdown.
+        // The __isLead__ flag tells handleSearchSelect to navigate
+        // to the lead detail page instead of opening a hotel popup.
+        id: l.id,
+        name: l.name,
+        brand: l.brand,
+        brand_tier: l.brand_tier,
+        city: l.city,
+        state: l.state,
+        lat: l.lat,
+        lng: l.lng,
+        is_client: false,
+        room_count: null,
+        revenue_annual: l.revenue_opening,
+        contact_email: null,
+        contact_phone: null,
+        zone: null,
+        __isLead__: true as const,
+      }))
+    const hotelMatches = filtered.filter(h =>
+      h.name.toLowerCase().includes(q) ||
+      (h.brand || '').toLowerCase().includes(q) ||
+      (h.city || '').toLowerCase().includes(q)
+    )
+    return [...leadMatches, ...hotelMatches].slice(0, 8)
+  }, [searchQuery, filtered, leadPins])
 
   const routeStopIds = useMemo(() => new Set(routeStops.map(h => h.id)), [routeStops])
 
@@ -614,8 +614,8 @@ export default function MapPage() {
       else setRouteStops(p => [...p, hotel])
       setRouteResult(null)
     } else if (nearbyMode) {
-      setNearbyAnchor(hotel); setSelectedHotel(null)
-    } else setSelectedHotel(hotel)
+      setNearbyAnchor(hotel); setSelectedHotel(null); setSelectedLead(null)
+    } else { setSelectedHotel(hotel); setSelectedLead(null) }
   }, [routeMode, nearbyMode, routeStopIds])
 
   async function handleOptimize() {
@@ -626,7 +626,14 @@ export default function MapPage() {
     setIsOptimizing(false)
   }
 
-  function handleSearchSelect(h: MapHotel) {
+  function handleSearchSelect(h: MapHotel & { __isLead__?: boolean }) {
+    if (h.__isLead__) {
+      // Lead — navigate to the New Hotels page filtered to this lead
+      navigate(`/new-hotels?lead=${h.id}`)
+      setSearchOpen(false)
+      setSearchQuery('')
+      return
+    }
     setFlyTarget({ lat: h.lat, lng: h.lng, zoom: 15, t: Date.now() }); setSelectedHotel(h); setSearchOpen(false); setSearchQuery('')
   }
 
@@ -727,11 +734,17 @@ export default function MapPage() {
             </div>
             {searchResults.length > 0 && (
               <div className="absolute top-full left-0 right-0 mt-1 bg-white border border-stone-200 rounded-xl shadow-xl max-h-72 overflow-y-auto z-[2001]">
-                {searchResults.map(h => (
-                  <button key={h.id} onClick={() => handleSearchSelect(h)} className="w-full flex items-center gap-3 px-4 py-2.5 hover:bg-stone-50 transition text-left">
-                    <div className={cn('w-2.5 h-2.5 rounded-full flex-shrink-0', h.is_client ? 'bg-emerald-500' : 'bg-blue-500')} />
+                {searchResults.map((h: any) => (
+                  <button key={`${h.__isLead__ ? 'lead-' : 'h-'}${h.id}`} onClick={() => handleSearchSelect(h)} className="w-full flex items-center gap-3 px-4 py-2.5 hover:bg-stone-50 transition text-left">
+                    <div className={cn(
+                      'w-2.5 h-2.5 rounded-full flex-shrink-0',
+                      h.__isLead__ ? 'bg-violet-500' : (h.is_client ? 'bg-emerald-500' : 'bg-blue-500')
+                    )} />
                     <div className="flex-1 min-w-0">
-                      <p className="text-sm font-semibold text-navy-900 truncate">{h.name}</p>
+                      <p className="text-sm font-semibold text-navy-900 truncate">
+                        {h.name}
+                        {h.__isLead__ && <span className="ml-2 text-2xs font-medium text-violet-600 bg-violet-50 px-1.5 py-0.5 rounded">LEAD</span>}
+                      </p>
                       <p className="text-2xs text-stone-400">{[h.city, h.state].filter(Boolean).join(', ')}{h.brand ? ` · ${h.brand}` : ''}</p>
                     </div>
                     {h.room_count && <span className="text-2xs text-stone-400">{h.room_count} rooms</span>}
@@ -780,7 +793,13 @@ export default function MapPage() {
 
               {/* Pre-opening Lead Pins — clustered */}
               {showLeads && (
-                <LeadMarkers leadPins={leadPins} onNavigate={(id) => navigate(`/new-hotels?lead=${id}`)} />
+                <LeadMarkers
+                  leadPins={leadPins}
+                  onLeadClick={(lead) => {
+                    setSelectedLead(lead)
+                    setSelectedHotel(null)
+                  }}
+                />
               )}
 
               {/* Route stops */}
@@ -847,8 +866,9 @@ export default function MapPage() {
             </div>
           )}
 
-          {/* Color legend */}
-          <div className="absolute bottom-4 right-3 z-[1000]">
+          {/* Color legend — bottom-LEFT to avoid overlap with the
+              selectedHotel detail card (which lives bottom-right) */}
+          <div className="absolute bottom-4 left-3 z-[1000]">
             <div className="bg-white/90 backdrop-blur-sm rounded-lg px-3 py-2 shadow border border-stone-200 space-y-1">
               {colorMode === 'type' && <><Dot c="#059669" l="Client" /><Dot c="#2563eb" l="Prospect" /></>}
               {colorMode === 'revenue' && <><Dot c="#3b82f6" l="Low Revenue" /><Dot c="#d4a853" l="Mid Revenue" /><Dot c="#dc2626" l="High Revenue" /></>}
@@ -964,6 +984,74 @@ export default function MapPage() {
                   </span>
                 </div>
                 {selectedHotel.phone && <a href={`tel:${selectedHotel.phone}`} className="flex items-center gap-1.5 mt-2.5 text-xs text-navy-600 hover:underline"><Phone className="w-3 h-3" />{selectedHotel.phone}</a>}
+                {/* Open in Existing Hotels — symmetric with the lead popup's
+                    "View in New Hotels" button. Navigates to the Existing
+                    Hotels page filtered to this specific hotel id. */}
+                <button
+                  onClick={() => navigate(`/existing-hotels?hotel=${selectedHotel.id}`)}
+                  className="mt-3 w-full inline-flex items-center justify-center gap-1.5 px-3 py-2 bg-navy-900 hover:bg-navy-800 text-white text-xs font-bold rounded-lg transition"
+                >
+                  → Open in Existing Hotels
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* ═══ LEAD DETAIL CARD ═══
+              Same bottom-right position and styling as the hotel detail
+              card, but lead-specific (timeline label, opening revenue,
+              "View in New Hotels" deep link). Shown when a lead pin is
+              clicked; replaces the previous Leaflet popup. */}
+          {!routeMode && !nearbyMode && selectedLead && (
+            <div className="absolute bottom-4 left-4 right-4 md:left-auto md:right-4 md:w-96 bg-white rounded-xl border border-slate-200 shadow-xl z-[1000]">
+              <div className="p-4">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2 mb-1">
+                      <span
+                        className="px-2 py-0.5 rounded text-2xs font-bold text-white"
+                        style={{
+                          background:
+                            selectedLead.timeline_label === 'URGENT' ? '#dc2626' :
+                            selectedLead.timeline_label === 'HOT' ? '#ea580c' :
+                            selectedLead.timeline_label === 'WARM' ? '#d97706' :
+                            selectedLead.timeline_label === 'COOL' ? '#2563eb' :
+                            '#7c3aed',
+                        }}
+                      >
+                        {selectedLead.timeline_label || 'TBD'}
+                      </span>
+                    </div>
+                    <h3 className="text-sm font-bold text-navy-900 truncate">{selectedLead.name}</h3>
+                    {selectedLead.brand && <p className="text-xs text-stone-400 mt-0.5">{selectedLead.brand}</p>}
+                  </div>
+                  <div className="flex items-center gap-2 flex-shrink-0">
+                    <span className="px-2 py-0.5 rounded-full text-2xs font-bold bg-violet-50 text-violet-600">Lead</span>
+                    <button onClick={() => setSelectedLead(null)} className="p-1 text-stone-400 hover:text-stone-600"><X className="w-3.5 h-3.5" /></button>
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-3 mt-3">
+                  <InfoCell icon={MapPin} label="Location" value={[selectedLead.city, selectedLead.state].filter(Boolean).join(', ') || '—'} />
+                  <InfoCell icon={DollarSign} label="Opening Revenue" value={fmtRevenue(selectedLead.revenue_opening)} />
+                </div>
+                <div className="mt-2.5 flex items-center gap-1.5 flex-wrap">
+                  {selectedLead.brand_tier && <span className={cn('inline-flex px-2 py-0.5 rounded text-2xs font-bold', getTierColor(selectedLead.brand_tier))}>{getTierLabel(selectedLead.brand_tier)}</span>}
+                  <span className="inline-flex px-2 py-0.5 rounded text-2xs font-medium bg-navy-50 text-navy-600">
+                    {distanceMiles(OFFICE_LAT, OFFICE_LNG, selectedLead.lat, selectedLead.lng).toFixed(1)} mi from HQ
+                  </span>
+                </div>
+                {selectedLead.hotel_website && (
+                  <a href={selectedLead.hotel_website} target="_blank" rel="noopener noreferrer"
+                    className="flex items-center gap-1.5 mt-2.5 text-xs text-blue-600 hover:underline truncate">
+                    🌐 {selectedLead.hotel_website.replace(/^https?:\/\/(www\.)?/, '')}
+                  </a>
+                )}
+                <button
+                  onClick={() => navigate(`/new-hotels?lead=${selectedLead.id}`)}
+                  className="mt-3 w-full inline-flex items-center justify-center gap-1.5 px-3 py-2 bg-navy-900 hover:bg-navy-800 text-white text-xs font-bold rounded-lg transition"
+                >
+                  → View in New Hotels
+                </button>
               </div>
             </div>
           )}
