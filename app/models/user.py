@@ -29,6 +29,12 @@ class User(Base):
     role = Column(String(20), nullable=False, default="sales")  # sales, admin
     is_active = Column(Boolean, default=True, nullable=False)
     last_login = Column(DateTime(timezone=True))
+    # Password-reset flow (forgot-password OR admin-triggered reset)
+    # Same OTP pattern as PendingRegistration: 6-digit code, hashed,
+    # capped attempts, time-bounded.
+    password_reset_otp_hash = Column(String(255), nullable=True)
+    password_reset_otp_expires_at = Column(DateTime(timezone=True), nullable=True)
+    password_reset_attempts = Column(Integer, default=0, nullable=False)
     created_at = Column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
     )

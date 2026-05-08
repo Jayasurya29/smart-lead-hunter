@@ -4,6 +4,7 @@ import AppLayout from '@/components/layout/AppLayout'
 import ErrorBoundary from '@/components/ErrorBoundary'
 import LoginPage from '@/pages/Login'
 import RegisterPage from '@/pages/Register'
+import ResetPasswordPage from '@/pages/ResetPassword'
 import Dashboard from '@/pages/Dashboard'
 import { Loader2 } from 'lucide-react'
 import UsersPage from '@/pages/Users'
@@ -47,6 +48,10 @@ export default function AppRouter() {
           <Route
             path="/register"
             element={isAuthenticated ? <Navigate to="/new-hotels" replace /> : <RegisterPage />}
+          />
+          <Route
+            path="/reset-password"
+            element={isAuthenticated ? <Navigate to="/new-hotels" replace /> : <ResetPasswordPage />}
           />
 
           {/* Protected routes */}

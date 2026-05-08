@@ -96,3 +96,75 @@ def _send_smtp(msg: MIMEMultipart, to_email: str):
         server.starttls()
         server.login(SMTP_USER, SMTP_PASSWORD)
         server.sendmail(SMTP_USER, to_email, msg.as_string())
+
+
+def _build_password_reset_html(first_name: str, otp: str, triggered_by: str) -> str:
+    """HTML email body for password-reset OTP.
+
+    triggered_by: 'self' for forgot-password flow, 'admin' for admin-triggered
+    reset — the wording differs slightly so the recipient knows what happened.
+    """
+    intro = (
+        "You requested a password reset."
+        if triggered_by == "self"
+        else "An admin has initiated a password reset for your account."
+    )
+    return f"""
+    <div style="font-family: 'Segoe UI', Arial, sans-serif; max-width: 480px; margin: 0 auto; padding: 32px;">
+        <div style="text-align: center; margin-bottom: 24px;">
+            <h2 style="color: #0a1628; margin: 0;">Smart Lead Hunter</h2>
+            <p style="color: #64748b; font-size: 13px; margin-top: 4px;">J.A. Uniforms · Hotel Intelligence</p>
+        </div>
+        <div style="background: #fafafa; border: 1px solid #e2e8f0; border-radius: 12px; padding: 32px; text-align: center;">
+            <p style="color: #334155; font-size: 15px; margin: 0 0 8px;">Hi {first_name},</p>
+            <p style="color: #64748b; font-size: 14px; margin: 0 0 24px;">{intro}<br>Your verification code is:</p>
+            <div style="font-size: 36px; font-weight: bold; letter-spacing: 8px; color: #0a1628; font-family: monospace; margin: 16px 0;">
+                {otp}
+            </div>
+            <p style="color: #94a3b8; font-size: 12px; margin-top: 24px;">
+                This code expires in 10 minutes.<br>
+                If you didn't request this, contact your admin immediately.
+            </p>
+        </div>
+    </div>
+    """
+
+
+async def send_password_reset_email(
+    to_email: str, first_name: str, otp: str, triggered_by: str = "self"
+) -> bool:
+    """Send password-reset OTP email. Returns True if sent successfully.
+
+    If SMTP is not configured, prints OTP to console for development.
+    triggered_by: 'self' (user clicked Forgot Password) or 'admin' (admin
+    triggered a reset for this user).
+    """
+    if not _smtp_configured():
+        logger.warning(
+            f"SMTP not configured — password-reset OTP for {to_email}: {otp}"
+        )
+        print(f"\n{'=' * 50}")
+        print(f"  PASSWORD RESET OTP for {to_email}: {otp}")
+        print(f"{'=' * 50}\n")
+        return True
+
+    try:
+        msg = MIMEMultipart("alternative")
+        msg["Subject"] = "Reset your Smart Lead Hunter password"
+        msg["From"] = f"{FROM_NAME} <{SMTP_USER}>"
+        msg["To"] = to_email
+
+        html_body = _build_password_reset_html(first_name, otp, triggered_by)
+        msg.attach(MIMEText(html_body, "html"))
+
+        import asyncio
+
+        loop = asyncio.get_event_loop()
+        await loop.run_in_executor(None, _send_smtp, msg, to_email)
+
+        logger.info(f"Password-reset email sent to {to_email}")
+        return True
+
+    except Exception as e:
+        logger.error(f"Failed to send password-reset email to {to_email}: {e}")
+        return False

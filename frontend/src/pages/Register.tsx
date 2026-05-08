@@ -336,17 +336,32 @@ export default function RegisterPage() {
               </p>
             </div>
 
-            {/* Role */}
+            {/* Role — button-pair instead of native select for reliability
+                across browsers (the native select dropdown was failing to
+                register clicks on some setups). */}
             <div>
               <label className="block text-[13px] font-semibold text-gray-700 mb-1.5">Role</label>
-              <div className="relative">
-                <Briefcase className="absolute left-4 top-1/2 -translate-y-1/2 w-[18px] h-[18px] text-slate-400 pointer-events-none z-10" />
-                <select value={role} onChange={e => setRole(e.target.value)}
-                        className="w-full pl-11 pr-8 py-[13px] text-sm rounded-xl text-gray-900 outline-none transition-all appearance-none cursor-pointer filter-select"
-                        style={inputStyle()} onFocus={onFocus} onBlur={onBlur}>
-                  <option value="sales">Sales Team</option>
-                  <option value="admin">Admin</option>
-                </select>
+              <div className="grid grid-cols-2 gap-2">
+                {[
+                  { value: 'sales', label: 'Sales Team' },
+                  { value: 'admin', label: 'Admin' },
+                ].map(opt => (
+                  <button
+                    key={opt.value}
+                    type="button"
+                    onClick={() => setRole(opt.value)}
+                    className="flex items-center justify-center gap-2 py-[13px] text-sm rounded-xl transition-all"
+                    style={{
+                      background: '#fafafa',
+                      border: `1.5px solid ${role === opt.value ? '#f59e0b' : '#e2e8f0'}`,
+                      color: role === opt.value ? '#0a1628' : '#64748b',
+                      fontWeight: role === opt.value ? 600 : 500,
+                    }}
+                  >
+                    <Briefcase className="w-[16px] h-[16px]" style={{ color: role === opt.value ? '#f59e0b' : '#94a3b8' }} />
+                    {opt.label}
+                  </button>
+                ))}
               </div>
             </div>
 

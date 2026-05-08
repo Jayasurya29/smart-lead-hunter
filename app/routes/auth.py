@@ -577,7 +577,10 @@ async def resend_code(
 
 @router.get("/users")
 async def list_users(
-    current_user: dict = Depends(require_admin),
+    # Open to any authenticated user — Sales can view the team roster
+    # (read-only). Mutating endpoints (PATCH/POST/DELETE) below remain
+    # admin-only via require_admin.
+    current_user: dict = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     result = await db.execute(select(User).order_by(User.created_at.asc()))
@@ -668,6 +671,210 @@ async def deactivate_user(
         pass
 
     return {"status": "deactivated", "user_id": user_id}
+
+
+# ── Password Reset Flow ───────────────────────────────────────────────────────
+# Three endpoints supporting both self-serve and admin-triggered resets:
+#   POST /auth/forgot-password           - any user, emails OTP to their address
+#   POST /auth/reset-password            - completes the reset with OTP + new pw
+#   POST /auth/users/{id}/reset-password - admin triggers reset for any user
+
+
+class ForgotPasswordRequest(BaseModel):
+    email: str
+
+    @field_validator("email")
+    @classmethod
+    def validate_email(cls, v: str) -> str:
+        v = v.strip().lower()
+        if not v or not _AUTH_EMAIL_RE.match(v):
+            raise ValueError("Invalid email format")
+        return v
+
+
+class ResetPasswordRequest(BaseModel):
+    email: str
+    code: str
+    new_password: str
+
+    @field_validator("email")
+    @classmethod
+    def validate_email(cls, v: str) -> str:
+        return v.strip().lower()
+
+    @field_validator("code")
+    @classmethod
+    def validate_code(cls, v: str) -> str:
+        v = v.strip()
+        if not v.isdigit() or len(v) != 6:
+            raise ValueError("Code must be 6 digits")
+        return v
+
+    @field_validator("new_password")
+    @classmethod
+    def validate_new_password(cls, v: str) -> str:
+        if not v:
+            raise ValueError("Password cannot be empty")
+        return v
+
+
+async def _trigger_password_reset(
+    user: User, db: AsyncSession, triggered_by: str
+) -> bool:
+    """Generate OTP, store hash on user, and email it. Shared between
+    forgot-password (triggered_by='self') and admin reset (triggered_by='admin').
+    Returns True if email sent successfully."""
+    from app.utils.email import send_password_reset_email
+
+    otp = generate_otp()
+    user.password_reset_otp_hash = hash_otp(otp)
+    user.password_reset_otp_expires_at = datetime.now(timezone.utc) + timedelta(
+        minutes=OTP_EXPIRE_MINUTES
+    )
+    user.password_reset_attempts = 0
+    await db.commit()
+
+    return await send_password_reset_email(
+        user.email, user.first_name, otp, triggered_by=triggered_by
+    )
+
+
+@router.post("/forgot-password")
+async def forgot_password(
+    body: ForgotPasswordRequest,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    """Self-serve password reset request. Always returns success regardless
+    of whether the email exists — prevents email enumeration."""
+    ip = _get_client_ip(request)
+    if not _check_rate_limit(ip, "forgot_password"):
+        raise HTTPException(status_code=429, detail="Too many requests. Try later.")
+
+    result = await db.execute(select(User).where(User.email == body.email))
+    user = result.scalar_one_or_none()
+
+    if user and user.is_active:
+        await _trigger_password_reset(user, db, triggered_by="self")
+        logger.info(f"Password reset OTP sent to {user.email} (self-serve)")
+    else:
+        # Don't leak account existence; pretend it succeeded
+        logger.info(
+            f"Password-reset requested for non-existent / inactive email: {body.email}"
+        )
+
+    return {
+        "success": True,
+        "message": "If an account exists, a reset code has been sent.",
+    }
+
+
+@router.post("/reset-password")
+async def reset_password(
+    body: ResetPasswordRequest,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    """Verify OTP and set new password."""
+    ip = _get_client_ip(request)
+    if not _check_rate_limit(ip, "reset_password"):
+        raise HTTPException(status_code=429, detail="Too many attempts. Try later.")
+
+    pw_error = validate_password(body.new_password)
+    if pw_error:
+        return JSONResponse({"success": False, "error": pw_error})
+
+    result = await db.execute(select(User).where(User.email == body.email))
+    user = result.scalar_one_or_none()
+
+    if not user or not user.is_active:
+        return JSONResponse(
+            {"success": False, "error": "Invalid or expired reset code"}
+        )
+
+    if not user.password_reset_otp_hash or not user.password_reset_otp_expires_at:
+        return JSONResponse(
+            {"success": False, "error": "No reset request found. Request a new code."}
+        )
+
+    if user.password_reset_otp_expires_at < datetime.now(timezone.utc):
+        # Expired — clear the OTP fields
+        user.password_reset_otp_hash = None
+        user.password_reset_otp_expires_at = None
+        user.password_reset_attempts = 0
+        await db.commit()
+        return JSONResponse(
+            {"success": False, "error": "Reset code expired. Request a new one."}
+        )
+
+    if user.password_reset_attempts >= OTP_MAX_ATTEMPTS:
+        return JSONResponse(
+            {
+                "success": False,
+                "error": "Too many incorrect attempts. Request a new code.",
+            }
+        )
+
+    if not verify_otp(body.code, user.password_reset_otp_hash):
+        user.password_reset_attempts += 1
+        await db.commit()
+        remaining = OTP_MAX_ATTEMPTS - user.password_reset_attempts
+        return JSONResponse(
+            {
+                "success": False,
+                "error": f"Invalid code. {remaining} attempt(s) remaining.",
+            }
+        )
+
+    # Success — set new password, clear reset fields
+    user.password_hash = hash_password(body.new_password)
+    user.password_reset_otp_hash = None
+    user.password_reset_otp_expires_at = None
+    user.password_reset_attempts = 0
+    user.updated_at = datetime.now(timezone.utc)
+    await db.commit()
+
+    logger.info(f"Password reset completed for {user.email}")
+    return {"success": True, "message": "Password reset successfully. Please log in."}
+
+
+@router.post("/users/{user_id}/reset-password")
+async def admin_reset_password(
+    user_id: int,
+    current_user: dict = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """Admin triggers password reset OTP for another user. The user
+    receives an email with a code and uses /auth/reset-password to set
+    their new password — no password is set by the admin directly."""
+    if user_id == current_user["id"]:
+        raise HTTPException(
+            status_code=400,
+            detail="Use the regular password change flow for your own account",
+        )
+
+    result = await db.execute(select(User).where(User.id == user_id))
+    user = result.scalar_one_or_none()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    if not user.is_active:
+        raise HTTPException(
+            status_code=400, detail="Cannot reset password for inactive user"
+        )
+
+    sent = await _trigger_password_reset(user, db, triggered_by="admin")
+    if not sent:
+        raise HTTPException(
+            status_code=500, detail="Failed to send password-reset email"
+        )
+
+    logger.info(
+        f"Admin {current_user['email']} triggered password reset for {user.email}"
+    )
+    return {
+        "success": True,
+        "message": f"Reset code sent to {user.email}",
+    }
 
 
 # ── POST /auth/logout ─────────────────────────────────────────────────────────

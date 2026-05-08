@@ -4,7 +4,7 @@ import api from '@/api/client'
 import {
   Users as UsersIcon, Shield, ShieldCheck, Eye,
   Plus, Loader2, Check, X, Pencil, UserMinus, UserPlus,
-  Mail, Lock, ChevronDown,
+  Mail, Lock, ChevronDown, KeyRound,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
@@ -20,8 +20,8 @@ interface UserRow {
 }
 
 const ROLE_CONFIG: Record<string, { label: string; color: string; icon: React.ElementType; desc: string }> = {
-  admin:   { label: 'Admin',   color: 'bg-gold-50 text-gold-600 border-gold-200',     icon: Shield,      desc: 'Full access — manage users, approve leads, run scrapes' },
-  sales:   { label: 'Sales',   color: 'bg-navy-50 text-navy-600 border-navy-200',     icon: ShieldCheck, desc: 'View leads, approve/reject, push to CRM' },
+  admin:   { label: 'Admin',   color: 'bg-gold-50 text-gold-600 border-gold-200',     icon: Shield,      desc: 'Full access — can manage other users' },
+  sales:   { label: 'Sales',   color: 'bg-navy-50 text-navy-600 border-navy-200',     icon: ShieldCheck, desc: 'Full access to leads — cannot manage users' },
 }
 
 function formatDate(iso: string | null): string {
@@ -60,6 +60,17 @@ export default function UsersPage() {
     },
   })
 
+  // Current user — used to hide admin-only controls from sales viewers
+  // and to prevent admins from triggering destructive actions on themselves.
+  const { data: me } = useQuery<{ id: number; role: string }>({
+    queryKey: ['me'],
+    queryFn: async () => {
+      const { data } = await api.get('/auth/me')
+      return data
+    },
+  })
+  const isAdmin = me?.role === 'admin'
+
   // Clear message after 4s
   useEffect(() => {
     if (message) {
@@ -91,6 +102,22 @@ export default function UsersPage() {
       setMessage({ text: `User ${action}d`, type: 'success' })
     } catch (e: any) {
       setMessage({ text: e?.response?.data?.detail || `Failed to ${action}`, type: 'error' })
+    }
+    setSaving(false)
+  }
+
+  async function handleResetPassword(userId: number, email: string) {
+    if (!window.confirm(
+      `Send a password-reset code to ${email}?\n\n` +
+      `They will receive an email with a 6-digit code, then use the ` +
+      `"Forgot Password" link on the login page to set a new password.`
+    )) return
+    setSaving(true)
+    try {
+      const { data } = await api.post(`/auth/users/${userId}/reset-password`)
+      setMessage({ text: data.message || `Reset code sent to ${email}`, type: 'success' })
+    } catch (e: any) {
+      setMessage({ text: e?.response?.data?.detail || 'Failed to send reset code', type: 'error' })
     }
     setSaving(false)
   }
@@ -211,22 +238,40 @@ export default function UsersPage() {
                       <span className="text-xs text-stone-400">{formatDate(user.created_at)}</span>
                     </td>
                     <td className="px-5 py-4">
-                      <div className="flex items-center gap-1 justify-end">
-                        <button
-                          onClick={() => setEditingId(editingId === user.id ? null : user.id)}
-                          className="p-1.5 text-stone-400 hover:text-navy-600 hover:bg-stone-100 rounded-md transition"
-                          title="Edit role"
-                        >
-                          <Pencil className="w-3.5 h-3.5" />
-                        </button>
-                        <button
-                          onClick={() => handleToggleActive(user.id, true)}
-                          className="p-1.5 text-stone-400 hover:text-red-600 hover:bg-red-50 rounded-md transition"
-                          title="Deactivate user"
-                        >
-                          <UserMinus className="w-3.5 h-3.5" />
-                        </button>
-                      </div>
+                      {isAdmin && me?.id !== user.id ? (
+                        <div className="flex items-center gap-1 justify-end">
+                          <button
+                            onClick={() => setEditingId(editingId === user.id ? null : user.id)}
+                            className="p-1.5 text-stone-400 hover:text-navy-600 hover:bg-stone-100 rounded-md transition"
+                            title="Edit role"
+                          >
+                            <Pencil className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            onClick={() => handleResetPassword(user.id, user.email)}
+                            className="p-1.5 text-stone-400 hover:text-amber-600 hover:bg-amber-50 rounded-md transition"
+                            title="Send password-reset email"
+                          >
+                            <KeyRound className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            onClick={() => handleToggleActive(user.id, true)}
+                            className="p-1.5 text-stone-400 hover:text-red-600 hover:bg-red-50 rounded-md transition"
+                            title="Deactivate user"
+                          >
+                            <UserMinus className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      ) : (
+                        // Sales viewers see no action column; admins viewing
+                        // their own row see a "you" indicator instead of
+                        // dangerous actions on themselves.
+                        <div className="flex items-center justify-end">
+                          {me?.id === user.id && (
+                            <span className="text-2xs text-stone-300 font-medium uppercase tracking-wider">You</span>
+                          )}
+                        </div>
+                      )}
                     </td>
                   </tr>
                 ))}
@@ -259,12 +304,14 @@ export default function UsersPage() {
                         <span className="text-xs text-stone-400">Deactivated</span>
                       </td>
                       <td className="px-5 py-3">
-                        <button
-                          onClick={() => handleToggleActive(user.id, false)}
-                          className="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium text-blue-600 hover:bg-blue-50 rounded-md transition"
-                        >
-                          <UserPlus className="w-3.5 h-3.5" /> Reactivate
-                        </button>
+                        {isAdmin ? (
+                          <button
+                            onClick={() => handleToggleActive(user.id, false)}
+                            className="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium text-blue-600 hover:bg-blue-50 rounded-md transition"
+                          >
+                            <UserPlus className="w-3.5 h-3.5" /> Reactivate
+                          </button>
+                        ) : null}
                       </td>
                     </tr>
                   ))}
