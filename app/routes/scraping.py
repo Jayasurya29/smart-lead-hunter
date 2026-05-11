@@ -1782,7 +1782,20 @@ async def smart_fill_lead(lead_id: int, request: Request, _csrf=Depends(require_
         )
         if is_already_opened_sync:
             lead.status = "expired"
-            lead.opening_date = enriched.get("opened_date", lead.opening_date)
+            # BUG FIX 2026-05-11 (Kindred Resort): When grounding finds a
+            # past opening_date, the cleaner sets already_opened=True but
+            # Gemini often puts the actual date in `opening_date`, not
+            # `opened_date` (the schema has both but Gemini doesn't always
+            # populate the right one). Old code fell back to
+            # lead.opening_date here, which is the STALE pre-grounding
+            # value -- so existing_hotels graduated with "Fall 2026"
+            # instead of "May 7, 2026". Fall back order: opened_date,
+            # then opening_date, then lead's existing value as last resort.
+            lead.opening_date = (
+                enriched.get("opened_date")
+                or enriched.get("opening_date")
+                or lead.opening_date
+            )
             lead.timeline_label = "EXPIRED"
             # Do NOT return here — fall through to apply all other fields,
             # then the auto-transfer block at the end of this handler does
@@ -2615,7 +2628,22 @@ def _apply_enrichment_to_lead(lead, enriched: dict, mode: str, get_timeline_labe
     is_already_opened = bool(enriched.get("already_opened")) and not is_live_reopening
     if is_already_opened:
         lead.status = "expired"
-        lead.opening_date = enriched.get("opened_date", lead.opening_date)
+        # BUG FIX 2026-05-11 (Kindred Resort): Same bug as the sync handler
+        # above. Gemini's grounding schema has both `opening_date` and
+        # `opened_date`, but Gemini doesn't reliably distinguish them
+        # for properties that opened in the recent past — it usually
+        # puts the date in `opening_date` only. The cleaner then sets
+        # already_opened=True (since the date is in the past), but old
+        # code defaulted to lead.opening_date which is the STALE
+        # pre-grounding value. Kindred Resort surfaced this:
+        # grounding returned "May 7, 2026" in opening_date, code stored
+        # the lead's pre-existing "Fall 2026" — then transfer carried
+        # "Fall 2026" into existing_hotels instead of the real date.
+        lead.opening_date = (
+            enriched.get("opened_date")
+            or enriched.get("opening_date")
+            or lead.opening_date
+        )
         lead.timeline_label = "EXPIRED"
         # Fall through to apply remaining fields below. The caller will
         # detect status='expired' and trigger transfer_lead, which then
