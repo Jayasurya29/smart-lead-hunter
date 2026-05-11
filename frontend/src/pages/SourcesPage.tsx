@@ -6,6 +6,7 @@ import {
   Radar, Clock, AlertTriangle, CheckCircle2, XCircle, Search, X,
   ChevronLeft, ChevronRight, ExternalLink, ToggleLeft, ToggleRight,
   RefreshCw, Activity, Globe, Zap, Eye, Timer, BarChart3, Loader2,
+  Mail, Sparkles, RotateCw,
 } from 'lucide-react'
 import { formatDistanceToNow } from 'date-fns'
 
@@ -53,14 +54,18 @@ interface ScrapeLog {
    ═══════════════════════════════════════════════════ */
 
 const SCHEDULE = [
-  { name: 'Health Check',     task: 'daily_health_check', time: '9:35 AM',  icon: Activity,  color: 'text-emerald-500', desc: 'Cleanup, rescore stale leads' },
-  { name: 'Smart Scrape #1',  task: 'smart_scrape',       time: '10:00 AM', icon: Radar,     color: 'text-violet-500',  desc: 'Brain picks due sources' },
-  { name: 'Auto Enrich #1',   task: 'auto_enrich',        time: '11:00 AM', icon: Zap,       color: 'text-amber-500',   desc: 'Enrich top 5 HOT/URGENT leads' },
-  { name: 'Smart Scrape #2',  task: 'smart_scrape',       time: '12:30 PM', icon: Radar,     color: 'text-violet-500',  desc: 'Brain picks due sources' },
-  { name: 'Auto Enrich #2',   task: 'auto_enrich',        time: '2:00 PM',  icon: Zap,       color: 'text-amber-500',   desc: 'Enrich top 5 HOT/URGENT leads' },
-  { name: 'Smart Scrape #3',  task: 'smart_scrape',       time: '3:30 PM',  icon: Radar,     color: 'text-violet-500',  desc: 'Last scrape of the day' },
-  { name: 'Auto Enrich #3',   task: 'auto_enrich',        time: '4:30 PM',  icon: Zap,       color: 'text-amber-500',   desc: 'Final enrichment round' },
-  { name: 'Weekly Discovery',  task: 'weekly_discovery',   time: 'Sun 10 AM', icon: Globe,   color: 'text-sky-500',     desc: 'Discover new sources' },
+  { name: 'Recompute Timelines',      task: 'recompute_timeline_labels',  time: '9:30 AM',   icon: RotateCw, color: 'text-stone-500',   desc: 'Drain expired → existing, resurrect ghosts' },
+  { name: 'Health Check',             task: 'daily_health_check',         time: '9:35 AM',   icon: Activity, color: 'text-emerald-500', desc: 'Cleanup, deactivate dead sources, rescore' },
+  { name: 'Pre-opening Digest',       task: 'pre_opening_digest',         time: '9:40 AM',   icon: Mail,     color: 'text-blue-500',    desc: 'Email digest: leads entering 6-12mo window' },
+  { name: 'Auto Smart Fill',          task: 'auto_smart_fill',            time: '9:50 AM',   icon: Sparkles, color: 'text-fuchsia-500', desc: 'Backfill opening/tier/rooms on top 10' },
+  { name: 'Auto Full Refresh',        task: 'auto_full_refresh',          time: '10:15 AM',  icon: RefreshCw,color: 'text-cyan-500',    desc: 'Re-check 5 stalest leads (>14d old)' },
+  { name: 'Smart Scrape #1',          task: 'smart_scrape',               time: '10:30 AM',  icon: Radar,    color: 'text-violet-500',  desc: 'Mon/Tue/Wed/Fri only (Thu = Discovery)' },
+  { name: 'Weekly Discovery',         task: 'weekly_discovery',           time: 'Thu 11:00', icon: Globe,    color: 'text-sky-500',     desc: 'Thursday only — replaces Smart Scrape #1' },
+  { name: 'Auto Enrich #1',           task: 'auto_enrich',                time: '12:00 PM',  icon: Zap,      color: 'text-amber-500',   desc: 'Enrich top 5 HOT/URGENT leads' },
+  { name: 'Smart Scrape #2',          task: 'smart_scrape',               time: '1:00 PM',   icon: Radar,    color: 'text-violet-500',  desc: 'Mid-day scrape (picks up Discovery on Thu)' },
+  { name: 'Auto Enrich #2',           task: 'auto_enrich',                time: '2:30 PM',   icon: Zap,      color: 'text-amber-500',   desc: 'Second contact-enrichment pass' },
+  { name: 'Smart Scrape #3',          task: 'smart_scrape',               time: '3:00 PM',   icon: Radar,    color: 'text-violet-500',  desc: 'Final scrape of the day' },
+  { name: 'Auto Enrich #3',           task: 'auto_enrich',                time: '4:00 PM',   icon: Zap,      color: 'text-amber-500',   desc: 'End-of-day enrich — no leads sit overnight' },
 ]
 
 /* ═══════════════════════════════════════════════════
