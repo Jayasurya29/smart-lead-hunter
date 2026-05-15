@@ -433,7 +433,7 @@ cannot confidently determine — DO NOT guess.
   "project_type": "new_opening | renovation | rebrand | reopening | conversion | ownership_change | residences_only",
   "room_count": 250,
   "brand": "Hotel brand / flag (e.g. 'Marriott', 'Four Seasons', 'Independent')",
-  "brand_tier": "tier1_ultra_luxury | tier2_luxury | tier3_upper_upscale | tier4_upscale | tier5_skip — pick tier5_skip for any 1-3 star / budget / select-service / extended-stay brand (Holiday Inn Express, Hampton, Days Inn, etc.). JA Uniforms only sells to 4-star+ properties; if it's not 4-star+, it's tier5_skip.",
+  "brand_tier": "tier1_ultra_luxury | tier2_luxury | tier3_upper_upscale | tier4_upscale | tier5_skip — pick tier5_skip for any brand below genuine 4-star full-service. This includes ALL budget/economy (Days Inn, Motel 6, Super 8), ALL midscale (Hampton, Holiday Inn Express, Fairfield, La Quinta, Comfort Inn), ALL select-service (Courtyard, Aloft, AC Hotels, Hyatt Place, Four Points, Hilton Garden Inn, citizenM, Cambria), and ALL extended-stay (Residence Inn, Homewood Suites, Staybridge, Element, Hyatt House). Only full-service 4-star+ brands (DoubleTree, Crowne Plaza, Delta Hotels, Novotel, etc.) belong in tier4_upscale.",
   "management_company": "Day-to-day hotel OPERATOR — the company running the hotel (NOT brand licensor like Marriott/Hilton/Hyatt)",
   "owner": "Property owner / real estate holding entity",
   "developer": "Entity BUILDING the property (often same as owner for new builds)",

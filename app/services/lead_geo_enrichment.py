@@ -8,19 +8,29 @@ Two tasks:
    official domain, filtering out news/social/booking sites.
 
 2. Geocoding — converts city+state+country to lat/lng using the
-   Nominatim geocoding API (free, no key required). Falls back to
-   city-level coordinates when the hotel address isn't known yet
-   (which is normal for pre-opening leads).
+   Geoapify geocoding API. Falls back to city-level coordinates when
+   the hotel address isn't known yet (which is normal for pre-opening leads).
 
 Both are called:
   - Automatically on first save (lead_factory.py)
   - Via POST /leads/{id}/enrich-geo for existing leads
   - Via POST /leads/bulk-enrich-geo to backfill all leads missing coords
+
+FIX 2026-05-15: Caribbean country detection from address/city/state text.
+  Geoapify has a severe US-bias for Caribbean place names — "Sandy Point,
+  North Caicos, Turks and Caicos Islands" returned Caicos Drive, Tavares FL.
+  Now we scan ALL text inputs (address, city, state, hotel_name) for known
+  Caribbean territory names and override the country parameter. Also added
+  centroid fallback: if all geocode attempts fail for a known Caribbean
+  territory, we return the territory's geographic center rather than None
+  (or worse, wrong US coords). A pin in the middle of Turks and Caicos is
+  infinitely better than a pin in Orlando.
 """
 
 import asyncio
 import logging
 import os
+import re as _re
 import urllib.parse
 from typing import Optional
 
@@ -273,6 +283,7 @@ _US_STATE_BOUNDS: dict[str, tuple] = {
 # Caribbean + international country bounds
 _COUNTRY_BOUNDS: dict[str, tuple] = {
     "bahamas": (20.8, 27.4, -80.0, -72.5),
+    "the bahamas": (20.8, 27.4, -80.0, -72.5),
     "jamaica": (17.6, 18.6, -78.4, -76.1),
     "barbados": (12.9, 13.4, -59.7, -59.3),
     "bermuda": (32.2, 32.4, -64.9, -64.6),
@@ -282,20 +293,30 @@ _COUNTRY_BOUNDS: dict[str, tuple] = {
     "dominican republic": (17.3, 20.1, -72.1, -68.2),
     "turks and caicos": (21.1, 22.1, -72.7, -71.0),
     "turks & caicos": (21.1, 22.1, -72.7, -71.0),
+    "turks and caicos islands": (21.1, 22.1, -72.7, -71.0),
     "st. lucia": (13.6, 14.1, -61.1, -60.8),
     "saint lucia": (13.6, 14.1, -61.1, -60.8),
     "antigua": (16.9, 17.2, -62.0, -61.6),
     "antigua and barbuda": (16.9, 17.2, -62.0, -61.6),
     "cayman islands": (19.2, 19.8, -81.5, -79.6),
     "trinidad and tobago": (10.0, 11.4, -61.9, -60.5),
+    "trinidad": (10.0, 10.9, -61.9, -60.8),
     "grenada": (11.9, 12.3, -61.8, -61.5),
     "st. kitts": (17.0, 17.5, -62.9, -62.5),
     "saint kitts": (17.0, 17.5, -62.9, -62.5),
+    "st. kitts and nevis": (17.0, 17.5, -62.9, -62.5),
     "anguilla": (18.1, 18.3, -63.2, -62.9),
     "bvi": (18.3, 18.8, -64.8, -64.3),
     "british virgin islands": (18.3, 18.8, -64.8, -64.3),
     "st. maarten": (17.9, 18.2, -63.2, -62.9),
+    "sint maarten": (17.9, 18.2, -63.2, -62.9),
     "saint martin": (17.9, 18.2, -63.2, -62.9),
+    "st. martin": (17.9, 18.2, -63.2, -62.9),
+    "bonaire": (12.0, 12.4, -68.5, -68.1),
+    "dominica": (15.2, 15.7, -61.5, -61.2),
+    "st. vincent": (12.9, 13.4, -61.4, -61.1),
+    "saint vincent": (12.9, 13.4, -61.4, -61.1),
+    "montserrat": (16.6, 16.8, -62.3, -62.1),
     "mexico": (14.5, 32.7, -118.4, -86.7),
     "canada": (41.7, 83.0, -141.0, -52.6),
 }
@@ -304,6 +325,7 @@ _COUNTRY_BOUNDS: dict[str, tuple] = {
 _ISO_CODES: dict[str, str] = {
     "united states": "us",
     "bahamas": "bs",
+    "the bahamas": "bs",
     "jamaica": "jm",
     "barbados": "bb",
     "bermuda": "bm",
@@ -314,15 +336,18 @@ _ISO_CODES: dict[str, str] = {
     "puerto rico": "pr",
     "turks and caicos": "tc",
     "turks & caicos": "tc",
+    "turks and caicos islands": "tc",
     "st. lucia": "lc",
     "saint lucia": "lc",
     "antigua": "ag",
     "antigua and barbuda": "ag",
     "cayman islands": "ky",
     "trinidad and tobago": "tt",
+    "trinidad": "tt",
     "grenada": "gd",
     "st. kitts": "kn",
     "saint kitts": "kn",
+    "st. kitts and nevis": "kn",
     "anguilla": "ai",
     "bvi": "vg",
     "british virgin islands": "vg",
@@ -332,9 +357,97 @@ _ISO_CODES: dict[str, str] = {
     "st. maarten": "sx",
     "sint maarten": "sx",
     "saint martin": "mf",
+    "st. martin": "mf",
+    "bonaire": "bq",
+    "dominica": "dm",
+    "st. vincent": "vc",
+    "saint vincent": "vc",
+    "montserrat": "ms",
     "mexico": "mx",
     "canada": "ca",
 }
+
+
+# ── FIX 2026-05-15: Caribbean country detection from text ────────────────
+# Sorted longest-first so "turks and caicos islands" matches before "caicos"
+# and "antigua and barbuda" before "antigua". This prevents partial matches
+# on US place names that contain Caribbean words (e.g. "Caicos Drive, FL").
+_CARIBBEAN_NAMES_SORTED = sorted(
+    [
+        k
+        for k in _COUNTRY_BOUNDS.keys()
+        if k not in ("mexico", "canada", "united states")
+    ],
+    key=len,
+    reverse=True,
+)
+
+
+def _detect_country_from_text(
+    hotel_name: str,
+    city: Optional[str],
+    state: Optional[str],
+    country: Optional[str],
+    address: Optional[str],
+) -> str:
+    """Scan all text inputs for a known Caribbean territory name.
+
+    Returns the canonical country name (key in _COUNTRY_BOUNDS) if found,
+    otherwise returns the original country string (defaulting to "USA").
+
+    FIX 2026-05-15: This is the core fix for the Anantara Turks and Caicos
+    bug — Gemini returned "Sandy Point, North Caicos, Turks and Caicos
+    Islands" in the address field, but the country param was empty/USA.
+    Geoapify then matched "Caicos" to Caicos Drive in Tavares, FL.
+
+    We scan address first (most specific), then city, state, hotel_name.
+    Longest-match-first prevents "antigua" matching inside "antigua and barbuda".
+    """
+    # If country is already a known Caribbean/international territory, keep it
+    country_lower = (country or "").lower().strip()
+    if country_lower in _COUNTRY_BOUNDS:
+        return country_lower
+
+    # Combine all text fields for scanning
+    haystack = " ".join(
+        filter(
+            None,
+            [
+                address,
+                city,
+                state,
+                hotel_name,
+                country,
+            ],
+        )
+    ).lower()
+
+    if not haystack.strip():
+        return country or "USA"
+
+    for name in _CARIBBEAN_NAMES_SORTED:
+        if name in haystack:
+            logger.info(
+                f"Country detection: found '{name}' in text fields "
+                f"(original country='{country or ''}') — overriding to '{name}'"
+            )
+            return name
+
+    return country or "USA"
+
+
+def _get_country_centroid(country_key: str) -> Optional[tuple[float, float]]:
+    """Return the geographic center of a country/territory from its bounding box.
+
+    Used as a last-resort fallback when all geocode attempts fail for a
+    known Caribbean territory. A pin in the middle of the territory is
+    infinitely better than no pin or a wrong pin in the US.
+    """
+    bounds = _COUNTRY_BOUNDS.get(country_key)
+    if not bounds:
+        return None
+    min_lat, max_lat, min_lon, max_lon = bounds
+    return ((min_lat + max_lat) / 2, (min_lon + max_lon) / 2)
 
 
 def _validate_coords(lat: float, lon: float, country: str, state: str = "") -> bool:
@@ -345,6 +458,21 @@ def _validate_coords(lat: float, lon: float, country: str, state: str = "") -> b
     """
     country_key = (country or "").lower().strip()
     state_key = (state or "").lower().strip()
+
+    # Caribbean / international validation — check FIRST so detected
+    # Caribbean countries never fall through to the US check.
+    # FIX 2026-05-15: moved above US check to prevent Caribbean leads
+    # with empty/default country from being validated as US.
+    bounds = _COUNTRY_BOUNDS.get(country_key)
+    if bounds:
+        min_lat, max_lat, min_lon, max_lon = bounds
+        valid = min_lat <= lat <= max_lat and min_lon <= lon <= max_lon
+        if not valid:
+            logger.debug(
+                f"Coord validation failed: ({lat:.4f}, {lon:.4f}) not in {country_key} "
+                f"bounds ({min_lat}-{max_lat}, {min_lon}-{max_lon})"
+            )
+        return valid
 
     # US state validation — most specific check
     is_us = country_key in (
@@ -369,17 +497,6 @@ def _validate_coords(lat: float, lon: float, country: str, state: str = "") -> b
             return valid
         # US state not in our dict — do broad US check
         return 18.0 <= lat <= 72.0 and -180.0 <= lon <= -66.0
-
-    # Caribbean / international validation
-    bounds = _COUNTRY_BOUNDS.get(country_key)
-    if bounds:
-        min_lat, max_lat, min_lon, max_lon = bounds
-        valid = min_lat <= lat <= max_lat and min_lon <= lon <= max_lon
-        if not valid:
-            logger.debug(
-                f"Coord validation failed: ({lat:.4f}, {lon:.4f}) not in {country_key}"
-            )
-        return valid
 
     # Unknown country — accept but warn
     return True
@@ -410,27 +527,10 @@ async def geocode_hotel(
         3. hotel_name + city + country          (POI without parish — risky)
         4. city + state + country               (city center, last resort)
 
-    KEY FINDINGS that drive this design:
-
-      - Geoapify's `confidence` score is unreliable for Caribbean POI lookups.
-        Wrong matches frequently return confidence=1.0; correct matches
-        sometimes return 0.0. We IGNORE confidence and rank by result_type.
-
-      - Parish/state is essential for Caribbean POI disambiguation.
-        "Sandals, Montego Bay, Jamaica" returned Sandals WHITEHOUSE (29 mi
-        wrong, different parish). Adding "Saint James" made it return the
-        correct resort (0.95 mi away).
-
-      - `result_type` hierarchy (most to least precise):
-          amenity    → named POI (best — a specific business/landmark)
-          building   → specific building
-          address    → house-level address (US)
-          street     → street centroid (approximate)
-          suburb     → neighborhood center
-          city/town  → city center (last-resort fallback)
-
-    We always prefer a higher-tier result_type, even from a later attempt,
-    over a lower-tier result from an earlier attempt.
+    FIX 2026-05-15: Caribbean country auto-detection + centroid fallback.
+      The `country` param may be wrong (empty, "USA") when the actual
+      territory is embedded in the address or city text. We now run
+      _detect_country_from_text() upfront to fix this.
 
     Returns (latitude, longitude) or None.
     """
@@ -439,7 +539,14 @@ async def geocode_hotel(
         logger.warning("GEOAPIFY_API_KEY not set — skipping geocoding")
         return None
 
-    country_norm = (country or "USA").strip()
+    # ── FIX 2026-05-15: detect actual country from all text inputs ───
+    # This catches cases like Anantara Turks and Caicos where the address
+    # says "Turks and Caicos Islands" but country param is empty/USA.
+    detected_country = _detect_country_from_text(
+        hotel_name or "", city, state, country, address
+    )
+
+    country_norm = (detected_country or "USA").strip()
     if country_norm.lower() in (
         "usa",
         "us",
@@ -454,12 +561,6 @@ async def geocode_hotel(
     country_code = _ISO_CODES.get(country_key, "us")
 
     # ── Normalize state/parish string for Caribbean queries ──────────
-    # Gemini returns Jamaica parishes variously as "Saint James",
-    # "St. James", or "Saint James Parish". Geoapify hits vary by format
-    # — "Saint James Parish" caused a 55-mile wrong match (Sandals Royal
-    # *Plantation* in St. Ann instead of Sandals Royal *Caribbean* in
-    # St. James). Strip the "Parish" suffix so queries normalize to
-    # "Saint James" regardless of DB casing.
     state_clean = (state or "").strip()
     _PARISH_SUFFIXES = (" parish", " county", " district")
     state_lower = state_clean.lower()
@@ -476,20 +577,6 @@ async def geocode_hotel(
     )
 
     # ── Hotel-name token set for name-match verification ─────────────
-    # Geoapify fuzzy-matches "Sandals Royal Caribbean" and happily
-    # returns "Sandals Royal Plantation" (55 mi wrong) because both
-    # start with "Sandals Royal". We need to verify that the returned
-    # amenity's name actually contains the DISTINGUISHING tokens of
-    # the hotel we asked for, not just a common prefix.
-    #
-    # Strategy: extract all significant tokens (≥3 chars, alphanumeric,
-    # case-insensitive) from the hotel name. When we get back an amenity
-    # result, its `formatted` or `name` must share ≥60% of those tokens
-    # AND must include the most-specific token (the last significant
-    # token, which is usually the distinguishing one like "Caribbean"
-    # vs "Plantation" vs "Whitehouse").
-    import re as _re
-
     _STOP_WORDS = {
         "the",
         "and",
@@ -507,23 +594,12 @@ async def geocode_hotel(
     }
     hotel_tokens = [
         t.lower()
-        for t in _re.findall(r"[A-Za-z0-9]+", hotel_name)
+        for t in _re.findall(r"[A-Za-z0-9]+", hotel_name or "")
         if len(t) >= 3 and t.lower() not in _STOP_WORDS
     ]
-    # The last significant token is usually the distinguishing one
-    # ("Caribbean" in "Sandals Royal Caribbean", "Whitehouse" in
-    # "Sandals Whitehouse"). Require it in any amenity match.
     hotel_distinguishing_token = hotel_tokens[-1] if hotel_tokens else ""
 
     # ── Brand-conflict detection using canonical tiers ───────────────
-    # The 60% token-match check isn't enough when tokens are location
-    # words. Example: "Sandals Montego Bay" vs "Hotel Riu Montego Bay"
-    # — both contain "montego" and "bay" (2/3 = 67%, passes), but the
-    # brand is completely different. The canonical_tiers.py dictionary
-    # gives us a list of known brand names we can use to detect this:
-    # if the hotel name we asked about contains brand X (e.g. "sandals")
-    # and the returned result contains brand Y (e.g. "riu") where Y != X,
-    # the result is a wrong-property match.
     _KNOWN_BRANDS: set[str] = set()
     try:
         from app.config.canonical_tiers import CANONICAL_TIERS
@@ -533,20 +609,11 @@ async def geocode_hotel(
         logger.debug(f"Could not load canonical_tiers for brand-conflict check: {e}")
 
     def _find_brand_marker(text: str) -> Optional[str]:
-        """Find the longest canonical brand name that appears as a whole
-        word/phrase in the text. Returns None if no canonical brand found.
-
-        Longest-match-wins so 'hotel xcaret' beats 'xcaret' when both fit.
-        Short brand names (≤4 chars, e.g. 'riu', 'aman') use word-boundary
-        matching to avoid substring false positives ('riu' inside 'ritual').
-        """
         if not _KNOWN_BRANDS or not text:
             return None
         t = text.lower()
-        # Try longest brand names first
         for brand in sorted(_KNOWN_BRANDS, key=len, reverse=True):
             if len(brand) <= 4:
-                # Short name — require word boundaries
                 if _re.search(rf"\b{_re.escape(brand)}\b", t):
                     return brand
             else:
@@ -554,15 +621,9 @@ async def geocode_hotel(
                     return brand
         return None
 
-    query_brand = _find_brand_marker(hotel_name)
+    query_brand = _find_brand_marker(hotel_name or "")
 
     # ── City-center coord for proximity sanity check ─────────────────
-    # Before running hotel queries, geocode the city alone. Any amenity
-    # result that lands >30 miles from the city center is almost
-    # certainly a wrong property (a different sibling in the same
-    # brand, a different town with the same name, etc.). This catches
-    # both the Sandals Whitehouse 29-mile error and the Sandals Royal
-    # Plantation 55-mile error.
     MAX_AMENITY_MILES_FROM_CITY = 25.0
 
     async def _haversine_miles(lat1, lon1, lat2, lon2) -> float:
@@ -578,24 +639,21 @@ async def geocode_hotel(
         )
         return 2 * R * math.asin(math.sqrt(a))
 
-    # result_type → priority. Higher = more specific = preferred.
     _TYPE_PRIORITY = {
-        "amenity": 6,  # Named POI (hotel as a business)
-        "building": 6,  # Specific building
-        "address": 5,  # House-level address
-        "street": 3,  # Street centroid
-        "suburb": 2,  # Neighborhood
-        "locality": 1,  # Town
-        "city": 1,  # City center
-        "town": 1,  # Town
-        "county": 0,  # County/parish
+        "amenity": 6,
+        "building": 6,
+        "address": 5,
+        "street": 3,
+        "suburb": 2,
+        "locality": 1,
+        "city": 1,
+        "town": 1,
+        "county": 0,
         "state": 0,
         "country": 0,
     }
 
     # Pre-geocode the city to establish a proximity anchor.
-    # If this fails, we skip proximity checks entirely (don't want to
-    # reject valid matches just because the city lookup failed).
     city_anchor: Optional[tuple[float, float]] = None
     if city:
         anchor_text = (
@@ -633,35 +691,15 @@ async def geocode_hotel(
             logger.debug(f"City anchor lookup failed: {e}")
 
     def _name_matches(formatted: str) -> bool:
-        """
-        Verify a returned amenity's formatted string contains the
-        distinguishing tokens of the hotel we asked for — not just a
-        prefix match. Prevents "Sandals Royal Caribbean" → "Sandals
-        Royal Plantation" false matches.
-        """
         if not hotel_tokens:
-            return True  # Can't verify — don't block
+            return True
         fmt_lower = (formatted or "").lower()
-        # The distinguishing token (last significant word) must be present
         if hotel_distinguishing_token and hotel_distinguishing_token not in fmt_lower:
             return False
-        # And ≥60% of significant tokens must appear overall
         matches = sum(1 for t in hotel_tokens if t in fmt_lower)
         return matches / len(hotel_tokens) >= 0.6
 
     async def _try_query(text: str, verify_name: bool = False) -> Optional[dict]:
-        """
-        Run one Geoapify geocode query. Returns the highest-priority
-        valid result as a dict, or None.
-
-        When `verify_name=True` (used for name-based queries), amenity
-        results are checked against the hotel's distinguishing tokens.
-        Wrong-sibling matches get rejected even if Geoapify gave them
-        priority 6.
-
-        Proximity: amenity/building results >25 miles from the city
-        anchor are rejected — almost certainly wrong property.
-        """
         params: dict = {
             "text": text,
             "apiKey": api_key,
@@ -698,19 +736,7 @@ async def geocode_hotel(
             priority = _TYPE_PRIORITY.get(rtype, 0)
             formatted = r.get("formatted", "")
 
-            # ── Name-match verification for amenity/building results ─
-            # Only applied when the caller asked for it (i.e. this was
-            # a hotel-name-based query, so the returned amenity should
-            # actually be THIS hotel).
             if verify_name and priority >= 5:
-                # BRAND CONFLICT CHECK (strongest signal): if the query
-                # hotel has a canonical brand (e.g. "sandals") and the
-                # returned result has a DIFFERENT canonical brand
-                # (e.g. "riu"), this is a wrong-property match. The
-                # token-similarity heuristic alone misses this because
-                # location words like "Montego" and "Bay" can match
-                # 60%+ of tokens between different hotels in the same
-                # city.
                 if query_brand:
                     result_brand = _find_brand_marker(formatted)
                     if result_brand and result_brand != query_brand:
@@ -728,10 +754,6 @@ async def geocode_hotel(
                     )
                     continue
 
-            # ── Proximity sanity check ───────────────────────────────
-            # Amenity/building >25 mi from city anchor = wrong property.
-            # City-level results (priority 1) are expected to be at the
-            # city centroid, so we skip proximity checks for them.
             if priority >= 5 and city_anchor is not None:
                 dist = await _haversine_miles(lat, lon, city_anchor[0], city_anchor[1])
                 if dist > MAX_AMENITY_MILES_FROM_CITY:
@@ -758,7 +780,6 @@ async def geocode_hotel(
     attempts: list[tuple[str, str]] = []
 
     if is_us_family:
-        # USA: street addresses are precise — try address first
         if address and address.strip():
             parts = [address.strip()]
             if zip_code and zip_code.strip():
@@ -778,9 +799,6 @@ async def geocode_hotel(
         if city:
             attempts.append(("city", f"{city}, {country_norm}"))
     else:
-        # Caribbean / international: POI lookup WITH PARISH first.
-        # Empirically: adding the state/parish cut "Sandals Royal Caribbean"
-        # distance error from 29 miles to 0.95 miles.
         if city and state_clean:
             attempts.append(
                 (
@@ -788,18 +806,6 @@ async def geocode_hotel(
                     f"{hotel_name}, {city}, {state_clean}, {country_norm}",
                 )
             )
-        # Address-based fallback for Caribbean: EXTRACT each district-like
-        # piece of the address and try it alone with country only.
-        #
-        # Empirical finding (2026-04-24): "Mahoe Bay, Montego Bay, St. James,
-        # Jamaica" returns WRONG STREET (Mahoe Close, 3.27 mi away) because
-        # Geoapify's parser chokes on over-specified Caribbean addresses.
-        # But "Mahoe Bay, Jamaica" alone returns the correct DISTRICT as an
-        # amenity 1.20 mi away. So we split the address on commas and try
-        # each piece individually as "{piece}, {country}".
-        #
-        # Filter pieces: must be ≥5 chars, not purely numeric, not a plain
-        # street type suffix ("Avenue", "Road") — we want named districts.
         if address and address.strip():
             addr_pieces = [p.strip() for p in address.split(",") if p.strip()]
             _STREET_TYPE_ALONE = {
@@ -829,12 +835,16 @@ async def geocode_hotel(
                     len(piece) >= 5
                     and not piece.replace(" ", "").isdigit()
                     and pl not in _STREET_TYPE_ALONE
+                    # FIX 2026-05-15: skip pieces that are just the country
+                    # name itself — "Turks and Caicos Islands" as a geocode
+                    # query returns garbage. Only use sub-territory parts
+                    # like "North Caicos" or "Sandy Point".
+                    and pl not in _COUNTRY_BOUNDS
+                    and pl != country_key
                 ):
                     attempts.append((f"addr_part_{i}", f"{piece}, {country_norm}"))
-        # POI without parish — risky but sometimes works
         if city:
             attempts.append(("name+city", f"{hotel_name}, {city}, {country_norm}"))
-        # City center last resort
         if city and state_clean:
             attempts.append(("city+state", f"{city}, {state_clean}, {country_norm}"))
         if city:
@@ -843,20 +853,9 @@ async def geocode_hotel(
             attempts.append(("state", f"{state_clean}, {country_norm}"))
 
     # ── Run attempts; keep best-priority result across all ───────────
-    # We don't stop at the first attempt — a later attempt might return
-    # a higher-priority result_type. We collect them all and pick the
-    # single best candidate.
-    #
-    # For attempts that include the hotel name, we enable name-match
-    # verification so Geoapify can't silently return a different
-    # property with a similar prefix (e.g., "Sandals Royal Caribbean"
-    # → "Sandals Royal Plantation" 55 mi away).
     best_overall: Optional[dict] = None
     best_label: str = ""
     for label, query in attempts:
-        # Enable name-match verification on any attempt that includes
-        # the hotel name in the query. These are the attempts where
-        # Geoapify might return a wrong-sibling amenity.
         verify = label.startswith("name+")
         r = await _try_query(query, verify_name=verify)
         if r is None:
@@ -869,20 +868,29 @@ async def geocode_hotel(
         if best_overall is None or r["priority"] > best_overall["priority"]:
             best_overall = r
             best_label = label
-            # Early exit: if we got a POI/building/address match, that's
-            # about as good as it gets — no need to try more
             if r["priority"] >= 5:
                 break
 
+    # ── FIX 2026-05-15: Caribbean centroid fallback ──────────────────
+    # If all Geoapify attempts failed for a known Caribbean territory,
+    # return the territory's geographic center. A pin in the middle of
+    # Turks and Caicos is infinitely better than no pin or a wrong pin
+    # in Orlando.
     if best_overall is None:
+        centroid = _get_country_centroid(country_key)
+        if centroid:
+            logger.warning(
+                f"Geocode FALLBACK: all attempts failed for '{hotel_name}' "
+                f"in {country_norm} — using territory centroid "
+                f"({centroid[0]:.4f}, {centroid[1]:.4f})"
+            )
+            return centroid
+
         logger.warning(
             f"Could not geocode: {hotel_name} / {city}, {state_clean}, {country_norm}"
         )
         return None
 
-    # Extra guard: if the best we got is a city-level fallback AND we had
-    # specific data (address or name + parish), that's a red flag worth
-    # logging but we still return the coords as a best-effort answer.
     if best_overall["priority"] <= 1 and (address or (hotel_name and state_clean)):
         logger.warning(
             f"Geocoded [{best_label}] '{hotel_name}' to city-level only "

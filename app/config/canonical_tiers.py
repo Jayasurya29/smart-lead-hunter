@@ -1,6 +1,11 @@
 # -*- coding: utf-8 -*-
 """
 CANONICAL BRAND TIERS — single source of truth for JA Uniforms (2026-04-24)
+Updated 2026-05-15: Tier audit — moved 30 select-service / extended-stay /
+limited-service brands from tier4_upscale → tier5_skip. JA only sells to
+genuine 4-star+ full-service properties. Select-service (Courtyard, Aloft,
+Hyatt Place, AC Hotels, HGI, Four Points, etc.) and extended-stay (Residence
+Inn, Homewood, Staybridge, Element, Hyatt House) are NOT sales targets.
 
 This module is THE authoritative mapping of brand -> tier for the entire
 application. `scorer.py` and `lead_data_enrichment.py` both import from
@@ -13,8 +18,9 @@ are 4-star and above):
   tier1_ultra_luxury    Top of STR Luxury (ADR $500-3,000+)
   tier2_luxury          Rest of STR Luxury (ADR $300-500)
   tier3_upper_upscale   STR Upper Upscale (ADR $200-350)
-  tier4_upscale         STR Upscale (ADR $140-200)
-  tier5_skip            Upper Midscale / Midscale / Economy (NOT targeted)
+  tier4_upscale         STR Upscale — FULL-SERVICE 4-star only (ADR $140-200)
+  tier5_skip            Select-service / extended-stay / midscale / economy
+                        (NOT targeted — no uniform procurement budget)
 
 SOURCES
   STR 2024 January Chain Scales (CoStar)
@@ -480,12 +486,11 @@ CANONICAL_TIERS: dict[str, str] = {
     "westin vacation club": "tier3_upper_upscale",
     "wyndham grand": "tier3_upper_upscale",
     # ============ TIER 4 UPSCALE ============
-    # STR Upscale (3). ADR $140-200. Source: STR 2023 Chain Scales.
-    "ac hotel": "tier4_upscale",
-    "ac hotels": "tier4_upscale",
-    "ac hotels by marriott": "tier4_upscale",
-    "aloft": "tier4_upscale",
-    "aloft hotel": "tier4_upscale",
+    # STR Upscale (3) — GENUINE 4-STAR FULL-SERVICE ONLY. ADR $140-200.
+    # Source: STR 2023 Chain Scales.
+    # 2026-05-15 AUDIT: Removed all select-service, extended-stay, and
+    # limited-service brands. Only full-service 4-star properties that
+    # have real F&B, banquets, bellmen, and uniform procurement budgets.
     "apa": "tier4_upscale",
     "apa hotel": "tier4_upscale",
     "ascend": "tier4_upscale",
@@ -499,20 +504,14 @@ CANONICAL_TIERS: dict[str, str] = {
     "barcelo": "tier4_upscale",
     "best western premier": "tier4_upscale",
     "bw premier collection": "tier4_upscale",
-    "cambria": "tier4_upscale",
-    "cambria hotels": "tier4_upscale",
     "canad inn": "tier4_upscale",
-    "caption": "tier4_upscale",
-    "caption by hyatt": "tier4_upscale",
     "catalonia": "tier4_upscale",
     "citadines": "tier4_upscale",
-    "citizenm": "tier4_upscale",
     "club med": "tier4_upscale",
     "coast": "tier4_upscale",
     "coast hotels": "tier4_upscale",
     "compass": "tier4_upscale",
     "compass by margaritaville": "tier4_upscale",
-    "courtyard": "tier4_upscale",
     "crowne plaza": "tier4_upscale",
     "delta": "tier4_upscale",
     "delta hotel": "tier4_upscale",
@@ -525,24 +524,13 @@ CANONICAL_TIERS: dict[str, str] = {
     "eaton": "tier4_upscale",
     "el cid resort": "tier4_upscale",
     "el dorado": "tier4_upscale",
-    "element": "tier4_upscale",
     "eurostars": "tier4_upscale",
-    "even": "tier4_upscale",
-    "even hotels": "tier4_upscale",
     "fiesta americana": "tier4_upscale",
-    "four points": "tier4_upscale",
-    "four points by sheraton": "tier4_upscale",
     "garza blanca": "tier4_upscale",
     "generations": "tier4_upscale",
     "grand america": "tier4_upscale",
-    "hilton garden inn": "tier4_upscale",
     "holiday inn club vacations": "tier4_upscale",
-    "homewood": "tier4_upscale",
-    "homewood suites": "tier4_upscale",
-    "homewood suites by hilton": "tier4_upscale",
     "hotel rl": "tier4_upscale",
-    "hyatt house": "tier4_upscale",
-    "hyatt place": "tier4_upscale",
     "iberostar": "tier4_upscale",
     "iberostar hotels & resorts": "tier4_upscale",
     "innside": "tier4_upscale",
@@ -578,7 +566,6 @@ CANONICAL_TIERS: dict[str, str] = {
     "radisson by choice": "tier4_upscale",
     "radisson individuals": "tier4_upscale",
     "radisson individuals by choice": "tier4_upscale",
-    "residence inn": "tier4_upscale",
     "riu": "tier4_upscale",
     "riu palace": "tier4_upscale",
     "riu plaza": "tier4_upscale",
@@ -586,20 +573,13 @@ CANONICAL_TIERS: dict[str, str] = {
     "sonesta": "tier4_upscale",
     "sonesta hotel": "tier4_upscale",
     "sonesta select": "tier4_upscale",
-    "springhill": "tier4_upscale",
-    "springhill suites": "tier4_upscale",
-    "staybridge": "tier4_upscale",
-    "staybridge suites": "tier4_upscale",
     "stoney creek": "tier4_upscale",
     "sunscape": "tier4_upscale",
     "sunscape resorts": "tier4_upscale",
-    "tempo": "tier4_upscale",
-    "tempo by hilton": "tier4_upscale",
     "temptation resort": "tier4_upscale",
     "vacation condos": "tier4_upscale",
     "vacation condos by outrigger": "tier4_upscale",
     "valentin imperial": "tier4_upscale",
-    "vib": "tier4_upscale",
     "voco": "tier4_upscale",
     "westmark": "tier4_upscale",
     "wyndham": "tier4_upscale",
@@ -608,14 +588,20 @@ CANONICAL_TIERS: dict[str, str] = {
     "wyndham vacation resort": "tier4_upscale",
     "yotel": "tier4_upscale",
     # ============ TIER 5 SKIP ============
-    # STR Upper Midscale (4) / Midscale (5) / Economy (6). Per JA tier system
-    # (line 17 docstring), these are NOT sales targets — uniform procurement
-    # budgets at midscale and below are minimal. Source: STR 2023 Chain Scales.
+    # STR Upper Midscale (4) / Midscale (5) / Economy (6) + all select-service
+    # and extended-stay brands regardless of STR classification. Per JA tier
+    # system: these are NOT sales targets — no meaningful uniform procurement.
+    # Source: STR 2023 Chain Scales + 2026-05-15 operational audit.
     "a victory": "tier5_skip",
+    "ac hotel": "tier5_skip",
+    "ac hotels": "tier5_skip",
+    "ac hotels by marriott": "tier5_skip",
     "adagio": "tier5_skip",
     "affordable suites of america": "tier5_skip",
     "aiden": "tier5_skip",
     "aiden by best western": "tier5_skip",
+    "aloft": "tier5_skip",
+    "aloft hotel": "tier5_skip",
     "america's best inn": "tier5_skip",
     "americas best": "tier5_skip",
     "americas best inn": "tier5_skip",
@@ -644,11 +630,16 @@ CANONICAL_TIERS: dict[str, str] = {
     "budget suites of america": "tier5_skip",
     "budgetel": "tier5_skip",
     "bw signature collection": "tier5_skip",
+    "cambria": "tier5_skip",
+    "cambria hotels": "tier5_skip",
     "candlewood": "tier5_skip",
     "candlewood suites": "tier5_skip",
+    "caption": "tier5_skip",
+    "caption by hyatt": "tier5_skip",
     "centerstone": "tier5_skip",
     "centerstone hotels": "tier5_skip",
     "chase suites": "tier5_skip",
+    "citizenm": "tier5_skip",
     "city express": "tier5_skip",
     "clarion": "tier5_skip",
     "clarion pointe": "tier5_skip",
@@ -661,6 +652,7 @@ CANONICAL_TIERS: dict[str, str] = {
     "country inn": "tier5_skip",
     "country inn & suites": "tier5_skip",
     "country inn & suites by choice": "tier5_skip",
+    "courtyard": "tier5_skip",
     "crystal inn": "tier5_skip",
     "days inn": "tier5_skip",
     "dazzler": "tier5_skip",
@@ -686,6 +678,9 @@ CANONICAL_TIERS: dict[str, str] = {
     "echo suites extended stay by wyndham": "tier5_skip",
     "econo lodge": "tier5_skip",
     "efficiency lodge": "tier5_skip",
+    "element": "tier5_skip",
+    "even": "tier5_skip",
+    "even hotels": "tier5_skip",
     "everhome": "tier5_skip",
     "everhome suites": "tier5_skip",
     "extend-a-suites": "tier5_skip",
@@ -698,6 +693,8 @@ CANONICAL_TIERS: dict[str, str] = {
     "fairbridge inn express": "tier5_skip",
     "fairfield": "tier5_skip",
     "fairfield inn": "tier5_skip",
+    "four points": "tier5_skip",
+    "four points by sheraton": "tier5_skip",
     "garner": "tier5_skip",
     "garner by ihg": "tier5_skip",
     "garner hotels": "tier5_skip",
@@ -719,6 +716,7 @@ CANONICAL_TIERS: dict[str, str] = {
     "hawthorn suites by wyndham": "tier5_skip",
     "henn na": "tier5_skip",
     "henn na hotel": "tier5_skip",
+    "hilton garden inn": "tier5_skip",
     "holiday inn": "tier5_skip",
     "holiday inn express": "tier5_skip",
     "home inn": "tier5_skip",
@@ -727,7 +725,12 @@ CANONICAL_TIERS: dict[str, str] = {
     "home2 suites by hilton": "tier5_skip",
     "hometowne studios": "tier5_skip",
     "hometowne studios by red roof": "tier5_skip",
+    "homewood": "tier5_skip",
+    "homewood suites": "tier5_skip",
+    "homewood suites by hilton": "tier5_skip",
     "howard johnson": "tier5_skip",
+    "hyatt house": "tier5_skip",
+    "hyatt place": "tier5_skip",
     "ibis": "tier5_skip",
     "ibis budget": "tier5_skip",
     "ibis styles": "tier5_skip",
@@ -786,6 +789,7 @@ CANONICAL_TIERS: dict[str, str] = {
     "red roof": "tier5_skip",
     "red roof inn": "tier5_skip",
     "red roof plus+": "tier5_skip",
+    "residence inn": "tier5_skip",
     "rode inn": "tier5_skip",
     "rodeway": "tier5_skip",
     "rodeway inn": "tier5_skip",
@@ -805,8 +809,12 @@ CANONICAL_TIERS: dict[str, str] = {
     "sonesta simply suites": "tier5_skip",
     "spark": "tier5_skip",
     "spark by hilton": "tier5_skip",
+    "springhill": "tier5_skip",
+    "springhill suites": "tier5_skip",
     "stayable suites": "tier5_skip",
     "stayapt suites": "tier5_skip",
+    "staybridge": "tier5_skip",
+    "staybridge suites": "tier5_skip",
     "studio 6": "tier5_skip",
     "studiores": "tier5_skip",
     "suburban": "tier5_skip",
@@ -816,6 +824,8 @@ CANONICAL_TIERS: dict[str, str] = {
     "surestay collection": "tier5_skip",
     "surestay plus": "tier5_skip",
     "surestay studio": "tier5_skip",
+    "tempo": "tier5_skip",
+    "tempo by hilton": "tier5_skip",
     "the red collection": "tier5_skip",
     "towneplace": "tier5_skip",
     "towneplace suites": "tier5_skip",
@@ -832,6 +842,7 @@ CANONICAL_TIERS: dict[str, str] = {
     "urcove": "tier5_skip",
     "vagabond inn": "tier5_skip",
     "value place": "tier5_skip",
+    "vib": "tier5_skip",
     "villager": "tier5_skip",
     "vista": "tier5_skip",
     "waterwalk": "tier5_skip",
@@ -881,6 +892,7 @@ def build_tier_rules_prompt_block() -> str:
     """
     Generate the TIER RULES block for Smart Fill's Gemini extraction prompt.
     Lists representative brands per tier (not every brand, to keep prompt compact).
+    Updated 2026-05-15: select-service and extended-stay brands moved to tier5.
     """
     tier1_exemplars = [
         "Aman",
@@ -964,7 +976,6 @@ def build_tier_rules_prompt_block() -> str:
         "Canopy",
         "Hotel Indigo",
         "Hard Rock",
-        "Loews",
         "Kimpton",
         "Omni",
         "Gaylord",
@@ -979,31 +990,24 @@ def build_tier_rules_prompt_block() -> str:
         "Disney Deluxe",
     ]
     tier4_exemplars = [
-        "Courtyard",
-        "AC Hotels",
-        "Aloft",
-        "Hilton Garden Inn",
-        "Hyatt Place",
-        "Hyatt House",
-        "Four Points",
-        "Element",
-        "Residence Inn",
-        "SpringHill Suites",
-        "Home2",
-        "Homewood Suites",
-        "Moxy",
-        "Holiday Inn",
-        "Crowne Plaza",
         "DoubleTree",
+        "Crowne Plaza",
         "Delta Hotels",
-        "citizenM",
         "Novotel",
+        "Voco",
+        "Radisson",
+        "Wyndham",
+        "Millennium",
+        "Melia",
         "Mercure",
         "Club Med",
         "RIU",
         "Iberostar",
         "Barcelo",
         "Karisma",
+        "Sonesta",
+        "Planet Hollywood",
+        "Ascend Collection",
     ]
     tier5_exemplars = [
         "Hampton Inn",
@@ -1015,6 +1019,17 @@ def build_tier_rules_prompt_block() -> str:
         "Motel 6",
         "Super 8",
         "Best Western",
+        "Courtyard",
+        "Hilton Garden Inn",
+        "Hyatt Place",
+        "Aloft",
+        "AC Hotels",
+        "Four Points",
+        "Residence Inn",
+        "Homewood Suites",
+        "Staybridge Suites",
+        "Element",
+        "SpringHill Suites",
     ]
 
     return (
@@ -1027,10 +1042,14 @@ def build_tier_rules_prompt_block() -> str:
         f"  tier5_skip (out of scope — JA does NOT sell to these): "
         f"{', '.join(tier5_exemplars)}\n"
         "\n"
-        "If the brand is a budget / midscale / extended-stay / select-service\n"
-        "brand below 4-star (Hampton, Holiday Inn Express, Hampton Inn,\n"
-        "Fairfield, La Quinta, Days Inn, Comfort Inn, etc.) you MUST output\n"
-        "exactly `tier5_skip`. NEVER invent tier6_, tier7_, tier5_upper_midscale\n"
+        "If the brand is select-service (Courtyard, Aloft, AC Hotels, Hyatt\n"
+        "Place, Hilton Garden Inn, Four Points, citizenM, Cambria), extended-\n"
+        "stay (Residence Inn, Homewood, Staybridge, Element, Hyatt House),\n"
+        "or budget/midscale (Hampton, Holiday Inn Express, Fairfield, La\n"
+        "Quinta, Days Inn, Comfort Inn, etc.) you MUST output exactly\n"
+        "`tier5_skip`. Only genuine 4-star full-service brands (DoubleTree,\n"
+        "Crowne Plaza, Delta Hotels, Novotel, Voco, etc.) belong in\n"
+        "tier4_upscale. NEVER invent tier6_, tier7_, tier5_upper_midscale\n"
         "or any tier name not listed above — those will be rejected and the\n"
         "lead will be silently dropped.\n"
         "\n"
@@ -1040,9 +1059,8 @@ def build_tier_rules_prompt_block() -> str:
         "    tier2_luxury per STR Luxury classification.\n"
         "  - Lifestyle boutique (Kimpton, Autograph, Tribute, Curio, Canopy)\n"
         "    = tier3_upper_upscale per STR.\n"
-        "  - Select-service (Courtyard, Aloft, Hyatt Place, HGI, Residence Inn,\n"
-        "    Crowne Plaza, DoubleTree, Delta Hotels, citizenM) = tier4_upscale\n"
-        "    per STR 2023/2024 Chain Scale.\n"
+        "  - Select-service and extended-stay brands = tier5_skip regardless\n"
+        "    of what STR chain scale says. JA only sells to full-service.\n"
     )
 
 

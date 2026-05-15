@@ -423,6 +423,12 @@ def prepare_lead(
     if not score_result.get("should_save", True):
         return None, score_result.get("skip_reason", "Filtered"), score_result
 
+    # HARD GATE: tier5_skip must NEVER enter the pipeline, even if the
+    # scorer forgot to set should_save=False (e.g. brand recognized
+    # after scoring via a different code path). Belt-and-suspenders.
+    if score_result.get("brand_tier") == "tier5_skip":
+        return None, f"Budget brand (tier5_skip): {hotel_name}", score_result
+
     pipeline_score = lead_dict.get("qualification_score") or lead_dict.get("lead_score")
     final_score = pipeline_score if pipeline_score else score_result["total_score"]
 
