@@ -118,6 +118,14 @@ celery_app.conf.update(
             "schedule": crontab(hour=9, minute=40, day_of_week="1-5"),
             "options": {"queue": "maintenance"},
         },
+        # Inbox Contact Sync: 9:45 AM Mon-Fri (added 2026-05-14).
+        # Syncs Gmail signatures → contacts table for all active JA mailboxes.
+        # Incremental after first run via History API cursor.
+        "sync-inbox-contacts": {
+            "task": "sync_inbox_contacts",
+            "schedule": crontab(hour=9, minute=45, day_of_week="1-5"),
+            "options": {"queue": "maintenance"},
+        },
         # ── Light Gemini tasks (9:50 - 10:15 AM) ──
         # Cheap grounding calls before heavy scrape/enrich rounds.
         # Auto Smart Fill: 9:50 AM Mon-Fri.

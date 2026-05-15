@@ -982,6 +982,7 @@ def recompute_timeline_labels(self) -> Dict[str, Any]:
 # every morning. This stamping uses the `notes` field with a tagged
 # substring — keeping it self-contained without a new column.
 
+
 @celery_app.task(name="pre_opening_digest", base=BaseTask)
 def pre_opening_digest_task():
     """Daily pre-opening digest — emails sales about leads crossing the
@@ -1065,15 +1066,12 @@ def pre_opening_digest_task():
         # sent if the email succeeded).
         if sent and stamped_ids:
             stamp = (
-                f"\n{_MARKER} "
-                f"{datetime.now(_tz.utc).strftime('%Y-%m-%dT%H:%MZ')}"
+                f"\n{_MARKER} " f"{datetime.now(_tz.utc).strftime('%Y-%m-%dT%H:%MZ')}"
             )
             try:
                 async with async_session() as stamp_session:
                     fetch = await stamp_session.execute(
-                        select(PotentialLead).where(
-                            PotentialLead.id.in_(stamped_ids)
-                        )
+                        select(PotentialLead).where(PotentialLead.id.in_(stamped_ids))
                     )
                     for lead in fetch.scalars().all():
                         lead.notes = (lead.notes or "") + stamp
@@ -1097,3 +1095,108 @@ def pre_opening_digest_task():
         }
 
     return run_async(_run())
+
+
+# =============================================================================================================================================================================================
+# TASK 6: INBOX CONTACT SYNC  (added 2026-05-14)
+# =============================================================================================================================================================================================
+
+
+@celery_app.task(bind=True, base=BaseTask, name="sync_inbox_contacts")
+def sync_inbox_contacts(self) -> Dict[str, Any]:
+    """Sync Gmail signatures → contacts table for all active JA mailboxes."""
+    logger.info("Inbox Contact Sync: starting...")
+
+    async def _sync():
+        from app.services.mailbox_discovery import list_active_mailboxes
+        from app.services.inbox_sync import sync_mailbox
+
+        results: Dict[str, Any] = {
+            "mailboxes_attempted": 0,
+            "mailboxes_ok": 0,
+            "mailboxes_failed": 0,
+            "total_messages_scanned": 0,
+            "total_contacts_found": 0,
+            "total_new_contacts": 0,
+            "total_updated_contacts": 0,
+            "total_errors": 0,
+            "per_mailbox": [],
+        }
+
+        try:
+            mailboxes = list_active_mailboxes()
+        except Exception as e:
+            logger.error(f"Inbox Contact Sync: mailbox discovery failed: {e}")
+            results["error"] = str(e)
+            results["success"] = False
+            return results
+
+        if not mailboxes:
+            logger.warning("Inbox Contact Sync: no active mailboxes found")
+            results["success"] = True
+            return results
+
+        logger.info(
+            f"Inbox Contact Sync: syncing {len(mailboxes)} mailbox(es): {mailboxes}"
+        )
+        results["mailboxes_attempted"] = len(mailboxes)
+
+        for mailbox in mailboxes:
+            try:
+                async with async_session() as session:
+                    mb_result = await sync_mailbox(mailbox, session)
+
+                if mb_result.get("status") == "success":
+                    results["mailboxes_ok"] += 1
+                else:
+                    results["mailboxes_failed"] += 1
+                    logger.warning(
+                        f"Inbox Contact Sync: {mailbox} finished with "
+                        f"status={mb_result.get('status')} "
+                        f"error={mb_result.get('error', '')}"
+                    )
+
+                results["total_messages_scanned"] += mb_result.get(
+                    "messages_scanned", 0
+                )
+                results["total_contacts_found"] += mb_result.get("contacts_found", 0)
+                results["total_new_contacts"] += mb_result.get("new_contacts", 0)
+                results["total_updated_contacts"] += mb_result.get(
+                    "updated_contacts", 0
+                )
+                results["total_errors"] += mb_result.get("errors", 0)
+                results["per_mailbox"].append(
+                    {
+                        "mailbox": mailbox,
+                        "status": mb_result.get("status"),
+                        "messages_scanned": mb_result.get("messages_scanned", 0),
+                        "contacts_found": mb_result.get("contacts_found", 0),
+                        "new_contacts": mb_result.get("new_contacts", 0),
+                        "updated_contacts": mb_result.get("updated_contacts", 0),
+                    }
+                )
+
+            except Exception as e:
+                results["mailboxes_failed"] += 1
+                results["per_mailbox"].append(
+                    {
+                        "mailbox": mailbox,
+                        "status": "error",
+                        "error": str(e)[:200],
+                    }
+                )
+                logger.exception(
+                    f"Inbox Contact Sync: unhandled error for {mailbox}: {e}"
+                )
+
+        results["success"] = True
+        logger.info(
+            f"Inbox Contact Sync: done — "
+            f"{results['mailboxes_ok']}/{results['mailboxes_attempted']} ok, "
+            f"{results['total_new_contacts']} new, "
+            f"{results['total_updated_contacts']} updated, "
+            f"{results['total_messages_scanned']} messages scanned"
+        )
+        return results
+
+    return run_async(_sync())

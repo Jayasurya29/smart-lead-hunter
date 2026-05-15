@@ -34,7 +34,15 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
 }
 
 export default function AppRouter() {
-  const { isAuthenticated } = useAuth()
+  const { isAuthenticated, isLoading } = useAuth()
+
+  if (isLoading) {
+    return (
+      <div className="h-full flex items-center justify-center bg-[#040910]">
+        <Loader2 className="w-8 h-8 animate-spin text-amber-500" />
+      </div>
+    )
+  }
 
   return (
     <ErrorBoundary>
