@@ -1,0 +1,145 @@
+import api from './client'
+
+/* ════════════════════════════════════════
+   TYPES
+   ════════════════════════════════════════ */
+
+export interface InboxContact {
+  id: number
+  email: string
+  first_name: string | null
+  last_name: string | null
+  display_name: string | null
+  title: string | null
+  organization: string | null
+  phone: string | null
+  address: string | null
+  linkedin_url: string | null
+  org_source: string | null
+  has_signature: boolean
+  confidence: number | null
+  parent_company: string | null
+  brand_tier: string | null
+  operating_model: string | null
+  gpo: string | null
+  procurement_priority: string
+  priority_reason: string | null
+  opportunity_level: string | null
+  opportunity_score: number | null
+  management_company: string | null
+  interaction_count: number
+  source_mailboxes: string[]
+  first_seen: string | null
+  last_seen: string | null
+  approval_status: string
+  insightly_contact_id: string | null
+  pushed_to_insightly_at: string | null
+  matched_lead_id: number | null
+  matched_hotel_id: number | null
+  sync_history: Array<{ action: string; mailbox: string | null; ts: string }> | null
+  created_at: string
+  updated_at: string
+}
+
+export interface InboxContactStats {
+  total: number
+  p1: number
+  p2: number
+  p3: number
+  p4: number
+  p_unknown: number
+  pending: number
+  approved: number
+  pushed_to_insightly: number
+  new_today: number
+  with_signature: number
+  with_phone: number
+  last_sync_at: string | null
+}
+
+export interface InboxContactListResponse {
+  items: InboxContact[]
+  total: number
+  page: number
+  per_page: number
+  pages: number
+}
+
+export interface InboxContactFilters {
+  page?: number
+  per_page?: number
+  procurement_priority?: string
+  approval_status?: string
+  brand_tier?: string
+  gpo?: string
+  source_mailbox?: string
+  has_signature?: boolean
+  organization?: string
+  search?: string
+  matched_only?: boolean
+  order_by?: string
+}
+
+/* ════════════════════════════════════════
+   API CALLS
+   ════════════════════════════════════════ */
+
+export async function fetchInboxContacts(
+  filters: InboxContactFilters = {},
+): Promise<InboxContactListResponse> {
+  const params = new URLSearchParams()
+  if (filters.page)                   params.set('page', String(filters.page))
+  if (filters.per_page)               params.set('per_page', String(filters.per_page))
+  if (filters.procurement_priority)   params.set('procurement_priority', filters.procurement_priority)
+  if (filters.approval_status)        params.set('approval_status', filters.approval_status)
+  if (filters.brand_tier)             params.set('brand_tier', filters.brand_tier)
+  if (filters.gpo)                    params.set('gpo', filters.gpo)
+  if (filters.source_mailbox)         params.set('source_mailbox', filters.source_mailbox)
+  if (filters.has_signature != null)  params.set('has_signature', String(filters.has_signature))
+  if (filters.organization)           params.set('organization', filters.organization)
+  if (filters.search)                 params.set('search', filters.search)
+  if (filters.matched_only != null)   params.set('matched_only', String(filters.matched_only))
+  if (filters.order_by)               params.set('order_by', filters.order_by)
+
+  const { data } = await api.get<InboxContactListResponse>(`/api/inbox-contacts?${params}`)
+  return data
+}
+
+export async function fetchInboxContactStats(): Promise<InboxContactStats> {
+  const { data } = await api.get<InboxContactStats>('/api/inbox-contacts/stats')
+  return data
+}
+
+export async function fetchInboxContact(id: number): Promise<InboxContact> {
+  const { data } = await api.get<InboxContact>(`/api/inbox-contacts/${id}`)
+  return data
+}
+
+export async function approveInboxContact(id: number): Promise<InboxContact> {
+  const { data } = await api.post<InboxContact>(`/api/inbox-contacts/${id}/approve`)
+  return data
+}
+
+export async function bulkApproveInboxContacts(ids: number[]): Promise<{ approved: number; failed: Array<{ id: number; reason: string }> }> {
+  const { data } = await api.post('/api/inbox-contacts/bulk-approve', { ids })
+  return data
+}
+
+export async function deleteInboxContact(id: number): Promise<void> {
+  await api.delete(`/api/inbox-contacts/${id}`)
+}
+
+export async function matchInboxContactToLead(id: number, leadId: number | null): Promise<InboxContact> {
+  const { data } = await api.post<InboxContact>(`/api/inbox-contacts/${id}/match-lead`, { lead_id: leadId })
+  return data
+}
+
+export async function matchInboxContactToHotel(id: number, hotelId: number | null): Promise<InboxContact> {
+  const { data } = await api.post<InboxContact>(`/api/inbox-contacts/${id}/match-hotel`, { hotel_id: hotelId })
+  return data
+}
+
+export async function triggerInboxSync(): Promise<{ status: string; task_id?: string; message: string }> {
+  const { data } = await api.post('/api/inbox-contacts/sync')
+  return data
+}

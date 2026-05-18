@@ -4,7 +4,7 @@ import { useAuth } from '@/hooks/useAuth'
 import { BackgroundTaskProvider, useBackgroundTask } from '@/hooks/useBackgroundTask'
 import {
   LayoutDashboard, Map, Mail, Users, LogOut, Play, Radar, Building2, Hotel,
-  CheckCircle2, AlertCircle, X, ChevronDown, ChevronUp, Shield,
+  CheckCircle2, AlertCircle, X, ChevronDown, ChevronUp, Shield, Inbox,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import ScrapeModal from '@/components/modals/ScrapeModal'
@@ -20,12 +20,13 @@ interface NavItem {
 const NAV_ITEMS: NavItem[] = [
   { to: '/new-hotels',        label: 'New Hotels',        icon: LayoutDashboard },
   { to: '/existing-hotels',  label: 'Existing Hotels',  icon: Building2 },
+  { to: '/outreach',         label: 'Outreach',         icon: Mail },
+  { to: '/contacts',          label: 'Contacts',          icon: Inbox },
   // HIDDEN 2026-04-24 — re-enable by uncommenting
   // { to: '/clients',          label: 'Clients',          icon: Users },
   { to: '/map',              label: 'Map',              icon: Map },
   { to: '/sources',          label: 'Sources',          icon: Radar },
   { to: '/users',            label: 'Team',             icon: Shield },
-  { to: '/outreach',         label: 'Outreach',         icon: Mail },
 ]
 
 export default function AppLayout({ children }: { children: ReactNode }) {

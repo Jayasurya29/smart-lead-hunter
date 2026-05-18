@@ -16,6 +16,14 @@ Design rules:
     BrandRegistry which may improve over time)
   - approval_status: never downgrade (pending → approved is fine; approved →
     pending is not). Reject = hard delete (no 'rejected' state).
+
+FIX 2026-05-18: All ``:param::type`` casts replaced with
+``CAST(:param AS type)`` — asyncpg translates named params to positional
+``$N`` and chokes on the ``::`` shorthand (it sees ``:param::jsonb`` as
+two separate named params).
+
+FIX 2026-05-18: bulk_upsert_contacts uses a SAVEPOINT per contact so a
+single failure doesn't poison the transaction for all remaining rows.
 """
 
 from __future__ import annotations
@@ -163,7 +171,7 @@ async def upsert_contact(
                     :interaction_count, :source_mailboxes,
                     :now, :now,
                     'pending', :matched_lead_id, :matched_hotel_id,
-                    :sync_history::jsonb, :now, :now
+                    CAST(:sync_history AS jsonb), :now, :now
                 )
                 RETURNING id
             """),
@@ -278,15 +286,17 @@ async def upsert_contact(
     updates["sync_history"] = existing_history
 
     # Build dynamic SET clause
+    # FIX 2026-05-18: Use CAST(:param AS type) instead of :param::type
+    # because asyncpg's named-param translation chokes on the :: shorthand.
     set_clauses = []
     params: dict[str, Any] = {"contact_id": contact_id}
     for col, val in updates.items():
         param_name = f"p_{col}"
         if col == "sync_history":
-            set_clauses.append(f"{col} = :{param_name}::jsonb")
+            set_clauses.append(f"{col} = CAST(:{param_name} AS jsonb)")
             params[param_name] = json.dumps(val, default=str)
         elif col == "source_mailboxes":
-            set_clauses.append(f"{col} = :{param_name}::text[]")
+            set_clauses.append(f"{col} = CAST(:{param_name} AS text[])")
             params[param_name] = val
         else:
             set_clauses.append(f"{col} = :{param_name}")
@@ -312,41 +322,45 @@ async def bulk_upsert_contacts(
     is passed through as `interaction_increment` so per-run deltas land
     correctly in the DB.
 
+    FIX 2026-05-18: Uses a SAVEPOINT per contact so a single failure
+    doesn't poison the transaction for all remaining rows.
+
     Returns: {"inserted": N, "updated": N, "errors": N}
     """
     inserted = updated = errors = 0
     for c in contacts:
         try:
-            mailbox = source_mailbox or c.get("source_mailbox")
-            increment = max(1, int(c.get("interaction_count") or 1))
-            action, _ = await upsert_contact(
-                session,
-                email=c["email"],
-                first_name=c.get("first_name"),
-                last_name=c.get("last_name"),
-                display_name=c.get("display_name"),
-                title=c.get("title"),
-                organization=c.get("organization"),
-                phone=c.get("phone"),
-                address=c.get("address"),
-                linkedin_url=c.get("linkedin_url"),
-                org_source=c.get("org_source"),
-                has_signature=c.get("has_signature", False),
-                confidence=c.get("confidence"),
-                parent_company=c.get("parent_company"),
-                brand_tier=c.get("brand_tier"),
-                operating_model=c.get("operating_model"),
-                gpo=c.get("gpo"),
-                procurement_priority=c.get("procurement_priority", "P_unknown"),
-                priority_reason=c.get("priority_reason"),
-                opportunity_level=c.get("opportunity_level"),
-                opportunity_score=c.get("opportunity_score"),
-                management_company=c.get("management_company"),
-                source_mailbox=mailbox,
-                interaction_increment=increment,
-                matched_lead_id=c.get("matched_lead_id"),
-                matched_hotel_id=c.get("matched_hotel_id"),
-            )
+            async with session.begin_nested():
+                mailbox = source_mailbox or c.get("source_mailbox")
+                increment = max(1, int(c.get("interaction_count") or 1))
+                action, _ = await upsert_contact(
+                    session,
+                    email=c["email"],
+                    first_name=c.get("first_name"),
+                    last_name=c.get("last_name"),
+                    display_name=c.get("display_name"),
+                    title=c.get("title"),
+                    organization=c.get("organization"),
+                    phone=c.get("phone"),
+                    address=c.get("address"),
+                    linkedin_url=c.get("linkedin_url"),
+                    org_source=c.get("org_source"),
+                    has_signature=c.get("has_signature", False),
+                    confidence=c.get("confidence"),
+                    parent_company=c.get("parent_company"),
+                    brand_tier=c.get("brand_tier"),
+                    operating_model=c.get("operating_model"),
+                    gpo=c.get("gpo"),
+                    procurement_priority=c.get("procurement_priority", "P_unknown"),
+                    priority_reason=c.get("priority_reason"),
+                    opportunity_level=c.get("opportunity_level"),
+                    opportunity_score=c.get("opportunity_score"),
+                    management_company=c.get("management_company"),
+                    source_mailbox=mailbox,
+                    interaction_increment=increment,
+                    matched_lead_id=c.get("matched_lead_id"),
+                    matched_hotel_id=c.get("matched_hotel_id"),
+                )
             if action == "inserted":
                 inserted += 1
             else:
@@ -556,7 +570,7 @@ async def update_approval_status(
             UPDATE contacts
             SET approval_status = :status,
                 updated_at = :now,
-                sync_history = COALESCE(sync_history, '[]'::jsonb) || :event::jsonb
+                sync_history = COALESCE(sync_history, '[]'::jsonb) || CAST(:event AS jsonb)
             WHERE id = :id
             RETURNING *
         """),
@@ -617,7 +631,7 @@ async def mark_pushed_to_insightly(
                 insightly_contact_id = :insightly_id,
                 pushed_to_insightly_at = :now,
                 updated_at = :now,
-                sync_history = COALESCE(sync_history, '[]'::jsonb) || :event::jsonb
+                sync_history = COALESCE(sync_history, '[]'::jsonb) || CAST(:event AS jsonb)
             WHERE id = :id
             RETURNING *
         """),
@@ -653,7 +667,7 @@ async def link_to_lead(
             UPDATE contacts
             SET matched_lead_id = :lead_id,
                 updated_at = :now,
-                sync_history = COALESCE(sync_history, '[]'::jsonb) || :event::jsonb
+                sync_history = COALESCE(sync_history, '[]'::jsonb) || CAST(:event AS jsonb)
             WHERE id = :id
             RETURNING *
         """),
@@ -683,7 +697,7 @@ async def link_to_hotel(
             UPDATE contacts
             SET matched_hotel_id = :hotel_id,
                 updated_at = :now,
-                sync_history = COALESCE(sync_history, '[]'::jsonb) || :event::jsonb
+                sync_history = COALESCE(sync_history, '[]'::jsonb) || CAST(:event AS jsonb)
             WHERE id = :id
             RETURNING *
         """),

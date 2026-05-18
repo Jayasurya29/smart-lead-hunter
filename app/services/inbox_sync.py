@@ -1,6 +1,6 @@
 """app/services/inbox_sync.py
 
-Refactored v4.6 Gmail contact-extraction pipeline as a reusable async module.
+Refactored v4.7 Gmail contact-extraction pipeline as a reusable async module.
 
 Core entry point: sync_mailbox(mailbox_email, session, ...)
 
@@ -14,12 +14,23 @@ Pipeline per mailbox:
   6. Upsert to contacts table via contact_dedup.bulk_upsert_contacts
   7. Update mailbox_sync_state cursor + run stats
 
+Changes in v4.7 (2026-05-18):
+  - Parallel Gemini sig parsing with asyncio.Semaphore(20) — was sequential
+    (~1/sec). Now processes all unique sig blocks concurrently in one batch.
+  - _normalize_saved_contact_orgs(): Gemini splits "Company - Person Name"
+    format org fields from Google Saved Contacts at ingest time, so we never
+    have to run a cleanup script again (fixes Alex Arencibia's contact format).
+  - _DOMAIN_ORG_OVERRIDES: domain-stem → canonical org name for common clients
+    (Towne Park, SP Plus, Laz Parking, Ocean Reef Club, etc.) so _infer_org()
+    returns clean names instead of "Townepark" or "Spplus".
+
 Credentials: credentials/slh-contact-sync.json
 Scopes: gmail.readonly + contacts.readonly + contacts.other.readonly
 """
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import hashlib
 import json
@@ -66,10 +77,6 @@ OWN_DOMAINS: set[str] = {
     "ja-uniforms.org",
 }
 
-# JA team first/last names used for cross-attribution leak detection
-# (catches the cbrown@evolutionpgs.com → "Sai Kandregula" bug from the
-# Ugarcia audit). If a parsed signature has a name in this set but the
-# email's domain is NOT a JA domain, we reject the parse as a leak.
 JA_TEAM_NAMES: set[str] = {
     "sai",
     "jayasurya",
@@ -78,7 +85,6 @@ JA_TEAM_NAMES: set[str] = {
     "ugarcia",
 }
 
-# Expanded from audit of 43 junk entries in Ugarcia's mailbox.
 NOREPLY_PATTERNS = [
     "noreply",
     "no-reply",
@@ -117,10 +123,7 @@ NOREPLY_PATTERNS = [
 
 MASS_MAIL_PATTERNS = ["newsletter", "unsubscribe", "digest"]
 
-# Expanded from audit — covers SigParser-equivalent procurement-platform
-# notifications + cold prospecting tools that pollute the contact pool.
 SAAS_DOMAINS: set[str] = {
-    # Email infrastructure / ESPs
     "mailchimp.com",
     "constantcontact.com",
     "campaignmonitor.com",
@@ -132,7 +135,6 @@ SAAS_DOMAINS: set[str] = {
     "amazonses.com",
     "ses.amazonaws.com",
     "facebookmail.com",
-    # Procurement / payment / accounting platforms
     "birchstreet.net",
     "sciquest.com",
     "jaggaer.com",
@@ -147,7 +149,6 @@ SAAS_DOMAINS: set[str] = {
     "grispi.com",
     "shopify.com",
     "hubspot.com",
-    # Marketing / notification subdomains seen in Ugarcia audit
     "feedback-marriott.com",
     "message.fedex.com",
     "email.netsuite.com",
@@ -155,7 +156,6 @@ SAAS_DOMAINS: set[str] = {
     "mail.beehiiv.com",
     "unbounce.com",
     "mail.clickup.com",
-    # Cold prospecting tools (so we don't ingest their reply addresses)
     "apollo.io",
     "mail.apollo.io",
     "hunter.io",
@@ -198,6 +198,89 @@ GENERIC_DOMAINS_NO_ORG: set[str] = {
     "salesforce.com",
 }
 
+# ── Domain-stem → canonical org name ─────────────────────────────────────
+# Used by _infer_org() before BrandRegistry lookup so common clients and
+# hotel brands with multi-word names get clean display names rather than
+# naive capitalization ("Townepark", "Fourseasons", "Lazparking").
+# ADD new domains here whenever _infer_org() produces ugly names.
+_DOMAIN_ORG_OVERRIDES: dict[str, str] = {
+    # Parking / valet (JA clients)
+    "townepark": "Towne Park",
+    "spplus": "SP Plus",
+    "lazparking": "Laz Parking",
+    "ameripark": "Ameripark",
+    "parkingmgt": "PMC Parking Management",
+    "impark": "Impark",
+    "vpne": "VPNE Parking Solutions",
+    "premierparking": "Premier Parking",
+    "aaaparking": "AAA Parking",
+    "denisonparking": "Denison Parking",
+    "park1": "Park One",
+    # Hotels / resorts not in BrandRegistry or with awkward stems
+    "grandbeachhotel": "Grand Beach Hotel",
+    "biltmorehotel": "Biltmore Hotel",
+    "remingtonhotels": "Remington Hotels",
+    "rosenhotels": "Rosen Hotels & Resorts",
+    "rosencentre": "Rosen Centre Hotel",
+    "rosenshinglecreek": "Rosen Shingle Creek Resort",
+    "mrchotels": "MRC Hotels",
+    "oceanreef": "Ocean Reef Club",
+    "oasismarinas": "OASIS Marinas",
+    "hawkscay": "Hawks Cay Resort",
+    "cheeca": "Cheeca Lodge",
+    "mutinyhotel": "Mutiny Hotel",
+    "nationalhotel": "National Hotel",
+    "thebetsyhotel": "The Betsy Hotel",
+    "thesetaihotel": "The Setai Hotel",
+    "naplesbayresort": "Naples Bay Resort",
+    "tidesinn": "Tides Inn",
+    "boceanfortlauderdale": "B Ocean Fort Lauderdale",
+    "grandgbd": "Grand Beach Hotel Surfside",
+    "elevationhotel": "Elevation Hotel",
+    "mainsailhotels": "Mainsail Hotels",
+    "pyramidglobal": "Pyramid Global Hospitality",
+    "noblehousehotels": "Noble House Hotels",
+    "gatehospitality": "Gate Hospitality",
+    "samarhospitality": "Samar Hospitality",
+    "mrhospitality": "MR Hospitality",
+    "apchospitality": "APC Hospitality",
+    "silvertoncasino": "Silverton Casino",
+    "cbayresort": "Curtain Bluff Resort",
+    "peabodymemphis": "Peabody Memphis",
+    "thestellahotel": "The Stella Hotel",
+    "thesagamore": "The Sagamore",
+    "thebodyholiday": "The Body Holiday",
+    "thebenwestpalm": "The Ben West Palm",
+    "thened": "The Ned",
+    "thenines": "The Nines Hotel",
+    "thesomerset": "The Somerset",
+    "thestovallhouse": "The Stovall House",
+    "thestrandtci": "The Strand TCI",
+    "theshoreclubtc": "The Shore Club Turks & Caicos",
+    "theiveyshotel": "The Ivey's Hotel",
+    "southbeachgroup": "South Beach Group",
+    "otesaga": "Otesaga Resort Hotel",
+    "halfmoon": "Half Moon Resort",
+    "hammockbeach": "Hammock Beach Resort",
+    "pvresorts": "PV Resorts",
+    "resortjh": "Resort at Jackson Hole",
+    "lacanteraresort": "La Cantera Resort",
+    "seagatedelray": "Seagate Hotel Delray",
+    "oceansedgekeywest": "Ocean's Edge Key West",
+    "bungalowskeylargo": "Bungalows Key Largo",
+    "sailfishpoint": "Sailfish Point",
+    "fisherislandclub": "Fisher Island Club",
+    "riversiidhotel": "Riverside Hotel",
+    "wgresorts": "Waterfall Glen Resorts",
+    "rbpropertiesinc": "RB Properties",
+    # Healthcare / other uniform buyers
+    "wellpath": "Wellpath",
+    "wvumedicine": "WVU Medicine",
+    "med": None,  # med.miami.edu → University of Miami Medical — skip
+    # Marinas
+    "westracbelize": "Westrac Belize",
+}
+
 FOOTER_MARKERS = [
     "CONFIDENTIALITY NOTICE",
     "Confidentiality Notice",
@@ -212,13 +295,13 @@ FOOTER_MARKERS = [
 ]
 
 MIN_CONFIDENCE = 0.6
-# FIX 2026-05-14: 1 day was too tight — first Monday-morning run after
-# the weekend would miss Saturday/Sunday emails. 2 days closes the gap.
-# Manual backfill script uses scan_days_override to do bigger windows.
 SCAN_DAYS_BACK_INITIAL = 2
-
-MAX_EMAILS_PER_RUN = 5000  # Safety cap per mailbox per Celery run
+MAX_EMAILS_PER_RUN = 5000
 PHONE_DEFAULT_REGION = "US"
+
+# Parallel Gemini limits
+_SIG_PARSE_SEMAPHORE = 20  # concurrent sig-parse calls
+_ORG_SPLIT_SEMAPHORE = 10  # concurrent org-split calls
 
 SIGNATURE_PROMPT = """Extract contact info from this email signature block.
 Return ONLY valid JSON. Use null for missing fields. No markdown, no preamble.
@@ -245,6 +328,32 @@ Rules:
 - Do NOT invent data not visible in the block.
 
 Block:
+"""
+
+# NEW 2026-05-18: Prompt for splitting "Company - Person" saved contact orgs.
+ORG_SPLIT_PROMPT = """\
+You are parsing Google Contact entries where the organization field contains
+"Company Name - Person Name" or similar mixed formats saved manually.
+
+For each entry classify:
+- org: the real organization/company name (string or null if personal only)
+- person_name: the real person's full name (string or null if org only)
+- is_personal: true if this is a personal/hobby contact (not a business contact)
+
+Return ONLY a JSON array (no markdown, no preamble) with one object per entry
+IN THE SAME ORDER. Each object: {"id":<int>,"org":<str|null>,"person_name":<str|null>,"is_personal":<bool>}
+
+Rules:
+- "Towne Park - Cindy Wetzel" → org="Towne Park", person_name="Cindy Wetzel"
+- "MANDARIN ORIENTAL - MIAMI" → both sides are company info, org="Mandarin Oriental Miami", person_name=null
+- "Tennis - Carlos Cuervo" → org=null, person_name="Carlos Cuervo", is_personal=true
+- "Leo - Matias father" → org=null, person_name=null, is_personal=true
+- ALL CAPS on both sides → merge into single org, no person split
+- "Mr. C - Carlos Robledo" → org="Mr. C", person_name="Carlos Robledo" (Mr. C is a hotel brand)
+- If the right side looks like a city/location not a person → keep as part of org
+- When unsure → keep original as org, person_name=null
+
+Entries:
 """
 
 # ──────────────────────────────────────────────────────────────────────────
@@ -444,25 +553,14 @@ def _name_matches_header(parsed: dict, header_name: str) -> bool:
     ln = (parsed.get("last_name") or "").lower().strip()
     if not fn and not ln:
         return True
+    # FIX 2026-05-18: empty header_name → False (forces domain-match rescue path)
     if not header_name:
-        return True
+        return False
     hn = header_name.lower()
     return (fn and len(fn) > 1 and fn in hn) or (ln and len(ln) > 1 and ln in hn)
 
 
 def _is_ja_team_leak(parsed: dict, sig_owner: str) -> bool:
-    """Detect JA team signature mis-attributed to an external email.
-
-    The Ugarcia audit found `cbrown@evolutionpgs.com` got attached to a
-    parsed signature reading "Sai Kandregula / IT Associate / JA Uniforms".
-    The org-mismatch guard catches cases where the parsed_org explicitly
-    contains "JA Uniforms" — but that guard misses when Gemini leaves the
-    organization blank and only the name is JA-staff.
-
-    This guard rejects parses where:
-      - the parsed first or last name is a known JA team name, AND
-      - the sig_owner email is NOT on a JA domain
-    """
     fn = (parsed.get("first_name") or "").lower().strip()
     ln = (parsed.get("last_name") or "").lower().strip()
     if not fn and not ln:
@@ -518,6 +616,24 @@ def _infer_org(domain: str) -> Optional[str]:
         stem = stem.split(".")[-1]
     if not stem or len(stem) < 2:
         return None
+
+    # NEW 2026-05-18: Check _DOMAIN_ORG_OVERRIDES first — covers JA's clients
+    # (Towne Park, SP Plus, Ocean Reef, etc.) and hotels with multi-word names.
+    stem_lower = stem.lower()
+    if stem_lower in _DOMAIN_ORG_OVERRIDES:
+        result = _DOMAIN_ORG_OVERRIDES[stem_lower]
+        return result  # None means "skip this domain" (e.g. med.miami.edu)
+
+    # Try BrandRegistry (covers hotel brands like Four Seasons, Ritz-Carlton)
+    for candidate in (
+        stem,
+        stem.replace("-", " "),
+        re.sub(r"([a-z])([A-Z])", r"\1 \2", stem),
+    ):
+        brand_info = BrandRegistry.lookup(candidate)
+        if brand_info.parent_company != "Unknown":
+            return brand_info.parent_company
+
     chunks = stem.replace("_", "-").split("-")
     words = [
         c.upper() if 2 <= len(c) <= 3 and c.isalpha() else c.capitalize()
@@ -662,6 +778,98 @@ def _dump_saved_contacts(people) -> dict[str, dict]:
     return contacts
 
 
+async def _normalize_saved_contact_orgs(
+    client: httpx.AsyncClient,
+    saved_contacts: dict[str, dict],
+) -> dict[str, dict]:
+    """NEW 2026-05-18: Fix 'Company - Person' format org fields at ingest time.
+
+    Alex Arencibia's Google Contacts store entries like "Towne Park - Cindy Wetzel"
+    in the organization field. This splits them correctly using Gemini so the
+    pipeline always receives clean org + person name data — no cleanup scripts needed.
+
+    Only processes entries where org contains ' - ' or ' – '.
+    Modifies saved_contacts in place and returns it.
+    """
+    candidates = {
+        email: data
+        for email, data in saved_contacts.items()
+        if data.get("organization")
+        and (" - " in data["organization"] or " – " in data["organization"])
+    }
+
+    if not candidates:
+        return saved_contacts
+
+    logger.info(
+        f"inbox_sync: normalizing {len(candidates)} saved contacts "
+        f"with 'Company - Person' org format"
+    )
+
+    emails = list(candidates.keys())
+    batches = [emails[i : i + 25] for i in range(0, len(emails), 25)]
+    sem = asyncio.Semaphore(_ORG_SPLIT_SEMAPHORE)
+
+    async def _split_batch(batch_emails: list[str]) -> tuple[list[str], list[dict]]:
+        entries = [
+            {"id": i, "original": candidates[e]["organization"]}
+            for i, e in enumerate(batch_emails)
+        ]
+        prompt = ORG_SPLIT_PROMPT + json.dumps(entries, ensure_ascii=False)
+        async with sem:
+            try:
+                raw = await ai_generate(client, prompt, model="gemini-2.5-flash-lite")
+            except Exception as exc:
+                logger.debug(f"inbox_sync: org-split Gemini error: {exc}")
+                return batch_emails, []
+        if not raw:
+            return batch_emails, []
+        raw = raw.strip()
+        if raw.startswith("```"):
+            raw = re.sub(r"^```(?:json)?\s*", "", raw)
+            raw = re.sub(r"\s*```$", "", raw)
+        try:
+            parsed = json.loads(raw)
+            return batch_emails, (parsed if isinstance(parsed, list) else [])
+        except json.JSONDecodeError:
+            return batch_emails, []
+
+    tasks = [_split_batch(batch) for batch in batches]
+    batch_results = await asyncio.gather(*tasks, return_exceptions=True)
+
+    fixed = 0
+    for result in batch_results:
+        if isinstance(result, Exception):
+            continue
+        batch_emails, items = result
+        for item in items:
+            idx = item.get("id")
+            if idx is None or idx >= len(batch_emails):
+                continue
+            email = batch_emails[idx]
+            contact = saved_contacts[email]
+
+            new_org = (item.get("org") or "").strip() or None
+            person_name = (item.get("person_name") or "").strip() or None
+            is_personal = bool(item.get("is_personal", False))
+
+            if is_personal:
+                contact["organization"] = None
+            elif new_org:
+                contact["organization"] = new_org
+
+            # Only fill names if they aren't already set
+            if person_name and not contact.get("first_name"):
+                parts = person_name.split(None, 1)
+                contact["first_name"] = parts[0] if parts else None
+                contact["last_name"] = parts[1] if len(parts) > 1 else None
+
+            fixed += 1
+
+    logger.info(f"inbox_sync: org-split normalized {fixed} saved contacts")
+    return saved_contacts
+
+
 # ──────────────────────────────────────────────────────────────────────────
 # Gmail message fetch
 # ──────────────────────────────────────────────────────────────────────────
@@ -672,14 +880,6 @@ def _list_message_ids_full(
     mailbox: str,
     scan_days_override: Optional[int] = None,
 ) -> list[str]:
-    """Full backfill — fetch last N days of messages.
-
-    Args:
-        scan_days_override: If set, use this many days instead of
-            SCAN_DAYS_BACK_INITIAL. The backfill script
-            (scripts/backfill_contacts.py) passes a larger value for
-            one-time historical scans without touching the global.
-    """
     days = scan_days_override if scan_days_override else SCAN_DAYS_BACK_INITIAL
     query = f"newer_than:{days}d -in:chats -in:spam -in:trash"
     ids: list[str] = []
@@ -713,11 +913,6 @@ def _list_message_ids_incremental(
     mailbox: str,
     history_id: str,
 ) -> tuple[list[str], Optional[str]]:
-    """Delta sync — fetch only messages since last_history_id.
-
-    Returns (message_ids, new_history_id).
-    Falls back to full backfill if history expired (404).
-    """
     try:
         resp = (
             gmail.users()
@@ -751,7 +946,6 @@ def _list_message_ids_incremental(
 
 
 def _get_current_history_id(gmail) -> Optional[str]:
-    """Get the current historyId from the mailbox profile."""
     try:
         profile = gmail.users().getProfile(userId="me").execute()
         return str(profile.get("historyId"))
@@ -936,12 +1130,9 @@ async def _parse_sig(client: httpx.AsyncClient, sig_block: str) -> dict:
 # ──────────────────────────────────────────────────────────────────────────
 # mailbox_sync_state helpers
 # ──────────────────────────────────────────────────────────────────────────
-# (Removed dead _get_sync_state function 2026-05-14 — sync_mailbox queries
-# last_history_id inline, _get_sync_state was never called.)
 
 
 async def _upsert_sync_state(session: AsyncSession, mailbox: str, **kwargs) -> None:
-    """Insert or update mailbox_sync_state row."""
     now = datetime.now(timezone.utc)
     result = await session.execute(
         text("SELECT 1 FROM mailbox_sync_state WHERE mailbox = :m"),
@@ -963,7 +1154,8 @@ async def _upsert_sync_state(session: AsyncSession, mailbox: str, **kwargs) -> N
             set_clause = ", ".join(f"{k} = :{k}" for k in kwargs)
             await session.execute(
                 text(
-                    f"UPDATE mailbox_sync_state SET {set_clause}, updated_at = :now WHERE mailbox = :mailbox"
+                    f"UPDATE mailbox_sync_state SET {set_clause}, updated_at = :now "
+                    f"WHERE mailbox = :mailbox"
                 ),
                 {"mailbox": mailbox, "now": now, **kwargs},
             )
@@ -981,20 +1173,7 @@ async def sync_mailbox(
     force_full_scan: bool = False,
     scan_days_override: Optional[int] = None,
 ) -> dict[str, Any]:
-    """Sync one mailbox and upsert contacts into the contacts table.
-
-    Args:
-        mailbox: Full email address to sync, e.g. "ugarcia@jauniforms.com"
-        session: AsyncSession for DB writes.
-        force_full_scan: Ignore History API cursor and do a full backfill.
-        scan_days_override: When doing a full scan, scan this many days
-            instead of SCAN_DAYS_BACK_INITIAL. Used by the manual
-            backfill CLI script (scripts/backfill_contacts.py).
-
-    Returns:
-        Run stats dict: {mailbox, messages_scanned, contacts_found,
-                         new_contacts, updated_contacts, errors, status}
-    """
+    """Sync one mailbox and upsert contacts into the contacts table."""
     run_start = datetime.now(timezone.utc)
     logger.info(f"inbox_sync: starting sync for {mailbox}")
 
@@ -1011,11 +1190,10 @@ async def sync_mailbox(
         "status": "success",
     }
 
-    # Rejection-stat counters (logged at end, useful for debugging
-    # quality issues like the cbrown leak).
     rejections = {
         "ja_org_mismatch": 0,
         "ja_team_leak": 0,
+        "ja_sig_on_external": 0,
         "email_domain_mismatch": 0,
         "not_real_person": 0,
         "low_confidence": 0,
@@ -1034,19 +1212,19 @@ async def sync_mailbox(
             f"{len(other_contacts)} other, {len(saved_contacts)} saved contacts"
         )
 
-        # Determine message ID list
         state_row = await session.execute(
             text("SELECT last_history_id FROM mailbox_sync_state WHERE mailbox = :m"),
             {"m": mailbox},
         )
         state = state_row.mappings().first()
         last_history_id = (state or {}).get("last_history_id") if state else None
-
         new_history_id: Optional[str] = None
 
         if force_full_scan or not last_history_id:
-            days = scan_days_override if scan_days_override else SCAN_DAYS_BACK_INITIAL
-            logger.info(f"inbox_sync: {mailbox} — full backfill (last {days}d)")
+            logger.info(
+                f"inbox_sync: {mailbox} — full backfill "
+                f"(last {scan_days_override or SCAN_DAYS_BACK_INITIAL}d)"
+            )
             message_ids = _list_message_ids_full(gmail, mailbox, scan_days_override)
             new_history_id = _get_current_history_id(gmail)
         else:
@@ -1066,10 +1244,27 @@ async def sync_mailbox(
         gmail_contacts: dict[str, dict] = {}
         seen_in_headers: dict[str, dict] = {}
 
-        async with httpx.AsyncClient(timeout=60.0) as http_client:
+        # ── Single shared HTTP client for all Gemini calls in this run ──
+        async with httpx.AsyncClient(timeout=120.0) as http_client:
+            # ── Step 0: Normalize saved contact org fields ────────────
+            # Fixes "Towne Park - Cindy Wetzel" → org + person name split
+            # BEFORE any merge logic runs, so all downstream code gets clean data.
+            saved_contacts = await _normalize_saved_contact_orgs(
+                http_client, saved_contacts
+            )
+
+            # ── Phase 1: Fetch messages, track headers, queue sig blocks ──
+            # Pure sync work — no Gemini calls here. Collects:
+            #   pending_sigs  → unique sig blocks that need Gemini parsing
+            #   work_items    → (sig_hash, sig_owner, header_name) per segment
+            pending_sigs: dict[str, str] = {}  # sig_hash → sig_block
+            work_items: list[tuple] = []  # (sig_hash, sig_owner, header_name)
+
             for idx, msg_id in enumerate(message_ids):
                 if idx % 200 == 0 and idx > 0:
-                    logger.debug(f"inbox_sync: {mailbox} — {idx}/{len(message_ids)}")
+                    logger.debug(
+                        f"inbox_sync: {mailbox} — phase1 {idx}/{len(message_ids)}"
+                    )
 
                 msg = _fetch_message(gmail, msg_id)
                 if not msg:
@@ -1080,7 +1275,6 @@ async def sync_mailbox(
                     for h in (msg.get("payload", {}).get("headers") or [])
                 }
 
-                # Header interaction-count tracking
                 for hdr in ("From", "To", "Cc", "Bcc"):
                     val = headers.get(hdr, "")
                     display = _display_name(val) if hdr == "From" else ""
@@ -1120,82 +1314,128 @@ async def sync_mailbox(
                         continue
 
                     sig_hash = hashlib.sha256(sig_block.encode()).hexdigest()[:16]
-                    if sig_hash in sig_cache:
-                        parsed = sig_cache[sig_hash]
-                    else:
-                        parsed = await _parse_sig(http_client, sig_block)
-                        sig_cache[sig_hash] = parsed
+                    if sig_hash not in sig_cache:
+                        pending_sigs[sig_hash] = sig_block
 
-                    if not parsed:
+                    work_items.append((sig_hash, sig_owner, header_name))
+
+            # ── Phase 2: Parallel Gemini sig parsing ─────────────────
+            # All unique sig blocks parsed concurrently — was sequential.
+            # Rate limit: Semaphore(20) → ~1200 RPM max against 2000 RPM limit.
+            if pending_sigs:
+                logger.info(
+                    f"inbox_sync: {mailbox} — parsing {len(pending_sigs)} unique "
+                    f"sig blocks in parallel (sem={_SIG_PARSE_SEMAPHORE})"
+                )
+                _parse_sem = asyncio.Semaphore(_SIG_PARSE_SEMAPHORE)
+
+                async def _parse_one(h: str, b: str) -> tuple[str, dict]:
+                    async with _parse_sem:
+                        return h, await _parse_sig(http_client, b)
+
+                parse_tasks = [
+                    _parse_one(h, b)
+                    for h, b in pending_sigs.items()
+                    if h not in sig_cache
+                ]
+                parse_results = await asyncio.gather(
+                    *parse_tasks, return_exceptions=True
+                )
+                for r in parse_results:
+                    if isinstance(r, Exception):
+                        logger.debug(f"inbox_sync: sig parse task error: {r}")
                         continue
+                    h, parsed = r
+                    sig_cache[h] = parsed or {}
 
-                    # Validation gauntlet ───────────────────────────────────
+                logger.info(
+                    f"inbox_sync: {mailbox} — sig parsing done, "
+                    f"cache={len(sig_cache)} entries"
+                )
 
-                    # Layer 1: JA org mismatch (explicit JA Uniforms in parsed_org)
-                    parsed_org = (parsed.get("organization") or "").lower()
-                    if any(
-                        t in parsed_org
-                        for t in ("jauniforms", "j.a. uniforms", "ja uniforms")
-                    ):
-                        rejections["ja_org_mismatch"] += 1
-                        continue
+            # ── Phase 3: Apply results, validation gauntlet ──────────
+            for sig_hash, sig_owner, header_name in work_items:
+                parsed = sig_cache.get(sig_hash)
+                if not parsed:
+                    continue
 
-                    # Layer 2: JA team leak (Sai/Menchu/Ugarcia name on external email)
-                    # This catches the cbrown@evolutionpgs.com bug Layer 1 missed.
-                    if _is_ja_team_leak(parsed, sig_owner):
-                        rejections["ja_team_leak"] += 1
-                        logger.debug(
-                            f"inbox_sync: rejected JA team leak — "
-                            f"{sig_owner} → parsed as "
-                            f"{parsed.get('first_name')} {parsed.get('last_name')}"
-                        )
-                        continue
+                # Layer 1: explicit JA org in parsed sig
+                parsed_org = (parsed.get("organization") or "").lower()
+                if any(
+                    t in parsed_org
+                    for t in ("jauniforms", "j.a. uniforms", "ja uniforms")
+                ):
+                    rejections["ja_org_mismatch"] += 1
+                    continue
 
-                    # Layer 3: email domain mismatch
-                    parsed_email = (parsed.get("email") or "").lower().strip()
-                    if parsed_email and parsed_email != sig_owner:
-                        if _domain(parsed_email) != _domain(sig_owner):
-                            rejections["email_domain_mismatch"] += 1
-                            continue
-
-                    # Layer 4: not a real person
-                    if parsed.get("is_real_person") is False:
-                        rejections["not_real_person"] += 1
-                        continue
-
-                    # Layer 5: confidence threshold
-                    conf = parsed.get("confidence")
-                    if isinstance(conf, (int, float)) and conf < MIN_CONFIDENCE:
-                        rejections["low_confidence"] += 1
-                        continue
-
-                    # Layer 6: name in header — try rescue via parsed email
-                    if not _name_matches_header(parsed, header_name):
-                        if (
-                            parsed_email
-                            and parsed_email != sig_owner
-                            and _domain(parsed_email) == _domain(sig_owner)
-                            and _domain(parsed_email) not in OWN_DOMAINS
-                        ):
-                            sig_owner = parsed_email
-                            rejections["rescued_via_parsed_email"] += 1
-                        else:
-                            rejections["name_mismatch"] += 1
-                            continue
-
-                    # Validate phones
-                    for field in ("phone", "mobile"):
-                        raw = parsed.get(field)
-                        if raw:
-                            parsed[field] = _validate_phone(raw)
-
-                    # Keep the richest sig per email
-                    new_score = sum(1 for v in parsed.values() if v)
-                    old_score = sum(
-                        1 for v in (gmail_contacts.get(sig_owner) or {}).values() if v
+                # Layer 2: JA team name on external email
+                if _is_ja_team_leak(parsed, sig_owner):
+                    rejections["ja_team_leak"] += 1
+                    logger.debug(
+                        f"inbox_sync: rejected JA team leak — "
+                        f"{sig_owner} → {parsed.get('first_name')} {parsed.get('last_name')}"
                     )
-                    if not gmail_contacts.get(sig_owner) or new_score > old_score:
-                        gmail_contacts[sig_owner] = parsed
+                    continue
+
+                # Layer 2.5: JA domain email in sig but external sig_owner
+                _parsed_email_raw = (parsed.get("email") or "").lower().strip()
+                if (
+                    _parsed_email_raw
+                    and _domain(_parsed_email_raw) in OWN_DOMAINS
+                    and _domain(sig_owner) not in OWN_DOMAINS
+                ):
+                    rejections["ja_sig_on_external"] += 1
+                    logger.debug(
+                        f"inbox_sync: rejected JA sig on external — "
+                        f"sig_owner={sig_owner}, parsed_email={_parsed_email_raw}"
+                    )
+                    continue
+
+                # Layer 3: email domain mismatch
+                parsed_email = (parsed.get("email") or "").lower().strip()
+                if parsed_email and parsed_email != sig_owner:
+                    if _domain(parsed_email) != _domain(sig_owner):
+                        rejections["email_domain_mismatch"] += 1
+                        continue
+
+                # Layer 4: not a real person
+                if parsed.get("is_real_person") is False:
+                    rejections["not_real_person"] += 1
+                    continue
+
+                # Layer 5: confidence threshold
+                conf = parsed.get("confidence")
+                if isinstance(conf, (int, float)) and conf < MIN_CONFIDENCE:
+                    rejections["low_confidence"] += 1
+                    continue
+
+                # Layer 6: name-in-header check with rescue path
+                if not _name_matches_header(parsed, header_name):
+                    if (
+                        parsed_email
+                        and parsed_email != sig_owner
+                        and _domain(parsed_email) == _domain(sig_owner)
+                        and _domain(parsed_email) not in OWN_DOMAINS
+                    ):
+                        sig_owner = parsed_email
+                        rejections["rescued_via_parsed_email"] += 1
+                    else:
+                        rejections["name_mismatch"] += 1
+                        continue
+
+                # Validate phones
+                for field in ("phone", "mobile"):
+                    raw = parsed.get(field)
+                    if raw:
+                        parsed[field] = _validate_phone(raw)
+
+                # Keep richest sig per email
+                new_score = sum(1 for v in parsed.values() if v)
+                old_score = sum(
+                    1 for v in (gmail_contacts.get(sig_owner) or {}).values() if v
+                )
+                if not gmail_contacts.get(sig_owner) or new_score > old_score:
+                    gmail_contacts[sig_owner] = parsed
 
         logger.info(
             f"inbox_sync: {mailbox} — "
@@ -1231,6 +1471,18 @@ async def sync_mailbox(
                         return v
                 return None
 
+            _header_dn = (header.get("display_name") or "").strip()
+            _header_fn = None
+            _header_ln = None
+            if _header_dn:
+                _parts = _header_dn.split(None, 1)
+                if len(_parts) >= 2:
+                    _header_fn = _parts[0]
+                    _header_ln = _parts[1]
+                elif len(_parts) == 1 and len(_parts[0]) > 1:
+                    _header_fn = _parts[0]
+            _header_name_dict = {"first_name": _header_fn, "last_name": _header_ln}
+
             org = pick((sig, "organization"), (saved, "organization"))
             org_source = (
                 "signature"
@@ -1245,23 +1497,22 @@ async def sync_mailbox(
                     org = inferred
                     org_source = "domain_inferred"
 
-            # Skip personal-domain contacts with no org (not hospitality)
             if _domain(email) in PERSONAL_DOMAINS and not org:
                 continue
 
             contact = {
                 "email": email,
                 "first_name": pick(
-                    (sig, "first_name"), (saved, "first_name"), (other, "first_name")
+                    (sig, "first_name"),
+                    (saved, "first_name"),
+                    (_header_name_dict, "first_name"),
                 ),
                 "last_name": pick(
-                    (sig, "last_name"), (saved, "last_name"), (other, "last_name")
+                    (sig, "last_name"),
+                    (saved, "last_name"),
+                    (_header_name_dict, "last_name"),
                 ),
-                "display_name": (
-                    header.get("display_name")
-                    or saved.get("display_name")
-                    or other.get("display_name")
-                ),
+                "display_name": (_header_dn or saved.get("display_name") or None),
                 "title": pick((sig, "title"), (saved, "title")),
                 "organization": org,
                 "org_source": org_source,
@@ -1285,7 +1536,6 @@ async def sync_mailbox(
             f"inbox_sync: {mailbox} — {len(merged_contacts)} contacts after merge/filter"
         )
 
-        # ── Upsert to contacts table ──────────────────────────────────
         if merged_contacts:
             upsert_stats = await bulk_upsert_contacts(
                 session,
@@ -1297,7 +1547,6 @@ async def sync_mailbox(
             stats["updated_contacts"] = upsert_stats["updated"]
             stats["errors"] = upsert_stats["errors"]
 
-        # ── Update sync state ─────────────────────────────────────────
         await _upsert_sync_state(
             session,
             mailbox,

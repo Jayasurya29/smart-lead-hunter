@@ -51,6 +51,7 @@ from app.routes.sap import router as sap_router, legacy_router as sap_legacy_rou
 from app.routes.revenue import router as revenue_router
 
 from app.routes.outreach import router as outreach_router
+from app.routes.inbox_contacts import router as inbox_contacts_router
 
 
 # NOTE: Do NOT set WindowsProactorEventLoopPolicy here.
@@ -330,6 +331,7 @@ app.include_router(sap_router)
 app.include_router(sap_legacy_router)
 app.include_router(revenue_router)
 app.include_router(outreach_router)
+app.include_router(inbox_contacts_router)
 
 
 # -----------------------------------------------------------------------------

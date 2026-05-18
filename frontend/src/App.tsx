@@ -14,6 +14,7 @@ import SourcesPage from '@/pages/SourcesPage'
 // HIDDEN 2026-04-24 — re-enable by uncommenting
 // import ClientIntelligence from '@/pages/ClientIntelligence'
 import MapPage from '@/pages/MapPage'
+import ContactsPage from '@/pages/ContactsPage'
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { isAuthenticated, isLoading } = useAuth()
@@ -84,6 +85,14 @@ export default function AppRouter() {
             element={
               <ProtectedRoute>
                 <ExistingHotels />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/contacts"
+            element={
+              <ProtectedRoute>
+                <ContactsPage />
               </ProtectedRoute>
             }
           />
