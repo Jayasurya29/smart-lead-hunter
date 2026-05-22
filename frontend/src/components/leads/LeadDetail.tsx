@@ -792,6 +792,7 @@ function ContactsTab({ contacts, loading, leadId, onEnrich, enriching, enriching
       title: c.title || '',
       organization: c.organization || '',
       email: c.email || '',
+      secondary_email: c.secondary_email || '',
       phone: c.phone || '',
       linkedin: c.linkedin || '',
       evidence_url: c.evidence_url || '',
@@ -902,7 +903,7 @@ function ContactsTab({ contacts, loading, leadId, onEnrich, enriching, enriching
               {(c.name || '?')[0].toUpperCase()}
             </div>
 
-            <div className="flex-1 min-w-0 pr-16">
+            <div className="flex-1 min-w-0 pr-20">
               {editingId === c.id ? (
                 /* ── EDIT MODE ── */
                 <div className="space-y-2" onKeyDown={handleEditKey}>
@@ -930,6 +931,12 @@ function ContactsTab({ contacts, loading, leadId, onEnrich, enriching, enriching
                       value={editForm.email || ''}
                       onChange={(e) => setEditForm(f => ({ ...f, email: e.target.value }))}
                       placeholder="Email"
+                      className="h-8 px-2.5 text-xs text-navy-900 bg-white border border-stone-200 rounded-md outline-none focus:border-navy-400 focus:ring-1 focus:ring-navy-200"
+                    />
+                    <input
+                      value={editForm.secondary_email || ''}
+                      onChange={(e) => setEditForm(f => ({ ...f, secondary_email: e.target.value }))}
+                      placeholder="Secondary Email"
                       className="h-8 px-2.5 text-xs text-navy-900 bg-white border border-stone-200 rounded-md outline-none focus:border-navy-400 focus:ring-1 focus:ring-navy-200"
                     />
                     <input
@@ -1095,6 +1102,12 @@ function ContactsTab({ contacts, loading, leadId, onEnrich, enriching, enriching
                         qc.invalidateQueries({ queryKey: ['contacts', leadId] })
                       }} />
                     ) : null}
+                    {c.secondary_email && (
+                      <a href={`mailto:${c.secondary_email}`} className="flex items-center gap-1.5 text-xs text-stone-500 hover:underline">
+                        <Mail className="w-3.5 h-3.5" /> {c.secondary_email}
+                        <span className="text-[10px] px-1.5 py-0.5 bg-stone-100 text-stone-500 rounded font-medium">2nd</span>
+                      </a>
+                    )}
                     {c.phone && (
                       <a href={`tel:${c.phone}`} className="flex items-center gap-1.5 text-xs text-navy-600 hover:underline">
                         <Phone className="w-3.5 h-3.5" /> {c.phone}
@@ -1305,6 +1318,7 @@ function ContactsTab({ contacts, loading, leadId, onEnrich, enriching, enriching
             <input value={addForm.title || ''} onChange={(e) => setAddForm(f => ({ ...f, title: e.target.value }))} placeholder="Title / Role" className="col-span-2 h-8 px-2.5 text-sm bg-white border border-stone-200 rounded-md outline-none focus:border-navy-400" />
             <input value={addForm.organization || ''} onChange={(e) => setAddForm(f => ({ ...f, organization: e.target.value }))} placeholder="Organization" className="col-span-2 h-8 px-2.5 text-sm bg-white border border-stone-200 rounded-md outline-none focus:border-navy-400" />
             <input value={addForm.email || ''} onChange={(e) => setAddForm(f => ({ ...f, email: e.target.value }))} placeholder="Email" className="h-8 px-2.5 text-xs bg-white border border-stone-200 rounded-md outline-none focus:border-navy-400" />
+            <input value={addForm.secondary_email || ''} onChange={(e) => setAddForm(f => ({ ...f, secondary_email: e.target.value }))} placeholder="Secondary Email" className="h-8 px-2.5 text-xs bg-white border border-stone-200 rounded-md outline-none focus:border-navy-400" />
             <input value={addForm.phone || ''} onChange={(e) => setAddForm(f => ({ ...f, phone: e.target.value }))} placeholder="Phone" className="h-8 px-2.5 text-xs bg-white border border-stone-200 rounded-md outline-none focus:border-navy-400" />
             <input value={addForm.linkedin || ''} onChange={(e) => setAddForm(f => ({ ...f, linkedin: e.target.value }))} placeholder="LinkedIn URL" className="col-span-2 h-8 px-2.5 text-xs bg-white border border-stone-200 rounded-md outline-none focus:border-navy-400" />
             <input value={addForm.evidence_url || ''} onChange={(e) => setAddForm(f => ({ ...f, evidence_url: e.target.value }))} placeholder="Evidence URL" className="col-span-2 h-8 px-2.5 text-xs bg-white border border-stone-200 rounded-md outline-none focus:border-navy-400" />

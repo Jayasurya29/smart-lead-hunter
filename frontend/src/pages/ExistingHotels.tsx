@@ -70,6 +70,7 @@ interface Filters {
   brand_tier: string
   is_client: string
   zone: string
+  data_source: string
   sort: string
 }
 
@@ -85,6 +86,7 @@ const DEFAULT_FILTERS: Filters = {
   brand_tier: '',
   is_client: '',
   zone: '',
+  data_source: '',
   sort: 'name_az',
 }
 
@@ -288,6 +290,7 @@ export default function ExistingHotels() {
       brand_tier: filters.brand_tier || undefined,
       is_client:  filters.is_client  || undefined,
       zone:       filters.zone       || undefined,
+      data_source: filters.data_source || undefined,
     }),
     refetchInterval: 30_000,
     refetchIntervalInBackground: false,
@@ -557,6 +560,19 @@ export default function ExistingHotels() {
             <option value="true">Clients Only</option>
             <option value="false">Prospects Only</option>
           </select>
+
+          {/* TEMPORARY: Towne Park campaign filter (remove after enrichment complete) */}
+          <button
+            onClick={() => handleFilterChange('data_source', filters.data_source === 'towne_park' ? '' : 'towne_park')}
+            className={cn(
+              'flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-semibold rounded-lg transition shadow-sm whitespace-nowrap',
+              filters.data_source === 'towne_park'
+                ? 'bg-violet-600 text-white border border-violet-700 hover:bg-violet-700'
+                : 'bg-white text-stone-500 border border-stone-200 hover:border-violet-300 hover:text-violet-600',
+            )}
+          >
+            🅿️ Towne Park
+          </button>
 
           {Object.entries(filters).some(([k, v]) => v && k !== 'sort' && k !== 'search') && (
             <button
@@ -1706,20 +1722,21 @@ function HotelContactsTab({
     } catch (e) { console.error('Toggle scope failed', e) }
   }
   async function handleDelete(contactId: number) {
-    if (!confirm('Delete this contact?')) return
     setDeleting(contactId)
     try {
       await deleteHotelContact(hotelId, contactId)
       qc.invalidateQueries({ queryKey: ['hotel-contacts', hotelId] })
       qc.invalidateQueries({ queryKey: ['existing-hotel', hotelId] })
-    } catch { /* silent */ }
+    } catch (e: any) {
+      console.error('Delete contact failed:', e?.response?.status, e?.response?.data, e)
+    }
     setDeleting(null)
   }
   function startEdit(c: Contact) {
     setEditingId(c.id)
     setEditForm({
       name: c.name || '', title: c.title || '', organization: c.organization || '',
-      email: c.email || '', phone: c.phone || '', linkedin: c.linkedin || '',
+      email: c.email || '', secondary_email: c.secondary_email || '', phone: c.phone || '', linkedin: c.linkedin || '',
       evidence_url: c.evidence_url || '',
     })
   }
@@ -1749,7 +1766,7 @@ function HotelContactsTab({
   const isStale = (y: number | null | undefined) => typeof y === 'number' && currentYear - y >= 2
 
   return (
-    <div className="space-y-2.5 animate-fadeIn">
+    <div className="space-y-3 animate-fadeIn">
       {progressCard}
 
       <div className="flex items-center gap-3 px-3 py-2 bg-slate-50 rounded-md border border-slate-200 text-2xs flex-wrap">
@@ -1773,7 +1790,7 @@ function HotelContactsTab({
       </div>
 
       {contacts.map((c) => (
-        <div key={c.id} className={cn('rounded-lg border p-4 transition relative group', c.is_primary ? 'border-navy-200 bg-navy-50/30' : 'border-stone-100 hover:border-stone-200')}>
+        <div key={c.id} className={cn('rounded-lg border p-4 transition relative group shadow-sm', c.is_primary ? 'border-navy-200 bg-navy-50/30' : 'border-stone-200 hover:border-stone-300')}>
           <div className="absolute top-3 right-3 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition">
             {editingId !== c.id && (
               <button onClick={() => startEdit(c)} className="p-1.5 text-stone-400 hover:text-navy-600 hover:bg-stone-100 rounded-md transition" title="Edit contact">
@@ -1813,6 +1830,7 @@ function HotelContactsTab({
                     <input value={editForm.title || ''} onChange={(e) => setEditForm(f => ({ ...f, title: e.target.value }))} placeholder="Title / Role" className="col-span-2 h-8 px-2.5 text-sm text-navy-900 bg-white border border-stone-200 rounded-md outline-none focus:border-navy-400 focus:ring-1 focus:ring-navy-200" />
                     <input value={editForm.organization || ''} onChange={(e) => setEditForm(f => ({ ...f, organization: e.target.value }))} placeholder="Organization" className="col-span-2 h-8 px-2.5 text-sm text-navy-900 bg-white border border-stone-200 rounded-md outline-none focus:border-navy-400 focus:ring-1 focus:ring-navy-200" />
                     <input value={editForm.email || ''} onChange={(e) => setEditForm(f => ({ ...f, email: e.target.value }))} placeholder="Email" className="h-8 px-2.5 text-xs text-navy-900 bg-white border border-stone-200 rounded-md outline-none focus:border-navy-400 focus:ring-1 focus:ring-navy-200" />
+                    <input value={editForm.secondary_email || ''} onChange={(e) => setEditForm(f => ({ ...f, secondary_email: e.target.value }))} placeholder="Secondary Email" className="h-8 px-2.5 text-xs text-navy-900 bg-white border border-stone-200 rounded-md outline-none focus:border-navy-400 focus:ring-1 focus:ring-navy-200" />
                     <input value={editForm.phone || ''} onChange={(e) => setEditForm(f => ({ ...f, phone: e.target.value }))} placeholder="Phone" className="h-8 px-2.5 text-xs text-navy-900 bg-white border border-stone-200 rounded-md outline-none focus:border-navy-400 focus:ring-1 focus:ring-navy-200" />
                     <input value={editForm.linkedin || ''} onChange={(e) => setEditForm(f => ({ ...f, linkedin: e.target.value }))} placeholder="LinkedIn URL" className="col-span-2 h-8 px-2.5 text-xs text-navy-900 bg-white border border-stone-200 rounded-md outline-none focus:border-navy-400 focus:ring-1 focus:ring-navy-200" />
                     <input value={editForm.evidence_url || ''} onChange={(e) => setEditForm(f => ({ ...f, evidence_url: e.target.value }))} placeholder="Evidence URL" className="col-span-2 h-8 px-2.5 text-xs text-navy-900 bg-white border border-stone-200 rounded-md outline-none focus:border-navy-400 focus:ring-1 focus:ring-navy-200" />
@@ -1829,7 +1847,7 @@ function HotelContactsTab({
                   <div className="flex items-center gap-2">
                     <span className="text-sm font-semibold text-navy-900">{c.name}</span>
                     {c.is_primary && <Star className="w-3.5 h-3.5 text-gold-500 fill-gold-500" />}
-                    <div className="flex items-center gap-2 ml-auto">
+                    <div className="flex items-center gap-2 ml-auto pr-3">
                       <PriorityBadge label={(c as any).priority_label} reason={(c as any).priority_reason} />
                       {c.score > 0 && (
                         <div className="flex flex-col items-end relative">
@@ -1906,6 +1924,12 @@ function HotelContactsTab({
                         onEmailFound={() => qc.invalidateQueries({ queryKey: ['hotel-contacts', hotelId] })}
                       />
                     ) : null}
+                    {c.secondary_email && (
+                      <a href={`mailto:${c.secondary_email}`} className="flex items-center gap-1.5 text-xs text-stone-500 hover:underline">
+                        <Mail className="w-3.5 h-3.5" /> {c.secondary_email}
+                        <span className="text-[10px] px-1.5 py-0.5 bg-stone-100 text-stone-500 rounded font-medium">2nd</span>
+                      </a>
+                    )}
                     {c.phone && (
                       <a href={`tel:${c.phone}`} className="flex items-center gap-1.5 text-xs text-navy-600 hover:underline">
                         <Phone className="w-3.5 h-3.5" /> {c.phone}
@@ -2033,6 +2057,7 @@ function HotelContactsTab({
             <input value={addForm.title || ''} onChange={(e) => setAddForm(f => ({ ...f, title: e.target.value }))} placeholder="Title / Role" className="col-span-2 h-8 px-2.5 text-sm bg-white border border-stone-200 rounded-md outline-none focus:border-navy-400" />
             <input value={addForm.organization || ''} onChange={(e) => setAddForm(f => ({ ...f, organization: e.target.value }))} placeholder="Organization" className="col-span-2 h-8 px-2.5 text-sm bg-white border border-stone-200 rounded-md outline-none focus:border-navy-400" />
             <input value={addForm.email || ''} onChange={(e) => setAddForm(f => ({ ...f, email: e.target.value }))} placeholder="Email" className="h-8 px-2.5 text-xs bg-white border border-stone-200 rounded-md outline-none focus:border-navy-400" />
+            <input value={addForm.secondary_email || ''} onChange={(e) => setAddForm(f => ({ ...f, secondary_email: e.target.value }))} placeholder="Secondary Email" className="h-8 px-2.5 text-xs bg-white border border-stone-200 rounded-md outline-none focus:border-navy-400" />
             <input value={addForm.phone || ''} onChange={(e) => setAddForm(f => ({ ...f, phone: e.target.value }))} placeholder="Phone" className="h-8 px-2.5 text-xs bg-white border border-stone-200 rounded-md outline-none focus:border-navy-400" />
             <input value={addForm.linkedin || ''} onChange={(e) => setAddForm(f => ({ ...f, linkedin: e.target.value }))} placeholder="LinkedIn URL" className="col-span-2 h-8 px-2.5 text-xs bg-white border border-stone-200 rounded-md outline-none focus:border-navy-400" />
             <select value={addForm.scope || 'hotel_specific'} onChange={(e) => setAddForm(f => ({ ...f, scope: e.target.value }))} className="col-span-2 h-8 px-2.5 text-xs bg-white border border-stone-200 rounded-md outline-none focus:border-navy-400">

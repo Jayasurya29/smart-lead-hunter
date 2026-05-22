@@ -61,6 +61,7 @@ export interface ExistingHotelFilters {
   is_client?: string
   has_contact?: string
   zone?: string
+  data_source?: string
   sort?: string
 }
 
@@ -83,6 +84,7 @@ export async function fetchExistingHotels(
   if (filters.is_client)   params.set('is_client', filters.is_client)
   if (filters.has_contact) params.set('has_contact', filters.has_contact)
   if (filters.zone)        params.set('zone', filters.zone)
+  if (filters.data_source) params.set('data_source', filters.data_source)
   if (filters.sort)        params.set('sort', filters.sort)
 
   const { data } = await api.get<ExistingHotelListResponse>(

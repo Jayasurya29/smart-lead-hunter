@@ -71,6 +71,7 @@ async def list_existing_hotels(
     status: Optional[str] = None,
     has_contact: Optional[str] = None,
     zone: Optional[str] = None,
+    data_source: Optional[str] = None,
     sort: str = "name_az",
     db: AsyncSession = Depends(get_db),
 ):
@@ -128,6 +129,13 @@ async def list_existing_hotels(
     if zone:
         query = query.where(ExistingHotel.zone == zone)
         count_query = count_query.where(ExistingHotel.zone == zone)
+
+    # TOWNE PARK FILTER (2026-05-20): temporary filter for batch enrichment.
+    # Matches data_source exactly. Remove once the TownePark enrichment
+    # campaign is complete.
+    if data_source:
+        query = query.where(ExistingHotel.data_source == data_source)
+        count_query = count_query.where(ExistingHotel.data_source == data_source)
 
     if has_contact == "true":
         # A contact exists if EITHER the legacy gm_name or the canonical
@@ -1012,6 +1020,23 @@ async def delete_hotel_contact(
     )
     contact = result.scalar_one_or_none()
     if not contact:
+        # Debug: check if contact exists at all
+        any_contact = await db.execute(
+            select(
+                LeadContact.id, LeadContact.lead_id, LeadContact.existing_hotel_id
+            ).where(LeadContact.id == contact_id)
+        )
+        row = any_contact.first()
+        if row:
+            logger.warning(
+                f"delete_hotel_contact: contact {contact_id} exists but "
+                f"lead_id={row.lead_id}, existing_hotel_id={row.existing_hotel_id}, "
+                f"requested hotel_id={hotel_id}"
+            )
+        else:
+            logger.warning(
+                f"delete_hotel_contact: contact {contact_id} does not exist at all"
+            )
         raise HTTPException(status_code=404, detail="Contact not found")
     await db.delete(contact)
     await db.commit()
@@ -1094,6 +1119,7 @@ async def update_hotel_contact(
         "name",
         "title",
         "email",
+        "secondary_email",
         "phone",
         "linkedin",
         "organization",
@@ -1135,6 +1161,7 @@ async def add_hotel_contact(
         name=name,
         title=body.get("title"),
         email=body.get("email"),
+        secondary_email=body.get("secondary_email"),
         phone=body.get("phone"),
         linkedin=body.get("linkedin"),
         organization=body.get("organization"),

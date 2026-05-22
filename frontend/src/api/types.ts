@@ -106,6 +106,7 @@ export interface Contact {
   name: string
   title: string | null
   email: string | null
+  secondary_email: string | null
   phone: string | null
   linkedin: string | null
   organization: string | null

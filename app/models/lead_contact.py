@@ -67,6 +67,7 @@ class LeadContact(Base):
     name = Column(String(200), nullable=False)
     title = Column(String(200))
     email = Column(String(255))
+    secondary_email = Column(String(255))
     phone = Column(String(50))
     linkedin = Column(String(500))
     organization = Column(String(300))
@@ -217,6 +218,7 @@ class LeadContact(Base):
             "name": self.name,
             "title": self.title,
             "email": self.email,
+            "secondary_email": self.secondary_email,
             "phone": self.phone,
             "linkedin": self.linkedin,
             "organization": self.organization,
