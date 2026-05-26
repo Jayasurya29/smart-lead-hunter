@@ -71,7 +71,7 @@ function AnimatedTabs({
     measure()
     // Re-measure after fonts finish loading (fixes shift on first login)
     document.fonts?.ready?.then(() => requestAnimationFrame(measure))
-  }, [tab])
+  }, [tab, tween])
 
   useEffect(() => {
     function onResize() {
@@ -97,7 +97,6 @@ function AnimatedTabs({
       {TABS.map((t) => {
         const Icon = t.icon
         const isActive = tab === t.key
-        const showCount = isActive && tween !== undefined
         return (
           <button
             key={t.key}
@@ -110,9 +109,14 @@ function AnimatedTabs({
           >
             <Icon className="w-4 h-4" />
             {t.label}
-            {showCount && (
-              <span className={cn('text-2xs ml-0.5 tabular-nums', isActive ? 'text-navy-500' : 'text-stone-400')}>
-                {tween!.toLocaleString()}
+            {/* Reserve count badge width on active tab to prevent layout
+                shift when data arrives. Inactive tabs don't need it. */}
+            {isActive && (
+              <span className={cn(
+                'text-2xs ml-0.5 tabular-nums',
+                tween !== undefined ? 'text-navy-500' : 'invisible',
+              )}>
+                {tween !== undefined ? tween.toLocaleString() : '00'}
               </span>
             )}
           </button>

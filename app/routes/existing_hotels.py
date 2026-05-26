@@ -1128,9 +1128,84 @@ async def update_hotel_contact(
     for fld, value in body.items():
         if fld in allowed:
             setattr(contact, fld, value)
+
+    # Sync primary contact changes back to hotel record
+    if contact.is_primary:
+        hotel_result = await db.execute(
+            select(ExistingHotel).where(ExistingHotel.id == hotel_id)
+        )
+        hotel = hotel_result.scalar_one_or_none()
+        if hotel:
+            hotel.contact_name = contact.name
+            hotel.contact_title = contact.title
+            hotel.contact_email = contact.email
+            hotel.contact_phone = contact.phone
+
+    # Rescore contact — title/scope edit changes the score + priority
+    from app.services.contact_scoring import apply_score_to_contact
+
+    apply_score_to_contact(
+        contact,
+        title=contact.title,
+        scope=contact.scope,
+        strategist_priority=contact.strategist_priority,
+    )
     contact.updated_at = local_now()
     await db.commit()
     return contact.to_dict()
+
+
+@router.post("/{hotel_id}/contacts/{contact_id}/toggle-scope")
+async def toggle_hotel_contact_scope(
+    hotel_id: int,
+    contact_id: int,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    _csrf=Depends(require_ajax),
+):
+    """Toggle a contact's scope. Mirrors the potential_leads variant."""
+    from app.models.lead_contact import LeadContact
+    from app.services.utils import local_now
+
+    body = await request.json()
+    new_scope = body.get("scope", "")
+    _VALID_SCOPES = (
+        "hotel_specific",
+        "chain_area",
+        "management_corporate",
+        "chain_corporate",
+        "owner",
+    )
+    if new_scope not in _VALID_SCOPES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid scope. Must be one of: {', '.join(_VALID_SCOPES)}",
+        )
+
+    result = await db.execute(
+        select(LeadContact).where(
+            LeadContact.id == contact_id,
+            LeadContact.existing_hotel_id == hotel_id,
+        )
+    )
+    contact = result.scalar_one_or_none()
+    if not contact:
+        raise HTTPException(status_code=404, detail="Contact not found")
+
+    contact.scope = new_scope
+
+    # Rescore — scope change affects the multiplier
+    from app.services.contact_scoring import apply_score_to_contact
+
+    apply_score_to_contact(
+        contact,
+        title=contact.title,
+        scope=new_scope,
+        strategist_priority=contact.strategist_priority,
+    )
+    contact.updated_at = local_now()
+    await db.commit()
+    return {"status": "updated", "scope": new_scope, "score": contact.score}
 
 
 @router.post("/{hotel_id}/contacts")

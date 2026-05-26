@@ -352,7 +352,10 @@ if _FRONTEND_DIR.is_dir():
         file_path = _FRONTEND_DIR / request.url.path.lstrip("/")
         if file_path.is_file():
             return FileResponse(str(file_path))
-        return FileResponse(str(_FRONTEND_DIR / "index.html"))
+        return FileResponse(
+            str(_FRONTEND_DIR / "index.html"),
+            headers={"Cache-Control": "no-cache, no-store, must-revalidate"},
+        )
 
     # AUDIT 2026-05-05 (bug #36): Return JSON 404 for unknown /api/* paths
     # so API consumers get a real error instead of the React shell with
@@ -370,7 +373,13 @@ if _FRONTEND_DIR.is_dir():
         file_path = _FRONTEND_DIR / full_path
         if file_path.is_file():
             return FileResponse(str(file_path))
-        return FileResponse(str(_FRONTEND_DIR / "index.html"))
+        # index.html must never be cached — it references hashed asset
+        # filenames that change on every build. Caching it causes the
+        # "giant logo / no CSS" bug on first visit after a rebuild.
+        return FileResponse(
+            str(_FRONTEND_DIR / "index.html"),
+            headers={"Cache-Control": "no-cache, no-store, must-revalidate"},
+        )
 
     logger.info(f"Frontend: serving production build from {_FRONTEND_DIR}")
 else:

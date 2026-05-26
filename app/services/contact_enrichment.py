@@ -1999,7 +1999,6 @@ async def _extract_contacts_with_gemini(
     headroom for Gemini 2.5 Flash "thinking" tokens on large pages.
     (Bug #1 fix — 2026-04-22.)
     """
-    model = get_enrichment_gemini_model()
     prompt = CONTACT_EXTRACTION_PROMPT_V3.format(
         hotel_name=hotel_name,
         location=location,
@@ -2009,7 +2008,9 @@ async def _extract_contacts_with_gemini(
     try:
         return await _call_gemini(
             prompt,
-            model=model,
+            # model= intentionally omitted — use the 9-entry fallback chain
+            # (4 endpoints × primary, gemini-3-flash-preview, 4 × lite)
+            # instead of pinning to primary model which has no recovery on timeout.
             response_schema=CONTACT_EXTRACTION_SCHEMA,
             max_output_tokens=32768,
         )
@@ -2044,6 +2045,7 @@ def _build_contact_grounding_prompt(
     state: Optional[str],
     country: Optional[str],
     opening_date: Optional[str],
+    is_existing_hotel: bool = False,
 ) -> str:
     """Build a context-aware grounding prompt using full SLH intelligence stack.
 
@@ -2228,8 +2230,41 @@ Search property-level FIRST:
 Only fall back to {management_company or brand or "operator"} corporate if
 no on-property pre-opening team has been named yet."""
     else:
-        status_context = """
+        # Determine opening year for age context
+        _opening_year = ""
+        if opening_date:
+            import re as _re_od
+
+            _m = _re_od.search(r"(20\d{2})", opening_date)
+            if _m:
+                _opening_year = _m.group(1)
+
+        _recency_block = ""
+        if is_existing_hotel:
+            _recency_block = f"""
+⚠️ CRITICAL — RECENCY REQUIREMENT FOR OPEN HOTELS:
+This hotel {"opened in " + _opening_year + " and " if _opening_year else ""}has been operating for years.
+Hotels experience staff turnover — GMs, Directors, and managers change
+every 2-4 years. You MUST only return people CURRENTLY at this property.
+
+RULES:
+1. If a press release from 2022 or earlier announces "John Smith as GM",
+   DO NOT assume John is still there. Search for MORE RECENT mentions.
+2. If you find MULTIPLE people with the same title (e.g. 3 different GMs
+   from 2019, 2021, and 2024), ONLY return the MOST RECENT one.
+3. LinkedIn "current position" at this hotel is the GOLD STANDARD —
+   prioritize it over any press release or news article.
+4. ONE person per singular role: there is only 1 GM, 1 Dir of Housekeeping,
+   1 Dir of Operations at any property at any time.
+5. If someone's LinkedIn shows they LEFT this hotel, DO NOT include them
+   even if a press release says they were appointed here.
+6. The current year is 2026. Sources from 2024-2026 are reliable.
+   Sources from 2022-2023 are QUESTIONABLE. Sources from 2021 or earlier
+   are UNRELIABLE for current staffing."""
+
+        status_context = f"""
 STATUS: OPEN AND OPERATING
+{_recency_block}
 The on-property team IS hired. Property-level staff are the day-to-day
 uniform buyers — they are ALWAYS the primary targets:
   - Director of Housekeeping / Executive Housekeeper (specs uniforms,
@@ -2652,6 +2687,7 @@ async def _enrich_contacts_grounded(
     state: Optional[str],
     country: Optional[str],
     opening_date: Optional[str],
+    is_existing_hotel: bool = False,
 ) -> Optional[list[dict]]:
     """One-shot grounded contact enrichment via Gemini googleSearch.
 
@@ -2692,6 +2728,7 @@ async def _enrich_contacts_grounded(
         state=state,
         country=country,
         opening_date=opening_date,
+        is_existing_hotel=is_existing_hotel,
     )
 
     payload = {
@@ -4341,6 +4378,7 @@ async def _verify_contacts_with_gemini(
     project_type: Optional[str] = None,
     developer: Optional[str] = None,
     owner: Optional[str] = None,
+    is_existing_hotel: bool = False,
 ) -> list[dict]:
     """
     AI verification layer: Gemini reads raw snippets to determine each contact
@@ -4384,7 +4422,21 @@ async def _verify_contacts_with_gemini(
             "Some staff may still be listed under the parent brand."
         )
     else:
-        hotel_status = "HOTEL STATUS: OPEN — Standard verification rules apply."
+        if is_existing_hotel:
+            hotel_status = (
+                "HOTEL STATUS: OPEN AND OPERATING (existing hotel enrichment)\n"
+                "⚠️ DEPARTED EMPLOYEE DETECTION REQUIRED:\n"
+                "This hotel has been operating for years. Staff turnover is normal.\n"
+                "For EACH contact, verify they are CURRENTLY at this property:\n"
+                "  - If their LinkedIn shows a DIFFERENT current employer → REJECT with reason 'departed'\n"
+                "  - If the source is from 2022 or earlier and no recent confirmation exists → mark confidence LOW\n"
+                "  - If multiple people share the same singular role (e.g. 2 GMs), keep ONLY the most recent\n"
+                "  - The current year is 2026. Sources from 2024-2026 are reliable.\n"
+                "Add 'possibly_departed' to the source_detail field for any contact whose\n"
+                "evidence is older than 2 years with no recent LinkedIn confirmation."
+            )
+        else:
+            hotel_status = "HOTEL STATUS: OPEN — Standard verification rules apply."
 
     # ── BRAND-AWARE PROCUREMENT GUIDANCE ──
     # Independent / boutique / founder-led brands have a fundamentally
@@ -4705,10 +4757,10 @@ async def _verify_contacts_with_gemini(
         contacts_json=json.dumps(contacts_for_verification, indent=2),
     )
 
-    model = get_enrichment_gemini_model()
-
     try:
-        verifications = await _call_gemini(prompt, model=model, timeout=120)
+        # model= intentionally omitted — use the 9-entry fallback chain
+        # instead of pinning to primary model which has no recovery on timeout.
+        verifications = await _call_gemini(prompt, timeout=120)
         if verifications is None:
             logger.warning(
                 "Gemini verification returned no data, keeping contacts as-is"
@@ -5840,6 +5892,7 @@ async def enrich_lead_contacts(
         state=state,
         country=country,
         opening_date=opening_date,
+        is_existing_hotel=is_existing_hotel,
     )
 
     if grounded_contacts is not None:
@@ -5872,6 +5925,7 @@ async def enrich_lead_contacts(
                     project_type=project_type_str,
                     developer=developer,
                     owner=owner,
+                    is_existing_hotel=is_existing_hotel,
                 )
             except Exception as ex:
                 logger.warning(
@@ -6355,6 +6409,7 @@ async def enrich_lead_contacts(
                 project_type=research_state.project_stage,
                 developer=developer,
                 owner=owner,
+                is_existing_hotel=is_existing_hotel,
             )
         except Exception as ex:
             logger.warning(f"Gemini verification failed (keeping raw contacts): {ex}")
@@ -6690,6 +6745,8 @@ async def _enrich_lead_contacts_v4_legacy(
                 country=country,
                 opening_date=opening_date,
                 project_type=project_type_str,
+                # v4 legacy path — no is_existing_hotel in scope; default False
+                is_existing_hotel=False,
             )
             # Restore protected contacts that Gemini tried to reject.
             # These are in contacts_before_verify with _gemini_rejected=True but

@@ -2198,8 +2198,9 @@ function HotelEditTab({ hotel, hotelId }: { hotel: ExistingHotel; hotelId: numbe
             const n = Number(v)
             if (!Number.isNaN(n)) payload[k] = n
           }
-        } else if (v !== '' && v !== null && v !== undefined) {
-          payload[k] = (k === 'room_count' && v) ? Number(v) : v
+        } else {
+            // Send empty strings as null so backend clears the field
+            payload[k] = (v === '' || v === null || v === undefined) ? null : ((k === 'room_count' && v) ? Number(v) : v)
         }
       })
       await editExistingHotel(hotelId, payload)
