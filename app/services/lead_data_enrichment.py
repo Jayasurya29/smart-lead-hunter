@@ -405,48 +405,26 @@ def _build_grounding_prompt(
     country: str,
     brand: str,
 ) -> str:
+    """Natural language grounding prompt — gets real citations.
+
+    2026-05-27: Switched from JSON format to natural question. Testing proved
+    JSON format causes phantom grounding (zero citations) on BOTH 2.5 Flash
+    and 3.5 Flash — the model skips the search and answers from training data.
+    Natural language gets 9-14 citations with verified, current information.
+
+    The structured fields are extracted from the grounded text by a cheap
+    Flash-Lite Call 2 in _enrich_lead_data_grounded.
+    """
     location = ", ".join(filter(None, [city, state, country]))
-    brand_line = f"BRAND: {brand}\n" if brand else ""
-    return f"""You are researching a specific hotel for a B2B uniform sales pipeline.
+    brand_line = f" ({brand})" if brand else ""
 
-HOTEL: {hotel_name}
-LOCATION: {location}
-{brand_line}
-Use Google Search to find the MOST CURRENT information about this hotel.
-Prefer sources from the last 12 months. Look for:
-  - Most recent announced opening / reopening date (delays count!)
-  - Full ownership and operator chain — distinguish brand LICENSOR
-    (e.g. "Hilton Worldwide", "Marriott") from day-to-day OPERATOR
-    (e.g. "Crescent Hotels", "Aimbridge"). The operator buys uniforms.
-  - Property details: room count, brand tier, project type
-  - Street address (only if officially announced)
-  - Official hotel website (the OPERATOR's site, not booking.com or expedia)
-  - Geographic coordinates (lat/lng) — only if you can find them on a
-    press release, developer site, or embedded map. Do NOT estimate
-    coordinates from a city name; return null if not directly stated.
-
-Return a JSON object with these fields. Use null for any field you
-cannot confidently determine — DO NOT guess.
-
-{{
-  "opening_date": "Most recent announced date — e.g. 'December 2026', 'Q4 2027', 'Spring 2028'",
-  "project_type": "new_opening | renovation | rebrand | reopening | conversion | ownership_change | residences_only",
-  "room_count": 250,
-  "brand": "Hotel brand / flag (e.g. 'Marriott', 'Four Seasons', 'Independent')",
-  "brand_tier": "tier1_ultra_luxury | tier2_luxury | tier3_upper_upscale | tier4_upscale | tier5_skip — pick tier5_skip for any brand below genuine 4-star full-service. This includes ALL budget/economy (Days Inn, Motel 6, Super 8), ALL midscale (Hampton, Holiday Inn Express, Fairfield, La Quinta, Comfort Inn), ALL select-service (Courtyard, Aloft, AC Hotels, Hyatt Place, Four Points, Hilton Garden Inn, citizenM, Cambria), and ALL extended-stay (Residence Inn, Homewood Suites, Staybridge, Element, Hyatt House). Only full-service 4-star+ brands (DoubleTree, Crowne Plaza, Delta Hotels, Novotel, etc.) belong in tier4_upscale.",
-  "management_company": "Day-to-day hotel OPERATOR — the company running the hotel (NOT brand licensor like Marriott/Hilton/Hyatt)",
-  "owner": "Property owner / real estate holding entity",
-  "developer": "Entity BUILDING the property (often same as owner for new builds)",
-  "address": "Street address if officially announced — null if not yet public",
-  "hotel_website": "Official hotel/operator URL — exclude booking.com, expedia.com, hotels.com, tripadvisor.com, yelp.com, google.com",
-  "latitude": 25.7617,
-  "longitude": -80.1918,
-  "description": "1-2 sentence summary of the property",
-  "confidence": "high | medium | low"
-}}
-
-Return ONLY a single JSON object — no preamble, no markdown fences.
-Pick exactly ONE value for each enum field — never pipe-separated lists."""
+    return (
+        f"What is the latest news about {hotel_name}{brand_line} in {location}? "
+        f"When does it open, who is the developer and owner, who will operate it, "
+        f"how many rooms will it have, and what is its street address? "
+        f"Also mention the management company if different from the brand, "
+        f"and whether this is a new opening, renovation, rebrand, or conversion."
+    )
 
 
 def _validate_grounding_response(parsed: Dict) -> Dict:
@@ -584,13 +562,14 @@ async def _enrich_lead_data_grounded(
     import httpx
     from app.services.gemini_client import get_gemini_headers
 
-    # Build the URL directly so we can pin grounding to a regional endpoint
-    # (us-central1) regardless of the system-wide VERTEX_LOCATION setting.
+    # Build the grounding URL with smart model→endpoint routing.
     #
-    # Why: grounded calls on the "global" endpoint frequently come back with
-    # ZERO source citations — Gemini ignores the googleSearch tool and answers
-    # from training data instead ("phantom grounding"). Regional endpoints
-    # return reliable, cited grounding results.
+    # History: gemini-2.5-flash on "global" produced phantom grounding (zero
+    # citations), so we hardcoded us-central1. With gemini-3.5-flash, global
+    # works correctly AND is the ONLY option (3.x 404s on us-central1).
+    # Smart routing (2026-05-27) handles both:
+    #   - gemini-3.x → global (required, also better grounding quality)
+    #   - gemini-2.x → us-central1 (still reliable for 2.x)
     #
     # Other paths (auto_enrich, smart_scrape, weekly_discovery, contact
     # research) keep using whatever VERTEX_LOCATION points at — usually
@@ -603,12 +582,20 @@ async def _enrich_lead_data_grounded(
         config = _get_config()
         project = config["vertex_project_id"]
         model = config["model"]
-        # Hardcoded — grounding requires a regional endpoint.
-        # us-central1 picked because it's lowest-latency from Florida and has
-        # the broadest model availability for Gemini 2.5 Flash.
-        grounding_location = "us-central1"
+        # Smart routing (2026-05-27): gemini-3.x → global, 2.x → us-central1.
+        # Global is REQUIRED for 3.x models (us-central1 returns 404).
+        # 3.5 Flash grounding is also significantly better quality — finds
+        # owner/developer names, construction updates, and specific details
+        # that 2.5 Flash missed.
+        if any(tag in model for tag in ("gemini-3", "gemini-4")):
+            grounding_location = "global"
+            host = "aiplatform.googleapis.com"
+        else:
+            # 2.x → us-central1 (proven reliable, lowest latency from FL)
+            grounding_location = "us-central1"
+            host = f"{grounding_location}-aiplatform.googleapis.com"
         url = (
-            f"https://{grounding_location}-aiplatform.googleapis.com/v1/"
+            f"https://{host}/v1/"
             f"projects/{project}/locations/{grounding_location}/"
             f"publishers/google/models/{model}:generateContent"
         )
@@ -658,7 +645,7 @@ async def _enrich_lead_data_grounded(
 
     elapsed = time.monotonic() - start
 
-    # Parse the JSON inside Gemini's text response
+    # Parse the natural text from Gemini's grounded response
     try:
         candidate = data["candidates"][0]
         content = candidate["content"]["parts"][0]["text"].strip()
@@ -669,37 +656,10 @@ async def _enrich_lead_data_grounded(
         )
         return None
 
-    # Strip markdown fences if Gemini wrapped JSON
-    if content.startswith("```"):
-        parts = content.split("```")
-        if len(parts) >= 2:
-            inner = parts[1]
-            if inner.startswith("json"):
-                inner = inner[4:].strip()
-            content = inner.strip().rstrip("`").strip()
-
-    try:
-        parsed = json.loads(content)
-    except json.JSONDecodeError as e:
+    if not content or len(content) < 30:
         logger.warning(
-            f"Grounding: JSON decode failed for '{hotel_name}': {e} — falling back"
-        )
-        return None
-
-    if not isinstance(parsed, dict):
-        logger.warning(
-            f"Grounding: response not a dict for '{hotel_name}' — falling back"
-        )
-        return None
-
-    cleaned = _validate_grounding_response(parsed)
-
-    # Count meaningful fields (excluding confidence which is metadata)
-    meaningful = sum(1 for k in cleaned if k != "confidence")
-    if meaningful < _GROUNDING_MIN_FIELDS:
-        logger.info(
-            f"Grounding: only {meaningful} fields filled for '{hotel_name}' "
-            f"(min {_GROUNDING_MIN_FIELDS}) — falling back to Serper+Gemini"
+            f"Grounding: insufficient text for '{hotel_name}' "
+            f"({len(content)} chars) — falling back"
         )
         return None
 
@@ -712,68 +672,135 @@ async def _enrich_lead_data_grounded(
         if title:
             sources.append(title)
 
-    # Reject "phantom grounding" — Gemini sometimes ignores the googleSearch
-    # tool at temperature=1.0 and answers from training data instead.
-    # Symptom: well-formed JSON, plausible fields, but zero source citations
-    # in groundingMetadata. The data is then untrustworthy (potentially
-    # stale or hallucinated, especially for obscure hotels). Vertex doesn't
-    # bill grounding calls without citations, so falling back here costs
-    # only the Serper+Gemini path — which produces real sources.
+    # Reject phantom grounding (no citations = answered from training data).
+    # With the natural language prompt, phantom is much rarer than with JSON
+    # format, but still possible. No tiered phantom trust — if there are no
+    # citations, the data is unverified and we fall back.
     if len(sources) == 0:
-        # Tiered phantom policy — Gemini sometimes answers from training data
-        # instead of actually searching (no citations returned). For obscure
-        # hotels this is dangerous (hallucination risk). For well-documented
-        # properties it's often correct — Sundance, major US resorts, etc.
-        #
-        # TRUST phantom if ALL of:
-        #   - confidence == "high"   (Gemini self-reports certainty)
-        #   - meaningful >= 8        (coherent, detailed answer — not vague)
-        #   - has opening_date       (the most critical field)
-        #   - has room_count         (specific number = not fabricated)
-        #   - has address            (specific location = not generic)
-        #
-        # REJECT otherwise — fall back to Serper+Gemini which uses real sources.
-        confidence = cleaned.get("confidence", "low")
-        has_specifics = (
-            bool(cleaned.get("opening_date"))
-            and bool(cleaned.get("room_count"))
-            and bool(cleaned.get("address"))
+        logger.warning(
+            f"Grounding PHANTOM for '{hotel_name}' — natural text returned but "
+            f"ZERO citations — falling back to Serper+Gemini"
         )
-        is_trustworthy = confidence == "high" and meaningful >= 8 and has_specifics
+        return None
 
-        logger.debug(
-            f"Grounding PHANTOM data [{hotel_name}] "
-            f"({'TRUSTED' if is_trustworthy else 'rejected'} — no sources): "
-            + json.dumps(cleaned, default=str)
+    logger.info(
+        f"Grounding text for '{hotel_name}' in {elapsed:.1f}s "
+        f"(via {grounding_location}): {len(content)} chars, "
+        f"{len(sources)} sources. Extracting fields via Flash-Lite..."
+    )
+
+    # ── Call 2: Extract structured fields from grounded text ──
+    # Uses Flash-Lite (cheap + fast — this is pure text→JSON, no search).
+    # Same pattern as contact extraction Call 2.
+    from app.services.ai_client import get_lite_model
+
+    lite_model = get_lite_model()
+
+    extract_prompt = f"""Extract hotel details from this text about {hotel_name}.
+
+TEXT:
+{content}
+
+Extract these fields. Use null for anything not mentioned or unclear.
+Return ONLY a JSON object — no preamble, no markdown fences.
+
+{{
+  "opening_date": "Most recent announced date (e.g. 'October 2026', 'Q4 2027')",
+  "project_type": "new_opening | renovation | rebrand | reopening | conversion | ownership_change | residences_only",
+  "room_count": 250,
+  "brand": "Hotel brand name",
+  "brand_tier": "tier1_ultra_luxury | tier2_luxury | tier3_upper_upscale | tier4_upscale | tier5_skip",
+  "management_company": "Day-to-day operator (NOT brand licensor like Marriott/Hilton/Hyatt)",
+  "owner": "Property owner / real estate entity",
+  "developer": "Entity building the property",
+  "address": "Street address if mentioned",
+  "hotel_website": "Official hotel URL (not booking.com/expedia/tripadvisor)",
+  "latitude": null,
+  "longitude": null,
+  "description": "1-2 sentence summary",
+  "confidence": "high | medium | low"
+}}"""
+
+    try:
+        import httpx as _httpx
+        from app.services.ai_client import get_ai_url, get_ai_headers
+
+        lite_url = get_ai_url(lite_model)
+        lite_headers = get_ai_headers()
+        lite_payload = {
+            "contents": [{"role": "user", "parts": [{"text": extract_prompt}]}],
+            "generationConfig": {
+                "temperature": 0.1,
+                "maxOutputTokens": 4096,
+                "thinkingConfig": {"thinkingBudget": 0},
+            },
+        }
+        async with _httpx.AsyncClient(timeout=30) as lite_client:
+            lite_resp = await lite_client.post(
+                lite_url, headers=lite_headers, json=lite_payload
+            )
+        lite_data = lite_resp.json()
+        lite_text = lite_data["candidates"][0]["content"]["parts"][0]["text"].strip()
+    except Exception as e:
+        logger.warning(
+            f"Grounding Call 2 (field extraction) failed for '{hotel_name}': "
+            f"{type(e).__name__}: {e} — falling back"
         )
+        return None
 
-        if is_trustworthy:
-            logger.warning(
-                f"Grounding PHANTOM-TRUSTED for '{hotel_name}' — "
-                f"confidence=high, {meaningful} fields filled, no citations. "
-                f"Gemini answered from training data (well-documented property). "
-                f"Proceeding without source verification."
-            )
-            # Fall through — treat like a real grounding success but mark
-            # the path so downstream logs can distinguish it.
-            sources = ["[training-data — no live citations]"]
-        else:
-            logger.warning(
-                f"Grounding PHANTOM for '{hotel_name}' — returned {meaningful} "
-                f"fields, confidence={confidence}, has_specifics={has_specifics}, "
-                f"ZERO sources — falling back to Serper+Gemini"
-            )
-            return None
+    # Strip markdown fences if Flash-Lite wrapped JSON
+    if lite_text.startswith("```"):
+        parts = lite_text.split("```")
+        if len(parts) >= 2:
+            inner = parts[1]
+            if inner.startswith("json"):
+                inner = inner[4:].strip()
+            lite_text = inner.strip().rstrip("`").strip()
+
+    try:
+        parsed = json.loads(lite_text)
+    except json.JSONDecodeError as e:
+        logger.warning(
+            f"Grounding Call 2: JSON decode failed for '{hotel_name}': {e} "
+            f"— falling back"
+        )
+        return None
+
+    if not isinstance(parsed, dict):
+        logger.warning(
+            f"Grounding Call 2: response not a dict for '{hotel_name}' — falling back"
+        )
+        return None
+
+    cleaned = _validate_grounding_response(parsed)
+
+    # Count meaningful fields (excluding confidence which is metadata)
+    meaningful = sum(1 for k in cleaned if k != "confidence")
+    if meaningful < _GROUNDING_MIN_FIELDS:
+        logger.info(
+            f"Grounding: only {meaningful} fields extracted for '{hotel_name}' "
+            f"(min {_GROUNDING_MIN_FIELDS}) — falling back to Serper+Gemini"
+        )
+        return None
 
     logger.info(
         f"Grounding SUCCESS for '{hotel_name}' in {elapsed:.1f}s "
-        f"(via us-central1): {meaningful} fields filled, "
+        f"(via {grounding_location}): {meaningful} fields filled, "
         f"{len(sources)} sources read"
     )
     logger.info(f"Grounding raw [{hotel_name}]: " + json.dumps(parsed, default=str))
     logger.info(
         f"Grounding cleaned [{hotel_name}]: " + json.dumps(cleaned, default=str)
     )
+
+    # Also store the grounded text as description if we didn't extract one.
+    # The grounded text often contains rich sales intel (construction updates,
+    # amenities, timelines) that's worth surfacing.
+    if not cleaned.get("description") and len(content) > 50:
+        # Take first 300 chars as a summary
+        cleaned["description"] = content[:300].strip()
+        if len(content) > 300:
+            cleaned["description"] += "..."
 
     # ── Key insights: extract sales-critical intel from description ──
     # If grounding's description contains phase/construction/timeline language,

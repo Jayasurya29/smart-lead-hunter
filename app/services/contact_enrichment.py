@@ -68,11 +68,43 @@ logger = logging.getLogger(__name__)
 MAX_CONTACTS_TO_SAVE = 8
 
 # ── GROUNDED CONTACT FAST-PATH ──
-# Single Gemini googleSearch call asks "who makes uniform decisions here?"
-# instead of running 6-iteration Serper+Gemini pipeline. Uses us-central1
-# regional endpoint (same as lead_data_enrichment.py grounding path).
-_CONTACT_GROUNDING_TIMEOUT_S = 45.0
+# Single Gemini googleSearch call discovers contacts in one shot instead of
+# running 6-iteration Serper+Gemini pipeline.
+#
+# 2026-05-27: Migrated to gemini-3.5-flash on global endpoint. Testing proved:
+#   - 3.5 Flash finds dept heads (Purchasing, Housekeeping, HR) that 2.5 missed
+#   - 3.5 Flash reaches LinkedIn-indexed data (theorg.com, prospeo.io, bold.pro)
+#   - Global endpoint is REQUIRED for 3.x models (us-central1 returns 404)
+#   - 3.5 is slower (10-30s vs 3-5s) but finds 6-9 contacts vs 1-3
+#   - Grounding cost: $14/1K queries (3.x) vs $35/1K (2.x) — 60% cheaper
+_CONTACT_GROUNDING_TIMEOUT_S = 90.0  # 3.5 Flash takes 10-40s; 90s allows retries
 _CONTACT_GROUNDING_MIN_CONTACTS = 2  # below this, fall back to iterative pipeline
+
+
+def _build_grounding_url(project: str, model: str) -> tuple:
+    """Build the Vertex AI grounding endpoint URL for the given model.
+
+    Gemini 3.x models only work on the global endpoint.
+    Gemini 2.x models work on both; us-central1 is preferred for lowest
+    latency from Florida, but global also works (tested 2026-05-27).
+
+    Returns (url, location_used).
+    """
+    if any(tag in model for tag in ("gemini-3", "gemini-4")):
+        location = "global"
+        host = "aiplatform.googleapis.com"
+    else:
+        # 2.x → us-central1 (proven reliable for grounding, lowest latency)
+        location = "us-central1"
+        host = f"{location}-aiplatform.googleapis.com"
+
+    url = (
+        f"https://{host}/v1/"
+        f"projects/{project}/locations/{location}/"
+        f"publishers/google/models/{model}:generateContent"
+    )
+    return url, location
+
 
 # Smart-distribution targets: desired mix of contacts in the final cap.
 # Fills in priority order — any unfilled slots get backfilled with the
@@ -635,29 +667,29 @@ async def _call_gemini_single(
 # Order matters — best model first, lighter fallbacks after.
 
 # ── FALLBACK CHAIN: (model, endpoint) tuples ──
-# Verified 2026-05-06 via scripts/test_endpoints.py + scripts/test_endpoints2.py
+# Verified 2026-05-27 via scripts/check_models.py
 #
 # Working combinations:
-#   gemini-2.5-flash      global ✅  us-central1 ✅  us-east4 ✅  us-west1 ✅
-#   gemini-3-flash-preview global ✅  us-central1 ❌  us-east4 ❌  us-west1 ❌
+#   gemini-3.5-flash       global ✅  us-central1 ❌
+#   gemini-3.1-flash-lite  global ✅  us-central1 ❌
+#   gemini-2.5-flash       global ✅  us-central1 ✅  us-east4 ✅  us-west1 ✅
 #   gemini-2.5-flash-lite  global ✅  us-central1 ✅  us-east4 ✅  us-west1 ✅
 #
 # Strategy: exhaust all ENDPOINTS for the primary model before downgrading
 # quality. Each region is separate physical infrastructure + separate DSQ pool.
 # None in model position = resolved at call time to env-configured primary.
 _GEMINI_FALLBACK_CHAIN: list[tuple] = [
-    # ── Primary model (gemini-2.5-flash) — 4 endpoints ──
-    (None, "global"),  # 1. primary default
-    (None, "us-central1"),  # 2. regional — proven reliable
-    (None, "us-east4"),  # 3. east coast region
-    (None, "us-west1"),  # 4. west coast region
-    # ── gemini-3-flash-preview — global only ──
-    ("gemini-3-flash-preview", "global"),  # 5. different model family/pool
-    # ── gemini-2.5-flash-lite — 4 endpoints, last resort ──
-    ("gemini-2.5-flash-lite", "global"),  # 6.
-    ("gemini-2.5-flash-lite", "us-central1"),  # 7.
-    ("gemini-2.5-flash-lite", "us-east4"),  # 8.
-    ("gemini-2.5-flash-lite", "us-west1"),  # 9. absolute last resort
+    # ── Primary model (env-configured, currently gemini-3.5-flash) ──
+    (None, "global"),  # 1. primary on global (required for 3.x)
+    # ── gemini-2.5-flash fallback — 4 endpoints ──
+    ("gemini-2.5-flash", "global"),  # 2. older model, still good
+    ("gemini-2.5-flash", "us-central1"),  # 3. regional
+    ("gemini-2.5-flash", "us-east4"),  # 4. east coast
+    ("gemini-2.5-flash", "us-west1"),  # 5. west coast
+    # ── Lite models — last resort ──
+    ("gemini-3.1-flash-lite", "global"),  # 6. lite 3.x
+    ("gemini-2.5-flash-lite", "global"),  # 7. lite 2.x
+    ("gemini-2.5-flash-lite", "us-central1"),  # 8. absolute last resort
 ]
 
 
@@ -2059,21 +2091,29 @@ def _build_contact_grounding_prompt(
     """
 
     # ══════════════════════════════════════════════════════════════
-    # EXISTING HOTEL: SIMPLE NATURAL PROMPT (NO JSON)
+    # EXISTING HOTEL: A3-STYLE SPECIFIC ROLES PROMPT
     # ══════════════════════════════════════════════════════════════
-    # For open hotels, a natural question triggers proper Google Search
-    # grounding with real citations. JSON format instructions cause the
-    # model to skip search and answer from training data (phantom).
+    # Tested 2026-05-27 across Faena, Ritz-Carlton, Four Seasons,
+    # Boston Marriott, Conrad. The A3 prompt (asking for specific roles
+    # by name) consistently fills ALL 6 uniform-relevant positions in
+    # ONE grounding call on gemini-3.5-flash/global. Key findings:
+    #   - Found purchasing directors at 4/5 hotels (2.5 Flash found 0/5)
+    #   - Honestly reports vacancies ("currently recruiting") instead of
+    #     returning stale former employees
+    #   - Runs 6-11 search queries internally, reaching theorg.com,
+    #     prospeo.io, bold.pro, LinkedIn-indexed pages
+    #   - 15-30 seconds per call (acceptable for existing hotel enrichment)
     #
-    # Flow: natural prompt → grounded text + citations → second Gemini
-    # call extracts name/title pairs from the text → structured contacts.
+    # The natural-language prompt (old approach) triggered proper grounding
+    # but returned only GM + Sales Director — too thin for sales team.
     # ══════════════════════════════════════════════════════════════
     if is_existing_hotel:
+        location = ", ".join(filter(None, [city, state, country]))
         return (
-            f"Who are the current leadership and management team at "
-            f"{hotel_name} in {city or ''}, {state or ''}? "
-            f"List each person's full name, exact job title, and company. "
-            f"Only include people currently working at this property in 2026."
+            f"Who are the current General Manager, Director of Housekeeping, "
+            f"Director of Operations, Director of HR, Director of Purchasing, "
+            f"and Director of Food & Beverage at {hotel_name} in {location}? "
+            f"List each person's full name, exact job title, and company."
         )
     from app.config.brand_registry import BrandRegistry
     from app.config.procurement_intelligence import (
@@ -2711,9 +2751,9 @@ async def _enrich_contacts_grounded(
 
     Returns list of contact dicts (2+ found) or None to trigger pipeline fallback.
 
-    Uses the us-central1 regional endpoint — global endpoint produces phantom
-    grounding (zero citations, unverified data) for the same reason as in
-    lead_data_enrichment.py.
+    Endpoint routing (2026-05-27):
+      - gemini-3.x → global (required; us-central1 returns 404)
+      - gemini-2.x → us-central1 (proven reliable, lowest latency from FL)
     """
     import time as _time
 
@@ -2725,12 +2765,7 @@ async def _enrich_contacts_grounded(
         config = _get_config()
         project = config["vertex_project_id"]
         model = config["model"]
-        grounding_location = "us-central1"
-        url = (
-            f"https://{grounding_location}-aiplatform.googleapis.com/v1/"
-            f"projects/{project}/locations/{grounding_location}/"
-            f"publishers/google/models/{model}:generateContent"
-        )
+        url, grounding_location = _build_grounding_url(project, model)
         headers = get_gemini_headers()
     except Exception as e:
         logger.warning(f"Contact grounding: cannot build URL/headers: {e}")
@@ -2848,31 +2883,50 @@ async def _enrich_contacts_grounded(
             logger.warning(f"Contact grounding: insufficient text for '{hotel_name}'")
             return None
 
-        # Second Gemini call — extract structured contacts from grounded text
-        # Uses the regular (non-grounding) Gemini call for JSON extraction
-        extract_prompt = f"""Extract EVERY person mentioned in this text about {hotel_name}.
-The text lists hotel staff with their names and titles.
+        # Second Gemini call — extract structured contacts from grounded text.
+        # Uses Flash-Lite (cheaper, faster — this is pure text→JSON, no search).
+        #
+        # CRITICAL: Currency-aware extraction (2026-05-27). The old prompt said
+        # "Extract EVERY person" which mixed current staff with former employees
+        # mentioned in press releases. The new prompt separates current vs former
+        # and treats "was appointed [recent year]" as CURRENT (that's how all
+        # appointment press releases are phrased).
+        from app.services.ai_client import get_lite_model
+
+        lite_model = get_lite_model()
+
+        extract_prompt = f"""Extract contacts from this text about {hotel_name}.
+Separate them into CURRENT staff vs FORMER/HISTORICAL.
 
 TEXT:
 {content_text}
 
-RULES:
-- Extract ALL people mentioned, not just the first one or two
-- If a person has two titles (e.g. "Vice President and General Manager"), use the MORE SPECIFIC one (General Manager)
+CLASSIFICATION RULES:
+- CURRENT: person described with "is the", "serves as", "currently", "oversees",
+  or "was appointed" + year 2023/2024/2025/2026 (recent appointment = still there)
+- CURRENT: person listed with a role and no departure language
+- FORMER: text says "previously", "formerly", "departed", "left", "transitioned to",
+  "moved to", "stepped down", "retired", or mentions them in clearly past context
+- VACANT: text says "actively recruiting", "currently vacant", "position open"
+- If a person has two titles, use the MORE SPECIFIC one (e.g. "General Manager" not "VP and GM")
 - Do NOT create duplicate entries for the same person
 - Include their organization/company name
 
 Return a JSON object:
-{{"contacts": [{{"name": "Full Name", "title": "Job Title", "organization": "Company"}}]}}"""
+{{"current": [{{"name": "Full Name", "title": "Job Title", "organization": "Company"}}],
+  "former": [{{"name": "Full Name", "title": "Job Title", "organization": "Company"}}],
+  "vacant_roles": ["Director of Housekeeping", "Director of F&B"]}}"""
 
         try:
-            extract_result = await _call_gemini(extract_prompt, timeout=30)
+            extract_result = await _call_gemini(
+                extract_prompt, model=lite_model, timeout=30
+            )
         except Exception as ex:
             logger.warning(f"Contact extraction from grounded text failed: {ex}")
             return None
 
         if not extract_result or not isinstance(extract_result, dict):
-            # Try parsing as contacts array directly
+            # Try parsing as contacts array directly (old format compat)
             if isinstance(extract_result, list):
                 contacts_raw = extract_result
             else:
@@ -2881,7 +2935,21 @@ Return a JSON object:
                 )
                 return None
         else:
-            contacts_raw = extract_result.get("contacts", [])
+            # New currency-aware format: use "current" bucket, ignore "former"
+            contacts_raw = extract_result.get("current", [])
+            former = extract_result.get("former", [])
+            vacant = extract_result.get("vacant_roles", [])
+            if former:
+                logger.info(
+                    f"Contact grounding filtered out {len(former)} former contacts "
+                    f"for '{hotel_name}': "
+                    + ", ".join(f.get("name", "?") for f in former[:5])
+                )
+            if vacant:
+                logger.info(
+                    f"Contact grounding detected {len(vacant)} vacant roles "
+                    f"at '{hotel_name}': {', '.join(vacant)}"
+                )
 
         if not isinstance(contacts_raw, list):
             return None
@@ -2950,20 +3018,37 @@ Return a JSON object:
                     "organization": org,
                     "confidence": confidence,
                     "scope": scope,
-                    "source_detail": f"Grounded via Google Search ({len(sources)} citations)",
+                    "source_detail": (
+                        f"Discovered via Google AI Search with "
+                        f"{len(sources)} verified sources "
+                        f"({', '.join(sources[:3])})"
+                    ),
                     "evidence": [
                         {
-                            "quote": f"Found via grounding search for {hotel_name} staff",
-                            "source_url": url,
+                            "quote": (
+                                f"Identified as {(c.get('title') or 'staff').strip()} "
+                                f"at {hotel_name} via grounded Google Search "
+                                f"citing {title}"
+                            ),
+                            "source_url": "",  # redirect URLs are not usable
                             "source_domain": title.split(" - ")[0]
                             if " - " in title
                             else title,
                             "trust_tier": "official"
-                            if "linkedin" in url.lower()
+                            if any(
+                                d in title.lower()
+                                for d in (
+                                    "linkedin",
+                                    "hotel",
+                                    "marriott",
+                                    "hilton",
+                                    "hyatt",
+                                )
+                            )
                             else "trade",
                         }
-                        for title, url in zip(sources[:3], source_urls[:3])
-                        if url
+                        for title in sources[:3]
+                        if title
                     ],
                 }
             )
@@ -6065,8 +6150,8 @@ async def enrich_lead_contacts(
     if grounded_contacts is not None:
         logger.info(
             f"Contact grounding fast-path SUCCESS for {hotel_name}: "
-            f"{len(grounded_contacts)} contacts — ALSO running iterative pipeline "
-            f"to find operational staff (Directors of Operations/Housekeeping/Purchasing)"
+            f"{len(grounded_contacts)} contacts — running verification"
+            + (" + gap-fill" if is_existing_hotel else "")
         )
         result.contacts = grounded_contacts
         result.layers_tried = ["grounding"]
@@ -6075,7 +6160,13 @@ async def enrich_lead_contacts(
         # Run Gemini verification to assign proper scopes + reject false positives
         if progress_callback is not None:
             try:
-                await progress_callback(10, 11, "Verifying contact scope (Gemini)")
+                await progress_callback(
+                    3,
+                    11,
+                    "Verifying contact roles & scope"
+                    if is_existing_hotel
+                    else "Verifying contact scope (Gemini)",
+                )
             except Exception:
                 pass
         if result.contacts:
@@ -6104,6 +6195,11 @@ async def enrich_lead_contacts(
         # Run the same targeted lookup the iterative pipeline uses:
         # site:linkedin.com/in + name + hotel/operator tokens.
         # Capped at 3 contacts to stay fast (grounding already got us the names).
+        if is_existing_hotel and progress_callback is not None:
+            try:
+                await progress_callback(5, 11, "Finding LinkedIn profiles")
+            except Exception:
+                pass
         _LI_STOPWORDS = {
             "the",
             "and",
@@ -6300,7 +6396,7 @@ async def enrich_lead_contacts(
         result.contacts.sort(key=_grounding_sort_key)
         result.contacts = _apply_smart_cap(result.contacts, MAX_CONTACTS_TO_SAVE)
 
-        if progress_callback is not None:
+        if progress_callback is not None and not is_existing_hotel:
             try:
                 await progress_callback(11, 11, "Saving & scoring contacts")
             except Exception:
@@ -6381,24 +6477,131 @@ async def enrich_lead_contacts(
             return result
         elif is_existing_hotel and not all_cxo and has_operational:
             # ── EXISTING HOTEL: run quick employment verification on grounding results ──
-            # Grounding found contacts but can't distinguish current vs departed.
-            # Instead of running the FULL 2-minute iterative pipeline, run a
-            # focused employment check on each contact (same logic as Iter 6.5).
+            if progress_callback is not None:
+                try:
+                    await progress_callback(7, 11, "Verifying employment currency")
+                except Exception:
+                    pass
+            # ──────────────────────────────────────────────────────────
+            # EMPLOYMENT VERIFICATION (3-part, 2026-05-27)
+            # ──────────────────────────────────────────────────────────
+            # Part A: Web mention check (baseline — are there recent articles?)
+            # Part B: LinkedIn date-range check (catches departures via end dates)
+            # Part C: Replacement hunt (fires only when departure detected —
+            #         searches for who currently holds that role)
+            #
+            # Why 3 parts: Part A alone was fooled by Carlos Rodriguez at
+            # W Minneapolis — old press releases from 2024 mentioned him +
+            # the hotel, so Part A said "CONFIRMED". But his LinkedIn shows
+            # "Aug 2023 - Aug 2025" = departed. Christie Hughes took over
+            # Jan 2026. Part B catches the departure, Part C finds the
+            # replacement. Total: 2-3 extra Serper queries per departed contact.
+            # ──────────────────────────────────────────────────────────
+            import re as _re
+
+            # Date-range pattern in LinkedIn SERP snippets:
+            #   "Aug 2023 - Aug 2025" (departed — has end date)
+            #   "Jan 2026 - Present" (current)
+            #   "2 yrs 1 mo" (duration — ignore)
+            _LINKEDIN_DATE_RANGE_RE = _re.compile(
+                r"((?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+\d{4})"
+                r"\s*[-–—]\s*"
+                r"((?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+\d{4}|Present)",
+                _re.IGNORECASE,
+            )
+
             logger.info(
                 f"Contact grounding for {hotel_name}: {len(result.contacts)} "
                 f"contacts — EXISTING HOTEL, running employment verification"
             )
 
             verified_contacts = []
+            departed_roles = []  # (role_title, departed_name) for Part C replacement hunt
+
             for c in result.contacts:
                 c_name = (c.get("name") or "").strip()
+                c_title = (c.get("title") or "").strip()
                 c_org = (c.get("organization") or "").strip()
                 if not c_name or len(c_name.split()) < 2:
                     verified_contacts.append(c)
                     continue
 
-                # Search for recent evidence of this person at this hotel/company
                 verify_org = c_org or hotel_name
+                is_departed = False
+
+                # ── PART B: LinkedIn date-range check (run FIRST — most reliable) ──
+                # LinkedIn SERP snippets show "Start Date - End Date" or "Start - Present"
+                li_query = f'"{c_name}" "{hotel_name}" site:linkedin.com'
+                try:
+                    li_results = await _search_web(li_query, max_results=3)
+                except Exception:
+                    li_results = []
+
+                if li_results:
+                    li_snippets = " ".join(
+                        (r.get("snippet") or "") + " " + (r.get("title") or "")
+                        for r in li_results
+                    )
+
+                    # Find date ranges in the LinkedIn snippets
+                    date_ranges = _LINKEDIN_DATE_RANGE_RE.findall(li_snippets)
+                    # date_ranges = [(start, end), ...] where end is "Present" or a date
+
+                    for start_date, end_date in date_ranges:
+                        if end_date.lower() == "present":
+                            # Still there — CONFIRMED via LinkedIn
+                            logger.info(
+                                f"[VERIFY PART B] {c_name}: LinkedIn shows "
+                                f"'{start_date} - Present' at {hotel_name} → CONFIRMED"
+                            )
+                            break
+                        else:
+                            # Has an end date — DEPARTED
+                            is_departed = True
+                            logger.warning(
+                                f"[VERIFY PART B] {c_name}: LinkedIn shows "
+                                f"'{start_date} - {end_date}' at {hotel_name} → DEPARTED"
+                            )
+                            break
+                    else:
+                        # No date range found in LinkedIn snippets — check if
+                        # snippets at least mention the hotel (weaker signal)
+                        hotel_lower = hotel_name.lower()
+                        hotel_words = [
+                            w
+                            for w in hotel_lower.split()
+                            if len(w) > 3
+                            and w
+                            not in {
+                                "hotel",
+                                "resort",
+                                "the",
+                                "and",
+                                "club",
+                            }
+                        ]
+                        li_text_lower = li_snippets.lower()
+                        if any(w in li_text_lower for w in hotel_words):
+                            logger.info(
+                                f"[VERIFY PART B] {c_name}: LinkedIn mentions "
+                                f"{hotel_name} but no date range found — "
+                                f"falling through to Part A"
+                            )
+                        # else: LinkedIn results exist but don't mention this hotel — weak signal
+
+                if is_departed:
+                    c["confidence"] = "low"
+                    c["source_detail"] = (
+                        f"⚠ DEPARTED — LinkedIn shows {c_name} left {hotel_name}. "
+                        f"Searching for replacement."
+                    )
+                    departed_roles.append((c_title, c_name))
+                    # Still add to contacts as "former" context (sales can reference
+                    # "I know you recently took over from [departed]")
+                    verified_contacts.append(c)
+                    continue
+
+                # ── PART A: Web mention check (fallback when LinkedIn inconclusive) ──
                 verify_query = f'"{c_name}" "{verify_org}" 2024 OR 2025 OR 2026'
                 try:
                     verify_results = await _search_web(verify_query, max_results=5)
@@ -6406,26 +6609,25 @@ async def enrich_lead_contacts(
                     verify_results = []
 
                 if not verify_results:
-                    # No recent mentions — likely departed
                     c["confidence"] = "low"
                     c["source_detail"] = (
                         f"⚠ POSSIBLY DEPARTED — no recent (2024-2026) mentions of "
                         f"{c_name} at {verify_org}. Verify before outreach."
                     )
                     logger.warning(
-                        f"[EXISTING HOTEL VERIFY] {c_name}: no recent mentions "
+                        f"[VERIFY PART A] {c_name}: no recent mentions "
                         f"at {verify_org} — flagged as possibly departed"
                     )
+                    departed_roles.append((c_title, c_name))
                     verified_contacts.append(c)
                     continue
 
-                # Check snippets for employer mismatch (e.g. "VP at Pinnacle Hotel Management")
+                # Check snippets for employer match
                 snippets_text = " ".join(
                     (r.get("snippet") or "") + " " + (r.get("title") or "")
                     for r in verify_results
                 ).lower()
 
-                # Look for signs they LEFT — LinkedIn snippets often show current employer
                 hotel_tokens = set(hotel_name.lower().split()) - {
                     "hotel",
                     "resort",
@@ -6450,14 +6652,13 @@ async def enrich_lead_contacts(
                 }
                 relevant_tokens = hotel_tokens | org_tokens
 
-                # If snippets mention the hotel/org, they're likely current
                 has_match = any(
                     t in snippets_text for t in relevant_tokens if len(t) > 3
                 )
 
                 if has_match:
                     logger.info(
-                        f"[EXISTING HOTEL VERIFY] {c_name}: CONFIRMED — "
+                        f"[VERIFY PART A] {c_name}: CONFIRMED — "
                         f"recent mentions at {verify_org}"
                     )
                     verified_contacts.append(c)
@@ -6468,16 +6669,612 @@ async def enrich_lead_contacts(
                         f"connection to {hotel_name}. Verify before outreach."
                     )
                     logger.warning(
-                        f"[EXISTING HOTEL VERIFY] {c_name}: no hotel match in "
+                        f"[VERIFY PART A] {c_name}: no hotel match in "
                         f"recent snippets — flagged as possibly departed"
                     )
+                    departed_roles.append((c_title, c_name))
                     verified_contacts.append(c)
+
+            # ── PART C: Replacement hunt for departed contacts ──
+            # For each role where we detected a departure, search for who
+            # currently holds that role. Surgical — one Serper query per role.
+            if departed_roles:
+                logger.info(
+                    f"[VERIFY PART C] Hunting replacements for {len(departed_roles)} "
+                    f"departed roles at {hotel_name}: "
+                    + ", ".join(
+                        f"{title} (was {name})" for title, name in departed_roles
+                    )
+                )
+
+                for departed_title, departed_name in departed_roles:
+                    # Build a targeted replacement query
+                    # Use the role title + hotel name + site:linkedin.com
+                    replacement_query = (
+                        f'"{hotel_name}" "{departed_title}" '
+                        f"site:linkedin.com 2025 OR 2026"
+                    )
+                    try:
+                        repl_results = await _search_web(
+                            replacement_query, max_results=5
+                        )
+                    except Exception:
+                        repl_results = []
+
+                    if not repl_results:
+                        # Try without year filter
+                        replacement_query = (
+                            f'"{hotel_name}" "{departed_title}" site:linkedin.com'
+                        )
+                        try:
+                            repl_results = await _search_web(
+                                replacement_query, max_results=5
+                            )
+                        except Exception:
+                            repl_results = []
+
+                    if not repl_results:
+                        logger.info(
+                            f"[VERIFY PART C] No replacement found for "
+                            f"{departed_title} at {hotel_name}"
+                        )
+                        continue
+
+                    # Parse SERP results for a person who ISN'T the departed one
+                    for r in repl_results:
+                        snippet = (
+                            (r.get("snippet") or "") + " " + (r.get("title") or "")
+                        )
+                        snippet_lower = snippet.lower()
+
+                        # Skip if it's about the departed person
+                        if departed_name.lower().split()[0] in snippet_lower:
+                            continue
+
+                        # Look for "Present" — indicates current holder
+                        if "present" in snippet_lower:
+                            # Try to extract a name from the SERP title
+                            # LinkedIn titles are "FirstName LastName - Title at Company"
+                            title_text = r.get("title", "")
+                            name_match = _re.match(
+                                r"^([A-Z][a-z]+ [A-Z][a-zA-Z'-]+)", title_text
+                            )
+                            if name_match:
+                                replacement_name = name_match.group(1).strip()
+
+                                # Don't add if same as departed
+                                if replacement_name.lower() == departed_name.lower():
+                                    continue
+
+                                # Don't add if already in verified_contacts
+                                existing_names = {
+                                    (vc.get("name") or "").lower()
+                                    for vc in verified_contacts
+                                }
+                                if replacement_name.lower() in existing_names:
+                                    continue
+
+                                replacement_contact = {
+                                    "name": replacement_name,
+                                    "title": departed_title,
+                                    "organization": hotel_name,
+                                    "confidence": "medium",
+                                    "scope": "hotel_specific",
+                                    "source_detail": (
+                                        f"Found via LinkedIn replacement search "
+                                        f"(replaced {departed_name})"
+                                    ),
+                                    "linkedin": r.get("link", ""),
+                                    "evidence": [
+                                        {
+                                            "quote": snippet[:200],
+                                            "source_url": r.get("link", ""),
+                                            "source_domain": "linkedin.com",
+                                            "trust_tier": "official",
+                                        }
+                                    ],
+                                }
+                                verified_contacts.append(replacement_contact)
+                                logger.info(
+                                    f"[VERIFY PART C] 🎯 REPLACEMENT FOUND: "
+                                    f"{replacement_name} replaced {departed_name} "
+                                    f"as {departed_title} at {hotel_name}"
+                                )
+                                break  # Found replacement, stop searching
+
+                    else:
+                        logger.info(
+                            f"[VERIFY PART C] No clear replacement found for "
+                            f"{departed_title} at {hotel_name} — "
+                            f"role may be vacant or restructured"
+                        )
 
             result.contacts = verified_contacts
             logger.info(
                 f"Contact grounding + employment verification complete for "
                 f"{hotel_name}: {len(result.contacts)} contacts ✅"
             )
+
+            # ──────────────────────────────────────────────────────────
+            # SURGICAL SERPER GAP-FILL (2026-05-27)
+            # ──────────────────────────────────────────────────────────
+            # Check which of the 6 uniform-critical roles are NOT filled
+            # by grounding. For each gap, fire ONE targeted Serper query
+            # against LinkedIn. Total: 0-4 extra Serper queries, ~1-2s each.
+            #
+            # This replaces the full 8-iteration pipeline fallback for
+            # existing hotels. Grounding finds 3-9 contacts in ~20-50s;
+            # Serper fills the remaining 0-3 gaps in ~3-6s.
+            # ──────────────────────────────────────────────────────────
+            _TARGET_ROLE_FAMILIES = {
+                "general_manager": {
+                    "general manager",
+                    "hotel manager",
+                    "resort manager",
+                    "managing director",
+                    "area general manager",
+                    "complex general manager",
+                },
+                "operations": {
+                    "director of operations",
+                    "director of rooms",
+                    "rooms division manager",
+                    "vp operations",
+                    "vice president operations",
+                },
+                "housekeeping": {
+                    "director of housekeeping",
+                    "executive housekeeper",
+                    "director of services",
+                    "director of rooms operations",
+                    "senior rooms operations manager",
+                },
+                "hr": {
+                    "director of human resources",
+                    "director of hr",
+                    "director of people and culture",
+                    "human resources director",
+                    "hr director",
+                    "regional human resources director",
+                },
+                "purchasing": {
+                    "director of purchasing",
+                    "purchasing manager",
+                    "senior purchasing manager",
+                    "area purchasing director",
+                    "procurement manager",
+                    "director of procurement",
+                },
+                "food_beverage": {
+                    "director of food and beverage",
+                    "director of food & beverage",
+                    "director of f&b",
+                    "f&b director",
+                    "director of food and beverage and culinary",
+                    "director of culinary",
+                    "executive chef",
+                },
+            }
+
+            def _match_role_family(title: str) -> set:
+                """Return which role families a contact's title matches."""
+                t = title.lower().strip()
+                matched = set()
+                for family, keywords in _TARGET_ROLE_FAMILIES.items():
+                    if any(kw in t for kw in keywords):
+                        matched.add(family)
+                return matched
+
+            # Find which families are already covered
+            covered_families = set()
+            for c in result.contacts:
+                c_title = (c.get("title") or "").strip()
+                if c_title and (c.get("confidence") or "high") != "low":
+                    covered_families |= _match_role_family(c_title)
+
+            # Determine gaps
+            all_families = set(_TARGET_ROLE_FAMILIES.keys())
+            gap_families = all_families - covered_families
+
+            if gap_families:
+                logger.info(
+                    f"[SERPER GAP-FILL] {hotel_name}: {len(gap_families)} role gaps "
+                    f"after grounding: {', '.join(sorted(gap_families))}. "
+                    f"Running targeted LinkedIn queries..."
+                )
+
+                if progress_callback is not None:
+                    try:
+                        await progress_callback(
+                            9, 11, f"Filling {len(gap_families)} role gaps via LinkedIn"
+                        )
+                    except Exception:
+                        pass
+
+                # Map families to Serper query title strings
+                _FAMILY_TO_QUERY_TITLES = {
+                    "general_manager": '"General Manager" OR "Hotel Manager"',
+                    "operations": '"Director of Operations" OR "Director of Rooms"',
+                    "housekeeping": '"Director of Housekeeping" OR "Executive Housekeeper"',
+                    "hr": '"Director of Human Resources" OR "Director of People and Culture"',
+                    "purchasing": '"Director of Purchasing" OR "Purchasing Manager"',
+                    "food_beverage": '"Director of Food and Beverage" OR "Executive Chef"',
+                }
+
+                hotel_short = search_name or hotel_name
+                existing_names = {
+                    (c.get("name") or "").lower() for c in result.contacts
+                }
+                gap_fills_found = 0
+
+                for family in sorted(gap_families):
+                    title_clause = _FAMILY_TO_QUERY_TITLES.get(family, "")
+                    if not title_clause:
+                        continue
+
+                    serper_query = f'"{hotel_short}" {title_clause} site:linkedin.com'
+
+                    try:
+                        serper_results = await _search_web(serper_query, max_results=5)
+                    except Exception:
+                        serper_results = []
+
+                    if not serper_results:
+                        # Try without site:linkedin.com as fallback
+                        try:
+                            serper_results = await _search_web(
+                                f'"{hotel_short}" {title_clause} 2025 OR 2026',
+                                max_results=5,
+                            )
+                        except Exception:
+                            serper_results = []
+
+                    if not serper_results:
+                        logger.info(
+                            f"[SERPER GAP-FILL] No results for {family} "
+                            f"at {hotel_name}"
+                        )
+                        continue
+
+                    # Parse SERP results — look for LinkedIn profiles with "Present"
+                    for sr in serper_results:
+                        sr_title = sr.get("title", "")
+                        sr_snippet = sr.get("snippet", "")
+                        sr_link = sr.get("link", "")
+                        sr_combined = f"{sr_title} {sr_snippet}".lower()
+
+                        # Extract name from LinkedIn title format:
+                        # "FirstName LastName - Title at Company | LinkedIn"
+                        name_match = _re.match(
+                            r"^([A-Z][a-z]+ (?:[A-Z]\.? )?[A-Z][a-zA-Z'-]+)",
+                            sr_title,
+                        )
+                        if not name_match:
+                            continue
+                        found_name = name_match.group(1).strip()
+
+                        # Validate it's a real person, not a company/hotel name
+                        if not _looks_like_real_person(found_name):
+                            continue
+
+                        # Reject if name overlaps with hotel/brand/company words
+                        # Catches "Sheraton Fort", "Hilton Garden", "Marriott Marquis"
+                        _BRAND_WORDS = {
+                            "marriott",
+                            "hilton",
+                            "hyatt",
+                            "ihg",
+                            "wyndham",
+                            "accor",
+                            "sheraton",
+                            "westin",
+                            "ritz",
+                            "carlton",
+                            "waldorf",
+                            "conrad",
+                            "doubletree",
+                            "embassy",
+                            "hampton",
+                            "fairfield",
+                            "courtyard",
+                            "springhill",
+                            "crescent",
+                            "aimbridge",
+                            "pyramid",
+                            "sage",
+                            "highgate",
+                            "benchmark",
+                            "concord",
+                            "remington",
+                        }
+                        name_words = set(found_name.lower().split())
+                        hotel_name_words = set(hotel_name.lower().split())
+                        mgmt_words = set((management_company or "").lower().split())
+                        if name_words & (_BRAND_WORDS | hotel_name_words | mgmt_words):
+                            continue
+
+                        # Skip if already in contacts or is a departed person
+                        if found_name.lower() in existing_names:
+                            continue
+
+                        # Skip if not LinkedIn
+                        is_linkedin = "linkedin.com/in/" in (sr_link or "").lower()
+
+                        # Check for hotel name in snippet (relevance filter)
+                        hotel_words = [
+                            w
+                            for w in hotel_short.lower().split()
+                            if len(w) > 3
+                            and w
+                            not in {
+                                "hotel",
+                                "resort",
+                                "the",
+                                "and",
+                                "club",
+                                "spa",
+                                "inn",
+                                "suites",
+                            }
+                        ]
+                        has_hotel_match = any(w in sr_combined for w in hotel_words)
+
+                        if not has_hotel_match:
+                            continue
+
+                        # Check for "Present" (current employment signal)
+                        is_current = "present" in sr_combined
+
+                        # ── Extract actual job title ──
+                        # Priority 1: LinkedIn SERP title format "Name - Title at Company"
+                        # Priority 2: Match against role family keywords in snippet
+                        # Priority 3: Default display name for the role family
+                        _FAMILY_DISPLAY_NAMES = {
+                            "general_manager": "General Manager",
+                            "operations": "Director of Operations",
+                            "housekeeping": "Director of Housekeeping",
+                            "hr": "Director of Human Resources",
+                            "purchasing": "Director of Purchasing",
+                            "food_beverage": "Director of Food and Beverage",
+                        }
+                        found_title = _FAMILY_DISPLAY_NAMES.get(family, family)
+
+                        # Try extracting from LinkedIn title: "Name - Title at Company"
+                        # Only for actual LinkedIn results, and validate the extracted
+                        # text looks like a job title, not a hotel/company name.
+                        if is_linkedin:
+                            li_title_match = _re.match(
+                                r"^[^-]+\s*[-–—]\s*(.+?)(?:\s+at\s+|\s*[|]\s*)",
+                                sr_title,
+                            )
+                            if li_title_match:
+                                extracted = li_title_match.group(1).strip()
+                                # Reject if it looks like a hotel/company name
+                                # instead of a job title
+                                extracted_lower = extracted.lower()
+                                is_hotel_name = any(
+                                    w in extracted_lower for w in hotel_words
+                                )
+                                is_title = any(
+                                    kw in extracted_lower
+                                    for kw in (
+                                        "director",
+                                        "manager",
+                                        "chef",
+                                        "vice president",
+                                        "vp",
+                                        "head",
+                                        "coordinator",
+                                        "supervisor",
+                                    )
+                                )
+                                if (
+                                    len(extracted) > 5
+                                    and "linkedin" not in extracted_lower
+                                    and not is_hotel_name
+                                    and is_title
+                                ):
+                                    found_title = extracted
+
+                        gap_contact = {
+                            "name": found_name,
+                            "title": found_title,
+                            "organization": hotel_name,
+                            "confidence": "medium" if is_current else "low",
+                            "scope": "hotel_specific",
+                            "linkedin": sr_link if is_linkedin else None,
+                            "source_detail": (
+                                f"Found via Serper LinkedIn gap-fill for "
+                                f"{family.replace('_', ' ')} role"
+                                + (" (currently employed)" if is_current else "")
+                            ),
+                            "evidence": [
+                                {
+                                    "quote": sr_snippet[:200],
+                                    "source_url": sr_link,
+                                    "source_domain": "linkedin.com"
+                                    if is_linkedin
+                                    else "",
+                                    "trust_tier": "official"
+                                    if is_linkedin
+                                    else "trade",
+                                }
+                            ],
+                        }
+                        result.contacts.append(gap_contact)
+                        existing_names.add(found_name.lower())
+                        gap_fills_found += 1
+                        logger.info(
+                            f"[SERPER GAP-FILL] 🎯 Found {found_name} as "
+                            f"{found_title} at {hotel_name} "
+                            f"({'current' if is_current else 'unverified'})"
+                        )
+                        break  # One contact per gap is enough
+
+                if gap_fills_found > 0:
+                    logger.info(
+                        f"[SERPER GAP-FILL] Filled {gap_fills_found}/{len(gap_families)} "
+                        f"gaps at {hotel_name} via targeted LinkedIn queries"
+                    )
+
+                    # ── LinkedIn URL lookup + verification for gap-fill contacts ──
+                    # Gap-fill contacts were added AFTER the main LinkedIn lookup
+                    # and verification steps. Run a quick version for them.
+                    for c in result.contacts:
+                        c_name = (c.get("name") or "").strip()
+                        # Only process gap-fill contacts (they have this source_detail)
+                        if "Serper LinkedIn gap-fill" not in (
+                            c.get("source_detail") or ""
+                        ):
+                            continue
+                        if not c_name or c.get("linkedin"):
+                            continue  # Already has LinkedIn URL or no name
+
+                        # LinkedIn URL lookup
+                        hotel_words = [
+                            w
+                            for w in (search_name or hotel_name).lower().split()
+                            if len(w) > 3
+                            and w
+                            not in {
+                                "hotel",
+                                "resort",
+                                "the",
+                                "and",
+                                "club",
+                                "spa",
+                                "inn",
+                            }
+                        ]
+                        or_tokens = " OR ".join(f'"{w}"' for w in hotel_words[:3])
+                        li_query = f'"{c_name}" ({or_tokens}) site:linkedin.com/in'
+                        try:
+                            li_results = await _search_web(li_query, max_results=3)
+                        except Exception:
+                            li_results = []
+
+                        for lr in li_results or []:
+                            lr_link = lr.get("link", "")
+                            lr_title = lr.get("title", "")
+                            lr_snippet = lr.get("snippet", "")
+                            if "linkedin.com/in/" not in lr_link:
+                                continue
+                            # Check name appears in title
+                            name_parts = c_name.lower().split()
+                            if len(name_parts) >= 2 and (
+                                name_parts[0] in lr_title.lower()
+                                or name_parts[-1] in lr_title.lower()
+                            ):
+                                c["linkedin"] = lr_link
+                                logger.info(
+                                    f"[GAP-FILL LINKEDIN] Found URL for "
+                                    f"{c_name}: {lr_link}"
+                                )
+
+                                # Quick currency check from snippet
+                                if "present" in lr_snippet.lower():
+                                    c["confidence"] = "medium"
+                                    c["source_detail"] += (
+                                        " — LinkedIn confirmed current"
+                                    )
+                                    logger.info(
+                                        f"[GAP-FILL VERIFY] {c_name}: "
+                                        f"LinkedIn shows 'Present' → CURRENT"
+                                    )
+
+                                # Check for end date = departed
+                                date_ranges = _LINKEDIN_DATE_RANGE_RE.findall(
+                                    lr_snippet
+                                )
+                                for start_d, end_d in date_ranges:
+                                    if end_d.lower() != "present":
+                                        c["confidence"] = "low"
+                                        c["source_detail"] = (
+                                            f"⚠ POSSIBLY DEPARTED — LinkedIn "
+                                            f"shows '{start_d} - {end_d}'"
+                                        )
+                                        logger.warning(
+                                            f"[GAP-FILL VERIFY] {c_name}: "
+                                            f"LinkedIn shows "
+                                            f"'{start_d} - {end_d}' → DEPARTED"
+                                        )
+                                        break
+                                break  # Found LinkedIn URL, stop searching
+
+                        # ── Quick web mention check for unverified gap-fill contacts ──
+                        # If LinkedIn lookup didn't find dates (no "Present", no end
+                        # date), fall back to Part A style web mention verification.
+                        # This catches cases where Serper snippets don't include dates.
+                        # SKIP if already confirmed by LinkedIn or already flagged departed.
+                        already_verified = (
+                            "confirmed" in (c.get("source_detail") or "").lower()
+                            or "departed" in (c.get("source_detail") or "").lower()
+                        )
+                        if not already_verified:
+                            c_org = c.get("organization") or hotel_name
+                            verify_query = f'"{c_name}" "{c_org}" 2024 OR 2025 OR 2026'
+                            try:
+                                verify_results = await _search_web(
+                                    verify_query, max_results=3
+                                )
+                            except Exception:
+                                verify_results = []
+
+                            if verify_results:
+                                verify_text = " ".join(
+                                    (r.get("snippet") or "")
+                                    + " "
+                                    + (r.get("title") or "")
+                                    for r in verify_results
+                                ).lower()
+                                hotel_words_verify = [
+                                    w
+                                    for w in hotel_name.lower().split()
+                                    if len(w) > 3
+                                    and w
+                                    not in {
+                                        "hotel",
+                                        "resort",
+                                        "the",
+                                        "and",
+                                    }
+                                ]
+                                if any(w in verify_text for w in hotel_words_verify):
+                                    c["confidence"] = "medium"
+                                    if (
+                                        "confirmed"
+                                        not in (c.get("source_detail") or "").lower()
+                                    ):
+                                        c["source_detail"] += (
+                                            " — web mentions confirm association"
+                                        )
+                                    logger.info(
+                                        f"[GAP-FILL VERIFY] {c_name}: "
+                                        f"web mentions confirm at {hotel_name}"
+                                    )
+                            else:
+                                logger.info(
+                                    f"[GAP-FILL VERIFY] {c_name}: no recent "
+                                    f"web mentions — keeping as unverified"
+                                )
+                else:
+                    logger.info(
+                        f"[SERPER GAP-FILL] No additional contacts found for "
+                        f"{len(gap_families)} gaps at {hotel_name} — "
+                        f"roles may be centralized or vacant"
+                    )
+            else:
+                logger.info(
+                    f"[SERPER GAP-FILL] All 6 target roles covered for "
+                    f"{hotel_name} — no gap-fill needed 🎯"
+                )
+
+            if progress_callback is not None:
+                try:
+                    await progress_callback(11, 11, "Saving & scoring contacts")
+                except Exception:
+                    pass
+
             return result
         elif all_cxo:
             # Grounding only found pure C-suite (CEO/Founder) — these don't
