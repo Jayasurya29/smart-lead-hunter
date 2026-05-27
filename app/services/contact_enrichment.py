@@ -592,10 +592,10 @@ async def _call_gemini_single(
                 "PoolTimeout",
                 "TimeoutException",
             )
-            if is_timeout and attempt >= 1:
+            if is_timeout and attempt >= 0:
                 logger.warning(
                     f"Gemini [{err_type}] on attempt {attempt + 1} — "
-                    f"bailing out to try fallback model (same model keeps timing out)"
+                    f"bailing immediately to next fallback (retrying same endpoint won't help)"
                 )
                 last_error = err_repr
                 break  # exit retry loop → _call_gemini() tries next model
@@ -2057,6 +2057,24 @@ def _build_contact_grounding_prompt(
     - Developer/owner involvement (pre-opening budget control)
     - Pre-opening vs open status
     """
+
+    # ══════════════════════════════════════════════════════════════
+    # EXISTING HOTEL: SIMPLE NATURAL PROMPT (NO JSON)
+    # ══════════════════════════════════════════════════════════════
+    # For open hotels, a natural question triggers proper Google Search
+    # grounding with real citations. JSON format instructions cause the
+    # model to skip search and answer from training data (phantom).
+    #
+    # Flow: natural prompt → grounded text + citations → second Gemini
+    # call extracts name/title pairs from the text → structured contacts.
+    # ══════════════════════════════════════════════════════════════
+    if is_existing_hotel:
+        return (
+            f"Who are the current leadership and management team at "
+            f"{hotel_name} in {city or ''}, {state or ''}? "
+            f"List each person's full name, exact job title, and company. "
+            f"Only include people currently working at this property in 2026."
+        )
     from app.config.brand_registry import BrandRegistry
     from app.config.procurement_intelligence import (
         build_prospecting_strategy,
@@ -2802,6 +2820,155 @@ async def _enrich_contacts_grounded(
             if inner.startswith("json"):
                 inner = inner[4:].strip()
             content_text = inner.strip().rstrip("`").strip()
+
+    # ── EXISTING HOTEL: Natural text → extract contacts via second Gemini call ──
+    # The simplified prompt for existing hotels produces natural text (not JSON)
+    # because JSON format instructions suppress grounding search. We now have
+    # the grounded text with real citations — extract name/title pairs from it.
+    if is_existing_hotel:
+        # Capture citations BEFORE extraction
+        grounding_meta = candidate.get("groundingMetadata", {}) or {}
+        sources = []
+        source_urls = []
+        for chunk in (grounding_meta.get("groundingChunks", []) or [])[:10]:
+            web = chunk.get("web", {}) or {}
+            title = web.get("title")
+            uri = web.get("uri") or ""
+            if title:
+                sources.append(title)
+                source_urls.append(uri)
+
+        logger.info(
+            f"Contact grounding raw text for '{hotel_name}': "
+            f"{len(content_text)} chars, {len(sources)} citations. "
+            f"Full text:\n{content_text}"
+        )
+
+        if not content_text or len(content_text) < 20:
+            logger.warning(f"Contact grounding: insufficient text for '{hotel_name}'")
+            return None
+
+        # Second Gemini call — extract structured contacts from grounded text
+        # Uses the regular (non-grounding) Gemini call for JSON extraction
+        extract_prompt = f"""Extract EVERY person mentioned in this text about {hotel_name}.
+The text lists hotel staff with their names and titles.
+
+TEXT:
+{content_text}
+
+RULES:
+- Extract ALL people mentioned, not just the first one or two
+- If a person has two titles (e.g. "Vice President and General Manager"), use the MORE SPECIFIC one (General Manager)
+- Do NOT create duplicate entries for the same person
+- Include their organization/company name
+
+Return a JSON object:
+{{"contacts": [{{"name": "Full Name", "title": "Job Title", "organization": "Company"}}]}}"""
+
+        try:
+            extract_result = await _call_gemini(extract_prompt, timeout=30)
+        except Exception as ex:
+            logger.warning(f"Contact extraction from grounded text failed: {ex}")
+            return None
+
+        if not extract_result or not isinstance(extract_result, dict):
+            # Try parsing as contacts array directly
+            if isinstance(extract_result, list):
+                contacts_raw = extract_result
+            else:
+                logger.warning(
+                    f"Contact extraction returned unexpected format for '{hotel_name}'"
+                )
+                return None
+        else:
+            contacts_raw = extract_result.get("contacts", [])
+
+        if not isinstance(contacts_raw, list):
+            return None
+
+        # Dedupe by normalized name before proceeding
+        seen_names = set()
+        deduped_contacts = []
+        for c in contacts_raw:
+            nm = (c.get("name") or "").strip().lower()
+            if nm and nm not in seen_names:
+                seen_names.add(nm)
+                deduped_contacts.append(c)
+        contacts_raw = deduped_contacts
+
+        logger.info(
+            f"Contact grounding raw for '{hotel_name}': {len(contacts_raw)} contacts, "
+            f"{len(sources)} citations."
+        )
+
+        # Skip phantom check — we already have citations from grounding
+        # Go straight to validation
+        valid_contacts = [
+            c
+            for c in contacts_raw
+            if isinstance(c, dict)
+            and (c.get("name") or "").strip()
+            and len((c.get("name") or "").strip()) > 3
+            and _looks_like_real_person((c.get("name") or "").strip())
+        ]
+
+        if len(valid_contacts) < _CONTACT_GROUNDING_MIN_CONTACTS:
+            logger.info(
+                f"Contact grounding: only {len(valid_contacts)} valid contacts for "
+                f"'{hotel_name}' (min {_CONTACT_GROUNDING_MIN_CONTACTS}) — "
+                f"falling back to pipeline"
+            )
+            return None
+
+        logger.info(
+            f"Contact grounding SUCCESS for '{hotel_name}' in {elapsed:.1f}s: "
+            f"{len(valid_contacts)} contacts, {len(sources)} sources"
+        )
+
+        # Convert to internal contact dict format
+        mgmt_lower = (management_company or "").lower()
+        hotel_lower = hotel_name.lower()
+        result_contacts = []
+        for c in valid_contacts:
+            org = (c.get("organization") or hotel_name).strip()
+            org_lower = org.lower()
+            confidence = (c.get("confidence") or "high").lower()
+            if confidence not in ("high", "medium", "low"):
+                confidence = "high"
+
+            if mgmt_lower and (mgmt_lower in org_lower or org_lower in mgmt_lower):
+                scope = "management_corporate"
+            elif any(w in org_lower for w in hotel_lower.split() if len(w) > 3):
+                scope = "hotel_specific"
+            else:
+                scope = "chain_area"
+
+            result_contacts.append(
+                {
+                    "name": (c.get("name") or "").strip(),
+                    "title": (c.get("title") or "").strip(),
+                    "organization": org,
+                    "confidence": confidence,
+                    "scope": scope,
+                    "source_detail": f"Grounded via Google Search ({len(sources)} citations)",
+                    "evidence": [
+                        {
+                            "quote": f"Found via grounding search for {hotel_name} staff",
+                            "source_url": url,
+                            "source_domain": title.split(" - ")[0]
+                            if " - " in title
+                            else title,
+                            "trust_tier": "official"
+                            if "linkedin" in url.lower()
+                            else "trade",
+                        }
+                        for title, url in zip(sources[:3], source_urls[:3])
+                        if url
+                    ],
+                }
+            )
+
+        return result_contacts
 
     try:
         parsed = json.loads(content_text)
@@ -6201,12 +6368,115 @@ async def enrich_lead_contacts(
             for c in result.contacts
         )
 
-        if not all_cxo and has_operational:
+        if not all_cxo and has_operational and not is_existing_hotel:
             # Grounding found useful contacts (operational staff, mgmt company,
-            # or properly scoped owners) — trust it, skip iterative
+            # or properly scoped owners) — trust it, skip iterative.
+            # EXCEPTION: existing hotels ALWAYS run iterative because grounding
+            # can't distinguish current vs departed staff. The iterative pipeline
+            # has Iter 6.5 employment verification that catches this.
             logger.info(
                 f"Contact grounding complete for {hotel_name}: "
                 f"{len(result.contacts)} contacts — skipping iterative pipeline ✅"
+            )
+            return result
+        elif is_existing_hotel and not all_cxo and has_operational:
+            # ── EXISTING HOTEL: run quick employment verification on grounding results ──
+            # Grounding found contacts but can't distinguish current vs departed.
+            # Instead of running the FULL 2-minute iterative pipeline, run a
+            # focused employment check on each contact (same logic as Iter 6.5).
+            logger.info(
+                f"Contact grounding for {hotel_name}: {len(result.contacts)} "
+                f"contacts — EXISTING HOTEL, running employment verification"
+            )
+
+            verified_contacts = []
+            for c in result.contacts:
+                c_name = (c.get("name") or "").strip()
+                c_org = (c.get("organization") or "").strip()
+                if not c_name or len(c_name.split()) < 2:
+                    verified_contacts.append(c)
+                    continue
+
+                # Search for recent evidence of this person at this hotel/company
+                verify_org = c_org or hotel_name
+                verify_query = f'"{c_name}" "{verify_org}" 2024 OR 2025 OR 2026'
+                try:
+                    verify_results = await _search_web(verify_query, max_results=5)
+                except Exception:
+                    verify_results = []
+
+                if not verify_results:
+                    # No recent mentions — likely departed
+                    c["confidence"] = "low"
+                    c["source_detail"] = (
+                        f"⚠ POSSIBLY DEPARTED — no recent (2024-2026) mentions of "
+                        f"{c_name} at {verify_org}. Verify before outreach."
+                    )
+                    logger.warning(
+                        f"[EXISTING HOTEL VERIFY] {c_name}: no recent mentions "
+                        f"at {verify_org} — flagged as possibly departed"
+                    )
+                    verified_contacts.append(c)
+                    continue
+
+                # Check snippets for employer mismatch (e.g. "VP at Pinnacle Hotel Management")
+                snippets_text = " ".join(
+                    (r.get("snippet") or "") + " " + (r.get("title") or "")
+                    for r in verify_results
+                ).lower()
+
+                # Look for signs they LEFT — LinkedIn snippets often show current employer
+                hotel_tokens = set(hotel_name.lower().split()) - {
+                    "hotel",
+                    "resort",
+                    "the",
+                    "and",
+                    "at",
+                    "a",
+                    "of",
+                    "by",
+                    "in",
+                }
+                org_tokens = set(verify_org.lower().split()) - {
+                    "hotel",
+                    "resort",
+                    "the",
+                    "and",
+                    "at",
+                    "a",
+                    "of",
+                    "by",
+                    "in",
+                }
+                relevant_tokens = hotel_tokens | org_tokens
+
+                # If snippets mention the hotel/org, they're likely current
+                has_match = any(
+                    t in snippets_text for t in relevant_tokens if len(t) > 3
+                )
+
+                if has_match:
+                    logger.info(
+                        f"[EXISTING HOTEL VERIFY] {c_name}: CONFIRMED — "
+                        f"recent mentions at {verify_org}"
+                    )
+                    verified_contacts.append(c)
+                else:
+                    c["confidence"] = "low"
+                    c["source_detail"] = (
+                        f"⚠ POSSIBLY DEPARTED — recent results found but no clear "
+                        f"connection to {hotel_name}. Verify before outreach."
+                    )
+                    logger.warning(
+                        f"[EXISTING HOTEL VERIFY] {c_name}: no hotel match in "
+                        f"recent snippets — flagged as possibly departed"
+                    )
+                    verified_contacts.append(c)
+
+            result.contacts = verified_contacts
+            logger.info(
+                f"Contact grounding + employment verification complete for "
+                f"{hotel_name}: {len(result.contacts)} contacts ✅"
             )
             return result
         elif all_cxo:

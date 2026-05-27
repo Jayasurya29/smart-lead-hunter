@@ -1231,19 +1231,47 @@ async def add_hotel_contact(
     if not name:
         raise HTTPException(status_code=400, detail="name is required")
 
+    # Score the contact via unified scoring module
+    from app.services.contact_scoring import score_contact
+
+    title = (body.get("title") or "").strip()
+    scope = body.get("scope", "hotel_specific")
+    _VALID_SCOPES = (
+        "hotel_specific",
+        "chain_area",
+        "management_corporate",
+        "chain_corporate",
+        "owner",
+        "unknown",
+    )
+    if scope not in _VALID_SCOPES:
+        scope = "unknown"
+
+    score_result = score_contact(
+        title=title,
+        scope=scope,
+        strategist_priority=None,  # Manual add — no strategist verdict yet
+    )
+
     contact = LeadContact(
         existing_hotel_id=hotel_id,
         name=name,
-        title=body.get("title"),
-        email=body.get("email"),
-        secondary_email=body.get("secondary_email"),
-        phone=body.get("phone"),
-        linkedin=body.get("linkedin"),
-        organization=body.get("organization"),
-        scope=body.get("scope", "hotel_specific"),
-        confidence="manual",
+        title=title or None,
+        email=(body.get("email") or "").strip() or None,
+        secondary_email=(body.get("secondary_email") or "").strip() or None,
+        phone=(body.get("phone") or "").strip() or None,
+        linkedin=(body.get("linkedin") or "").strip() or None,
+        organization=(body.get("organization") or "").strip() or None,
+        scope=scope,
+        confidence=score_result["confidence"],
+        tier=score_result["tier"],
+        score=score_result["score"],
+        score_breakdown=score_result["breakdown"],
+        is_primary=False,
         is_saved=True,
         found_via="manual",
+        source_detail="Manually added",
+        evidence_url=(body.get("evidence_url") or "").strip() or None,
         last_enriched_at=local_now(),
     )
     db.add(contact)

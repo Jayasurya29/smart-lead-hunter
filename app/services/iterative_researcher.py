@@ -620,8 +620,12 @@ async def iteration_2_gm_hunt(state: ResearchState) -> int:
     # queries — those are noise on an open property and waste credits.
     if state.is_existing_hotel:
         queries = [
-            f'"{short_name}" "general manager"',
+            # LinkedIn first — current positions are gold standard for open hotels
             f'"{short_name}" "general manager" OR "hotel manager" site:linkedin.com',
+            # Basic GM search
+            f'"{short_name}" "general manager"',
+            # Recency filter — surfaces 2024-2026 content over old press releases
+            f'"{short_name}" "general manager" current 2024 OR 2025 OR {_CY}',
         ]
 
         facts_before = _fact_count(state)
