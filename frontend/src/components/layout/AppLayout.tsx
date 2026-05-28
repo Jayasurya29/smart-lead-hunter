@@ -9,6 +9,7 @@ import {
 import { cn } from '@/lib/utils'
 import ScrapeModal from '@/components/modals/ScrapeModal'
 import DiscoveryModal from '@/components/modals/DiscoveryModal'
+import { Upload } from 'lucide-react'
 
 interface NavItem {
   to: string
@@ -27,6 +28,7 @@ const NAV_ITEMS: NavItem[] = [
   { to: '/map',              label: 'Map',              icon: Map },
   { to: '/sources',          label: 'Sources',          icon: Radar },
   { to: '/users',            label: 'Team',             icon: Shield },
+  { to: '/bulk-upload', label: 'Bulk Upload', icon: Upload },
 ]
 
 export default function AppLayout({ children }: { children: ReactNode }) {

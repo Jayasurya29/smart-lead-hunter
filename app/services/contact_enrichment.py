@@ -611,26 +611,42 @@ async def _call_gemini_single(
             err_type = type(e).__name__
             err_repr = repr(e) or f"{err_type}(no details)"
 
-            # ── EARLY BAILOUT FOR TIMEOUT ERRORS ──
-            # ReadTimeout / ConnectTimeout mean Gemini received the request
-            # but didn't respond in time — the model's DSQ pool is overloaded.
-            # Retrying the SAME model 6 times wastes 7+ minutes (90s × 6).
-            # After 2 consecutive timeouts, bail out immediately so the
-            # multi-model fallback chain in _call_gemini() can try a
-            # different model with its own fresh DSQ pool.
+            # ── TIMEOUT RETRY LOGIC ──
+            # ReadTimeout / ConnectTimeout mean Gemini didn't respond in time.
+            # Usually transient — Gemini was overloaded and a retry succeeds.
+            #
+            # Strategy: retry TWICE on the same endpoint with a short cooldown
+            # (5-10s), THEN bail to the fallback chain. This balances:
+            #   - Not wasting 7+ minutes (90s × 6) on a dead endpoint
+            #   - Not giving up immediately when a 5s retry would've worked
+            #
+            # 2026-05-28: Fixed bug where `attempt >= 0` bailed on first try.
             is_timeout = err_type in (
                 "ReadTimeout",
                 "ConnectTimeout",
                 "PoolTimeout",
                 "TimeoutException",
             )
-            if is_timeout and attempt >= 0:
-                logger.warning(
-                    f"Gemini [{err_type}] on attempt {attempt + 1} — "
-                    f"bailing immediately to next fallback (retrying same endpoint won't help)"
-                )
-                last_error = err_repr
-                break  # exit retry loop → _call_gemini() tries next model
+            if is_timeout:
+                if attempt >= 2:
+                    # Tried 3 times (0, 1, 2) — this endpoint is genuinely down
+                    logger.warning(
+                        f"Gemini [{err_type}] on attempt {attempt + 1} — "
+                        f"bailing to next fallback model after {attempt + 1} timeouts"
+                    )
+                    last_error = err_repr
+                    break  # exit retry loop → _call_gemini() tries next model
+                else:
+                    # First or second timeout — retry with short cooldown
+                    cooldown = 5.0 + (attempt * 5.0)  # 5s, then 10s
+                    logger.warning(
+                        f"Gemini [{err_type}] on attempt {attempt + 1} — "
+                        f"retrying same endpoint in {cooldown:.0f}s "
+                        f"(attempt {attempt + 2}/{_GEMINI_RETRY_ATTEMPTS})"
+                    )
+                    await asyncio.sleep(cooldown)
+                    last_error = err_repr
+                    continue
 
             delay = _retry_delay_with_jitter(attempt)
             logger.warning(
@@ -651,10 +667,9 @@ async def _call_gemini_single(
 # MULTI-MODEL FALLBACK CHAIN
 # ═══════════════════════════════════════════════════════════════
 #
-# When the primary model's DSQ pool is saturated, we exhaust 6 retries
-# (~90s wasted) before falling back to title-only priority — at the cost
-# of brief quality. Instead, when retries fail with 429, we automatically
-# try a different model's pool. Per Google's DSQ docs:
+# When the primary model times out or returns 429, we try up to 3 times
+# with short cooldowns (5s, 10s) before falling back to a different model.
+# Each model in the chain gets its own fresh DSQ pool (per Google's docs):
 #
 #   "The throughput limit shown for a model family applies independently
 #   to each model within that family. Usage against one of these limits

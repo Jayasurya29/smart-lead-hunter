@@ -3001,7 +3001,7 @@ _ADDITIONAL_BRANDS: dict[str, BrandInfo] = {
     ),
     "element": BrandInfo(
         parent_company="Marriott",
-        tier="tier4_upscale",
+        tier="tier5_skip",
         operating_model="franchised",
         typical_model_note="Extended stay eco-focused brand.",
         procurement_model="avendra_gpo",
@@ -3016,7 +3016,7 @@ _ADDITIONAL_BRANDS: dict[str, BrandInfo] = {
     ),
     "four points": BrandInfo(
         parent_company="Marriott",
-        tier="tier4_upscale",
+        tier="tier5_skip",
         operating_model="franchised",
         typical_model_note="Select service brand.",
         procurement_model="avendra_gpo",
@@ -3076,7 +3076,7 @@ _ADDITIONAL_BRANDS: dict[str, BrandInfo] = {
     ),
     "spark by hilton": BrandInfo(
         parent_company="Hilton",
-        tier="tier4_upscale",
+        tier="tier5_skip",
         operating_model="franchised",
         typical_model_note="Hilton's premium economy brand.",
         procurement_model="owner_managed",
@@ -3094,7 +3094,7 @@ _ADDITIONAL_BRANDS: dict[str, BrandInfo] = {
     # ──────────────────────────────────────────────────────────────────────────
     "hyatt place": BrandInfo(
         parent_company="Hyatt",
-        tier="tier4_upscale",
+        tier="tier5_skip",
         operating_model="franchised",
         typical_model_note="Select service lifestyle brand.",
         procurement_model="owner_managed",
@@ -3109,7 +3109,7 @@ _ADDITIONAL_BRANDS: dict[str, BrandInfo] = {
     ),
     "hyatt house": BrandInfo(
         parent_company="Hyatt",
-        tier="tier4_upscale",
+        tier="tier5_skip",
         operating_model="franchised",
         typical_model_note="Extended stay select service brand.",
         procurement_model="owner_managed",
@@ -3324,7 +3324,7 @@ _ADDITIONAL_BRANDS: dict[str, BrandInfo] = {
     ),
     "garner": BrandInfo(
         parent_company="IHG",
-        tier="tier4_upscale",
+        tier="tier5_skip",
         operating_model="franchised",
         typical_model_note="IHG's newest midscale brand (2023).",
         procurement_model="owner_managed",
@@ -3903,7 +3903,7 @@ _ADDITIONAL_BRANDS: dict[str, BrandInfo] = {
     ),
     "citizenm": BrandInfo(
         parent_company="citizenM Hotels (Independent)",
-        tier="tier4_upscale",
+        tier="tier5_skip",
         operating_model="managed",
         typical_model_note="Dutch affordable luxury brand. Tech-forward.",
         procurement_model="brand_managed",
@@ -3918,7 +3918,7 @@ _ADDITIONAL_BRANDS: dict[str, BrandInfo] = {
     ),
     "sonder": BrandInfo(
         parent_company="Sonder Holdings (Public)",
-        tier="tier4_upscale",
+        tier="tier5_skip",
         operating_model="managed",
         typical_model_note="Tech-enabled hospitality company. Apartments + hotels.",
         procurement_model="brand_managed",

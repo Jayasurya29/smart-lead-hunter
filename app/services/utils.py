@@ -517,14 +517,12 @@ def should_accept_opening_date(
     Rules:
       1. If current is empty → accept anything non-empty.
       2. If candidate is empty → reject (don't blank-out a real value).
-      3. If candidate is more specific OR equally specific → accept,
-         BUT only if the year hasn't shifted backward (suspicious).
-      4. If candidate is less specific → reject (regression).
-      5. If years differ and the candidate is less specific → reject.
-
-    The year-shift-backward case is conservative: we accept only when
-    the new value carries higher specificity (e.g. correcting "2027"
-    → "September 2026" is fine; "2027" → "2026" is rejected).
+      3. If candidate year is LATER than current → ACCEPT (project delayed).
+         Delays are extremely common in pre-opening; a later date from a
+         grounded/cited source should always override an earlier one.
+      4. If candidate year is EARLIER → only accept if specificity increases
+         (e.g. "2027" → "September 2026" is fine, "2027" → "2026" is not).
+      5. Same year: accept if specificity doesn't regress.
     """
     cur = (current or "").strip()
     cand = (candidate or "").strip()
@@ -543,7 +541,19 @@ def should_accept_opening_date(
     cur_year = _extract_year(cur)
     cand_year = _extract_year(cand)
 
-    # Year shifted backward — only accept if specificity strictly increases
+    # Year shifted FORWARD — project was DELAYED. This is extremely common
+    # in pre-opening hotel development. A later year from a grounded/cited
+    # source should ALWAYS be accepted, even if less specific.
+    # "Late 2026" → "2027" = delay, accept it.
+    # 2026-05-28: Fixed bug where delays were rejected as "specificity regression"
+    if cur_year and cand_year and cand_year > cur_year:
+        return True, (
+            f"year shifted forward ({cur_year}→{cand_year}) — "
+            f"project likely delayed, accepting"
+        )
+
+    # Year shifted BACKWARD — suspicious. Only accept if specificity increases
+    # (e.g. correcting "2027" → "September 2026" is fine, "2027" → "2026" is not)
     if cur_year and cand_year and cand_year < cur_year:
         if cand_spec > cur_spec:
             return True, (
@@ -555,6 +565,7 @@ def should_accept_opening_date(
             f"({cur_spec}→{cand_spec}) — rejected as suspicious"
         )
 
+    # Same year — only accept if specificity doesn't regress
     if cand_spec < cur_spec:
         return False, (
             f"specificity regression ({cur_spec}→{cand_spec}): "

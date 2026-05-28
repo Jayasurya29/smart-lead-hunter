@@ -15,6 +15,7 @@ import SourcesPage from '@/pages/SourcesPage'
 // import ClientIntelligence from '@/pages/ClientIntelligence'
 import MapPage from '@/pages/MapPage'
 import ContactsPage from '@/pages/ContactsPage'
+import BulkUpload from '@/pages/BulkUpload'
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { isAuthenticated, isLoading } = useAuth()
@@ -127,6 +128,14 @@ export default function AppRouter() {
             element={
               <ProtectedRoute>
                 <Outreach />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/bulk-upload"
+            element={
+              <ProtectedRoute>
+                <BulkUpload />
               </ProtectedRoute>
             }
           />

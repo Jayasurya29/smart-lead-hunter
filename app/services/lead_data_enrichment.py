@@ -322,7 +322,7 @@ async def _call_gemini(
 # the 6-stage path. We only flip this on for batch_smart_fill / batch_full_refresh
 # (15 leads/day) — never for auto_enrich (50 calls/lead, would cost $220/mo).
 
-_GROUNDING_TIMEOUT_S = 60.0
+_GROUNDING_TIMEOUT_S = 90.0  # 3.5 Flash takes 20-55s; 90s matches contact_enrichment
 _GROUNDING_MIN_FIELDS = 3  # below this, we treat the result as a failure
 # AUDIT 2026-05-06 (CRIT-2): Canonical 5-tier set ONLY. JA Uniforms
 # targets 4-star+ properties. Any other tier value the AI returns is
@@ -445,12 +445,17 @@ def _validate_grounding_response(parsed: Dict) -> Dict:
         if "|" not in pt_lower and pt_lower in _GROUNDING_VALID_PROJECT_TYPES:
             clean["project_type"] = pt_lower
 
-    # room_count — must be positive int
+    # room_count — must be positive int, max 5000 (largest US hotel ~3000 rooms)
     rc = parsed.get("room_count")
     try:
         rc_int = int(rc) if rc is not None else 0
-        if rc_int > 0:
+        if 0 < rc_int <= 5000:
             clean["room_count"] = rc_int
+        elif rc_int > 5000:
+            logger.warning(
+                f"Grounding room_count={rc_int} exceeds 5000 — likely parsing error, "
+                f"discarding"
+            )
     except (TypeError, ValueError):
         pass
 
@@ -1142,15 +1147,30 @@ async def enrich_lead_data(
                 }
                 if cur_lower not in _PLACEHOLDERS:
                     new_mgmt = (grounded.get("management_company") or "").strip()
-                    if new_mgmt.lower() != cur_lower:
-                        logger.info(
-                            f"Grounding: management_company '{new_mgmt}' "
-                            f"not applied — current value '{cur_mgmt}' is "
-                            f"already set and not a placeholder"
+                    new_lower = new_mgmt.lower()
+                    if new_lower != cur_lower:
+                        # Accept if the new name is a MORE COMPLETE version
+                        # of the current name (e.g. "Virgin Hotels" → "Virgin Hotels Collection")
+                        # or if the new name contains the current name as a substring
+                        is_more_complete = (
+                            cur_lower in new_lower  # current is substring of new
+                            and len(new_mgmt) > len(cur_mgmt)
                         )
-                        grounded.pop("management_company", None)
-                        if "management_company" in grounded.get("changes", []):
-                            grounded["changes"].remove("management_company")
+                        if is_more_complete:
+                            logger.info(
+                                f"Grounding: management_company '{cur_mgmt}' "
+                                f"→ '{new_mgmt}' (more complete name)"
+                            )
+                            # Keep the grounded value — don't pop it
+                        else:
+                            logger.info(
+                                f"Grounding: management_company '{new_mgmt}' "
+                                f"not applied — current value '{cur_mgmt}' is "
+                                f"already set and not a placeholder"
+                            )
+                            grounded.pop("management_company", None)
+                            if "management_company" in grounded.get("changes", []):
+                                grounded["changes"].remove("management_company")
 
             # Run hybrid geocode + website resolver. This is best-effort —
             # if it fails, grounded already has whatever lat/lng/website it
@@ -2914,6 +2934,12 @@ def _map_extraction_to_result(
     try:
         new_rc = int(extraction.get("room_count") or 0)
     except (TypeError, ValueError):
+        new_rc = 0
+    if new_rc > 5000:
+        logger.warning(
+            f"Smart Fill room_count={new_rc} exceeds 5000 for "
+            f"'{result.get('hotel_name', '?')}' — likely parsing error, discarding"
+        )
         new_rc = 0
     if new_rc > 0:
         if mode == "full" or not current_room_count or current_room_count <= 0:
