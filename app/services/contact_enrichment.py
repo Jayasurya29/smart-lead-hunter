@@ -6969,7 +6969,46 @@ async def enrich_lead_contacts(
                         found_name = name_match.group(1).strip()
 
                         # Validate it's a real person, not a company/hotel name
+                        # Validate it's a real person, not a company/hotel name
                         if not _looks_like_real_person(found_name):
+                            continue
+
+                        # Reject if name contains job title words
+                        # (catches "Assistant General", "Executive Chef", "Director Operations")
+                        _TITLE_WORDS = {
+                            "assistant",
+                            "general",
+                            "director",
+                            "manager",
+                            "executive",
+                            "chef",
+                            "supervisor",
+                            "coordinator",
+                            "president",
+                            "vice",
+                            "senior",
+                            "junior",
+                            "associate",
+                            "intern",
+                            "trainee",
+                        }
+                        name_words_lower = set(found_name.lower().split())
+                        if name_words_lower & _TITLE_WORDS:
+                            continue
+
+                        # Reject known non-person entities
+                        _KNOWN_COMPANIES = {
+                            "towne park",
+                            "marriott international",
+                            "hilton worldwide",
+                            "hyatt hotels",
+                            "ihg hotels",
+                            "accor hotels",
+                            "wyndham hotels",
+                            "choice hotels",
+                            "best western",
+                        }
+                        if found_name.lower() in _KNOWN_COMPANIES:
                             continue
 
                         # Reject if name overlaps with hotel/brand/company words
@@ -7001,6 +7040,7 @@ async def enrich_lead_contacts(
                             "benchmark",
                             "concord",
                             "remington",
+                            "towne",
                         }
                         name_words = set(found_name.lower().split())
                         hotel_name_words = set(hotel_name.lower().split())
