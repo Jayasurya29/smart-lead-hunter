@@ -785,14 +785,15 @@ TARGET LOCATIONS (we ONLY care about these):
 WHAT COUNTS AS RELEVANT:
 ✅ A NAMED hotel opening, groundbreaking, or construction start in {current_year}+
 ✅ Hotel brand conversion/renovation reopening as a new brand (e.g., Hilton → Four Seasons)
-✅ New resort or hotel development announced for USA/Caribbean
+✅ New resort or hotel development announced for USA, the Caribbean, or the MEXICAN CARIBBEAN COAST (Quintana Roo — Cancún, Riviera Maya, Playa del Carmen, Tulum, Cozumel — which sits on the Caribbean Sea and counts as Caribbean)
 ✅ Hotel under construction with projected opening date
 ✅ Mixed-use development that includes a hotel component
 
 WHAT IS NOT RELEVANT:
 ❌ Hotels that already opened ({current_year - 1} or earlier) — unless announcing a new phase
 ❌ Hotels mentioned only as BACKGROUND or COMPARISON (e.g. "similar to the Ritz-Carlton Turtle Bay which opened last year")
-❌ International hotels (Europe, Asia, Middle East, Africa) with no US/Caribbean connection
+❌ International hotels (Europe, Asia, Middle East, Africa, South America) with no US/Caribbean connection
+❌ Mexico OUTSIDE the Caribbean coast — Mexico City, Los Cabos / Cabo San Lucas, Puerto Vallarta, Guadalajara, Monterrey (interior or Pacific, NOT Caribbean)
 ❌ Executive appointments, promotions, or leadership changes (UNLESS tied to a new property)
 ❌ Hotel reviews, travel guides, or "best hotels" lists
 ❌ Airlines, cruises, restaurants (unless inside a new hotel)
@@ -814,6 +815,12 @@ Example 4: "Developer breaks ground on $200M mixed-use tower in Fort Lauderdale 
 
 Example 5: "Top 10 luxury hotels opening in {current_year}"
 → {{"is_new_hotel_opening": true, "confidence": 0.70, "reasoning": "Listicle about new openings — likely contains multiple relevant hotels"}}
+
+Example 6: "Park Hyatt to open its first all-inclusive resort in Riviera Maya, Mexico in {current_year}+"
+→ {{"is_new_hotel_opening": true, "confidence": 0.95, "reasoning": "New resort on the Mexican Caribbean coast (Riviera Maya, Quintana Roo) — in scope as Caribbean"}}
+
+Example 7: "Four Seasons announces new resort in Los Cabos, Mexico"
+→ {{"is_new_hotel_opening": false, "confidence": 0.90, "reasoning": "Los Cabos is on Mexico's Pacific coast, not the Caribbean — out of region"}}
 
 Now classify THIS content:
 ---

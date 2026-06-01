@@ -228,6 +228,7 @@ class APIKeyMiddleware:
         # Method 3: JWT cookie
         jwt_cookie = request.cookies.get("slh_session", "")
         if jwt_cookie:
+            _jwt_authed = False
             try:
                 from jose import jwt as jose_jwt
 
@@ -265,8 +266,7 @@ class APIKeyMiddleware:
                 if payload and payload.get("sub"):
                     user_id_str = str(payload["sub"])
                     if await _is_user_active(user_id_str):
-                        await self.app(scope, receive, send)
-                        return
+                        _jwt_authed = True
                     else:
                         # Deactivated user — fall through to deny
                         logger.info(
@@ -275,6 +275,19 @@ class APIKeyMiddleware:
                         )
             except Exception:
                 pass
+
+            # FIX 2026-06-01: Call the downstream app OUTSIDE the JWT-decode
+            # try/except above. Previously `await self.app(...)` lived INSIDE
+            # that try, so ANY route exception (e.g. one bad lead row raising
+            # a ResponseValidationError in /leads) was swallowed by
+            # `except Exception: pass` and execution fell through to the 401
+            # reject block — surfacing a real 500 as a fake "session expired".
+            # That masked the actual error and bounced authenticated users to
+            # /login. The try/except must guard JWT decoding only, never the
+            # request handling itself.
+            if _jwt_authed:
+                await self.app(scope, receive, send)
+                return
 
         # Dev bypass when no auth configured at all
         if not api_key and not jwt_cookie:

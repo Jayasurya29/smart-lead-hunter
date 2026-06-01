@@ -402,13 +402,15 @@ export default function BulkUpload() {
                             {row.target_table === 'potential' ? 'New Hotels' : 'Existing'}
                           </span>
                         </td>
-                        <td className="px-3 py-2.5 text-xs text-stone-500 max-w-[200px] truncate">
+                        <td className="px-3 py-2.5 text-xs text-stone-500 min-w-[240px] whitespace-normal break-words">
                           {status === 'new' ? (
                             <span className="text-emerald-600">Ready to import</span>
                           ) : status === 'duplicate_upload' ? (
                             <span>Same as row {row.dedup?.match_row}</span>
                           ) : (
-                            <span>
+                            <span
+                              title={`Matches ${row.dedup?.match_name} (${row.dedup?.match_table === 'existing_hotels' ? 'existing' : 'lead'} #${row.dedup?.match_id}, ${row.dedup?.similarity})`}
+                            >
                               Matches{' '}
                               <span className="font-medium text-stone-700">
                                 {row.dedup?.match_name}

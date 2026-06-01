@@ -359,20 +359,53 @@ class LeadResponse(LeadBase):
 
     model_config = ConfigDict(from_attributes=True)
 
-    # Disable input validators on response — data comes from DB, already validated
+    # FIX 2026-06-01: Response data comes straight from the DB and is for
+    # DISPLAY only — it must NOT be re-validated with the input-side
+    # validators inherited from LeadBase, which RAISE (not coerce) on values
+    # that are perfectly fine to store: a scheme-less hotel_website
+    # ("www.hotel.com", "TBD"), a junk contact_email ("info@", "n/a"), a
+    # legacy/non-canonical brand_tier, an out-of-set location_type, a blank
+    # hotel_name, or a negative room_count. A SINGLE such row anywhere in a
+    # page made FastAPI raise ResponseValidationError for the ENTIRE /leads
+    # response — which the auth middleware then swallowed and surfaced as a
+    # 401 "session expired" (see app/middleware/auth.py FIX 2026-06-01). That
+    # is why per_page=25 (clean top-of-list rows) worked but per_page=100,
+    # the map's per_page=500, and the HOT timeline bucket all "logged out".
+    #
+    # Pydantic v2 only suppresses a parent field_validator when the override
+    # uses the SAME function name. The previous pass_hotel_name / pass_existing
+    # / pass_enum_fields overrides used DIFFERENT names and only added a
+    # `mode="before"` validator, so the raising LeadBase `after` validators
+    # still ran. These overrides reuse the exact parent names and pass the raw
+    # DB value through untouched.
     @field_validator("hotel_name", mode="before")
     @classmethod
-    def pass_hotel_name(cls, v):
+    def hotel_name_not_empty(cls, v):
         return v if v else ""
 
-    @field_validator("contact_email", "hotel_website", mode="before")
+    @field_validator("contact_email", mode="before")
     @classmethod
-    def pass_existing(cls, v):
+    def validate_contact_email(cls, v):
         return v
 
-    @field_validator("brand_tier", "location_type", mode="before")
+    @field_validator("hotel_website", mode="before")
     @classmethod
-    def pass_enum_fields(cls, v):
+    def validate_hotel_website(cls, v):
+        return v
+
+    @field_validator("brand_tier", mode="before")
+    @classmethod
+    def validate_brand_tier(cls, v):
+        return v
+
+    @field_validator("location_type", mode="before")
+    @classmethod
+    def validate_location_type(cls, v):
+        return v
+
+    @field_validator("room_count", mode="before")
+    @classmethod
+    def room_count_positive(cls, v):
         return v
 
 

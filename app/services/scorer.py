@@ -701,15 +701,16 @@ INTERNATIONAL_SKIP = [
     "british columbia",
     "ontario",
     "alberta",
-    # Mexico (not Caribbean)
+    # Mexico — interior + Pacific coast only (NOT the Caribbean coast).
+    # SCOPE 2026-06-01 (Menchu): the Mexican Caribbean coast (Quintana Roo:
+    # Cancún, Riviera Maya, Playa del Carmen, Tulum, Cozumel) is IN SCOPE and
+    # was removed from this list — it is now matched positively as Caribbean
+    # in get_location_score STEP 3.5 (see MEXICAN_CARIBBEAN below). Everything
+    # left here is genuinely out of region (interior or Pacific).
     "mexico",
     "mexico city",
-    "cancun",
     "los cabos",
     "cabo san lucas",
-    "riviera maya",
-    "playa del carmen",
-    "tulum",
     "puerto vallarta",
     "guadalajara",
     "monterrey",
@@ -966,6 +967,40 @@ LOCATION_TYPES = {
 }
 
 
+# =============================================================================
+# MEXICAN CARIBBEAN COAST — IN-SCOPE CARVE-OUT
+# =============================================================================
+# SCOPE 2026-06-01 (Menchu): The Mexican Caribbean coast sits on the Caribbean
+# Sea (Quintana Roo, Yucatán Peninsula) and IS in scope — same water as
+# Jamaica / Bahamas / DR. It is the deliberate exception to the blanket Mexico
+# block in INTERNATIONAL_SKIP. Matched positively in get_location_score STEP 3.5
+# BEFORE any international gate, so a Quintana Roo property scores as Caribbean.
+# Anything NOT in this list (Mexico City, Los Cabos, Puerto Vallarta, etc.)
+# still falls through to the international skip + country gate and is dropped.
+# Accented and unaccented spellings are both listed (matching is substring on
+# the lowercased location text, so "cancún" != "cancun").
+MEXICAN_CARIBBEAN = [
+    "quintana roo",
+    "cancun",
+    "cancún",
+    "riviera maya",
+    "riviera cancun",
+    "riviera cancún",
+    "playa del carmen",
+    "tulum",
+    "cozumel",
+    "puerto morelos",
+    "isla mujeres",
+    "costa mujeres",
+    "playa mujeres",
+    "akumal",
+    "puerto aventuras",
+    "mayakoba",
+    "mahahual",
+    "bacalar",
+]
+
+
 def get_location_score(
     city: str = None, state: str = None, country: str = None
 ) -> Tuple[int, str, str]:
@@ -1058,6 +1093,17 @@ def get_location_score(
     for carib_keyword in CARIBBEAN_KEYWORDS:
         if _location_keyword_matches(carib_keyword, location_text):
             return (15, "Caribbean", "caribbean")
+
+    # ── STEP 3.5: Mexican Caribbean coast (Quintana Roo) ──
+    # SCOPE 2026-06-01 (Menchu): Cancún / Riviera Maya / Playa del Carmen /
+    # Tulum / Cozumel and the rest of Quintana Roo are on the Caribbean Sea and
+    # ARE in scope. This positive check runs BEFORE the international gates
+    # (STEP 4/5) so a Quintana Roo property is scored as Caribbean instead of
+    # being skipped as "Mexico". The rest of Mexico is NOT in MEXICAN_CARIBBEAN,
+    # so it still falls through to STEP 4/5 and is dropped as international.
+    for mx_keyword in MEXICAN_CARIBBEAN:
+        if _location_keyword_matches(mx_keyword, location_text):
+            return (15, "Caribbean (Mexican Caribbean coast)", "caribbean")
 
     # ── STEP 4: Check international keywords ──
     # Audit Fix H-09: When BOTH state AND country are empty, city alone could
@@ -1932,7 +1978,12 @@ if __name__ == "__main__":
         # M-07: TRUE POSITIVE TESTS - these SHOULD match
         ("Tru by Hilton Orlando", "Orlando", "FL", "USA"),
         ("Glo Hotel Downtown", "Tampa", "FL", "USA"),
-        ("Riu Palace Cancun", "Cancun", None, "Mexico"),
+        # SCOPE 2026-06-01: Mexican Caribbean coast is IN — location qualifies
+        # as Caribbean. The rest of Mexico (interior / Pacific) stays OUT.
+        ("Park Hyatt Riviera Maya", "Riviera Maya", "Quintana Roo", "Mexico"),
+        ("Hyatt Ziva Cancun", "Cancun", None, "Mexico"),
+        ("Hyatt Regency Mexico City", "Mexico City", None, "Mexico"),
+        ("Waldorf Astoria Los Cabos", "Los Cabos", None, "Mexico"),
     ]
 
     for hotel, city, state, country in test_cases:

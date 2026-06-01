@@ -52,6 +52,7 @@ from app.routes.revenue import router as revenue_router
 
 from app.routes.outreach import router as outreach_router
 from app.routes.inbox_contacts import router as inbox_contacts_router
+from app.routes.bulk_upload import router as bulk_upload_router
 
 
 # NOTE: Do NOT set WindowsProactorEventLoopPolicy here.
@@ -332,6 +333,12 @@ app.include_router(sap_legacy_router)
 app.include_router(revenue_router)
 app.include_router(outreach_router)
 app.include_router(inbox_contacts_router)
+# FIX 2026-06-01: bulk_upload router was never registered the BulkUpload
+# page + bulkUpload.ts call POST /api/bulk-upload/parse, but with no router
+# included the request fell through to the GET /api/{full_path} catch-all,
+# which matched the path but not the method → 405 Method Not Allowed. Router
+# already carries prefix="/api/bulk-upload" with /parse and /confirm.
+app.include_router(bulk_upload_router)
 
 
 # -----------------------------------------------------------------------------

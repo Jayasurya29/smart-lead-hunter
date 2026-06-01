@@ -1972,12 +1972,7 @@ async def smart_fill_lead(lead_id: int, request: Request, _csrf=Depends(require_
                 getattr(lead, "website_verified", "") != "manual"
             ):
                 lead.website_verified = "auto"
-        if (
-            enriched.get("latitude") is not None
-            and enriched.get("longitude") is not None
-        ):
-            lead.latitude = enriched["latitude"]
-            lead.longitude = enriched["longitude"]
+        _apply_coords_if_not_downgrade(lead, enriched)
 
         # ── Always update normalized name for dedup matching ──
         from app.services.utils import normalize_hotel_name
@@ -2576,6 +2571,54 @@ async def smart_fill_stream(lead_id: int, request: Request, mode: str = "smart")
     )
 
 
+def _apply_coords_if_not_downgrade(lead, enriched: dict) -> None:
+    """Write enriched lat/lng onto the lead UNLESS doing so would clobber
+    existing coordinates with a low-confidence geocode.
+
+    FIX 2026-06-01: Pre-opening hotels in regions dense with same-brand
+    siblings (e.g. Park Hyatt Riviera Maya among already-built Hyatt
+    Ziva/Zilara resorts) can only produce a weak last-resort POI match
+    (_geo_source == "geoapify_poi"), which is frequently a coincidental
+    same-name street, NOT the real site. A Full Refresh that hits this case
+    must NOT overwrite coordinates a human already corrected (or a good
+    earlier fix). We only overwrite EXISTING coords when the new fix is
+    high-confidence: a rooftop street address ("geoapify_address") or a
+    sanity-checked grounding coordinate ("grounding_coords"). A lead with NO
+    coords yet accepts anything — an approximate pin beats none. When
+    _geo_source is missing (older/non-grounded paths), we treat it as
+    low-confidence and keep existing coords, which matches this function's
+    "preserve user-verified manual edits" philosophy.
+
+    Routed through one helper so the two apply sites (the POST /smart-fill
+    endpoint and _apply_enrichment_to_lead) can't drift apart.
+    """
+    new_lat = enriched.get("latitude")
+    new_lng = enriched.get("longitude")
+    if new_lat is None or new_lng is None:
+        return
+
+    geo_source = enriched.get("_geo_source")
+    high_confidence = geo_source in ("geoapify_address", "grounding_coords")
+    has_existing = lead.latitude is not None and lead.longitude is not None
+
+    if has_existing and not high_confidence:
+        logger.info(
+            f"Geo: keeping existing coords for {lead.hotel_name!r} "
+            f"({lead.latitude}, {lead.longitude}) — new fix was low-confidence "
+            f"({geo_source or 'unknown'}); not overwriting."
+        )
+        # Don't report a phantom "updated location" in the SSE/summary.
+        for _k in ("latitude", "longitude"):
+            enriched.pop(_k, None)
+            changes = enriched.get("changes")
+            if isinstance(changes, list) and _k in changes:
+                changes.remove(_k)
+        return
+
+    lead.latitude = new_lat
+    lead.longitude = new_lng
+
+
 def _apply_enrichment_to_lead(lead, enriched: dict, mode: str, get_timeline_label):
     """Apply fields from an enrich_lead_data result onto a lead ORM object.
 
@@ -2744,6 +2787,4 @@ def _apply_enrichment_to_lead(lead, enriched: dict, mode: str, get_timeline_labe
             getattr(lead, "website_verified", "") != "manual"
         ):
             lead.website_verified = "auto"
-    if enriched.get("latitude") is not None and enriched.get("longitude") is not None:
-        lead.latitude = enriched["latitude"]
-        lead.longitude = enriched["longitude"]
+    _apply_coords_if_not_downgrade(lead, enriched)

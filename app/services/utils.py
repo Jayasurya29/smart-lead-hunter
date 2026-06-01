@@ -376,24 +376,42 @@ def get_timeline_label(opening_date: str) -> str:
     text = opening_date.lower().strip()
     current_year = str(datetime.now().year)
 
-    # "2026 or 2027" style — too vague
-    if re.fullmatch(r"20\d{2}\s+or\s+20\d{2}", text):
-        return "TBD"
+    # ── Multi-year opening dates (FIX 2026-06-01) ───────────────────────────
+    # A string naming two or more DISTINCT years is a RANGE — e.g.
+    # "late 2026 or early 2027", "Q4 2026 to Q1 2027", "2026 or 2027".
+    # months_to_opening() only reads the FIRST year plus a single month, so for
+    # "late 2026 or early 2027" it married year 2026 ("late 2026") with the
+    # month from "early" (March — 'early' sorts before 'late' in the season
+    # parser) → March 2026, which is in the PAST → EXPIRED → the lead got
+    # auto-transferred out to existing_hotels. Wrong: that lead opens HOT.
+    #
+    # Correct handling: split the range into its date phrases and bucket on the
+    # EARLIEST plausible opening (the binding constraint for sales lead time).
+    # Only do this when at least one phrase carries a season/quarter/month
+    # qualifier; a bare "2026 or 2027" with no month info anywhere is genuinely
+    # unbucketable → TBD.
+    distinct_years = set(re.findall(r"20\d{2}", text))
+    if len(distinct_years) >= 2:
+        segments = re.split(r"\s+(?:or|to|through|thru|and|vs\.?)\s+|\s*/\s*", text)
+        seg_months: list[int] = []
+        any_specific = False
+        for seg in segments:
+            if not re.search(r"20\d{2}", seg):
+                continue
+            # "specific" == names a month/season/quarter, not just a bare year
+            if parse_month_from_text(seg, default=-1) != -1:
+                any_specific = True
+            seg_months.append(months_to_opening(seg))
+        if not (any_specific and seg_months):
+            return "TBD"
+        months = min(seg_months)
+    else:
+        # Bare current year only (e.g. "2026") — could be any month → TBD.
+        # Future bare years (2027+) fall through to a mid-year estimate.
+        if re.fullmatch(r"20\d{2}", text) and text == current_year:
+            return "TBD"
+        months = months_to_opening(opening_date)
 
-    # Year ranges like "2025-2026", "2026/27", "2026 to 2027" are too vague
-    # to bucket reliably. The source didn't commit to a specific window, so
-    # neither should we — return TBD instead of guessing a month.
-    if re.search(r"20\d{2}\s*[-/]\s*20?\d{2}", text):
-        return "TBD"
-    if re.search(r"20\d{2}\s+to\s+20\d{2}", text):
-        return "TBD"
-
-    # Bare current year only (e.g. "2026") — could be any month
-    # Future bare years (2027, 2028) use mid-year estimate
-    if re.fullmatch(r"20\d{2}", text) and text == current_year:
-        return "TBD"
-
-    months = months_to_opening(opening_date)
     # Business rule: uniform sales cycle requires ~6+ months lead time.
     # Anything under 3 months is too late to win the deal, so it's bucketed
     # as EXPIRED (don't pursue), not URGENT. The "sweet spot" is 6-12 months.
