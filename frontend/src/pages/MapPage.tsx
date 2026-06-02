@@ -92,6 +92,7 @@ interface RouteResult {
 
 type TileStyle = 'street' | 'satellite' | 'dark'
 type ColorMode = 'type' | 'revenue' | 'tier'
+type LeadColorMode = 'timeline' | 'tier'
 type NearbyRadius = 5 | 10 | 20
 
 const DEFAULT_FILTERS: MapFilters = { type: '', tier: '', zone: '' }
@@ -138,12 +139,9 @@ const officeIcon = L.divIcon({
 })
 
 const _leadIconCache = new Map<string, L.DivIcon>()
-function createLeadIcon(timeline: string | null, score: number | null): L.DivIcon {
-  const colors: Record<string, string> = { URGENT:'#dc2626', HOT:'#ea580c', WARM:'#d97706', COOL:'#2563eb', TBD:'#7c3aed' }
-  const tl = timeline || 'TBD'
-  const color = colors[tl] || '#7c3aed'
+function createLeadIcon(color: string, score: number | null): L.DivIcon {
   const s = score && score >= 70 ? 16 : score && score >= 50 ? 13 : 11
-  const key = `${tl}-${s}`
+  const key = `${color}-${s}`
   if (_leadIconCache.has(key)) return _leadIconCache.get(key)!
   const pad = 12, total = s + pad * 2
   const icon = L.divIcon({
@@ -180,6 +178,20 @@ const TYPE_COLORS = { client: '#059669', prospect: '#2563eb' }
 const TIER_COLORS: Record<string, string> = {
   tier1_ultra_luxury: '#d4a853', tier2_luxury: '#c49a3c',
   tier3_upper_upscale: '#3e638c', tier4_upscale: '#6b665e',
+}
+
+// Pre-opening lead diamonds use a warm-to-neutral URGENCY ramp that does NOT
+// overlap the existing-hotel palette (green client / blue prospect). COOL was
+// previously #2563eb — identical to Prospect — which made blue diamonds and
+// blue circles indistinguishable. It's now slate, so leads and existing hotels
+// never share a color.
+const LEAD_TIMELINE_COLORS: Record<string, string> = {
+  URGENT: '#dc2626', HOT: '#ea580c', WARM: '#d97706', COOL: '#64748b', TBD: '#7c3aed',
+}
+
+function leadColor(mode: LeadColorMode, timeline: string | null, tier: string | null): string {
+  if (mode === 'tier') return TIER_COLORS[tier || ''] || '#94a3b8'
+  return LEAD_TIMELINE_COLORS[timeline || 'TBD'] || '#7c3aed'
 }
 
 function lerpColor(a: string, b: string, t: number): string {
@@ -398,9 +410,10 @@ const leadClusterIconFn = (cluster: any) => {
 
 // ─── Memoized lead pin layer with clustering ───────────────────────────────────
 const LeadMarkers = memo(function LeadMarkers({
-  leadPins, onLeadClick,
+  leadPins, leadColorMode, onLeadClick,
 }: {
   leadPins: LeadPin[]
+  leadColorMode: LeadColorMode
   onLeadClick: (lead: LeadPin) => void
 }) {
   // No clustering for leads — there are only ~20-30 active leads at any
@@ -415,7 +428,7 @@ const LeadMarkers = memo(function LeadMarkers({
         <Marker
           key={`lead-${lead.id}`}
           position={[lead.lat, lead.lng]}
-          icon={createLeadIcon(lead.timeline_label, lead.lead_score)}
+          icon={createLeadIcon(leadColor(leadColorMode, lead.timeline_label, lead.brand_tier), lead.lead_score)}
           zIndexOffset={500}
           eventHandlers={{ click: () => onLeadClick(lead) }}
         />
@@ -502,6 +515,7 @@ export default function MapPage() {
   const [isFullscreen, setIsFullscreen] = useState(false)
   const [showGap, setShowGap] = useState(false)
   const [showLeads, setShowLeads] = useState(true)
+  const [leadColorMode, setLeadColorMode] = useState<LeadColorMode>('timeline')
 
   // Data
   const { data: hotels = [], isLoading } = useQuery<MapHotel[]>({
@@ -694,6 +708,17 @@ export default function MapPage() {
             <ToolBtn active={showGap} color="navy" icon={BarChart3} label="Zones" onClick={() => setShowGap(!showGap)} />
             <ToolBtn active={showLeads} color="violet" icon={Milestone} label={`Leads${leadPins.length ? ` (${leadPins.length})` : ''}`} onClick={() => setShowLeads(!showLeads)} />
 
+            {/* Lead color mode — only relevant while leads are shown */}
+            {showLeads && (
+              <div className="flex bg-violet-50 rounded-lg p-0.5" title="Color pre-opening lead diamonds by timeline or brand tier">
+                {([['timeline', 'Timeline', Clock], ['tier', 'Tier', Layers]] as [LeadColorMode, string, any][]).map(([k, lbl, Ic]) => (
+                  <button key={k} onClick={() => setLeadColorMode(k)} className={cn('flex items-center gap-1 px-2 py-1.5 text-2xs font-semibold rounded-md transition', leadColorMode === k ? 'bg-white text-violet-700 shadow-sm' : 'text-violet-400 hover:text-violet-600')}>
+                    <Ic className="w-3 h-3" />{lbl}
+                  </button>
+                ))}
+              </div>
+            )}
+
             <button onClick={() => setShowFilters(!showFilters)} className={cn('flex items-center gap-1 px-2.5 py-2 text-xs font-semibold rounded-lg transition', hasFilters ? 'bg-navy-900 text-white' : 'bg-white border border-stone-200 text-stone-600 hover:bg-stone-50')}>
               <Filter className="w-3.5 h-3.5" />Filters
             </button>
@@ -795,6 +820,7 @@ export default function MapPage() {
               {showLeads && (
                 <LeadMarkers
                   leadPins={leadPins}
+                  leadColorMode={leadColorMode}
                   onLeadClick={(lead) => {
                     setSelectedLead(lead)
                     setSelectedHotel(null)
@@ -867,17 +893,37 @@ export default function MapPage() {
           )}
 
           {/* Color legend — bottom-LEFT to avoid overlap with the
-              selectedHotel detail card (which lives bottom-right) */}
+              selectedHotel detail card (which lives bottom-right).
+              Two groups: round glyph = existing hotels, diamond glyph =
+              pre-opening leads, so the shape convention is self-explaining. */}
           <div className="absolute bottom-4 left-3 z-[1000]">
-            <div className="bg-white/90 backdrop-blur-sm rounded-lg px-3 py-2 shadow border border-stone-200 space-y-1">
-              {colorMode === 'type' && <><Dot c="#059669" l="Client" /><Dot c="#2563eb" l="Prospect" /></>}
-              {colorMode === 'revenue' && <><Dot c="#3b82f6" l="Low Revenue" /><Dot c="#d4a853" l="Mid Revenue" /><Dot c="#dc2626" l="High Revenue" /></>}
-              {colorMode === 'tier' && <><Dot c="#d4a853" l="Ultra Luxury" /><Dot c="#c49a3c" l="Luxury" /><Dot c="#3e638c" l="Upper Upscale" /><Dot c="#6b665e" l="Upscale" /></>}
-              {showOffice && <Dot c="#0f1d32" l="JA Office" diamond />}
+            <div className="bg-white/90 backdrop-blur-sm rounded-lg px-3 py-2 shadow border border-stone-200 space-y-1.5 min-w-[148px]">
+              {/* Existing hotels (circles) */}
+              <div>
+                <p className="text-[9px] text-stone-400 font-semibold uppercase tracking-wide mb-1 flex items-center gap-1.5">
+                  <span className="w-2.5 h-2.5 rounded-full bg-stone-400 inline-block" /> Existing hotels
+                </p>
+                {colorMode === 'type' && <><Dot c="#059669" l="Client" /><Dot c="#2563eb" l="Prospect" /></>}
+                {colorMode === 'revenue' && <><Dot c="#3b82f6" l="Low Revenue" /><Dot c="#d4a853" l="Mid Revenue" /><Dot c="#dc2626" l="High Revenue" /></>}
+                {colorMode === 'tier' && <><Dot c="#d4a853" l="Ultra Luxury" /><Dot c="#c49a3c" l="Luxury" /><Dot c="#3e638c" l="Upper Upscale" /><Dot c="#6b665e" l="Upscale" /></>}
+              </div>
+
+              {/* Pre-opening leads (diamonds) */}
               {showLeads && leadPins.length > 0 && (
-                <div className="pt-1 mt-1 border-t border-stone-100">
-                  <p className="text-[9px] text-stone-400 font-semibold uppercase tracking-wide mb-1">Pre-Opening Leads</p>
-                  <Dot c="#dc2626" l="Urgent" square /><Dot c="#ea580c" l="Hot" square /><Dot c="#d97706" l="Warm" square /><Dot c="#2563eb" l="Cool" square />
+                <div className="pt-1.5 mt-1.5 border-t border-stone-100">
+                  <p className="text-[9px] text-stone-400 font-semibold uppercase tracking-wide mb-1 flex items-center gap-1.5">
+                    <span className="w-2.5 h-2.5 rotate-45 rounded-[2px] bg-stone-400 inline-block" /> Pre-opening leads
+                  </p>
+                  {leadColorMode === 'timeline'
+                    ? <><Dot c="#dc2626" l="Urgent" square /><Dot c="#ea580c" l="Hot" square /><Dot c="#d97706" l="Warm" square /><Dot c="#64748b" l="Cool" square /><Dot c="#7c3aed" l="TBD" square /></>
+                    : <><Dot c="#d4a853" l="Ultra Luxury" square /><Dot c="#c49a3c" l="Luxury" square /><Dot c="#3e638c" l="Upper Upscale" square /><Dot c="#6b665e" l="Upscale" square /></>
+                  }
+                </div>
+              )}
+
+              {showOffice && (
+                <div className="pt-1.5 mt-1.5 border-t border-stone-100">
+                  <Dot c="#0f1d32" l="JA Office" diamond />
                 </div>
               )}
             </div>

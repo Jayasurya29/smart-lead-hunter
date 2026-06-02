@@ -116,25 +116,12 @@ def serper_search(query: str) -> list[str]:
         return []
 
 
-def ddg_search(query: str) -> list[str]:
-    try:
-        from duckduckgo_search import DDGS
-
-        results = []
-        with DDGS() as ddgs:
-            for r in ddgs.text(query, max_results=5):
-                results.append(f"{r['title']}: {r['body']} ({r['href']})")
-        return results
-    except Exception as e:
-        logger.warning(f"DDG search failed for {query!r}: {e}")
-        return []
-
-
 def smart_search(query: str) -> list[str]:
-    results = serper_search(query)
-    if not results:
-        results = ddg_search(query)
-    return results
+    # Serper only. The DuckDuckGo fallback was removed — it rate-limited
+    # constantly (202 Ratelimit) and added no reliable value. If Serper
+    # returns nothing, we return nothing and let the caller handle it
+    # (synthesis produces an empty/low-confidence result rather than guessing).
+    return serper_search(query)
 
 
 def run_all_searches(queries: dict[str, str]) -> dict[str, list[str]]:

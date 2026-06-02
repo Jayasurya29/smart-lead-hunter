@@ -102,6 +102,7 @@ async def inbox_contacts_list(
     page: int = Query(1, ge=1),
     per_page: int = Query(50, ge=1, le=500),
     procurement_priority: Optional[str] = None,
+    contact_category: Optional[str] = None,
     approval_status: Optional[str] = None,
     brand_tier: Optional[str] = None,
     gpo: Optional[str] = None,
@@ -124,6 +125,7 @@ async def inbox_contacts_list(
         rows, total = await list_contacts(
             db,
             procurement_priority=procurement_priority,
+            contact_category=contact_category,
             approval_status=approval_status,
             brand_tier=brand_tier,
             gpo=gpo,

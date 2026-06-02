@@ -532,6 +532,27 @@ class SourceResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
+class SourceListResponse(BaseModel):
+    """Paginated source list response (mirrors LeadListResponse)."""
+
+    sources: List[SourceResponse]
+    total: int
+    page: int
+    per_page: int
+    pages: int
+
+
+class SourceStatsResponse(BaseModel):
+    """Aggregate counts for the Sources page stat cards."""
+
+    total: int
+    active: int
+    healthy: int
+    blocked: int
+    total_leads: int
+    no_patterns: int
+
+
 # ═══════════════════════════════════════════════════════════════════════
 # SCRAPE LOG & STATS
 # ═══════════════════════════════════════════════════════════════════════

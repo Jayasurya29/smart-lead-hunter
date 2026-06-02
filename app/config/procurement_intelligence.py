@@ -36,6 +36,7 @@ OPERATING MODELS:
 """
 
 import datetime
+import re
 from dataclasses import dataclass, field
 from typing import Optional
 
@@ -246,6 +247,91 @@ def get_management_company_intel(management_company: str) -> Optional[dict]:
     for k, v in MANAGEMENT_COMPANY_INTEL.items():
         if k in key or key in k:
             return v
+    return None
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# PROCUREMENT GATEWAYS
+# ══════════════════════════════════════════════════════════════════════════
+# Some brands don't buy at the property OR the management-company level — they
+# buy through ONE dedicated procurement entity that serves a whole family of
+# properties. One relationship there unlocks all of them, so a contact who
+# works AT a gateway is a top-priority (P1) target regardless of their title.
+#
+# This both ELEVATES the real buyers (gateway employees → P1) and, for a
+# property-level contact whose purchasing is centralized at a gateway, attaches
+# an AWARENESS note. It never lowers a property contact's priority/score —
+# centralization is surfaced as knowledge, not used as a penalty.
+#
+# To add a gateway: drop a dict below. `org_tokens`/`domains` match a contact
+# who IS the gateway (Case A). `covers_brand_tokens` match the brands whose
+# purchasing it centralizes (Case B awareness note).
+PROCUREMENT_GATEWAYS = [
+    {
+        "short": "HPI",
+        "name": "Hospitality Purveyors Inc.",
+        # Case A — contact works AT the gateway (org name or email domain).
+        "org_tokens": ["hospitality purveyors", "hpi"],
+        # TODO: add HPI's real email domain(s) once confirmed (e.g.
+        # "hpimiami.com") — domain match is the most reliable signal.
+        "domains": [],
+        # Case B — brands whose procurement HPI centralizes.
+        "covers_brand_tokens": [
+            "sandals",
+            "beaches",
+            "sandals resorts international",
+        ],
+        "covers": "all Sandals & Beaches properties (~20)",
+        "priority": "P1",
+        "note": (
+            "HPI is the exclusive procurement arm for all Sandals/Beaches "
+            "properties (HQ Miami). One HPI relationship = access to ~20 "
+            "properties — pursue HPI directly, not individual resort GMs."
+        ),
+    },
+]
+
+
+def _gw_norm(s: Optional[str]) -> str:
+    return (s or "").lower().strip()
+
+
+def match_gateway_contact(
+    organization: Optional[str],
+    parent_company: Optional[str],
+    domain: Optional[str],
+) -> Optional[dict]:
+    """Case A — is this contact employed AT a procurement gateway (e.g. HPI)?
+
+    Returns the gateway dict (caller forces P1) or None. Short codes like 'hpi'
+    are matched as whole words to avoid spurious substring hits; multi-word
+    tokens like 'hospitality purveyors' match as substrings."""
+    o, p, d = _gw_norm(organization), _gw_norm(parent_company), _gw_norm(domain)
+    for g in PROCUREMENT_GATEWAYS:
+        if d and d in [dom.lower() for dom in g["domains"]]:
+            return g
+        for tok in g["org_tokens"]:
+            if " " in tok:
+                if tok in o or tok in p:
+                    return g
+            elif re.search(rf"\b{re.escape(tok)}\b", o) or re.search(
+                rf"\b{re.escape(tok)}\b", p
+            ):
+                return g
+    return None
+
+
+def gateway_for_brand(
+    organization: Optional[str],
+    parent_company: Optional[str],
+) -> Optional[dict]:
+    """Case B — is this contact's BRAND centralized through a gateway? Used only
+    for an awareness note on property-level contacts; never changes priority."""
+    o, p = _gw_norm(organization), _gw_norm(parent_company)
+    for g in PROCUREMENT_GATEWAYS:
+        for tok in g["covers_brand_tokens"]:
+            if tok in o or tok in p:
+                return g
     return None
 
 

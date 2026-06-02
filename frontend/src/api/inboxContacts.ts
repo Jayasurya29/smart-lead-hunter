@@ -24,6 +24,15 @@ export interface InboxContact {
   gpo: string | null
   procurement_priority: string
   priority_reason: string | null
+  contact_category: string | null
+  category_source: string | null
+  inferred_role: string | null
+  seniority: string | null
+  department: string | null
+  is_decision_maker: boolean | null
+  background: string | null
+  enrichment_source: string | null
+  enrichment_confidence: number | null
   opportunity_level: string | null
   opportunity_score: number | null
   management_company: string | null
@@ -54,6 +63,13 @@ export interface InboxContactStats {
   new_today: number
   with_signature: number
   with_phone: number
+  buyer: number
+  seller: number
+  competitor: number
+  personal: number
+  junk: number
+  uncategorized: number
+  decision_makers: number
   last_sync_at: string | null
 }
 
@@ -69,6 +85,7 @@ export interface InboxContactFilters {
   page?: number
   per_page?: number
   procurement_priority?: string
+  contact_category?: string
   approval_status?: string
   brand_tier?: string
   gpo?: string
@@ -91,6 +108,7 @@ export async function fetchInboxContacts(
   if (filters.page)                   params.set('page', String(filters.page))
   if (filters.per_page)               params.set('per_page', String(filters.per_page))
   if (filters.procurement_priority)   params.set('procurement_priority', filters.procurement_priority)
+  if (filters.contact_category)       params.set('contact_category', filters.contact_category)
   if (filters.approval_status)        params.set('approval_status', filters.approval_status)
   if (filters.brand_tier)             params.set('brand_tier', filters.brand_tier)
   if (filters.gpo)                    params.set('gpo', filters.gpo)
@@ -141,5 +159,28 @@ export async function matchInboxContactToHotel(id: number, hotelId: number | nul
 
 export async function triggerInboxSync(): Promise<{ status: string; task_id?: string; message: string }> {
   const { data } = await api.post('/api/inbox-contacts/sync')
+  return data
+}
+
+export interface DeepEnrichResult {
+  contact_id: number
+  name: string
+  role: string | null
+  seniority: string | null
+  department: string | null
+  is_decision_maker: boolean | null
+  background: string | null
+  found_email: string | null
+  confidence: number
+  sources_used: number
+}
+
+export async function deepEnrichContact(
+  id: number,
+  findEmail = false,
+): Promise<DeepEnrichResult> {
+  const { data } = await api.post<DeepEnrichResult>(
+    `/api/contacts/${id}/enrich-deep?find_email=${findEmail}`,
+  )
   return data
 }

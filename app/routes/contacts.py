@@ -1511,3 +1511,53 @@ async def enrich_lead_status(lead_id: int):
         "watchers": len(job.subscribers),
         "elapsed_s": round(time.monotonic() - job.started_at, 1),
     }
+
+
+# ════════════════════════════════════════════════════════════════════════
+# DEEP CONTACT ENRICHMENT (Tier 2) — Serper + Wiza + Gemini dossier
+# ════════════════════════════════════════════════════════════════════════
+
+
+@router.post("/api/contacts/{contact_id}/enrich-deep", tags=["Contacts"])
+async def enrich_contact_deep_endpoint(
+    contact_id: int,
+    find_email: bool = False,
+    _csrf=Depends(require_ajax),
+):
+    """On-demand deep enrichment for ONE contact: web research (Serper) +
+    optional Wiza email lookup + Gemini synthesis → role, seniority,
+    department, decision-maker, background. Writes back with provenance.
+
+    find_email=true spends Wiza credits to find a verified email when missing.
+    """
+    from app.services.contact_tier2_enrichment import enrich_contact_deep
+
+    try:
+        result = await enrich_contact_deep(contact_id, find_email=find_email)
+    except Exception as e:
+        logger.exception(f"deep enrich failed for contact {contact_id}")
+        raise HTTPException(status_code=500, detail=str(e))
+    if result.get("error"):
+        raise HTTPException(status_code=404, detail=result["error"])
+    return result
+
+
+@router.post("/api/contacts/enrich-deep-batch", tags=["Contacts"])
+async def enrich_contacts_deep_batch_endpoint(
+    request: Request,
+    _csrf=Depends(require_ajax),
+):
+    """Deep-enrich a chosen set of contacts (e.g. one company's people, or all
+    decision-makers). Body: {"contact_ids": [...], "find_email": false}."""
+    body = await request.json()
+    ids = body.get("contact_ids") or []
+    find_email = bool(body.get("find_email", False))
+    if not ids or not isinstance(ids, list):
+        raise HTTPException(status_code=400, detail="contact_ids list required")
+    if len(ids) > 100:
+        raise HTTPException(status_code=400, detail="max 100 contacts per batch")
+
+    from app.services.contact_tier2_enrichment import enrich_batch_deep
+
+    results = await enrich_batch_deep([int(i) for i in ids], find_email=find_email)
+    return {"enriched": len(results), "results": results}

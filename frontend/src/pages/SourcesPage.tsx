@@ -1,5 +1,5 @@
-import { useState } from 'react'
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { useState, useEffect } from 'react'
+import { useQuery, useMutation, useQueryClient, keepPreviousData } from '@tanstack/react-query'
 import api from '@/api/client'
 import { cn } from '@/lib/utils'
 import {
@@ -32,6 +32,23 @@ interface Source {
   gold_urls: Record<string, unknown>
   total_scrapes: number
   notes: string | null
+}
+
+interface SourceStats {
+  total: number
+  active: number
+  healthy: number
+  blocked: number
+  total_leads: number
+  no_patterns: number
+}
+
+interface SourceListResponse {
+  sources: Source[]
+  total: number
+  page: number
+  per_page: number
+  pages: number
 }
 
 interface ScrapeLog {
@@ -96,16 +113,49 @@ function HealthBadge({ status }: { status: string }) {
 export default function SourcesPage() {
   const [viewMode, setViewMode] = useState<'sources' | 'queries'>('sources')
   const [search, setSearch] = useState('')
+  const [debouncedSearch, setDebouncedSearch] = useState('')
   const [filter, setFilter] = useState<string>('')
+  const [page, setPage] = useState(1)
+  const [perPage, setPerPage] = useState(25)
   const [selectedId, setSelectedId] = useState<number | null>(null)
   const qc = useQueryClient()
 
-  const { data: sources = [], isLoading } = useQuery<Source[]>({
-    queryKey: ['sources'],
-    queryFn: async () => (await api.get('/sources')).data,
+  // Debounce the search box so we don't hit the API on every keystroke.
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedSearch(search), 300)
+    return () => clearTimeout(t)
+  }, [search])
+
+  // Any filter / search / page-size change resets back to page 1.
+  useEffect(() => { setPage(1) }, [debouncedSearch, filter, perPage])
+
+  // Stat cards — aggregate over the WHOLE table, independent of page/filter.
+  const { data: stats } = useQuery<SourceStats>({
+    queryKey: ['sources-stats'],
+    queryFn: async () => (await api.get('/sources/stats')).data,
     refetchInterval: 60_000,
     staleTime: 30_000,
   })
+
+  // Paginated list — only the current page is fetched from the server.
+  const { data: listData, isLoading, isFetching } = useQuery<SourceListResponse>({
+    queryKey: ['sources', page, perPage, debouncedSearch, filter],
+    queryFn: async () => (await api.get('/sources', {
+      params: {
+        page,
+        per_page: perPage,
+        ...(debouncedSearch ? { search: debouncedSearch } : {}),
+        ...(filter ? { status: filter } : {}),
+      },
+    })).data,
+    placeholderData: keepPreviousData,
+    refetchInterval: 60_000,
+    staleTime: 30_000,
+  })
+
+  const sources = listData?.sources ?? []
+  const totalPages = listData?.pages ?? 1
+  const totalRows = listData?.total ?? 0
 
   const { data: logs = [] } = useQuery<ScrapeLog[]>({
     queryKey: ['scrape-logs'],
@@ -116,31 +166,30 @@ export default function SourcesPage() {
 
   const toggleMut = useMutation({
     mutationFn: async (id: number) => (await api.post(`/sources/${id}/toggle`)).data,
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['sources'] }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['sources'] })
+      qc.invalidateQueries({ queryKey: ['sources-stats'] })
+    },
   })
 
   const resetMut = useMutation({
     mutationFn: async (id: number) => (await api.post(`/sources/${id}/reset-health`)).data,
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['sources'] }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['sources'] })
+      qc.invalidateQueries({ queryKey: ['sources-stats'] })
+    },
   })
 
-  // Stats
-  const total = sources.length
-  const healthy = sources.filter(s => s.health_status === 'healthy').length
-  const blocked = sources.filter(s => s.health_status === 'failing' || s.health_status === 'dead').length
-  const active = sources.filter(s => s.is_active).length
-  const totalLeads = sources.reduce((sum, s) => sum + (s.leads_found || 0), 0)
-  const missingPatterns = sources.filter(s => !s.gold_urls || Object.keys(s.gold_urls || {}).length === 0).length
+  // Stats from the aggregate endpoint (0 while loading).
+  const total = stats?.total ?? 0
+  const healthy = stats?.healthy ?? 0
+  const blocked = stats?.blocked ?? 0
+  const active = stats?.active ?? 0
+  const totalLeads = stats?.total_leads ?? 0
+  const missingPatterns = stats?.no_patterns ?? 0
 
-  // Filter & search
-  const filtered = sources.filter(s => {
-    if (search && !s.name.toLowerCase().includes(search.toLowerCase()) && !s.base_url.toLowerCase().includes(search.toLowerCase())) return false
-    if (filter === 'healthy' && s.health_status !== 'healthy') return false
-    if (filter === 'problems' && !['failing', 'dead', 'degraded'].includes(s.health_status)) return false
-    if (filter === 'active' && !s.is_active) return false
-    if (filter === 'inactive' && s.is_active) return false
-    return true
-  }).sort((a, b) => (b.leads_found || 0) - (a.leads_found || 0))
+  // Server already applied search + filter + ordering; render rows as-is.
+  const filtered = sources
 
   const selected = sources.find(s => s.id === selectedId)
   const selectedLogs = logs.filter(l => l.source_id === selectedId).slice(0, 10)
@@ -250,7 +299,7 @@ export default function SourcesPage() {
             </button>
           ))}
 
-          <span className="text-xs text-stone-400 ml-auto">{filtered.length} sources</span>
+          <span className="text-xs text-stone-400 ml-auto">{totalRows.toLocaleString()} sources</span>
         </div>
       </div>
 
@@ -328,6 +377,42 @@ export default function SourcesPage() {
               </table>
             </div>
           )}
+
+          {/* Pager */}
+          <div className="flex items-center justify-between gap-3 px-3 py-2 border-t border-slate-100 bg-slate-50/60 flex-shrink-0">
+            <div className="flex items-center gap-2 text-xs text-stone-500">
+              <span className="tabular-nums">{totalRows.toLocaleString()} sources</span>
+              <span className="text-stone-300">·</span>
+              <label className="flex items-center gap-1">
+                <span>Per page</span>
+                <select
+                  value={perPage}
+                  onChange={(e) => setPerPage(Number(e.target.value))}
+                  className="h-7 px-1.5 rounded-md border border-stone-200 bg-white text-xs outline-none focus:border-navy-400"
+                >
+                  {[25, 50, 100].map(n => <option key={n} value={n}>{n}</option>)}
+                </select>
+              </label>
+              {isFetching && <Loader2 className="w-3.5 h-3.5 animate-spin text-stone-400" />}
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setPage(p => Math.max(1, p - 1))}
+                disabled={page <= 1}
+                className="h-7 px-2 inline-flex items-center gap-1 text-xs font-semibold rounded-md border border-stone-200 bg-white text-stone-600 disabled:opacity-40 disabled:cursor-not-allowed hover:bg-stone-50 transition"
+              >
+                <ChevronLeft className="w-3.5 h-3.5" /> Prev
+              </button>
+              <span className="text-xs text-stone-500 tabular-nums">Page {page} of {totalPages}</span>
+              <button
+                onClick={() => setPage(p => Math.min(totalPages, p + 1))}
+                disabled={page >= totalPages}
+                className="h-7 px-2 inline-flex items-center gap-1 text-xs font-semibold rounded-md border border-stone-200 bg-white text-stone-600 disabled:opacity-40 disabled:cursor-not-allowed hover:bg-stone-50 transition"
+              >
+                Next <ChevronRight className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          </div>
         </div>
 
         {/* Detail Panel */}

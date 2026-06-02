@@ -52,6 +52,8 @@ from app.config.brand_registry import BrandRegistry, BrandInfo
 from app.config.procurement_intelligence import (
     MANAGEMENT_COMPANY_INTEL,  # noqa: F401  (imported for future use)
     get_management_company_intel,
+    match_gateway_contact,
+    gateway_for_brand,
 )
 from app.services.contact_dedup import bulk_upsert_contacts
 
@@ -196,6 +198,129 @@ GENERIC_DOMAINS_NO_ORG: set[str] = {
     "zendesk.com",
     "zoho.com",
     "salesforce.com",
+}
+
+# Role / non-person local parts — mass or transactional addresses, never an
+# individual buyer. Matched as whole tokens (split on . _ - +) so we never nick
+# a real name like "john.newsome" ("news" is not a token there). Hotel-relevant
+# role words (sales, reservations, events, catering) are deliberately EXCLUDED.
+ROLE_LOCALPARTS: set[str] = {
+    "info",
+    "news",
+    "newsletter",
+    "orders",
+    "order",
+    "marketing",
+    "press",
+    "media",
+    "hello",
+    "team",
+    "members",
+    "member",
+    "billing",
+    "invoice",
+    "invoices",
+    "receipts",
+    "statements",
+    "support",
+    "help",
+    "care",
+    "service",
+    "customerservice",
+    "updates",
+    "update",
+    "digest",
+    "social",
+    "community",
+    "contact",
+    "subscribe",
+    "unsubscribe",
+    "feedback",
+    "survey",
+    "surveys",
+    "marketingteam",
+    "newsroom",
+}
+
+# Marketing / bulk subdomain prefixes — when the leftmost domain label is one of
+# these, the address is a blast stream (e.zoro.com, e.weareprogressives.org),
+# not a person. High-precision list; tune as needed.
+BULK_SUBDOMAIN_PREFIXES: tuple = (
+    "e",
+    "em",
+    "email",
+    "t",
+    "go",
+    "click",
+    "send",
+    "mailer",
+    "news",
+    "newsletter",
+    "marketing",
+    "editorial",
+    "campaign",
+    "campaigns",
+    "promo",
+    "promotions",
+    "engage",
+    "members",
+)
+
+# Consumer / e-commerce / news / job-board / social domains — never hotel
+# buyers. (icloud/amazon/linkedin already live in the personal/generic sets.)
+CONSUMER_DOMAINS: set[str] = {
+    # Apple relay
+    "privaterelay.appleid.com",
+    "appleid.com",
+    # e-commerce / delivery / payments
+    "instacart.com",
+    "netflix.com",
+    "zoro.com",
+    "ebay.com",
+    "etsy.com",
+    "walmart.com",
+    "target.com",
+    "bestbuy.com",
+    "doordash.com",
+    "ubereats.com",
+    "uber.com",
+    "lyft.com",
+    "paypal.com",
+    "venmo.com",
+    "chewy.com",
+    "wayfair.com",
+    "homedepot.com",
+    "lowes.com",
+    "costco.com",
+    # job boards / recruiting
+    "indeedemail.com",
+    "indeed.com",
+    "glassdoor.com",
+    "ziprecruiter.com",
+    "monster.com",
+    # news / media / newsletter platforms
+    "theguardian.com",
+    "nytimes.com",
+    "wsj.com",
+    "washingtonpost.com",
+    "cnn.com",
+    "bloomberg.com",
+    "reuters.com",
+    "substack.com",
+    "beehiiv.com",
+    "medium.com",
+    "alphasignal.ai",
+    "morningbrew.com",
+    # streaming / social / consumer apps
+    "spotify.com",
+    "facebook.com",
+    "instagram.com",
+    "twitter.com",
+    "x.com",
+    "tiktok.com",
+    "youtube.com",
+    "pinterest.com",
+    "reddit.com",
 }
 
 # ── Domain-stem → canonical org name ─────────────────────────────────────
@@ -574,6 +699,19 @@ def _is_ja_team_leak(parsed: dict, sig_owner: str) -> bool:
     return False
 
 
+def _is_role_localpart(local: str) -> bool:
+    """True if the local part is a role/mass address (info@, news@, orders@…).
+    Token-based so real names containing a role substring aren't nicked."""
+    tokens = [t for t in re.split(r"[._+\-]", local) if t]
+    return any(t in ROLE_LOCALPARTS for t in tokens)
+
+
+def _is_bulk_subdomain(domain: str) -> bool:
+    """True if the leftmost label is a marketing/blast subdomain (e.x.com…)."""
+    parts = domain.split(".")
+    return len(parts) >= 3 and parts[0] in BULK_SUBDOMAIN_PREFIXES
+
+
 def _passes_hard_filters(email: str, own_mailbox: str) -> tuple[bool, str]:
     if "@" not in email:
         return False, "malformed"
@@ -587,8 +725,14 @@ def _passes_hard_filters(email: str, own_mailbox: str) -> tuple[bool, str]:
         return False, "noreply"
     if any(p in local for p in MASS_MAIL_PATTERNS):
         return False, "mass_mail"
+    if _is_role_localpart(local):
+        return False, "role_address"
     if d in SAAS_DOMAINS or any(d.endswith("." + s) for s in SAAS_DOMAINS):
         return False, "saas"
+    if d in CONSUMER_DOMAINS or any(d.endswith("." + s) for s in CONSUMER_DOMAINS):
+        return False, "consumer"
+    if _is_bulk_subdomain(d):
+        return False, "bulk_subdomain"
     return True, "ok"
 
 
@@ -976,18 +1120,53 @@ _P1_KW = [
     "vp purchasing",
     "purchasing manager",
     "purchasing director",
+    "purchasing agent",
+    "purchasing supervisor",
+    "purchasing coordinator",
     "chief procurement officer",
     "cpo",
+    "procurement manager",
+    "procurement director",
+    "procurement specialist",
+    "procurement agent",
+    "category manager",
+    "strategic sourcing",
+    # Materials / supply chain / inventory — all buyer-side roles.
+    "materials manager",
+    "director of materials",
+    "materials management",
+    "supply chain manager",
+    "supply chain director",
+    "director of supply chain",
+    "vp supply chain",
+    "inventory manager",
+    "inventory control",
+    "storeroom manager",
+    "stores manager",
+    # Housekeeping + laundry/linen/wardrobe — own and reorder uniforms directly.
     "director of housekeeping",
     "executive housekeeper",
+    "assistant executive housekeeper",
     "head housekeeper",
+    "housekeeping manager",
+    "laundry manager",
+    "linen manager",
+    "linen room",
+    "uniform room",
+    "wardrobe manager",
 ]
 _P2_KW = [
     "general manager",
     "hotel manager",
     "resort manager",
+    "managing director",
+    "area general manager",
+    "assistant general manager",
+    "executive assistant manager",
     "director of operations",
     "director of rooms",
+    "rooms division manager",
+    "director of rooms division",
     "chief operating officer",
     "vp operations",
     "vp hotel operations",
@@ -1027,7 +1206,7 @@ _P4_KW = [
     "security",
 ]
 _P4_TOKENS = ("it", "pr")
-_PROC_HINTS = ("procurement", "purchasing", "buyer", "sourcing")
+_PROC_HINTS = ("procurement", "purchasing", "buyer", "sourcing", "supply chain")
 
 
 def _word_match(text_str: str, tokens: tuple) -> bool:
@@ -1040,20 +1219,36 @@ def _classify_priority(title: Optional[str], brand_info: BrandInfo) -> tuple[str
     if not title:
         return "P_unknown", "no title"
     tl = title.lower().strip()
-    if any(kw in tl for kw in _P4_KW) or _word_match(tl, _P4_TOKENS):
-        return "P4", "non-buyer role"
+
+    # Order matters: we check from the STRONGEST buyer signal down, and treat
+    # P4 (non-buyer departments) as a FALLBACK, not a veto. Previously P4 was
+    # checked first, so any title containing an incidental token like "IT" or
+    # "Marketing" was dumped into P4 before procurement was even considered —
+    # e.g. "VP, IT Procurement" or "Director of Operations & IT" were wrongly
+    # buried. Now a real procurement/operational title always wins.
+
+    # P1 — the buyer. Procurement / purchasing / supply-chain / housekeeping.
     if any(kw in tl for kw in _P1_KW):
         return "P1", "direct procurement title"
     if any(h in tl for h in _PROC_HINTS):
         return "P1", "procurement keyword in title"
-    p2 = any(kw in tl for kw in _P2_KW) or _word_match(tl, _P2_TOKENS)
-    if p2:
-        tier = brand_info.tier_for_title(title)
-        if brand_info.gpo and tier == "property":
-            return "P3", f"GPO-constrained property role ({brand_info.gpo})"
+
+    # P2 — operational decision-maker.
+    if any(kw in tl for kw in _P2_KW) or _word_match(tl, _P2_TOKENS):
+        # GPO (e.g. Avendra) is recorded as an informational flag on the
+        # contact for sales awareness only — it must NEVER affect priority or
+        # score. Operational decision-makers stay P2 regardless of GPO.
         return "P2", "operational decision-maker"
+
+    # P3 — secondary internal contact.
     if any(kw in tl for kw in _P3_KW) or _word_match(tl, _P3_TOKENS):
         return "P3", "secondary contact"
+
+    # P4 — known non-buyer department. Fallback only: reached just for titles
+    # that matched none of the above, so it can't override a real buyer.
+    if any(kw in tl for kw in _P4_KW) or _word_match(tl, _P4_TOKENS):
+        return "P4", "non-buyer role"
+
     return "P_unknown", "title not matched"
 
 
@@ -1092,6 +1287,28 @@ def _enrich(contact: dict) -> dict:
     priority, reason = _classify_priority(title, brand_info)
     contact["procurement_priority"] = priority
     contact["priority_reason"] = reason
+
+    # ── Procurement-gateway knowledge (HPI etc.) — see procurement_intelligence ──
+    # Case A: the contact works AT a gateway → force P1; they're the real buyer
+    #         for a whole family of properties, whatever their title says.
+    # Case B: their brand's purchasing is centralized at a gateway → attach an
+    #         awareness note only. Priority is NOT changed — we surface
+    #         centralization as knowledge, never as a penalty on the property.
+    domain = _domain(contact.get("email") or "")
+    gw = match_gateway_contact(org, contact.get("parent_company"), domain)
+    if gw:
+        contact["procurement_priority"] = gw["priority"]  # P1
+        contact["priority_reason"] = (
+            f"{gw['short']} — centralized procurement gateway "
+            f"({gw['covers']}). {gw['note']}"
+        )
+    else:
+        brand_gw = gateway_for_brand(org, contact.get("parent_company"))
+        if brand_gw:
+            contact["priority_reason"] = (
+                f"{reason} · purchasing centralized at {brand_gw['short']} "
+                f"({brand_gw['covers']})"
+            )
 
     interactions = contact.get("interaction_count") or 0
     contact["opportunity_score"] = round(

@@ -6,6 +6,7 @@ import {
   bulkApproveInboxContacts,
   deleteInboxContact,
   triggerInboxSync,
+  deepEnrichContact,
   type InboxContactFilters,
 } from '@/api/inboxContacts'
 
@@ -69,5 +70,14 @@ export function useTriggerInboxSync() {
       // Delay refetch slightly — task is async
       setTimeout(() => invalidateInboxContacts(qc), 2000)
     },
+  })
+}
+
+export function useDeepEnrichContact() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ id, findEmail }: { id: number; findEmail?: boolean }) =>
+      deepEnrichContact(id, findEmail),
+    onSuccess: () => invalidateInboxContacts(qc),
   })
 }

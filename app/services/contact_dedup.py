@@ -414,6 +414,7 @@ async def list_contacts(
     session: AsyncSession,
     *,
     procurement_priority: Optional[str] = None,
+    contact_category: Optional[str] = None,
     approval_status: Optional[str] = None,
     brand_tier: Optional[str] = None,
     gpo: Optional[str] = None,
@@ -450,6 +451,10 @@ async def list_contacts(
             raise ValueError(f"Invalid priority: {procurement_priority}")
         where_clauses.append("procurement_priority = :priority")
         params["priority"] = procurement_priority
+
+    if contact_category:
+        where_clauses.append("contact_category = :contact_category")
+        params["contact_category"] = contact_category
 
     if approval_status:
         if approval_status not in VALID_APPROVAL_STATUSES:
@@ -743,7 +748,14 @@ async def get_contact_stats(session: AsyncSession) -> dict:
                 COUNT(*) FILTER (WHERE approval_status = 'pushed_to_insightly')::int    AS pushed_to_insightly,
                 COUNT(*) FILTER (WHERE first_seen >= NOW() - INTERVAL '24 hours')::int  AS new_today,
                 COUNT(*) FILTER (WHERE has_signature = TRUE)::int                       AS with_signature,
-                COUNT(*) FILTER (WHERE phone IS NOT NULL)::int                          AS with_phone
+                COUNT(*) FILTER (WHERE phone IS NOT NULL)::int                          AS with_phone,
+                COUNT(*) FILTER (WHERE contact_category = 'buyer')::int                 AS buyer,
+                COUNT(*) FILTER (WHERE contact_category = 'seller')::int                AS seller,
+                COUNT(*) FILTER (WHERE contact_category = 'competitor')::int            AS competitor,
+                COUNT(*) FILTER (WHERE contact_category = 'personal')::int              AS personal,
+                COUNT(*) FILTER (WHERE contact_category = 'junk')::int                  AS junk,
+                COUNT(*) FILTER (WHERE contact_category IS NULL)::int                   AS uncategorized,
+                COUNT(*) FILTER (WHERE is_decision_maker = TRUE)::int                   AS decision_makers
             FROM contacts
         """)
     )
@@ -767,5 +779,12 @@ async def get_contact_stats(session: AsyncSession) -> dict:
         "new_today": row.get("new_today", 0),
         "with_signature": row.get("with_signature", 0),
         "with_phone": row.get("with_phone", 0),
+        "buyer": row.get("buyer", 0),
+        "seller": row.get("seller", 0),
+        "competitor": row.get("competitor", 0),
+        "personal": row.get("personal", 0),
+        "junk": row.get("junk", 0),
+        "uncategorized": row.get("uncategorized", 0),
+        "decision_makers": row.get("decision_makers", 0),
         "last_sync_at": last_sync.isoformat() if last_sync else None,
     }

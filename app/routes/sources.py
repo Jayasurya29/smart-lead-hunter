@@ -4,13 +4,19 @@ import logging
 from typing import Optional, List
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import select
+from sqlalchemy import select, func, or_, case, cast, String
 from sqlalchemy.orm import defer
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
 from app.models import Source, ScrapeLog
-from app.schemas import SourceCreate, SourceResponse, ScrapeLogResponse
+from app.schemas import (
+    SourceCreate,
+    SourceResponse,
+    SourceListResponse,
+    SourceStatsResponse,
+    ScrapeLogResponse,
+)
 from app.services.utils import local_now
 
 logger = logging.getLogger(__name__)
@@ -29,26 +35,151 @@ _HEAVY_DEFERRED_COLUMNS = (
 )
 
 
-@router.get("/sources", response_model=List[SourceResponse], tags=["Sources"])
+# Map the UI filter-tab value -> a SQLAlchemy WHERE clause. Kept in one place
+# so the list endpoint and any future caller stay consistent with the tabs
+# shown on the Sources page (All / Healthy / Problems / Active / Inactive).
+def _status_filter(status: Optional[str]):
+    if status == "healthy":
+        return Source.health_status == "healthy"
+    if status == "problems":
+        return Source.health_status.in_(["failing", "dead", "degraded"])
+    if status == "active":
+        return Source.is_active.is_(True)
+    if status == "inactive":
+        return Source.is_active.is_(False)
+    return None  # "" / "all" / None -> no filter
+
+
+def _apply_source_filters(
+    query,
+    count_query,
+    *,
+    search: Optional[str],
+    status: Optional[str],
+    active_only: bool,
+    source_type: Optional[str],
+    min_priority: Optional[int],
+):
+    """Apply the same filters to both the row query and the count query."""
+    if search:
+        s = f"%{search}%"
+        f = or_(Source.name.ilike(s), Source.base_url.ilike(s))
+        query, count_query = query.where(f), count_query.where(f)
+
+    status_f = _status_filter(status)
+    if status_f is not None:
+        query, count_query = query.where(status_f), count_query.where(status_f)
+
+    if active_only:
+        query = query.where(Source.is_active.is_(True))
+        count_query = count_query.where(Source.is_active.is_(True))
+    if source_type:
+        query = query.where(Source.source_type == source_type)
+        count_query = count_query.where(Source.source_type == source_type)
+    if min_priority:
+        query = query.where(Source.priority >= min_priority)
+        count_query = count_query.where(Source.priority >= min_priority)
+
+    return query, count_query
+
+
+@router.get("/sources", response_model=SourceListResponse, tags=["Sources"])
 async def list_sources(
+    page: int = Query(1, ge=1),
+    per_page: int = Query(25, ge=1, le=200),
+    search: Optional[str] = None,
+    status: Optional[str] = None,  # healthy | problems | active | inactive
     active_only: bool = False,
     source_type: Optional[str] = None,
     min_priority: Optional[int] = None,
     db: AsyncSession = Depends(get_db),
 ):
-    """List all scraping sources"""
-    query = select(Source).options(*_HEAVY_DEFERRED_COLUMNS)
-    if active_only:
-        query = query.where(Source.is_active.is_(True))
-    if source_type:
-        query = query.where(Source.source_type == source_type)
-    if min_priority:
-        query = query.where(Source.priority >= min_priority)
-    query = query.order_by(Source.priority.desc(), Source.name)
+    """Paginated list of scraping sources.
 
-    result = await db.execute(query)
-    sources = result.scalars().all()
-    return [SourceResponse.model_validate(source) for source in sources]
+    Server-side pagination + search + status filtering so the Sources page
+    no longer pulls all rows on every load. Ordered leads-desc to match the
+    page's previous client-side sort (highest-yield sources first).
+    """
+    query = select(Source).options(*_HEAVY_DEFERRED_COLUMNS)
+    count_query = select(func.count(Source.id))
+    query, count_query = _apply_source_filters(
+        query,
+        count_query,
+        search=search,
+        status=status,
+        active_only=active_only,
+        source_type=source_type,
+        min_priority=min_priority,
+    )
+
+    total = (await db.execute(count_query)).scalar() or 0
+
+    query = (
+        query.order_by(
+            Source.leads_found.desc().nullslast(),
+            Source.priority.desc(),
+            Source.name,
+        )
+        .offset((page - 1) * per_page)
+        .limit(per_page)
+    )
+
+    sources = (await db.execute(query)).scalars().all()
+    pages = (total + per_page - 1) // per_page if total > 0 else 1
+
+    return SourceListResponse(
+        sources=[SourceResponse.model_validate(s) for s in sources],
+        total=total,
+        page=page,
+        per_page=per_page,
+        pages=pages,
+    )
+
+
+@router.get("/sources/stats", response_model=SourceStatsResponse, tags=["Sources"])
+async def source_stats(db: AsyncSession = Depends(get_db)):
+    """Aggregate counts for the Sources page stat cards.
+
+    Computed over the FULL table in one query so the cards stay correct
+    regardless of which page/filter the list is showing. 'no_patterns'
+    counts rows whose gold_urls JSONB is NULL or an empty object — this is
+    the real count (the old client-side card always read total because
+    gold_urls isn't carried on the list payload)."""
+    row = (
+        await db.execute(
+            select(
+                func.count(Source.id).label("total"),
+                func.count(case((Source.is_active.is_(True), 1))).label("active"),
+                func.count(case((Source.health_status == "healthy", 1))).label(
+                    "healthy"
+                ),
+                func.count(
+                    case((Source.health_status.in_(["failing", "dead"]), 1))
+                ).label("blocked"),
+                func.coalesce(func.sum(Source.leads_found), 0).label("total_leads"),
+                func.count(
+                    case(
+                        (
+                            or_(
+                                Source.gold_urls.is_(None),
+                                cast(Source.gold_urls, String) == "{}",
+                            ),
+                            1,
+                        )
+                    )
+                ).label("no_patterns"),
+            )
+        )
+    ).one()
+
+    return SourceStatsResponse(
+        total=row.total or 0,
+        active=row.active or 0,
+        healthy=row.healthy or 0,
+        blocked=row.blocked or 0,
+        total_leads=int(row.total_leads or 0),
+        no_patterns=row.no_patterns or 0,
+    )
 
 
 @router.get("/sources/healthy", response_model=List[SourceResponse], tags=["Sources"])
