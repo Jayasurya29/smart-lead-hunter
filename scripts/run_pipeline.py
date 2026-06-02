@@ -26,7 +26,6 @@ Usage:
 
 import argparse
 import asyncio
-import json
 import os
 import sys
 import time
@@ -205,7 +204,7 @@ async def test_url(url: str):
 
     # Step 3: Show results
     print(f"\n{'─' * 60}")
-    print(f"📊 RESULTS")
+    print("📊 RESULTS")
     print(f"{'─' * 60}")
     print(f"  Pages classified:  {result.pages_classified}")
     print(f"  Pages relevant:    {result.pages_relevant}")
@@ -319,7 +318,7 @@ async def run_test():
                 print(f"  📝 {lead.qualification_score}pts — {lead.hotel_name}")
 
     print(f"\n{'=' * 60}")
-    print(f"🧪 TEST COMPLETE")
+    print("🧪 TEST COMPLETE")
     print(f"  Sources scraped: {len(test_urls)}")
     print(f"  Total leads:     {len(all_leads)}")
 

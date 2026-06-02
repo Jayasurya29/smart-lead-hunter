@@ -1,0 +1,29 @@
+# ruff.toml — repo-wide lint config.
+#
+# There was no ruff config before, so a bare `ruff check` fell back to ruff's
+# defaults across EVERY file and surfaced pre-existing debt in scripts/ that
+# the pipeline never gates on.
+#
+#   CI lints app/ only:          ruff check app/ --select=E,F,W --ignore=E501
+#   pre-commit lints app/ only:  same args, files: ^app/
+#
+# Both pass --select explicitly on the command line, which OVERRIDES this file
+# for those runs — so this config does not change what the pipeline enforces.
+# It only makes a bare, repo-wide `ruff check` report something sensible.
+
+target-version = "py311"
+line-length = 100
+
+[lint]
+# No `select` here on purpose: keep ruff's default rule set (E4, E7, E9, F),
+# which is exactly what you're already seeing — so adding this file won't
+# surface a flood of new whitespace/style rules in the unformatted scripts.
+ignore = ["E501"]  # line length is the formatter's job, not the linter's
+
+[lint.per-file-ignores]
+# CLI / one-off utility scripts — not shipped in app/, not formatted by
+# pre-commit. They legitimately bootstrap sys.path before importing app
+# modules (E402), use compact one-line guards (E701), and short lambda loop
+# vars (E741). Real problems (dead imports, f-string typos, == True) are
+# still flagged and fixed everywhere.
+"scripts/**" = ["E402", "E701", "E741"]

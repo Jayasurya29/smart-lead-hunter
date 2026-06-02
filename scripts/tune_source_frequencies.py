@@ -15,7 +15,7 @@ Logic:
 Also sets discovery_interval_days for gold URL refresh.
 """
 import asyncio
-from sqlalchemy import select, update
+from sqlalchemy import select
 from app.database import async_session
 from app.models.source import Source
 
@@ -131,7 +131,7 @@ async def tune_sources():
         for src in sources:
             freq_counts[src.scrape_frequency] = freq_counts.get(src.scrape_frequency, 0) + 1
 
-        print(f"\n📋 Frequency Distribution:")
+        print("\n📋 Frequency Distribution:")
         for freq, count in sorted(freq_counts.items()):
             print(f"   {freq:<15} {count} sources")
 

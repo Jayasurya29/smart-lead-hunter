@@ -18,7 +18,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import {
-  Sparkles, Wand2, X, RefreshCw, Filter, Inbox, Star, TrendingUp,
+  Sparkles, Wand2, X, RefreshCw, Inbox, Star, TrendingUp, ChevronRight,
   Mail, Phone, Linkedin, ExternalLink, MapPin, Building2, Shield, Hash,
   Eye, Users, Activity, Send, Check, Loader2, Trash2, CheckSquare, Square,
 } from 'lucide-react'
@@ -89,23 +89,6 @@ function deriveSignals(c: InboxContact): string[] {
   return out.slice(0, 4)
 }
 
-/** Suggested next steps — heuristic, based on the contact's shape. */
-function deriveNextSteps(c: InboxContact): string[] {
-  const cat = c.contact_category
-  const steps: string[] = []
-  if (cat === 'competitor') return ['Flag as competitor in CRM', 'Keep replies factual — withhold pricing']
-  if (cat === 'seller' || c.gpo) {
-    steps.push(c.gpo ? `Align on ${c.gpo} approved-supplier path` : 'Submit supplier-application packet', 'Share pricing & capacity sheet')
-  }
-  if (cat === 'buyer' || !cat) {
-    steps.push(c.is_decision_maker ? 'Draft a tailored proposal' : 'Identify the decision-maker / approver')
-    if (isHighOpportunity(c)) steps.push('Prioritize outreach within 7 days')
-  }
-  if (!c.phone) steps.push('Find a direct dial (Deep Enrich)')
-  if (!c.matched_lead_id && !c.matched_hotel_id) steps.push('Match to a lead or hotel record')
-  return Array.from(new Set(steps)).slice(0, 3)
-}
-
 /** AI summary text: real enriched background, else a composed fallback. */
 function deriveSummary(c: InboxContact): string {
   if (c.background) return c.background
@@ -153,24 +136,6 @@ function CategoryBadge({ category }: { category: string | null }) {
   )
 }
 
-function ConfRing({ value, size = 34 }: { value: number; size?: number }) {
-  const r = (size - 5) / 2
-  const c = 2 * Math.PI * r
-  const off = c * (1 - value / 100)
-  const col = value >= 90 ? '#1a7a55' : value >= 75 ? '#c49a3c' : '#b0a99e'
-  return (
-    <div className="relative flex-shrink-0" style={{ width: size, height: size }}>
-      <svg width={size} height={size} className="-rotate-90">
-        <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="#edebe5" strokeWidth={3} />
-        <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke={col} strokeWidth={3}
-          strokeDasharray={c} strokeDashoffset={off} strokeLinecap="round"
-          style={{ transition: 'stroke-dashoffset .6s cubic-bezier(.16,1,.3,1)' }} />
-      </svg>
-      <span className="absolute inset-0 flex items-center justify-center text-[9px] font-bold tabular-nums" style={{ color: col }}>{value}</span>
-    </div>
-  )
-}
-
 function Avatar({ contact, size = 40, showPip = true }: { contact: InboxContact; size?: number; showPip?: boolean }) {
   return (
     <div className="relative flex-shrink-0 rounded-full flex items-center justify-center text-white font-bold select-none"
@@ -204,7 +169,7 @@ function Chip({ label, count, active, color, onClick }: { label: string; count?:
    ════════════════════════════════════════════════════════════════════ */
 
 function ContactRow({
-  contact, active, selectMode, checked, onOpen, onToggleCheck,
+  contact, active, selectMode, checked, onOpen, onToggleCheck, compact,
 }: {
   contact: InboxContact
   active: boolean
@@ -212,10 +177,12 @@ function ContactRow({
   checked: boolean
   onOpen: () => void
   onToggleCheck: () => void
+  compact?: boolean
 }) {
   const pending = contact.approval_status === 'pending'
   return (
-    <div className={cn('group w-full flex items-center gap-2.5 px-2 py-3 rounded-xl transition-all duration-150 relative cursor-pointer',
+    <div className={cn('group w-full flex items-center gap-2.5 rounded-xl transition-all duration-150 relative cursor-pointer',
+      compact ? 'px-2 py-2.5' : 'px-2 py-3',
       active ? 'bg-white shadow-card ring-1 ring-navy-100' : 'hover:bg-white/70')}
       onClick={onOpen}>
       {active && <span className="absolute left-0 top-1/2 -translate-y-1/2 h-7 w-1 rounded-r-full bg-navy-600" />}
@@ -228,7 +195,7 @@ function ContactRow({
         {checked ? <CheckSquare className="w-4 h-4 text-navy-600" /> : <Square className="w-4 h-4 text-stone-300" />}
       </button>
 
-      <Avatar contact={contact} size={40} />
+      <Avatar contact={contact} size={compact ? 34 : 40} />
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-1.5">
           <span className="truncate font-semibold text-navy-900 text-sm">{fullName(contact)}</span>
@@ -240,7 +207,7 @@ function ContactRow({
           <span className="text-stone-300">{'  ·  '}</span>
           <span className="text-stone-400 font-medium">{contact.organization || '—'}</span>
         </div>
-        <div className="flex items-center gap-2 mt-1.5">
+        <div className="flex items-center gap-2 mt-1">
           <CategoryBadge category={contact.contact_category} />
           {isHighOpportunity(contact) && (
             <span className="inline-flex items-center gap-1 text-[10px] font-bold text-coral-500 whitespace-nowrap flex-shrink-0">
@@ -250,7 +217,59 @@ function ContactRow({
           <span className="text-[10px] text-stone-400 ml-auto whitespace-nowrap flex-shrink-0">{relativeDate(contact.last_seen)}</span>
         </div>
       </div>
-      <ConfRing value={confidencePct(contact)} size={34} />
+    </div>
+  )
+}
+
+/* ════════════════════════════════════════════════════════════════════
+   HOTEL GROUP (collapsible)
+   ════════════════════════════════════════════════════════════════════ */
+
+function HotelGroup({
+  org, members, expanded, onToggle, selectedId, checked, selectMode, onToggleCheck, onSelect,
+}: {
+  org: string
+  members: InboxContact[]
+  expanded: boolean
+  onToggle: () => void
+  selectedId: number | null
+  checked: Set<number>
+  selectMode: boolean
+  onToggleCheck: (id: number) => void
+  onSelect: (id: number) => void
+}) {
+  const dm = members.filter((m) => m.is_decision_maker).length
+  const tier = members.find((m) => m.brand_tier)?.brand_tier
+  const hasSelected = members.some((m) => m.id === selectedId)
+  return (
+    <div className="mb-1">
+      <button
+        onClick={onToggle}
+        className={cn('w-full flex items-center gap-2 px-2 py-2 rounded-lg transition-all', hasSelected ? 'bg-stone-100/80' : 'hover:bg-stone-100/70')}>
+        <ChevronRight className="w-3.5 h-3.5 text-stone-400 flex-shrink-0" style={{ transform: expanded ? 'rotate(90deg)' : 'none', transition: 'transform .18s ease' }} />
+        <span className="w-7 h-7 rounded-lg bg-navy-50 ring-1 ring-navy-100 flex items-center justify-center flex-shrink-0">
+          <Building2 className="w-3.5 h-3.5 text-navy-500" />
+        </span>
+        <div className="min-w-0 flex-1 text-left">
+          <div className="truncate text-[13px] font-bold text-navy-900">{org}</div>
+          <div className="text-[10px] text-stone-400 font-semibold">
+            {members.length} contact{members.length > 1 ? 's' : ''}
+            {dm > 0 && <span className="text-gold-600">{`  ·  ★ ${dm} DM${dm > 1 ? 's' : ''}`}</span>}
+          </div>
+        </div>
+        {tier && (
+          <span className="text-[9px] font-bold text-gold-600 bg-gold-50 ring-1 ring-gold-200 px-1.5 py-0.5 rounded-full flex-shrink-0">{getTierLabel(tier)}</span>
+        )}
+      </button>
+      {expanded && (
+        <div className="pl-2.5 mt-0.5 ml-3.5 border-l border-stone-200 space-y-0.5">
+          {members.map((c) => (
+            <ContactRow key={c.id} contact={c} active={c.id === selectedId} compact
+              selectMode={selectMode} checked={checked.has(c.id)}
+              onOpen={() => onSelect(c.id)} onToggleCheck={() => onToggleCheck(c.id)} />
+          ))}
+        </div>
+      )}
     </div>
   )
 }
@@ -339,7 +358,7 @@ function AIBand({ contact }: { contact: InboxContact }) {
             ))}
           </div>
         ) : (
-          <p className="text-[13.5px] leading-relaxed text-white/85">{deriveSummary(contact)}</p>
+          <p className="text-[13.5px] leading-relaxed text-white/85 max-w-[80ch]">{deriveSummary(contact)}</p>
         )}
 
         {result && !deepMut.isPending && (
@@ -392,35 +411,6 @@ function InfoRow({ icon, label, value, mono, href }: { icon: React.ReactNode; la
         )}
       </div>
     </div>
-  )
-}
-
-function NextSteps({ contact }: { contact: InboxContact }) {
-  const [done, setDone] = useState<number[]>([])
-  useEffect(() => setDone([]), [contact.id])
-  const steps = deriveNextSteps(contact)
-  const icons = [Send, Phone, Mail, Hash]
-  if (steps.length === 0) return null
-  return (
-    <SectionCard title="AI suggested next steps" icon={<Wand2 className="w-3.5 h-3.5" />}>
-      <div className="space-y-2">
-        {steps.map((n, i) => {
-          const isDone = done.includes(i)
-          const Ic = icons[i % icons.length]
-          return (
-            <button key={i} onClick={() => setDone((d) => (d.includes(i) ? d.filter((x) => x !== i) : [...d, i]))}
-              className={cn('group w-full flex items-center gap-3 text-left px-3 py-2.5 rounded-xl ring-1 transition-all',
-                isDone ? 'bg-emerald-50 ring-emerald-200' : 'bg-stone-50 ring-stone-200/70 hover:ring-navy-200 hover:bg-white')}>
-              <span className={cn('flex-shrink-0 w-7 h-7 rounded-lg flex items-center justify-center text-white', isDone ? 'bg-emerald-500' : 'bg-navy-600')}>
-                {isDone ? <Check className="w-3.5 h-3.5" /> : <Ic className="w-3.5 h-3.5" />}
-              </span>
-              <span className={cn('flex-1 text-[13px] font-medium', isDone ? 'text-emerald-700 line-through' : 'text-navy-800')}>{n}</span>
-              <span className={cn('text-[10px] font-bold uppercase tracking-wide', isDone ? 'text-emerald-500' : 'text-stone-300 group-hover:text-navy-400')}>{isDone ? 'Done' : 'Do it'}</span>
-            </button>
-          )
-        })}
-      </div>
-    </SectionCard>
   )
 }
 
@@ -577,11 +567,10 @@ function ProfilePanel({ contact, onDeleted }: { contact: InboxContact | null; on
       </div>
 
       {/* body */}
-      <div className="p-5 space-y-4">
+      <div className="px-7 py-6 space-y-4">
         <AIBand contact={contact} />
-        <NextSteps contact={contact} />
 
-        <div className="grid grid-cols-2 gap-4">
+        <div className="grid gap-4 items-start" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))' }}>
           <SectionCard title="Contact" icon={<Users className="w-3.5 h-3.5" />}>
             <InfoRow icon={<Mail className="w-3.5 h-3.5" />} label="Email" value={contact.email} mono />
             <InfoRow icon={<Phone className="w-3.5 h-3.5" />} label="Phone" value={contact.phone} />
@@ -602,6 +591,8 @@ function ProfilePanel({ contact, onDeleted }: { contact: InboxContact | null; on
             <InfoRow icon={<ExternalLink className="w-3.5 h-3.5" />} label="Matched lead" value={contact.matched_lead_id ? `#${contact.matched_lead_id}` : null} />
             <InfoRow icon={<ExternalLink className="w-3.5 h-3.5" />} label="Matched hotel" value={contact.matched_hotel_id ? `#${contact.matched_hotel_id}` : null} />
           </SectionCard>
+
+          <Timeline contact={contact} />
         </div>
 
         {contact.priority_reason && (
@@ -610,8 +601,6 @@ function ProfilePanel({ contact, onDeleted }: { contact: InboxContact | null; on
             <p className="mt-1 leading-relaxed">{contact.priority_reason}</p>
           </div>
         )}
-
-        <Timeline contact={contact} />
       </div>
     </div>
   )
@@ -692,8 +681,30 @@ export default function ContactsPage() {
   const activeContact = items.find((c) => c.id === selectedId) || filtered[0] || null
 
   const [focused, setFocused] = useState(false)
+  const [view, setView] = useState<'hotels' | 'people'>('hotels')
+  const [openOrgs, setOpenOrgs] = useState<Set<string>>(new Set())
   const smartActive = query.trim().length > 0
   const selectMode = selected.size > 0
+
+  // group filtered contacts by organization (hotel)
+  const groups = useMemo(() => {
+    const m = new Map<string, InboxContact[]>()
+    for (const c of filtered) {
+      const k = c.organization || 'No organization'
+      if (!m.has(k)) m.set(k, [])
+      m.get(k)!.push(c)
+    }
+    return [...m.entries()].sort((a, b) => b[1].length - a[1].length || a[0].localeCompare(b[0]))
+  }, [filtered])
+
+  function toggleOrg(org: string) {
+    setOpenOrgs((prev) => {
+      const next = new Set(prev)
+      if (next.has(org)) next.delete(org)
+      else next.add(org)
+      return next
+    })
+  }
 
   function toggleCheck(id: number) {
     setSelected((prev) => {
@@ -720,7 +731,7 @@ export default function ContactsPage() {
     <div className="h-full flex overflow-hidden bg-stone-50">
 
       {/* ════ LEFT RAIL ════ */}
-      <div className="flex flex-col h-full bg-stone-50 border-r border-stone-200 flex-shrink-0 w-[412px] relative">
+      <div className="flex flex-col h-full bg-stone-50 border-r border-stone-200 flex-shrink-0 w-[508px] relative">
 
         {/* header */}
         <div className="flex-shrink-0 px-4 pt-4 pb-3">
@@ -780,29 +791,40 @@ export default function ContactsPage() {
           <Chip label="Competitors" count={stats?.competitor} active={category === 'competitor'} color="#e85d4a" onClick={() => patch({ category: category === 'competitor' ? null : 'competitor', dm: null })} />
         </div>
 
-        {/* sort + status row */}
-        <div className="flex-shrink-0 px-4 pb-2 flex items-center justify-between gap-2">
-          <span className="text-[11px] font-bold text-stone-400 uppercase tracking-wider whitespace-nowrap">{filtered.length.toLocaleString()} shown</span>
-          <div className="flex items-center gap-2">
-            <select value={status} onChange={(e) => patch({ status: e.target.value || null })}
-              className="text-[11px] font-semibold text-stone-500 bg-white ring-1 ring-stone-200 rounded-lg px-2 py-1 outline-none cursor-pointer hover:text-navy-700">
-              {STATUS_OPTIONS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
-            </select>
-            <div className="flex items-center gap-1 text-[11px] text-stone-400">
-              <Filter className="w-3 h-3" />
-              <select value={sort} onChange={(e) => patch({ sort: e.target.value })}
-                className="bg-transparent font-semibold text-stone-500 outline-none cursor-pointer hover:text-navy-700">
-                <option value="confidence">Top match</option>
-                <option value="opportunity">Opportunity</option>
-                <option value="recent">Last seen</option>
-                <option value="name">Name A–Z</option>
-              </select>
-            </div>
+        {/* toolbar: view toggle + status + sort */}
+        <div className="flex-shrink-0 px-4 pb-2 flex items-center gap-2">
+          <div className="flex items-center bg-stone-100 rounded-lg p-0.5">
+            {(['hotels', 'people'] as const).map((v) => (
+              <button key={v} onClick={() => setView(v)}
+                className={cn('px-2.5 h-6 rounded-md text-[11px] font-bold transition-all whitespace-nowrap',
+                  view === v ? 'bg-white text-navy-800 shadow-soft' : 'text-stone-400 hover:text-stone-600')}>
+                {v === 'hotels' ? 'By hotel' : 'All people'}
+              </button>
+            ))}
           </div>
+          <div className="flex-1" />
+          <select value={status} onChange={(e) => patch({ status: e.target.value || null })}
+            className="text-[11px] font-semibold text-stone-500 bg-white ring-1 ring-stone-200 rounded-lg px-1.5 py-1 outline-none cursor-pointer hover:text-navy-700">
+            {STATUS_OPTIONS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+          </select>
+          <select value={sort} onChange={(e) => patch({ sort: e.target.value })}
+            className="text-[11px] font-semibold text-stone-500 bg-white ring-1 ring-stone-200 rounded-lg px-1.5 py-1 outline-none cursor-pointer hover:text-navy-700">
+            <option value="confidence">Top match</option>
+            <option value="opportunity">Opportunity</option>
+            <option value="recent">Last seen</option>
+            <option value="name">Name A–Z</option>
+          </select>
+        </div>
+
+        {/* count line */}
+        <div className="flex-shrink-0 px-4 pb-1.5 text-[11px] font-bold text-stone-400 uppercase tracking-wider">
+          {view === 'hotels'
+            ? `${groups.length.toLocaleString()} hotels · ${filtered.length.toLocaleString()} people`
+            : `${filtered.length.toLocaleString()} people`}
         </div>
 
         {/* list */}
-        <div className="flex-1 overflow-y-auto px-2.5 pb-20 space-y-0.5">
+        <div className="flex-1 overflow-y-auto px-2.5 pb-20">
           {listQ.isLoading ? (
             <div className="space-y-2 px-1 pt-1">
               {Array.from({ length: 8 }).map((_, i) => <div key={i} className="h-[78px] rounded-xl bg-stone-100 animate-pulse" />)}
@@ -813,11 +835,21 @@ export default function ContactsPage() {
               <p className="text-sm font-semibold text-stone-500">No matches</p>
               <p className="text-xs mt-1">Try a different search or filter</p>
             </div>
+          ) : view === 'people' ? (
+            <div className="space-y-0.5">
+              {filtered.map((c) => (
+                <ContactRow key={c.id} contact={c} active={c.id === activeContact?.id}
+                  selectMode={selectMode} checked={selected.has(c.id)}
+                  onOpen={() => patch({ selected: String(c.id) })} onToggleCheck={() => toggleCheck(c.id)} />
+              ))}
+            </div>
           ) : (
-            filtered.map((c) => (
-              <ContactRow key={c.id} contact={c} active={c.id === activeContact?.id}
-                selectMode={selectMode} checked={selected.has(c.id)}
-                onOpen={() => patch({ selected: String(c.id) })} onToggleCheck={() => toggleCheck(c.id)} />
+            groups.map(([org, members]) => (
+              <HotelGroup key={org} org={org} members={members}
+                expanded={smartActive || openOrgs.has(org) || members.some((m) => m.id === activeContact?.id)}
+                onToggle={() => toggleOrg(org)}
+                selectedId={activeContact?.id ?? null} checked={selected} selectMode={selectMode}
+                onToggleCheck={toggleCheck} onSelect={(id) => patch({ selected: String(id) })} />
             ))
           )}
         </div>

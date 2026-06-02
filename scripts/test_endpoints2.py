@@ -1,5 +1,8 @@
 """Quick test: us-west1 endpoint for all 3 models."""
-import asyncio, os, sys, time
+import asyncio
+import os
+import sys
+import time
 
 try:
     from dotenv import load_dotenv
@@ -46,7 +49,7 @@ async def test_one(model, endpoint, project, headers):
 
 async def main():
     sys.path.insert(0, os.getcwd())
-    from app.services.ai_client import _ensure_init, _get_config, _creds
+    from app.services.ai_client import _ensure_init, _get_config
     _ensure_init()
     config = _get_config()
     project = config["vertex_project_id"]

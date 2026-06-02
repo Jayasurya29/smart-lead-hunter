@@ -1357,8 +1357,6 @@ class WebDiscoveryEngine:
         from app.database import async_session
         from app.services.query_intelligence import (
             filter_active_queries,
-            QueryIntelligence,
-            QueryRunResult,
         )
         from app.models.discovery_query_stat import DiscoveryQueryStat
         from sqlalchemy import select

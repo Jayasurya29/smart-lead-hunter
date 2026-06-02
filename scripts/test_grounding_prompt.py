@@ -25,13 +25,11 @@ Tests grounding directly — no pipeline, no DB. Shows:
 """
 
 import asyncio
-import json
 import re
 import sys
 import os
 import time
 from collections import Counter
-from typing import Optional
 
 # Add project root to path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -260,7 +258,7 @@ def _print_result(r: dict, verbose: bool = True):
           f"model={r.get('model','')}  |  endpoint={r.get('location','')}")
 
     if r.get("search_queries"):
-        print(f"\n  QUERIES GEMINI RAN:")
+        print("\n  QUERIES GEMINI RAN:")
         for i, q in enumerate(r["search_queries"], 1):
             print(f"    {i}. {q}")
 
@@ -274,23 +272,23 @@ def _print_result(r: dict, verbose: bool = True):
     if f.get("years_in_text"):
         print(f"  Years in text: {f['years_in_text']}")
     if f.get("stale_signals"):
-        print(f"  ⚠ STALE SIGNALS:")
+        print("  ⚠ STALE SIGNALS:")
         for s in f["stale_signals"][:5]:
             print(f"    {s}")
     if f.get("fresh_signals"):
-        print(f"  ✅ FRESH SIGNALS:")
+        print("  ✅ FRESH SIGNALS:")
         for s in f["fresh_signals"][:5]:
             print(f"    {s}")
 
     if verbose and r.get("text"):
-        print(f"\n  TEXT:")
+        print("\n  TEXT:")
         print(f"  {'─'*50}")
         for line in r["text"].split("\n"):
             print(f"  {line}")
         print(f"  {'─'*50}")
 
     if r.get("sources"):
-        print(f"\n  SOURCES:")
+        print("\n  SOURCES:")
         for s in r["sources"][:8]:
             title = s.get("title", "(no title)")
             uri = s.get("uri", "")[:80]
@@ -398,7 +396,7 @@ def _build_lead_data_prompts(hotel: str, city: str, state: str) -> list[dict]:
 def _print_comparison(results: list[dict]):
     """Print a side-by-side comparison table."""
     print(f"\n{'='*60}")
-    print(f"  COMPARISON SUMMARY")
+    print("  COMPARISON SUMMARY")
     print(f"{'='*60}\n")
 
     # Show model + endpoint
@@ -494,7 +492,7 @@ async def main():
 
     if mode in ("contacts", "both"):
         print(f"\n{'═'*60}")
-        print(f"  CONTACT DISCOVERY PROMPTS")
+        print("  CONTACT DISCOVERY PROMPTS")
         print(f"{'═'*60}")
 
         prompts = _build_contact_prompts(hotel, city, state)
@@ -511,7 +509,7 @@ async def main():
 
     if mode in ("lead-data", "both"):
         print(f"\n{'═'*60}")
-        print(f"  LEAD DATA ENRICHMENT PROMPTS")
+        print("  LEAD DATA ENRICHMENT PROMPTS")
         print(f"{'═'*60}")
 
         prompts = _build_lead_data_prompts(hotel, city, state)

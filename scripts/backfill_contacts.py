@@ -156,7 +156,7 @@ async def main():
             print(f"  {mb}")
 
         if not args.yes:
-            confirm = input(f"\nProceed? [y/N] ").strip().lower()
+            confirm = input("\nProceed? [y/N] ").strip().lower()
             if confirm not in ("y", "yes"):
                 print("Aborted.")
                 return

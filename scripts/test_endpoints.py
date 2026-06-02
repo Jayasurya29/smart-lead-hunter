@@ -81,7 +81,7 @@ async def main():
     # Get credentials
     try:
         sys.path.insert(0, os.getcwd())
-        from app.services.ai_client import _ensure_init, _get_config, _creds
+        from app.services.ai_client import _ensure_init, _get_config
         _ensure_init()
         config = _get_config()
         project = config["vertex_project_id"]

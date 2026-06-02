@@ -47,7 +47,6 @@ from app.services.ai_client import ai_generate  # noqa: E402
 from app.config.brand_registry import BrandRegistry, BrandInfo  # noqa: E402
 from app.config.procurement_intelligence import (  # noqa: E402
     MANAGEMENT_COMPANY_INTEL,
-    GPO_NOTES,
     get_management_company_intel,
 )
 
@@ -1147,13 +1146,13 @@ async def main():
     print(f"   ✓ Gmail: {len(seen_in_headers)} unique emails across all headers")
     print(f"   ✓ {len(sig_cache)} unique signatures cached")
 
-    print(f"\n   Preprocessing impact (all messages combined):")
+    print("\n   Preprocessing impact (all messages combined):")
     print(f"     URL wrappers stripped:    {preproc_totals['urls_stripped']}")
     print(f"     Image refs stripped:      {preproc_totals['images_stripped']}")
     print(f"     Warning lines stripped:   {preproc_totals['warnings_stripped']}")
     print(f"     Soft-wrap lines joined:   {preproc_totals['lines_joined']}")
 
-    print(f"\n   Signature-level rejections:")
+    print("\n   Signature-level rejections:")
     print(f"     JA org mismatch:        {sig_rejected['ja_mismatch']}")
     print(f"     parsed-email mismatch:  {sig_rejected['email_mismatch']}")
     print(f"     not real person:        {sig_rejected['not_real_person']}")
@@ -1254,13 +1253,13 @@ async def main():
     print("\n" + "=" * 80)
     print("🏨 HOSPITALITY ENRICHMENT:")
     print(f"   Brands recognized via BrandRegistry: {brands_recognized}/{n} ({100*brands_recognized/n:.0f}%)")
-    print(f"   Procurement priority breakdown:")
+    print("   Procurement priority breakdown:")
     print(f"     P1 (direct buyers):         {p1:4} ({100*p1/n:.0f}%)")
     print(f"     P2 (operational/GMs):       {p2:4} ({100*p2/n:.0f}%)")
     print(f"     P3 (HR/F&B/secondary):      {p3:4} ({100*p3/n:.0f}%)")
     print(f"     P4 (non-buyers):            {p4:4} ({100*p4/n:.0f}%)")
     print(f"     P_unknown:                  {p_unknown:4} ({100*p_unknown/n:.0f}%)")
-    print(f"   Opportunity level:")
+    print("   Opportunity level:")
     print(f"     High (independents/collections): {high_opp:4}")
     print(f"     Medium:                          {med_opp:4}")
     print(f"     Low (Disney/Sandals/all-inc):    {low_opp:4}")

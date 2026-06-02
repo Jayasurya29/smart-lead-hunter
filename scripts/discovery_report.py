@@ -24,7 +24,7 @@ _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 
-from sqlalchemy import select, desc, func  # noqa: E402
+from sqlalchemy import select, desc  # noqa: E402
 
 from app.database import async_session  # noqa: E402
 from app.models.discovery_query_stat import DiscoveryQueryStat  # noqa: E402

@@ -49,7 +49,6 @@ import argparse
 import asyncio
 import json
 import logging
-import re
 import sys
 from pathlib import Path
 
@@ -376,8 +375,8 @@ async def _generate_plan(force: bool) -> int:
     print()
     print("Next steps:")
     print(f"  1. Open and review: notepad {PLAN_FILE}")
-    print(f"  2. Preview: python scripts\\dedup_expired_leads.py --apply --dry-run")
-    print(f"  3. Apply:   python scripts\\dedup_expired_leads.py --apply")
+    print("  2. Preview: python scripts\\dedup_expired_leads.py --apply --dry-run")
+    print("  3. Apply:   python scripts\\dedup_expired_leads.py --apply")
     return 0
 
 

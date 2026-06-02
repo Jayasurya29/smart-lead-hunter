@@ -84,7 +84,7 @@ async def export(source: str = None, output: str = None):
     GREEN_BG = PatternFill(start_color="ECFDF5", fill_type="solid")
     SECTION = PatternFill(start_color="EFF6FF", fill_type="solid")
     HDR = Font(name="Calibri", size=11, bold=True, color="FFFFFF")
-    HDR_SEC = Font(name="Calibri", size=10, bold=True, color="1E40AF")
+    Font(name="Calibri", size=10, bold=True, color="1E40AF")
     D = Font(name="Calibri", size=10)
     B = Font(name="Calibri", size=10, bold=True)
     LINK = Font(name="Calibri", size=10, color="3B82F6", underline="single")
@@ -391,7 +391,7 @@ async def export(source: str = None, output: str = None):
     print(f"\nExported to: {output}")
     print(f"  Sheet 1: {len(hotels)} hotels (call list with primary contact)")
     print(f"  Sheet 2: {len(contacts)} contacts (all details)")
-    print(f"  Sheet 3: Summary dashboard")
+    print("  Sheet 3: Summary dashboard")
     print(f"  Emails: {emails_found} primary + {sec_emails_found} secondary")
     print(f"  LinkedIn: {li_found}")
 

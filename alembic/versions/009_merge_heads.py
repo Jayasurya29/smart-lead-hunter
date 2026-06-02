@@ -9,7 +9,6 @@ Revises: sap_clients_001, 008
 Create Date: 2026-04-14
 """
 
-from alembic import op
 
 revision = "009_merge"
 down_revision = ("sap_clients_001", "008")

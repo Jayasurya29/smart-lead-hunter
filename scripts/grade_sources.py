@@ -36,7 +36,7 @@ from typing import Dict, List, Optional
 # Add project root to path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from sqlalchemy import select, update
+from sqlalchemy import select
 from app.database import async_session
 from app.models.source import Source
 
@@ -226,7 +226,7 @@ async def run_grading(
 
     async with async_session() as session:
         # Build query
-        query = select(Source).where(Source.is_active == True).order_by(Source.priority.desc())
+        query = select(Source).where(Source.is_active).order_by(Source.priority.desc())
 
         if source_type:
             query = query.where(Source.source_type == source_type)
@@ -292,9 +292,9 @@ async def run_grading(
 
         # ── Summary ──
         print(f"\n{'='*80}")
-        print(f"  GRADING SUMMARY")
+        print("  GRADING SUMMARY")
         print(f"{'='*80}")
-        print(f"\n  Grade Distribution:")
+        print("\n  Grade Distribution:")
         print(f"  {'⭐ S-Tier (Gold Mine):':<30} {grade_counts['S']:>3} sources")
         print(f"  {'✅ A-Tier (Reliable):':<30} {grade_counts['A']:>3} sources")
         print(f"  {'🔵 B-Tier (Occasional):':<30} {grade_counts['B']:>3} sources")
@@ -309,21 +309,21 @@ async def run_grading(
         # Show F-tier sources to deactivate
         f_tier = [g for g in all_grades if g["grade"] == "F"]
         if f_tier:
-            print(f"\n  🗑️  F-TIER (candidates for deactivation):")
+            print("\n  🗑️  F-TIER (candidates for deactivation):")
             for g in f_tier:
                 print(f"     • {g['source_name']:<40} — {g['grade_reason']}")
 
         # Show S-tier gold mines
         s_tier = [g for g in all_grades if g["grade"] == "S"]
         if s_tier:
-            print(f"\n  🏆 S-TIER (gold mines to prioritize):")
+            print("\n  🏆 S-TIER (gold mines to prioritize):")
             for g in s_tier:
                 print(f"     • {g['source_name']:<40} — {g['leads_us_caribbean']} leads, {g['relevance_pct']}% relevant")
 
         # ── Apply grades ──
         if apply:
             print(f"\n{'='*80}")
-            print(f"  APPLYING GRADES")
+            print("  APPLYING GRADES")
             print(f"{'='*80}")
 
             applied = 0
