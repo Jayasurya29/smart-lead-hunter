@@ -1,31 +1,34 @@
 /**
- * ContactsPage — AI-first, split-view contact directory (FULL, self-contained).
+ * ContactsPage — AI-first contact directory with slide-over profile (self-contained).
  * ============================================================================
- * Drop-in replacement. This single file contains everything: helpers, small
- * presentational components, the list rail, the live AI profile, and the full
- * triage workflow. The only imports are your existing hooks / api / utils.
+ * Drop-in replacement. One file: helpers, presentational components, the
+ * full-width hotel directory, the live AI profile drawer, and the triage workflow.
+ * Only imports are your existing hooks / api / utils.
  *
- *   Left rail  : natural-language "ask AI" search, decision-maker focus,
- *                category + status filters, sort, multi-select bulk-approve.
- *   Right panel: live AI profile — Deep Enrich (+ Find Email), suggested next
- *                steps, contact + hospitality intel, engagement timeline, and
- *                Approve / Push-to-CRM / Reject actions.
+ *   Main pane : full-width directory — natural-language "ask AI" search (person /
+ *               hotel / position), grouped by hotel (collapsible) or flat list,
+ *               category + status filters, sort, multi-select bulk-approve.
+ *   Drawer    : clicking a contact slides a profile in BESIDE the list (no scrim —
+ *               the directory stays usable). Live AI Intelligence + Deep Enrich,
+ *               contact + hospitality intel, engagement, Approve / Push-to-CRM /
+ *               Reject. ‹ › steps through contacts; Esc / ✕ closes.
  *
  * Server-side filtering: category + approval status + ordering.
- * Client-side (over the loaded page, per_page 200): smart-search, DM focus,
- * sort. For very large inboxes, push `search` to the server (marked below).
+ * Client-side (over the loaded page, per_page 200): smart-search, DM focus, sort.
+ * For very large inboxes, push `search` to the server (marked below).
  */
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import {
-  Sparkles, Wand2, X, RefreshCw, Inbox, Star, TrendingUp, ChevronRight,
+  Sparkles, Wand2, X, RefreshCw, Inbox, Star, ChevronRight, ChevronDown,
   Mail, Phone, Linkedin, ExternalLink, MapPin, Building2, Shield, Hash,
   Eye, Users, Activity, Send, Check, Loader2, Trash2, CheckSquare, Square,
+  Radar, Briefcase, Layers,
 } from 'lucide-react'
 import { cn, formatDate, relativeDate, getTierLabel } from '@/lib/utils'
 import type { InboxContact, InboxContactStats } from '@/api/inboxContacts'
 import {
-  useInboxContacts,
+  useAllInboxContacts,
   useInboxContactStats,
   useTriggerInboxSync,
   useDeepEnrichContact,
@@ -38,7 +41,51 @@ import {
    HELPERS
    ════════════════════════════════════════════════════════════════════ */
 
-type SortKey = 'confidence' | 'opportunity' | 'recent' | 'name'
+type SortKey = 'confidence' | 'opportunity' | 'recent' | 'newest' | 'oldest' | 'name' | 'org'
+
+/* ────────────────────────────────────────────────────────────────────
+   UNIFIED MODEL ADAPTER
+   --------------------------------------------------------------------
+   This page unifies TWO contact sources into one directory:
+     1. Email-scraped contacts  → useInboxContacts (already wired)
+     2. Lead-generator contacts → contacts attached to discovered/existing
+        hotels & management companies. Merge them into `items` below and
+        set `source: 'lead_generator'` (see the MERGE POINT in the page).
+
+   These three dimensions drive the new scope bar. Each reads a real field
+   if present, else falls back to a heuristic — so it works today and gets
+   sharper once the backend exposes the explicit fields:
+     • source        → c.source            ('email_scrape' | 'lead_generator')
+     • account_type  → c.account_type      ('hotel' | 'management_company')
+     • lifecycle     → c.lifecycle_stage   ('potential' | 'existing')
+   ──────────────────────────────────────────────────────────────────── */
+type Source = 'email_scrape' | 'lead_generator'
+type AccountType = 'hotel' | 'management_company'
+type Stage = 'potential' | 'existing'
+
+type UnifiedContact = InboxContact & {
+  source?: Source
+  account_type?: AccountType
+  lifecycle_stage?: Stage
+  management_company?: string | null
+}
+
+function sourceOf(c: UnifiedContact): Source {
+  return c.source || 'email_scrape'
+}
+function accountTypeOf(c: UnifiedContact): AccountType {
+  if (c.account_type) return c.account_type
+  const mc = c.management_company
+  // works AT the management company itself, or is a GPO/seller → management company
+  if (mc && c.organization && mc.trim().toLowerCase() === c.organization.trim().toLowerCase()) return 'management_company'
+  if (c.contact_category === 'seller') return 'management_company'
+  return 'hotel'
+}
+function stageOf(c: UnifiedContact): Stage {
+  if (c.lifecycle_stage) return c.lifecycle_stage
+  if (c.matched_hotel_id) return 'existing'
+  return 'potential'
+}
 
 function fullName(c: InboxContact): string {
   return [c.first_name, c.last_name].filter(Boolean).join(' ') || c.display_name || c.email || '—'
@@ -100,16 +147,22 @@ function deriveSummary(c: InboxContact): string {
 }
 
 /** Map natural-language queries to a predicate over a contact. */
-function smartMatch(c: InboxContact, query: string): boolean {
+function smartMatch(c: UnifiedContact, query: string): boolean {
   const t = query.toLowerCase().trim()
   if (!t) return true
+  const acctLabel = accountTypeOf(c) === 'management_company' ? 'management company mgmt co operator' : 'hotel'
+  const srcLabel = sourceOf(c) === 'lead_generator' ? 'lead generator scraped discovery prospect' : 'email inbox'
   const hay = [
     c.first_name, c.last_name, c.display_name, c.title, c.inferred_role, c.organization,
-    c.email, c.address, c.department, c.parent_company, c.gpo, getTierLabel(c.brand_tier),
-    c.contact_category, c.opportunity_level,
+    c.email, c.address, c.department, c.parent_company, c.management_company, c.gpo, getTierLabel(c.brand_tier),
+    c.contact_category, c.opportunity_level, acctLabel, srcLabel, stageOf(c),
   ].filter(Boolean).join(' ').toLowerCase()
   if (/decision|maker|\bdm\b/.test(t)) return !!c.is_decision_maker
   if (/high opp|opportun|hot lead/.test(t)) return isHighOpportunity(c)
+  if (/management compan|mgmt|operator/.test(t)) return accountTypeOf(c) === 'management_company'
+  if (/lead gen|scraped|discover|prospect/.test(t)) return sourceOf(c) === 'lead_generator'
+  if (/existing|customer|current client/.test(t)) return stageOf(c) === 'existing'
+  if (/potential|new lead/.test(t)) return stageOf(c) === 'potential'
   if (/repl|recent|engaged|active/.test(t)) return c.interaction_count >= 5
   if (/luxury|premium|upscale|high.?end/.test(t)) return /luxury|upscale/i.test(getTierLabel(c.brand_tier) || '')
   if (/buyer/.test(t)) return c.contact_category === 'buyer'
@@ -163,73 +216,132 @@ function Chip({ label, count, active, color, onClick }: { label: string; count?:
     </button>
   )
 }
+void Chip // retained for reference; the calm design uses <Facet> instead
 
 /* ════════════════════════════════════════════════════════════════════
-   LIST ROW
+   DIRECTORY ROW (full-width)
    ════════════════════════════════════════════════════════════════════ */
 
-function ContactRow({
-  contact, active, selectMode, checked, onOpen, onToggleCheck, compact,
+function StatusPill({ status }: { status: string }) {
+  if (status === 'pushed_to_insightly') return <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold bg-navy-50 text-navy-700">In CRM</span>
+  if (status === 'approved') return <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-50 text-emerald-700">Approved</span>
+  return <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold text-stone-500"><span className="w-1.5 h-1.5 rounded-full bg-coral-400" />Pending</span>
+}
+void StatusPill // status now shown only inside the profile drawer; kept for reuse
+
+/* ── one consistent filter facet (dropdown) — the only filter idiom ── */
+type FacetOption = { v: string; label: string; count?: number; dot?: string; icon?: React.ComponentType<{ className?: string }> }
+function Facet({ icon: Ic, label, value, options, onChange, align }: {
+  icon?: React.ComponentType<{ className?: string }>
+  label: string
+  value: string
+  options: FacetOption[]
+  onChange: (v: string) => void
+  align?: 'right'
+}) {
+  const [open, setOpen] = useState(false)
+  const cur = options.find((o) => o.v === value) || options[0]
+  const isAll = value == null || value === 'all' || value === ''
+  return (
+    <div className="relative">
+      <button onClick={() => setOpen((o) => !o)}
+        className={cn('inline-flex items-center gap-1.5 h-9 px-3 rounded-lg text-[13px] font-medium transition-colors',
+          isAll ? 'text-stone-500 hover:bg-stone-100' : 'text-navy-800 bg-navy-50 ring-1 ring-navy-100 font-semibold')}>
+        {Ic && <Ic className={cn('w-3.5 h-3.5', isAll ? 'text-stone-400' : 'text-navy-500')} />}
+        <span>{isAll ? label : cur.label}</span>
+        <ChevronDown className="w-3.5 h-3.5 opacity-40" />
+      </button>
+      {open && (
+        <>
+          <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
+          <div className={cn('absolute z-50 mt-1.5 min-w-[200px] bg-white rounded-xl shadow-lift ring-1 ring-stone-200/80 p-1.5', align === 'right' ? 'right-0' : 'left-0')}>
+            {options.map((o) => (
+              <button key={o.v} onClick={() => { onChange(o.v); setOpen(false) }}
+                className={cn('w-full flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-[13px] text-left transition-colors',
+                  o.v === value ? 'bg-stone-50 font-semibold text-navy-900' : 'text-stone-600 hover:bg-stone-50')}>
+                {o.icon ? <o.icon className="w-4 h-4 text-stone-400 flex-shrink-0" /> : o.dot ? <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: o.dot }} /> : null}
+                <span className="flex-1">{o.label}</span>
+                {o.count != null && <span className="text-[11px] tabular-nums text-stone-400">{o.count}</span>}
+                {o.v === value && <Check className="w-4 h-4" style={{ color: 'var(--accent, #2e4a6e)' }} />}
+              </button>
+            ))}
+          </div>
+        </>
+      )}
+    </div>
+  )
+}
+
+function DirRow({
+  contact, selected, checked, selectMode, onOpen, onToggleCheck, hideOrg, onOpenOrg,
 }: {
-  contact: InboxContact
-  active: boolean
-  selectMode: boolean
+  contact: UnifiedContact
+  selected: boolean
   checked: boolean
+  selectMode: boolean
   onOpen: () => void
   onToggleCheck: () => void
-  compact?: boolean
+  hideOrg?: boolean
+  onOpenOrg?: (org: string) => void
 }) {
-  const pending = contact.approval_status === 'pending'
+  const isLead = sourceOf(contact) === 'lead_generator'
   return (
-    <div className={cn('group w-full flex items-center gap-2.5 rounded-xl transition-all duration-150 relative cursor-pointer',
-      compact ? 'px-2 py-2.5' : 'px-2 py-3',
-      active ? 'bg-white shadow-card ring-1 ring-navy-100' : 'hover:bg-white/70')}
-      onClick={onOpen}>
-      {active && <span className="absolute left-0 top-1/2 -translate-y-1/2 h-7 w-1 rounded-r-full bg-navy-600" />}
-
-      {/* checkbox — visible on hover, when selected, or in select mode */}
-      <button
-        onClick={(e) => { e.stopPropagation(); onToggleCheck() }}
-        className={cn('flex-shrink-0 transition-opacity', checked || selectMode ? 'opacity-100' : 'opacity-0 group-hover:opacity-100')}
-        title={checked ? 'Deselect' : 'Select'}>
+    <div onClick={onOpen}
+      className={cn('group flex items-center gap-3 pl-3 pr-4 py-2.5 rounded-xl cursor-pointer transition-colors',
+        selected ? 'bg-white shadow-card ring-1 ring-navy-100' : 'hover:bg-white')}>
+      <button onClick={(e) => { e.stopPropagation(); onToggleCheck() }}
+        className={cn('flex-shrink-0 transition-opacity', checked || selectMode ? 'opacity-100' : 'opacity-0 group-hover:opacity-100')}>
         {checked ? <CheckSquare className="w-4 h-4 text-navy-600" /> : <Square className="w-4 h-4 text-stone-300" />}
       </button>
-
-      <Avatar contact={contact} size={compact ? 34 : 40} />
-      <div className="min-w-0 flex-1">
+      <div className="relative flex-shrink-0">
+        <Avatar contact={contact} size={38} />
+        <span className="absolute -bottom-0.5 -left-0.5 w-3.5 h-3.5 rounded-full ring-2 ring-stone-50 flex items-center justify-center"
+          style={{ background: isLead ? '#7c3aed' : '#2e4a6e' }} title={isLead ? 'Lead Generator' : 'Email'}>
+          {isLead ? <Radar className="w-2 h-2 text-white" /> : <Inbox className="w-2 h-2 text-white" />}
+        </span>
+      </div>
+      {/* name + role */}
+      <div className="min-w-0 w-[34%] flex-shrink-0">
         <div className="flex items-center gap-1.5">
           <span className="truncate font-semibold text-navy-900 text-sm">{fullName(contact)}</span>
-          {contact.is_decision_maker && <span className="text-gold-500 text-[10px] flex-shrink-0" title="Decision-maker">★</span>}
-          {pending && <span className="ml-auto flex-shrink-0 w-1.5 h-1.5 rounded-full bg-coral-400" title="Pending review" />}
+          {contact.is_decision_maker && <span className="inline-flex items-center gap-0.5 text-[10px] font-bold text-gold-700 bg-gold-50 px-1.5 py-0.5 rounded-full flex-shrink-0" title="Decision-maker">★ DM</span>}
         </div>
-        <div className="truncate text-stone-500 text-xs mt-0.5">
-          {roleText(contact) || <span className="italic text-stone-400">role unknown</span>}
-          <span className="text-stone-300">{'  ·  '}</span>
-          <span className="text-stone-400 font-medium">{contact.organization || '—'}</span>
-        </div>
-        <div className="flex items-center gap-2 mt-1">
-          <CategoryBadge category={contact.contact_category} />
-          {isHighOpportunity(contact) && (
-            <span className="inline-flex items-center gap-1 text-[10px] font-bold text-coral-500 whitespace-nowrap flex-shrink-0">
-              <TrendingUp className="w-3 h-3" /> High opp
-            </span>
-          )}
-          <span className="text-[10px] text-stone-400 ml-auto whitespace-nowrap flex-shrink-0">{relativeDate(contact.last_seen)}</span>
-        </div>
+        <div className="truncate text-stone-500 text-[13px] mt-0.5">{hideOrg ? (roleText(contact) || 'role unknown') : `${roleText(contact) || 'role unknown'}  ·  ${contact.organization || '—'}`}</div>
+      </div>
+      {/* email — the field reps need most */}
+      <div className="min-w-0 flex-1 hidden md:block">
+        {contact.email
+          ? <a href={`mailto:${contact.email}`} onClick={(e) => e.stopPropagation()} className="truncate block text-[13px] text-navy-600 hover:text-navy-800 hover:underline font-medium">{contact.email}</a>
+          : <span className="text-[12px] text-stone-400 italic">no email yet</span>}
+      </div>
+      {/* quick actions — appear on hover, act without opening the drawer */}
+      <div className="hidden lg:flex items-center gap-1 flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
+        {contact.email && <a href={`mailto:${contact.email}`} onClick={(e) => e.stopPropagation()} title="Email" className="w-7 h-7 rounded-lg hover:bg-stone-100 flex items-center justify-center text-stone-500"><Mail className="w-4 h-4" /></a>}
+        {contact.phone && <a href={`tel:${contact.phone}`} onClick={(e) => e.stopPropagation()} title="Call" className="w-7 h-7 rounded-lg hover:bg-stone-100 flex items-center justify-center text-stone-500"><Phone className="w-4 h-4" /></a>}
+      </div>
+      {/* org + meta (status pills removed — org name is more useful here). Org is a link → jumps to that company. */}
+      <div className="flex items-center gap-3 flex-shrink-0">
+        {isHighOpportunity(contact) && <span className="hidden sm:inline text-[11px] font-bold text-coral-500" title="High opportunity">High</span>}
+        {contact.organization
+          ? <button onClick={(e) => { e.stopPropagation(); onOpenOrg?.(contact.organization!) }} title={`See everyone at ${contact.organization}`}
+              className="hidden sm:block w-[180px] text-right truncate text-[12px] font-semibold text-navy-700 hover:text-navy-900 hover:underline">{contact.organization}</button>
+          : <span className="hidden sm:block w-[180px]" />}
+        <span className="w-12 text-right text-[11px] text-stone-500 whitespace-nowrap hidden xl:block">{isLead && contact.interaction_count === 0 ? 'new' : relativeDate(contact.last_seen)}</span>
+        <ChevronRight className="w-4 h-4 text-stone-300 group-hover:text-navy-400 transition-colors" />
       </div>
     </div>
   )
 }
 
 /* ════════════════════════════════════════════════════════════════════
-   HOTEL GROUP (collapsible)
+   HOTEL GROUP (collapsible, full-width)
    ════════════════════════════════════════════════════════════════════ */
 
-function HotelGroup({
-  org, members, expanded, onToggle, selectedId, checked, selectMode, onToggleCheck, onSelect,
+function DirGroup({
+  org, members, expanded, onToggle, selectedId, checked, selectMode, onToggleCheck, onSelect, onOpenOrg,
 }: {
   org: string
-  members: InboxContact[]
+  members: UnifiedContact[]
   expanded: boolean
   onToggle: () => void
   selectedId: number | null
@@ -237,36 +349,39 @@ function HotelGroup({
   selectMode: boolean
   onToggleCheck: (id: number) => void
   onSelect: (id: number) => void
+  onOpenOrg?: (org: string) => void
 }) {
   const dm = members.filter((m) => m.is_decision_maker).length
+  const isMgmt = members.length > 0 && accountTypeOf(members[0]) === 'management_company'
   const tier = members.find((m) => m.brand_tier)?.brand_tier
-  const hasSelected = members.some((m) => m.id === selectedId)
+  const allExisting = members.every((m) => stageOf(m) === 'existing')
   return (
-    <div className="mb-1">
-      <button
-        onClick={onToggle}
-        className={cn('w-full flex items-center gap-2 px-2 py-2 rounded-lg transition-all', hasSelected ? 'bg-stone-100/80' : 'hover:bg-stone-100/70')}>
-        <ChevronRight className="w-3.5 h-3.5 text-stone-400 flex-shrink-0" style={{ transform: expanded ? 'rotate(90deg)' : 'none', transition: 'transform .18s ease' }} />
-        <span className="w-7 h-7 rounded-lg bg-navy-50 ring-1 ring-navy-100 flex items-center justify-center flex-shrink-0">
-          <Building2 className="w-3.5 h-3.5 text-navy-500" />
+    <div className="mb-2" data-org={org}>
+      <button onClick={onToggle} className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl hover:bg-white transition-colors">
+        <ChevronRight className="w-3.5 h-3.5 text-stone-300 flex-shrink-0" style={{ transform: expanded ? 'rotate(90deg)' : 'none', transition: 'transform .18s ease' }} />
+        <span className={cn('w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0', isMgmt ? 'bg-violet-50' : 'bg-navy-50')}>
+          {isMgmt ? <Briefcase className="w-4 h-4 text-violet-500" /> : <Building2 className="w-4 h-4 text-navy-500" />}
         </span>
-        <div className="min-w-0 flex-1 text-left">
-          <div className="truncate text-[13px] font-bold text-navy-900">{org}</div>
-          <div className="text-[10px] text-stone-400 font-semibold">
-            {members.length} contact{members.length > 1 ? 's' : ''}
-            {dm > 0 && <span className="text-gold-600">{`  ·  ★ ${dm} DM${dm > 1 ? 's' : ''}`}</span>}
+        <div className="min-w-0 text-left flex-1">
+          <div className="flex items-center gap-2">
+            <span className="truncate text-[15px] font-bold text-navy-900">{org}</span>
+            {isMgmt
+              ? <span className="text-[10px] font-semibold text-violet-600 flex-shrink-0">Mgmt co.</span>
+              : (tier && <span className="text-[10px] font-semibold text-gold-600 flex-shrink-0">{getTierLabel(tier)}</span>)}
+            {allExisting && <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 flex-shrink-0" title="Existing customer" />}
+          </div>
+          <div className="text-[12px] text-stone-500 mt-0.5">
+            {members.length} contact{members.length > 1 ? 's' : ''}{dm > 0 ? `  ·  ★ ${dm}` : ''}
           </div>
         </div>
-        {tier && (
-          <span className="text-[9px] font-bold text-gold-600 bg-gold-50 ring-1 ring-gold-200 px-1.5 py-0.5 rounded-full flex-shrink-0">{getTierLabel(tier)}</span>
-        )}
+        <span className="text-[12px] text-stone-500 font-medium">{expanded ? 'Hide' : 'Show'}</span>
       </button>
       {expanded && (
-        <div className="pl-2.5 mt-0.5 ml-3.5 border-l border-stone-200 space-y-0.5">
+        <div className="pl-5 ml-4 border-l border-stone-200/70 mt-1 space-y-0.5">
           {members.map((c) => (
-            <ContactRow key={c.id} contact={c} active={c.id === selectedId} compact
+            <DirRow key={c.id} contact={c} selected={c.id === selectedId} hideOrg
               selectMode={selectMode} checked={checked.has(c.id)}
-              onOpen={() => onSelect(c.id)} onToggleCheck={() => onToggleCheck(c.id)} />
+              onOpen={() => onSelect(c.id)} onToggleCheck={() => onToggleCheck(c.id)} onOpenOrg={onOpenOrg} />
           ))}
         </div>
       )}
@@ -414,11 +529,15 @@ function InfoRow({ icon, label, value, mono, href }: { icon: React.ReactNode; la
   )
 }
 
-function Timeline({ contact }: { contact: InboxContact }) {
+function Timeline({ contact }: { contact: UnifiedContact }) {
+  const isLead = sourceOf(contact) === 'lead_generator'
   const events = [
-    { t: contact.last_seen, label: 'Last email received', color: '#2e4a6e' },
+    isLead
+      ? { t: contact.first_seen, label: 'Discovered via Lead Generator', color: '#7c3aed' }
+      : { t: contact.last_seen, label: 'Last email received', color: '#2e4a6e' },
     isHighOpportunity(contact) ? { t: contact.last_seen, label: 'Flagged high-opportunity by AI', color: '#c49a3c' } : null,
-    { t: contact.first_seen, label: 'First seen in inbox', color: '#b0a99e' },
+    isLead && contact.interaction_count > 0 ? { t: contact.last_seen, label: 'First email exchanged', color: '#2e4a6e' } : null,
+    !isLead ? { t: contact.first_seen, label: 'First seen in inbox', color: '#b0a99e' } : null,
   ].filter(Boolean) as Array<{ t: string | null; label: string; color: string }>
   const recent = (contact.sync_history || []).slice(-3).reverse()
 
@@ -431,8 +550,8 @@ function Timeline({ contact }: { contact: InboxContact }) {
         </div>
         <div className="w-px h-9 bg-stone-200" />
         <div>
-          <div className="text-2xl font-bold text-navy-900 tabular-nums leading-none">{contact.source_mailboxes?.length ?? 0}</div>
-          <div className="text-[10px] uppercase tracking-wide font-bold text-stone-400 mt-1">Mailboxes</div>
+          <div className={cn('text-2xl font-bold tabular-nums leading-none', isLead ? 'text-violet-600' : 'text-navy-900')}>{isLead ? 'Lead Gen' : `${contact.source_mailboxes?.length ?? 0} mbx`}</div>
+          <div className="text-[10px] uppercase tracking-wide font-bold text-stone-400 mt-1">Source</div>
         </div>
         {contact.opportunity_score != null && (
           <>
@@ -463,11 +582,15 @@ function Timeline({ contact }: { contact: InboxContact }) {
           ))}
         </div>
       )}
-      {contact.source_mailboxes && contact.source_mailboxes.length > 0 && (
-        <div className="mt-3 pt-3 border-t border-stone-100 text-[11px] text-stone-400">
-          Source: <span className="font-mono text-stone-500">{contact.source_mailboxes.join(', ')}</span>
+      {isLead ? (
+        <div className="mt-3 pt-3 border-t border-stone-100 text-[11px] text-stone-400 inline-flex items-center gap-1">
+          <Radar className="w-3 h-3 text-violet-500" /> Discovered by Lead Generator — no email thread yet
         </div>
-      )}
+      ) : contact.source_mailboxes && contact.source_mailboxes.length > 0 ? (
+        <div className="mt-3 pt-3 border-t border-stone-100 text-[11px] text-stone-400">
+          Source mailboxes: <span className="font-mono text-stone-500">{contact.source_mailboxes.join(', ')}</span>
+        </div>
+      ) : null}
     </SectionCard>
   )
 }
@@ -536,9 +659,12 @@ function ProfilePanel({ contact, onDeleted }: { contact: InboxContact | null; on
               <span className="text-white/40">{'  at  '}</span>
               <span className="font-semibold text-white">{contact.organization || '—'}</span>
             </p>
-            <div className="flex items-center gap-3 mt-2 text-[12px] text-white/60">
+            <div className="flex items-center gap-2 mt-2 flex-wrap text-[12px] text-white/60">
               {contact.address && <span className="inline-flex items-center gap-1"><MapPin className="w-3 h-3" />{contact.address}</span>}
-              <span className="inline-flex items-center gap-1"><Mail className="w-3 h-3" />In inbox {relativeDate(contact.last_seen)}</span>
+              {sourceOf(contact) === 'lead_generator'
+                ? <span className="inline-flex items-center gap-1"><Radar className="w-3 h-3" />Found via Lead Generator · {relativeDate(contact.first_seen)}</span>
+                : <span className="inline-flex items-center gap-1"><Mail className="w-3 h-3" />From email · {relativeDate(contact.last_seen)}</span>}
+              <span className="inline-flex items-center gap-1">{accountTypeOf(contact) === 'management_company' ? <Briefcase className="w-3 h-3" /> : <Building2 className="w-3 h-3" />}{accountTypeOf(contact) === 'management_company' ? 'Management co.' : 'Hotel'}</span>
               <CategoryBadge category={contact.contact_category} />
             </div>
           </div>
@@ -616,6 +742,7 @@ const STATUS_OPTIONS: Array<[string, string]> = [
   ['approved', 'Approved'],
   ['pushed_to_insightly', 'In CRM'],
 ]
+void STATUS_OPTIONS // status now lives in the <Facet> options inline
 
 export default function ContactsPage() {
   const [params, setParams] = useSearchParams()
@@ -624,12 +751,19 @@ export default function ContactsPage() {
   const query = params.get('q') || ''
   const category = params.get('category') || ''
   const status = params.get('status') || ''
+  const source = (params.get('source') as Source | '') || ''     // '' = all
+  const account = (params.get('account') as AccountType | '') || '' // '' = all
+  const lifecycle = (params.get('stage') as Stage | '') || ''      // '' = all
   const dmOnly = params.get('dm') === '1'
   const sort = (params.get('sort') as SortKey) || 'confidence'
   const selectedId = params.get('selected') ? Number(params.get('selected')) : null
 
   // local state
   const [selected, setSelected] = useState<Set<number>>(new Set())
+  const [drawerOpen, setDrawerOpen] = useState<boolean>(() => !!params.get('selected'))
+  const [focused, setFocused] = useState(false)
+  const [view, setView] = useState<'accounts' | 'people'>('accounts')
+  const [collapsedOrgs, setCollapsedOrgs] = useState<Set<string>>(new Set())
 
   function patch(updates: Record<string, string | null>) {
     const next = new URLSearchParams(params)
@@ -640,72 +774,131 @@ export default function ContactsPage() {
     setParams(next, { replace: true })
   }
 
-  // data
+  // data — load the FULL table so account grouping + scope counts are real
   const statsQ = useInboxContactStats()
-  const listQ = useInboxContacts({
-    per_page: 200,
-    contact_category: category || undefined,
-    approval_status: status || undefined,
-    order_by: 'priority_score',
-    // For very large inboxes, also pass: search: query || undefined  (and drop the client-side text match below)
-  })
+  const listQ = useAllInboxContacts('priority_score')
   const syncMut = useTriggerInboxSync()
   const bulkApproveMut = useBulkApproveInboxContacts()
 
   const stats: InboxContactStats | undefined = statsQ.data
-  const items = listQ.data?.items || []
+
+  // ╔══════════════════════════════════════════════════════════════════╗
+  // ║ MERGE POINT — unify email-scraped + lead-generator contacts here.  ║
+  // ║ `items` below is the inbox (email_scrape) list. To add lead-gen    ║
+  // ║ contacts, fetch them (e.g. useLeadContacts()) and concat, mapping  ║
+  // ║ each into the InboxContact shape with source: 'lead_generator'.    ║
+  // ║   const items = [...inboxItems, ...leadItems.map(toUnified)]       ║
+  // ╚══════════════════════════════════════════════════════════════════╝
+  const items = (listQ.data?.items || []) as UnifiedContact[]
   const total = listQ.data?.total || 0
+
+  // scope counts (computed over the loaded page; for full-inbox totals expose these from the backend)
+  const scope = useMemo(() => {
+    const s = { emailScrape: 0, leadGen: 0, hotels: 0, mgmtCos: 0, potential: 0, existing: 0 }
+    const hotelAccts = new Set<string>(); const mgmtAccts = new Set<string>()
+    for (const c of items) {
+      sourceOf(c) === 'lead_generator' ? s.leadGen++ : s.emailScrape++
+      if (accountTypeOf(c) === 'management_company') { s.mgmtCos++; if (c.organization) mgmtAccts.add(c.organization) }
+      else { s.hotels++; if (c.organization) hotelAccts.add(c.organization) }
+      stageOf(c) === 'existing' ? s.existing++ : s.potential++
+    }
+    return { ...s, hotelAccounts: hotelAccts.size, mgmtAccounts: mgmtAccts.size }
+  }, [items])
 
   // client-side refine + sort
   const filtered = useMemo(() => {
     let list = items.filter((c) => smartMatch(c, query))
+    if (category) list = list.filter((c) => c.contact_category === category)
+    if (status) list = list.filter((c) => c.approval_status === status)
     if (dmOnly) list = list.filter((c) => c.is_decision_maker)
-    const sorters: Record<SortKey, (a: InboxContact, b: InboxContact) => number> = {
+    if (source) list = list.filter((c) => sourceOf(c) === source)
+    if (account) list = list.filter((c) => accountTypeOf(c) === account)
+    if (lifecycle) list = list.filter((c) => stageOf(c) === lifecycle)
+    const sorters: Record<SortKey, (a: UnifiedContact, b: UnifiedContact) => number> = {
       confidence: (a, b) => confidencePct(b) - confidencePct(a),
       opportunity: (a, b) => (b.opportunity_score ?? 0) - (a.opportunity_score ?? 0),
       recent: (a, b) => new Date(b.last_seen || 0).getTime() - new Date(a.last_seen || 0).getTime(),
-      name: (a, b) => `${a.first_name || ''}${a.last_name || ''}`.localeCompare(`${b.first_name || ''}${b.last_name || ''}`),
+      newest: (a, b) => new Date(b.first_seen || 0).getTime() - new Date(a.first_seen || 0).getTime(),
+      oldest: (a, b) => new Date(a.first_seen || 0).getTime() - new Date(b.first_seen || 0).getTime(),
+      name: (a, b) => `${a.first_name || ''} ${a.last_name || ''}`.trim().localeCompare(`${b.first_name || ''} ${b.last_name || ''}`.trim()),
+      org: (a, b) => (a.organization || '~').localeCompare(b.organization || '~') || `${a.first_name || ''}${a.last_name || ''}`.localeCompare(`${b.first_name || ''}${b.last_name || ''}`),
     }
     return [...list].sort(sorters[sort])
-  }, [items, query, dmOnly, sort])
+  }, [items, query, category, status, dmOnly, source, account, lifecycle, sort])
 
-  // keep a valid selection
-  useEffect(() => {
-    if (!filtered.length) return
-    if (selectedId == null || !filtered.some((c) => c.id === selectedId)) {
-      patch({ selected: String(filtered[0].id) })
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filtered, selectedId])
-
-  const activeContact = items.find((c) => c.id === selectedId) || filtered[0] || null
-
-  const [focused, setFocused] = useState(false)
-  const [view, setView] = useState<'hotels' | 'people'>('hotels')
-  const [openOrgs, setOpenOrgs] = useState<Set<string>>(new Set())
-  const smartActive = query.trim().length > 0
-  const selectMode = selected.size > 0
-
-  // group filtered contacts by organization (hotel)
+  // group filtered contacts by account (hotel OR management company)
   const groups = useMemo(() => {
-    const m = new Map<string, InboxContact[]>()
+    const m = new Map<string, UnifiedContact[]>()
     for (const c of filtered) {
       const k = c.organization || 'No organization'
       if (!m.has(k)) m.set(k, [])
       m.get(k)!.push(c)
     }
-    return [...m.entries()].sort((a, b) => b[1].length - a[1].length || a[0].localeCompare(b[0]))
+    // keep insertion order so account groups follow the active Sort (e.g. Company A–Z, Newest added)
+    return [...m.entries()]
   }, [filtered])
 
+  const hotelGroups = groups.filter(([, m]) => accountTypeOf(m[0]) === 'hotel').length
+  const mgmtGroups = groups.filter(([, m]) => accountTypeOf(m[0]) === 'management_company').length
+  const anyFilter = !!source || !!account || !!lifecycle || !!category || dmOnly || !!status
+  function resetAll() { patch({ source: null, account: null, stage: null, category: null, dm: null, status: null }) }
+
+  const activeContact = items.find((c) => c.id === selectedId) || null
+  const idx = filtered.findIndex((c) => c.id === selectedId)
+  const smartActive = query.trim().length > 0
+  const selectMode = selected.size > 0
+
+  function openContact(id: number) { patch({ selected: String(id) }); setDrawerOpen(true) }
+  function closeDrawer() { setDrawerOpen(false) }
+  function go(delta: number) { const n = filtered[idx + delta]; if (n) patch({ selected: String(n.id) }) }
+  function onDeleted() {
+    const n = filtered[idx + 1] || filtered[idx - 1] || null
+    if (n) patch({ selected: String(n.id) })
+    else { setDrawerOpen(false); patch({ selected: null }) }
+  }
+
+  // keyboard nav while drawer open
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (!drawerOpen) return
+      if (e.key === 'Escape') closeDrawer()
+      else if (e.key === 'ArrowDown') { e.preventDefault(); go(1) }
+      else if (e.key === 'ArrowUp') { e.preventDefault(); go(-1) }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [drawerOpen, idx, filtered])
+
   function toggleOrg(org: string) {
-    setOpenOrgs((prev) => {
+    setCollapsedOrgs((prev) => {
       const next = new Set(prev)
       if (next.has(org)) next.delete(org)
       else next.add(org)
       return next
     })
   }
-
+  // org → people: jump to grouped view, expand that company, and scroll to it
+  function openOrg(org: string) {
+    setView('accounts')
+    setCollapsedOrgs((prev) => { const next = new Set(prev); next.delete(org); return next })
+    const sel = `[data-org="${window.CSS && CSS.escape ? CSS.escape(org) : org}"]`
+    let tries = 0
+    const tick = () => {
+      const el = document.querySelector(sel) as HTMLElement | null
+      const box = el && (el.closest('.overflow-y-auto') as HTMLElement | null)
+      if (el && box) {
+        const delta = el.getBoundingClientRect().top - box.getBoundingClientRect().top
+        box.scrollTop = box.scrollTop + delta - 8
+        el.style.transition = 'background .2s ease'
+        el.style.background = 'rgba(212,168,83,.18)'
+        setTimeout(() => { el.style.background = 'transparent' }, 700)
+        return
+      }
+      if (tries++ < 25) setTimeout(tick, 30)
+    }
+    setTimeout(tick, 30)
+  }
   function toggleCheck(id: number) {
     setSelected((prev) => {
       const next = new Set(prev)
@@ -715,151 +908,149 @@ export default function ContactsPage() {
     })
   }
   function clearSelection() { setSelected(new Set()) }
-  function bulkApprove() {
-    bulkApproveMut.mutate(Array.from(selected), { onSuccess: clearSelection })
-  }
+  function bulkApprove() { bulkApproveMut.mutate(Array.from(selected), { onSuccess: clearSelection }) }
   function selectAllVisible() { setSelected(new Set(filtered.map((c) => c.id))) }
 
-  const suggestions: Array<[string, () => void]> = [
-    ['★ Decision-makers', () => { patch({ dm: '1', q: null, category: null }) }],
-    ['High opportunity', () => patch({ q: 'high opportunity' })],
-    ['Replied recently', () => patch({ q: 'replied' })],
-    ['Luxury brands', () => patch({ q: 'luxury' })],
-  ]
-
   return (
-    <div className="h-full flex overflow-hidden bg-stone-50">
+    <div className="h-full overflow-hidden bg-stone-50" style={{ display: 'grid', gridTemplateColumns: drawerOpen ? '1fr 600px' : '1fr 0px', transition: 'grid-template-columns .28s cubic-bezier(.16,1,.3,1)' }}>
 
-      {/* ════ LEFT RAIL ════ */}
-      <div className="flex flex-col h-full bg-stone-50 border-r border-stone-200 flex-shrink-0 w-[508px] relative">
+      {/* ════ MAIN DIRECTORY ════ */}
+      <div className="min-w-0 overflow-hidden flex flex-col h-full relative">
 
-        {/* header */}
-        <div className="flex-shrink-0 px-4 pt-4 pb-3">
-          <div className="flex items-center justify-between mb-3">
-            <div>
-              <h1 className="text-[17px] font-bold text-navy-900 leading-none">Contacts</h1>
-              <p className="text-[11px] text-stone-400 font-semibold uppercase tracking-wide mt-1">
-                <span className="text-navy-700 tabular-nums">{(stats?.total ?? total).toLocaleString()}</span> people
-                {' · '}
-                <span className="text-gold-600 tabular-nums">{(stats?.decision_makers ?? 0).toLocaleString()}</span> decision-makers
-              </p>
-            </div>
-            <button onClick={() => syncMut.mutate()} disabled={syncMut.isPending}
-              className="flex items-center gap-1.5 px-3 h-8 rounded-lg text-xs font-semibold text-white bg-navy-600 hover:bg-navy-700 shadow-soft transition-all disabled:opacity-60">
-              <RefreshCw className={cn('w-3.5 h-3.5', syncMut.isPending && 'animate-spin')} />
-              {syncMut.isPending ? 'Syncing…' : 'Sync'}
-            </button>
+        {/* header — calm: title + one-line context + Sync */}
+        <div className="flex-shrink-0 px-8 pt-6 pb-4 flex items-end justify-between">
+          <div>
+            <h1 className="text-2xl font-bold text-navy-900 leading-none tracking-tight">Contacts</h1>
+            <p className="text-[13px] text-stone-500 mt-2">
+              <span className="text-stone-600 font-semibold tabular-nums">{(stats?.total ?? total).toLocaleString()}</span> people across{' '}
+              <span className="text-stone-600 font-semibold tabular-nums">{scope.hotelAccounts} hotels</span> and{' '}
+              <span className="text-stone-600 font-semibold tabular-nums">{scope.mgmtAccounts} management companies</span>
+            </p>
           </div>
+          <button onClick={() => syncMut.mutate()} disabled={syncMut.isPending}
+            className="flex items-center gap-2 px-4 h-10 rounded-xl text-[13px] font-semibold text-white bg-navy-600 hover:bg-navy-700 shadow-soft transition-all disabled:opacity-60">
+            <RefreshCw className={cn('w-4 h-4', syncMut.isPending && 'animate-spin')} />
+            {syncMut.isPending ? 'Syncing…' : 'Sync inbox'}
+          </button>
+        </div>
 
-          {/* AI smart search */}
-          <div className={cn('relative rounded-xl bg-white transition-all', focused ? 'ring-2 ring-navy-500 shadow-lift' : 'ring-1 ring-stone-200')}
-            style={focused ? { boxShadow: '0 0 0 4px rgba(46,74,110,.08)' } : undefined}>
-            <div className="flex items-center gap-2 px-3 h-11">
-              <Sparkles className="w-4 h-4 flex-shrink-0 text-navy-600" />
+        {/* search — the one hero control */}
+        <div className="flex-shrink-0 px-8 pb-3">
+          <div className={cn('relative rounded-2xl bg-white transition-all', focused ? 'ring-2 ring-navy-500 shadow-lift' : 'ring-1 ring-stone-200')}
+            style={focused ? { boxShadow: '0 0 0 4px rgba(46,74,110,.07)' } : undefined}>
+            <div className="flex items-center gap-3 px-4 h-12">
+              <Sparkles className="w-[18px] h-[18px] flex-shrink-0 text-navy-600" />
               <input value={query} onChange={(e) => patch({ q: e.target.value || null })}
                 onFocus={() => setFocused(true)} onBlur={() => setFocused(false)}
-                placeholder='Ask AI — e.g. "decision-makers at luxury hotels"'
-                className="flex-1 bg-transparent outline-none text-sm text-navy-900 placeholder:text-stone-400" />
-              {query ? (
-                <button onClick={() => patch({ q: null })} className="text-stone-400 hover:text-stone-600"><X className="w-4 h-4" /></button>
-              ) : (
-                <kbd className="text-[10px] text-stone-400 font-semibold bg-stone-100 px-1.5 py-0.5 rounded">⌘K</kbd>
-              )}
+                placeholder='Search anyone — a name, a hotel, a company, or a role like "director of procurement"'
+                className="flex-1 bg-transparent outline-none text-[15px] text-navy-900 placeholder:text-stone-400" />
+              {query && <button onClick={() => patch({ q: null })} className="text-stone-400 hover:text-stone-600"><X className="w-[17px] h-[17px]" /></button>}
             </div>
-            {smartActive && (
-              <div className="px-3 pb-2 -mt-0.5 text-[11px] text-stone-400 flex items-center gap-1">
-                <Wand2 className="w-3 h-3 text-navy-600" /> AI matched <span className="font-bold text-navy-700">{filtered.length}</span> of {total}
-              </div>
-            )}
-          </div>
-
-          {/* suggested queries */}
-          <div className="flex flex-wrap gap-1.5 mt-2.5">
-            {suggestions.map(([label, fn]) => (
-              <button key={label} onClick={fn}
-                className="text-[11px] font-semibold text-stone-500 bg-white ring-1 ring-stone-200 hover:ring-stone-300 hover:text-navy-700 px-2.5 py-1 rounded-full transition-all">{label}</button>
-            ))}
           </div>
         </div>
 
-        {/* category chips */}
-        <div className="flex-shrink-0 px-4 pb-2.5 flex items-center gap-1.5 overflow-x-auto">
-          <Chip label="All" count={stats?.total} active={category === '' && !dmOnly} onClick={() => patch({ category: null, dm: null })} />
-          <Chip label="★ DMs" count={stats?.decision_makers} active={dmOnly} color="#c49a3c" onClick={() => patch({ dm: dmOnly ? null : '1' })} />
-          <Chip label="Buyers" count={stats?.buyer} active={category === 'buyer'} color="#1a7a55" onClick={() => patch({ category: category === 'buyer' ? null : 'buyer', dm: null })} />
-          <Chip label="Sellers" count={stats?.seller} active={category === 'seller'} color="#c49a3c" onClick={() => patch({ category: category === 'seller' ? null : 'seller', dm: null })} />
-          <Chip label="Competitors" count={stats?.competitor} active={category === 'competitor'} color="#e85d4a" onClick={() => patch({ category: category === 'competitor' ? null : 'competitor', dm: null })} />
-        </div>
-
-        {/* toolbar: view toggle + status + sort */}
-        <div className="flex-shrink-0 px-4 pb-2 flex items-center gap-2">
-          <div className="flex items-center bg-stone-100 rounded-lg p-0.5">
-            {(['hotels', 'people'] as const).map((v) => (
-              <button key={v} onClick={() => setView(v)}
-                className={cn('px-2.5 h-6 rounded-md text-[11px] font-bold transition-all whitespace-nowrap',
-                  view === v ? 'bg-white text-navy-800 shadow-soft' : 'text-stone-400 hover:text-stone-600')}>
-                {v === 'hotels' ? 'By hotel' : 'All people'}
-              </button>
-            ))}
-          </div>
+        {/* ONE filter row — every control is the same quiet facet */}
+        <div className="flex-shrink-0 px-8 pb-3 flex items-center gap-1 flex-wrap">
+          <Facet icon={Layers} label="Source" value={source || 'all'} onChange={(v) => patch({ source: v === 'all' ? null : v })} options={[
+            { v: 'all', label: 'All sources' },
+            { v: 'email_scrape', label: 'Email scraped', icon: Inbox, count: scope.emailScrape },
+            { v: 'lead_generator', label: 'Lead generator', icon: Radar, count: scope.leadGen },
+          ]} />
+          <Facet icon={Building2} label="Account" value={account || 'all'} onChange={(v) => patch({ account: v === 'all' ? null : v })} options={[
+            { v: 'all', label: 'All accounts' },
+            { v: 'hotel', label: 'Hotels', icon: Building2, count: scope.hotels },
+            { v: 'management_company', label: 'Management companies', icon: Briefcase, count: scope.mgmtCos },
+          ]} />
+          <Facet label="Stage" value={lifecycle || 'all'} onChange={(v) => patch({ stage: v === 'all' ? null : v })} options={[
+            { v: 'all', label: 'Any stage' },
+            { v: 'potential', label: 'Potential', dot: '#c49a3c', count: scope.potential },
+            { v: 'existing', label: 'Existing', dot: '#1a7a55', count: scope.existing },
+          ]} />
+          <Facet label="Category" value={category || 'all'} onChange={(v) => patch({ category: v === 'all' ? null : v, dm: null })} options={[
+            { v: 'all', label: 'Any category' },
+            { v: 'buyer', label: 'Buyers', dot: '#1a7a55', count: stats?.buyer },
+            { v: 'seller', label: 'Sellers', dot: '#c49a3c', count: stats?.seller },
+            { v: 'competitor', label: 'Competitors', dot: '#e85d4a', count: stats?.competitor },
+          ]} />
+          <Facet label="Status" value={status || 'all'} onChange={(v) => patch({ status: v === 'all' ? null : v })} options={[
+            { v: 'all', label: 'Any status' },
+            { v: 'pending', label: 'Pending' },
+            { v: 'approved', label: 'Approved' },
+            { v: 'pushed_to_insightly', label: 'In CRM' },
+          ]} />
+          <button onClick={() => patch({ dm: dmOnly ? null : '1' })}
+            className={cn('inline-flex items-center gap-1.5 h-9 px-3 rounded-lg text-[13px] font-medium transition-colors',
+              dmOnly ? 'text-gold-700 bg-gold-50 ring-1 ring-gold-200 font-semibold' : 'text-stone-500 hover:bg-stone-100')}>
+            <span className={dmOnly ? 'text-gold-500' : 'text-stone-400'}>★</span> Decision-makers
+          </button>
+          {anyFilter && (
+            <button onClick={resetAll} className="inline-flex items-center gap-1 h-9 px-2.5 rounded-lg text-[12px] font-medium text-stone-400 hover:text-coral-500 transition-colors">
+              <X className="w-3.5 h-3.5" /> Clear
+            </button>
+          )}
           <div className="flex-1" />
-          <select value={status} onChange={(e) => patch({ status: e.target.value || null })}
-            className="text-[11px] font-semibold text-stone-500 bg-white ring-1 ring-stone-200 rounded-lg px-1.5 py-1 outline-none cursor-pointer hover:text-navy-700">
-            {STATUS_OPTIONS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
-          </select>
-          <select value={sort} onChange={(e) => patch({ sort: e.target.value })}
-            className="text-[11px] font-semibold text-stone-500 bg-white ring-1 ring-stone-200 rounded-lg px-1.5 py-1 outline-none cursor-pointer hover:text-navy-700">
-            <option value="confidence">Top match</option>
-            <option value="opportunity">Opportunity</option>
-            <option value="recent">Last seen</option>
-            <option value="name">Name A–Z</option>
-          </select>
+          <Facet align="right" label="Group" value={view} onChange={(v) => setView(v as 'accounts' | 'people')} options={[
+            { v: 'accounts', label: 'By account' },
+            { v: 'people', label: 'All people' },
+          ]} />
+          <Facet align="right" label="Sort" value={sort} onChange={(v) => patch({ sort: v })} options={[
+            { v: 'confidence', label: 'Top match' },
+            { v: 'name', label: 'Name A–Z' },
+            { v: 'org', label: 'Company A–Z' },
+            { v: 'newest', label: 'Newest added' },
+            { v: 'oldest', label: 'Oldest added' },
+            { v: 'recent', label: 'Last activity' },
+            { v: 'opportunity', label: 'Opportunity' },
+          ]} />
         </div>
 
-        {/* count line */}
-        <div className="flex-shrink-0 px-4 pb-1.5 text-[11px] font-bold text-stone-400 uppercase tracking-wider">
-          {view === 'hotels'
-            ? `${groups.length.toLocaleString()} hotels · ${filtered.length.toLocaleString()} people`
-            : `${filtered.length.toLocaleString()} people`}
+        {/* subtle result line */}
+        <div className="flex-shrink-0 px-8 pb-2 text-[12px] text-stone-500">
+          {smartActive ? (
+            <span className="inline-flex items-center gap-1.5"><Wand2 className="w-3 h-3 text-navy-600" /> Showing <span className="font-semibold text-navy-700">{filtered.length}</span> matches</span>
+          ) : (
+            <span>{view === 'accounts' ? `${hotelGroups} hotels · ${mgmtGroups} companies · ${filtered.length} people` : `${filtered.length} people`}</span>
+          )}
         </div>
 
-        {/* list */}
-        <div className="flex-1 overflow-y-auto px-2.5 pb-20">
+        {/* body */}
+        <div className="flex-1 overflow-y-auto px-6 pb-24">
           {listQ.isLoading ? (
-            <div className="space-y-2 px-1 pt-1">
-              {Array.from({ length: 8 }).map((_, i) => <div key={i} className="h-[78px] rounded-xl bg-stone-100 animate-pulse" />)}
+            <div className="space-y-2 px-1 pt-1 max-w-[1320px] mx-auto">
+              {Array.from({ length: 10 }).map((_, i) => <div key={i} className="h-[60px] rounded-xl bg-stone-100 animate-pulse" />)}
             </div>
           ) : filtered.length === 0 ? (
-            <div className="flex flex-col items-center justify-center h-48 text-stone-400 text-center px-6">
+            <div className="flex flex-col items-center justify-center h-64 text-stone-400 text-center">
               <Inbox className="w-8 h-8 text-stone-300 mb-2" />
               <p className="text-sm font-semibold text-stone-500">No matches</p>
               <p className="text-xs mt-1">Try a different search or filter</p>
             </div>
           ) : view === 'people' ? (
-            <div className="space-y-0.5">
+            <div className="max-w-[1320px] mx-auto space-y-0.5">
               {filtered.map((c) => (
-                <ContactRow key={c.id} contact={c} active={c.id === activeContact?.id}
-                  selectMode={selectMode} checked={selected.has(c.id)}
-                  onOpen={() => patch({ selected: String(c.id) })} onToggleCheck={() => toggleCheck(c.id)} />
+                <DirRow key={c.id} contact={c} selected={c.id === selectedId} selectMode={selectMode} checked={selected.has(c.id)}
+                  onOpen={() => openContact(c.id)} onToggleCheck={() => toggleCheck(c.id)} onOpenOrg={openOrg} />
               ))}
             </div>
           ) : (
-            groups.map(([org, members]) => (
-              <HotelGroup key={org} org={org} members={members}
-                expanded={smartActive || openOrgs.has(org) || members.some((m) => m.id === activeContact?.id)}
-                onToggle={() => toggleOrg(org)}
-                selectedId={activeContact?.id ?? null} checked={selected} selectMode={selectMode}
-                onToggleCheck={toggleCheck} onSelect={(id) => patch({ selected: String(id) })} />
-            ))
+            <div className="max-w-[1320px] mx-auto">
+              {groups.map(([org, members]) => (
+                <DirGroup key={org} org={org} members={members}
+                  expanded={smartActive || !collapsedOrgs.has(org)}
+                  onToggle={() => toggleOrg(org)}
+                  selectedId={selectedId} checked={selected} selectMode={selectMode}
+                  onToggleCheck={toggleCheck} onSelect={openContact} onOpenOrg={openOrg} />
+              ))}
+            </div>
           )}
         </div>
 
         {/* bulk action bar */}
         {selectMode && (
-          <div className="absolute bottom-0 left-0 right-0 m-2.5 px-3.5 py-2.5 rounded-xl bg-navy-900 text-white shadow-lift flex items-center gap-3">
+          <div className="absolute bottom-4 left-1/2 -translate-x-1/2 px-4 py-2.5 rounded-xl bg-navy-900 text-white shadow-lift flex items-center gap-3 z-10">
             <span className="text-xs font-bold tabular-nums">{selected.size} selected</span>
             <button onClick={selectAllVisible} className="text-[11px] font-semibold text-white/60 hover:text-white">Select all {filtered.length}</button>
-            <div className="flex-1" />
+            <div className="w-px h-4 bg-white/20" />
             <button onClick={clearSelection} className="text-[11px] font-semibold text-white/60 hover:text-white">Clear</button>
             <button onClick={bulkApprove} disabled={bulkApproveMut.isPending}
               className="inline-flex items-center gap-1.5 h-8 px-3 rounded-lg text-xs font-bold text-navy-900 bg-gold-300 hover:bg-gold-200 transition-all disabled:opacity-60">
@@ -870,8 +1061,30 @@ export default function ContactsPage() {
         )}
       </div>
 
-      {/* ════ RIGHT PANEL ════ */}
-      <ProfilePanel contact={activeContact} onDeleted={() => patch({ selected: null })} />
+      {/* ════ SLIDE-OVER DRAWER (pushes in beside list; no scrim — list stays usable) ════ */}
+      <div className={cn('overflow-hidden bg-stone-100', drawerOpen && 'border-l border-stone-200')}>
+        <div className="h-full flex flex-col" style={{ width: 600 }}>
+          <div className="flex-shrink-0 h-12 px-2.5 bg-white border-b border-stone-200 flex items-center justify-between">
+            <div className="flex items-center gap-0.5">
+              <button onClick={() => go(-1)} disabled={idx <= 0} title="Previous (↑)"
+                className="w-8 h-8 rounded-lg hover:bg-stone-100 flex items-center justify-center text-stone-500 disabled:opacity-30">
+                <ChevronRight className="w-[18px] h-[18px]" style={{ transform: 'rotate(180deg)' }} />
+              </button>
+              <button onClick={() => go(1)} disabled={idx >= filtered.length - 1} title="Next (↓)"
+                className="w-8 h-8 rounded-lg hover:bg-stone-100 flex items-center justify-center text-stone-500 disabled:opacity-30">
+                <ChevronRight className="w-[18px] h-[18px]" />
+              </button>
+              {idx >= 0 && <span className="text-[11px] text-stone-400 ml-1.5 tabular-nums font-semibold">{idx + 1} of {filtered.length}</span>}
+            </div>
+            <button onClick={closeDrawer} className="inline-flex items-center gap-1.5 h-8 px-3 rounded-lg text-[12px] font-semibold text-stone-500 hover:bg-stone-100 transition">
+              <X className="w-[15px] h-[15px]" /> Close
+            </button>
+          </div>
+          <div className="flex-1 overflow-hidden flex flex-col">
+            {drawerOpen && activeContact ? <ProfilePanel contact={activeContact} onDeleted={onDeleted} /> : null}
+          </div>
+        </div>
+      </div>
     </div>
   )
 }

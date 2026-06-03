@@ -64,7 +64,10 @@ Categories (choose the single best fit):
   want JA's money. Examples: SanMar, Chef Works fabric/blank suppliers.
 - "junk": newsletters, marketing blasts, job boards, e-commerce receipts, an
   unrelated industry (grocery, real estate, auto, healthcare, political), or
-  spam / unparseable garbage.
+  spam / unparseable garbage. NEVER put a NAMED PERSON at a hotel, resort, or
+  hospitality-services company into junk — that is a BUYER, even if their title
+  is blank or looks junior. Junk is only for non-people (no-reply addresses,
+  newsletters, automated receipts) and clearly unrelated industries.
 
 Return ONLY a JSON array, one object per id, no prose, no markdown:
 [{"id":0,"category":"buyer","role":"","seniority":"","department":"",
@@ -76,7 +79,17 @@ Field rules:
 - seniority: c_suite | director | manager | staff | unknown.
 - department: procurement | operations | housekeeping | food_beverage | sales |
   finance | hr | it | marketing | other | unknown.
-- is_decision_maker: true if they likely influence buying uniforms/supplies.
+- is_decision_maker: TRUE if their title buys or specifies uniforms at a
+  property. Mark TRUE at ANY level — coordinator, assistant, specialist,
+  manager, director; junior modifiers do NOT disqualify — for:
+    * procurement / purchasing / sourcing  (e.g. "Procurement Coordinator" = TRUE)
+    * general manager / hotel manager
+    * director or VP of operations
+    * executive housekeeper / housekeeping director / housekeeping manager
+    * food & beverage director
+    * owner or founder of an independent or boutique property
+  Mark FALSE for finance, IT, HR, marketing, outbound sales reps, front-desk /
+  guest services, and a bare "manager" with no buying-related department.
 - reason: <= 10 words.
 - confidence: 0.0-1.0.
 
@@ -90,10 +103,7 @@ def _now():
 
 def _seniority_from_role(role: str) -> str:
     r = (role or "").lower()
-    if any(
-        k in r
-        for k in ("ceo", "cfo", "coo", "cpo", "chief", "president", "owner", "founder")
-    ):
+    if any(k in r for k in ("ceo", "cfo", "coo", "cpo", "chief", "president", "owner", "founder")):
         return "c_suite"
     if any(k in r for k in ("vp", "vice president", "director", "head of", "head ")):
         return "director"
@@ -165,7 +175,7 @@ async def run_tier1(
             params["cutoff"] = _now() - timedelta(days=REFRESH_DAYS)
         sql = (
             "SELECT id, email, first_name, last_name, display_name, title, "
-            "organization, enrichment_confidence "
+            "organization, enrichment_confidence, enrichment_source "
             f"FROM contacts WHERE {where} ORDER BY interaction_count DESC NULLS LAST"
         )
         if limit:
@@ -205,6 +215,7 @@ async def run_tier1(
                 "category": category,
                 "category_source": source,
                 "old_conf": r.enrichment_confidence or 0.0,
+                "old_source": r.enrichment_source,
             }
         )
 
@@ -215,9 +226,7 @@ async def run_tier1(
     sem = asyncio.Semaphore(CONCURRENCY)
     llm_results: dict = {}
     try:
-        batches = [
-            llm_rows[i : i + BATCH_SIZE] for i in range(0, len(llm_rows), BATCH_SIZE)
-        ]
+        batches = [llm_rows[i : i + BATCH_SIZE] for i in range(0, len(llm_rows), BATCH_SIZE)]
         # Throttled waves: run CONCURRENCY batches, pause, repeat — keeps us
         # under the Vertex per-minute quota that triggered 429s.
         for wave_start in range(0, len(batches), CONCURRENCY):
@@ -260,7 +269,11 @@ async def run_tier1(
             if source in ("competitor_list", "personal_rule"):
                 conf = 1.0
 
-            if conf < w["old_conf"]:
+            # Protect a richer grounded (Tier-2 Deep Enrich) profile from being
+            # overwritten by this cheap signals pass. Signals rows always
+            # re-stamp, so a forced re-run applies the latest category/DM rules
+            # deterministically instead of being blocked by confidence jitter.
+            if w["old_source"] == "grounded" and conf < w["old_conf"]:
                 continue
 
             await session.execute(

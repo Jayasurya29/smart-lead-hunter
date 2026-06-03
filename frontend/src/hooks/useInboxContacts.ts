@@ -28,6 +28,37 @@ export function useInboxContacts(filters: InboxContactFilters = {}) {
   })
 }
 
+/**
+ * Load the ENTIRE contacts table (all pages) so the account-grouped view and
+ * its header/scope counts are computed over every contact — not just a 200-row
+ * slice. Fetches page 1 to learn the page count, then pulls the rest in
+ * parallel. Cached for 60s. Filtering/sorting/grouping happen client-side in
+ * the page, so this hook takes no filters beyond sort order.
+ */
+export function useAllInboxContacts(orderBy = 'priority_score') {
+  return useQuery({
+    queryKey: ['inbox-contacts', 'all', orderBy],
+    queryFn: async () => {
+      const per_page = 500
+      const first = await fetchInboxContacts({ page: 1, per_page, order_by: orderBy })
+      const pages = Math.min(first.pages || 1, 40) // safety cap ~20k
+      const items = [...first.items]
+      if (pages > 1) {
+        const rest = await Promise.all(
+          Array.from({ length: pages - 1 }, (_, i) =>
+            fetchInboxContacts({ page: i + 2, per_page, order_by: orderBy }),
+          ),
+        )
+        for (const r of rest) items.push(...r.items)
+      }
+      return { items, total: first.total }
+    },
+    staleTime: 60_000,
+    refetchInterval: false,
+    refetchOnWindowFocus: false,
+  })
+}
+
 export function useInboxContactStats() {
   return useQuery({
     queryKey: ['inbox-contacts-stats'],
