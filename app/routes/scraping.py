@@ -89,6 +89,27 @@ async def _find_source_by_url(session, target_url: str):
     return None
 
 
+async def _mark_url_source_failure(target_url: str) -> None:
+    """Record a failed URL-extract on its matching source.
+
+    FIX 2026-06-04: call this via asyncio.shield(). Previously the inline
+    failure-mark ran unshielded in the SSE request task — when the browser
+    dropped the stream right after the error event, uvicorn's cancellation
+    landed mid-DB-checkout, poisoned the asyncpg connection, and dumped an
+    80-line CancelledError traceback. Shielded, the write completes in the
+    background even if the client is gone.
+    """
+    try:
+        async with async_session() as fail_sess:
+            fail_src = await _find_source_by_url(fail_sess, target_url)
+            if fail_src:
+                fail_src.record_failure()
+                fail_src.last_scraped_at = local_now()
+                await fail_sess.commit()
+    except Exception as _fe:
+        logger.warning(f"URL extract failure-mark failed: {_fe}")
+
+
 @router.post("/api/dashboard/scrape", tags=["Dashboard"])
 async def dashboard_trigger_scrape(request: Request, _csrf=Depends(require_ajax)):
     try:
@@ -246,9 +267,7 @@ async def scrape_with_progress(request: Request):
 
                 # Check if client disconnected (stop wasting resources)
                 if await request.is_disconnected():
-                    logger.info(
-                        f"Client disconnected during scrape {scrape_id}, stopping pipeline"
-                    )
+                    logger.info(f"Client disconnected during scrape {scrape_id}, stopping pipeline")
                     break
 
                 source_name = source.name
@@ -260,22 +279,16 @@ async def scrape_with_progress(request: Request):
                     source_intel_map[source.id] = intel
                     scrape_settings = intel.get_scrape_settings()
                     if scrape_settings.should_skip:
-                        skip_msg = (
-                            f"Skipping {source_name}: {scrape_settings.skip_reason}"
-                        )
+                        skip_msg = f"Skipping {source_name}: {scrape_settings.skip_reason}"
                         yield f"data: {json.dumps({'type': 'info', 'message': skip_msg})}\n\n"
                         continue
                 except Exception as intel_err:
-                    logger.warning(
-                        f"Intelligence load failed for {source_name}: {intel_err}"
-                    )
+                    logger.warning(f"Intelligence load failed for {source_name}: {intel_err}")
 
                 # Check for gold URLs (fast scrape mode)
                 gold_urls_dict = source.gold_urls or {}
                 active_gold = [
-                    url
-                    for url, meta in gold_urls_dict.items()
-                    if meta.get("miss_streak", 0) < 3
+                    url for url, meta in gold_urls_dict.items() if meta.get("miss_streak", 0) < 3
                 ]
 
                 # Decide: gold mode vs rediscovery
@@ -296,9 +309,7 @@ async def scrape_with_progress(request: Request):
                     use_gold = False
 
                 if needs_rediscovery:
-                    mode_label = (
-                        f"🔄 Rediscovery (overdue, {len(active_gold)} gold exist)"
-                    )
+                    mode_label = f"🔄 Rediscovery (overdue, {len(active_gold)} gold exist)"
                 elif use_gold:
                     mode_label = f"⚡ GOLD ({len(active_gold)} URLs)"
                 else:
@@ -314,16 +325,11 @@ async def scrape_with_progress(request: Request):
                         for gold_url in active_gold:
                             try:
                                 # 1. Fetch the listing/hub page (adaptive delay)
-                                if (
-                                    scrape_settings
-                                    and scrape_settings.delay_seconds > 1.0
-                                ):
+                                if scrape_settings and scrape_settings.delay_seconds > 1.0:
                                     import asyncio as _aio
 
                                     await _aio.sleep(scrape_settings.delay_seconds)
-                                await orchestrator.scraping_engine.rate_limiter.acquire(
-                                    gold_url
-                                )
+                                await orchestrator.scraping_engine.rate_limiter.acquire(gold_url)
                                 # Disconnect check before scrape call (Audit Fix C-05)
                                 if await request.is_disconnected():
                                     return
@@ -378,18 +384,14 @@ async def scrape_with_progress(request: Request):
                                             full_url not in visited
                                             and urlparse(full_url).netloc == gold_domain
                                             and not any(
-                                                skip in full_url.lower()
-                                                for skip in _skip_patterns
+                                                skip in full_url.lower() for skip in _skip_patterns
                                             )
                                         ):
                                             # Intelligence junk filter
                                             import re as _re
 
                                             is_junk = False
-                                            if (
-                                                scrape_settings
-                                                and scrape_settings.junk_patterns
-                                            ):
+                                            if scrape_settings and scrape_settings.junk_patterns:
                                                 for jp in scrape_settings.junk_patterns:
                                                     try:
                                                         if _re.search(jp, full_url):
@@ -402,9 +404,7 @@ async def scrape_with_progress(request: Request):
 
                                     # Fetch linked pages (capped by intelligence)
                                     max_follow = (
-                                        scrape_settings.max_pages
-                                        if scrape_settings
-                                        else 15
+                                        scrape_settings.max_pages if scrape_settings else 15
                                     )
                                     for link_url in list(links)[:max_follow]:
                                         try:
@@ -415,9 +415,7 @@ async def scrape_with_progress(request: Request):
                                             ):
                                                 import asyncio as _aio
 
-                                                await _aio.sleep(
-                                                    scrape_settings.delay_seconds
-                                                )
+                                                await _aio.sleep(scrape_settings.delay_seconds)
                                             await orchestrator.scraping_engine.rate_limiter.acquire(
                                                 link_url
                                             )
@@ -429,17 +427,13 @@ async def scrape_with_progress(request: Request):
                                                 link_result.status_code in (429, 403)
                                                 and source.id in source_intel_map
                                             ):
-                                                source_intel_map[
-                                                    source.id
-                                                ].record_rate_limit(
+                                                source_intel_map[source.id].record_rate_limit(
                                                     link_result.status_code
                                                 )
                                                 break  # Stop following links if rate limited
 
                                             if link_result.success:
-                                                scrape_results[source_name].append(
-                                                    link_result
-                                                )
+                                                scrape_results[source_name].append(link_result)
                                                 visited.add(link_url)
                                         except Exception:
                                             pass
@@ -450,17 +444,14 @@ async def scrape_with_progress(request: Request):
                         )
                     else:
                         # DISCOVERY MODE: Deep crawl to find new gold URLs
-                        scrape_results = (
-                            await orchestrator.scraping_engine.scrape_sources(
-                                [source_name], deep=True, max_concurrent=3
-                            )
+                        scrape_results = await orchestrator.scraping_engine.scrape_sources(
+                            [source_name], deep=True, max_concurrent=3
                         )
                         # If discovery got 0 SUCCESSFUL pages (e.g. base URL 403'd)
                         # but gold URLs exist, fall back to gold mode so we don't
                         # skip a source entirely just because rediscovery failed.
                         _discovery_success = sum(
-                            sum(1 for r in pages if r.success)
-                            for pages in scrape_results.values()
+                            sum(1 for r in pages if r.success) for pages in scrape_results.values()
                         )
                         if _discovery_success == 0 and active_gold:
                             yield f"data: {json.dumps({'type': 'info', 'message': f'{source_name}: Rediscovery got 0 pages — falling back to {len(active_gold)} gold URLs'})}\n\n"
@@ -502,8 +493,7 @@ async def scrape_with_progress(request: Request):
                                             full_url = urljoin(gold_url, a["href"])
                                             if (
                                                 full_url not in visited
-                                                and urlparse(full_url).netloc
-                                                == gold_domain
+                                                and urlparse(full_url).netloc == gold_domain
                                                 and not any(
                                                     skip in full_url.lower()
                                                     for skip in SKIP_URL_PATTERNS
@@ -511,9 +501,7 @@ async def scrape_with_progress(request: Request):
                                             ):
                                                 links.add(full_url)
                                         max_follow = (
-                                            scrape_settings.max_pages
-                                            if scrape_settings
-                                            else 15
+                                            scrape_settings.max_pages if scrape_settings else 15
                                         )
                                         for link_url in list(links)[:max_follow]:
                                             try:
@@ -529,9 +517,7 @@ async def scrape_with_progress(request: Request):
                                                 ):
                                                     break
                                                 if link_result.success:
-                                                    scrape_results[source_name].append(
-                                                        link_result
-                                                    )
+                                                    scrape_results[source_name].append(link_result)
                                                     visited.add(link_url)
                                             except Exception:
                                                 pass
@@ -540,9 +526,7 @@ async def scrape_with_progress(request: Request):
                                             f"Gold URL {result.status_code or 'ERR'}: {gold_url[:80]}"
                                         )
                                 except Exception as e:
-                                    logger.warning(
-                                        f"Gold fallback failed {gold_url[:50]}: {e}"
-                                    )
+                                    logger.warning(f"Gold fallback failed {gold_url[:50]}: {e}")
                             logger.info(
                                 f"⚡ Gold fallback: {source_name} → {len(scrape_results[source_name])} pages from {len(active_gold)} gold URLs"
                             )
@@ -580,15 +564,11 @@ async def scrape_with_progress(request: Request):
                     # Update source last_scraped_at
                     async with async_session() as session:
                         source_obj = (
-                            await session.execute(
-                                select(Source).where(Source.id == source.id)
-                            )
+                            await session.execute(select(Source).where(Source.id == source.id))
                         ).scalar_one_or_none()
                         if source_obj:
                             if source_pages > 0:
-                                source_obj.record_success(
-                                    0
-                                )  # lead count updated after extraction
+                                source_obj.record_success(0)  # lead count updated after extraction
                             else:
                                 source_obj.record_failure()
                             await session.commit()
@@ -629,9 +609,7 @@ async def scrape_with_progress(request: Request):
             if orchestrator.deduplicator and pipeline_result.final_leads:
                 yield f"data: {json.dumps({'type': 'info', 'message': 'Phase 3: Deduplication...'})}\n\n"
 
-                leads_for_dedup = [
-                    lead.to_dict() for lead in pipeline_result.final_leads
-                ]
+                leads_for_dedup = [lead.to_dict() for lead in pipeline_result.final_leads]
                 merged_leads = orchestrator.deduplicator.deduplicate(leads_for_dedup)
                 dedup_stats = orchestrator.deduplicator.get_stats()
 
@@ -643,9 +621,7 @@ async def scrape_with_progress(request: Request):
                 lead_dicts = [merged_lead_to_dict(ml) for ml in merged_leads]
             else:
                 # No deduplicator or no leads
-                lead_dicts = [
-                    lead.to_dict() for lead in (pipeline_result.final_leads or [])
-                ]
+                lead_dicts = [lead.to_dict() for lead in (pipeline_result.final_leads or [])]
 
             # --- PHASE 4: SAVE TO DATABASE via orchestrator ---
             if lead_dicts:
@@ -676,9 +652,7 @@ async def scrape_with_progress(request: Request):
                     if lead_dicts:
                         for lead in lead_dicts:
                             src_url = lead.get("source_url", "")
-                            src_name = lead.get("source_name", "") or lead.get(
-                                "source", ""
-                            )
+                            src_name = lead.get("source_name", "") or lead.get("source", "")
 
                             source_id = None
                             for sname, sid in source_id_map.items():
@@ -699,9 +673,7 @@ async def scrape_with_progress(request: Request):
                     # Update each source
                     for src in sources:
                         source_obj = (
-                            await stats_session.execute(
-                                select(Source).where(Source.id == src.id)
-                            )
+                            await stats_session.execute(select(Source).where(Source.id == src.id))
                         ).scalar_one_or_none()
 
                         if not source_obj:
@@ -717,9 +689,7 @@ async def scrape_with_progress(request: Request):
                         )
 
                         if source_leads > 0:
-                            source_obj.leads_found = (
-                                source_obj.leads_found or 0
-                            ) + source_leads
+                            source_obj.leads_found = (source_obj.leads_found or 0) + source_leads
                             source_obj.last_success_at = local_now()
                             source_obj.consecutive_failures = 0
                             source_obj.health_status = "healthy"
@@ -747,9 +717,7 @@ async def scrape_with_progress(request: Request):
                                     )
                                     gold[url]["last_hit"] = now_str
                                     gold[url]["miss_streak"] = 0
-                                    gold[url]["total_checks"] = (
-                                        gold[url].get("total_checks", 0) + 1
-                                    )
+                                    gold[url]["total_checks"] = gold[url].get("total_checks", 0) + 1
                                 else:
                                     gold[url] = {
                                         "leads_found": count,
@@ -761,25 +729,17 @@ async def scrape_with_progress(request: Request):
 
                         # Track misses on existing gold URLs
                         scraped_urls_for_source = [
-                            p["url"]
-                            for p in all_pages
-                            if p.get("source_name") == src.name
+                            p["url"] for p in all_pages if p.get("source_name") == src.name
                         ]
                         for url in scraped_urls_for_source:
                             if url in gold and (
                                 src.id not in url_lead_map
                                 or url not in url_lead_map.get(src.id, {})
                             ):
-                                gold[url]["miss_streak"] = (
-                                    gold[url].get("miss_streak", 0) + 1
-                                )
-                                gold[url]["total_checks"] = (
-                                    gold[url].get("total_checks", 0) + 1
-                                )
+                                gold[url]["miss_streak"] = gold[url].get("miss_streak", 0) + 1
+                                gold[url]["total_checks"] = gold[url].get("total_checks", 0) + 1
                                 if gold[url]["miss_streak"] >= 3:
-                                    logger.info(
-                                        f"Gold URL demoted (3 misses): {url[:60]}"
-                                    )
+                                    logger.info(f"Gold URL demoted (3 misses): {url[:60]}")
 
                         source_obj.gold_urls = gold
                         source_obj.last_discovery_at = local_now()
@@ -789,15 +749,11 @@ async def scrape_with_progress(request: Request):
                             try:
                                 src_intel = source_intel_map[source_obj.id]
                                 src_pages = [
-                                    p
-                                    for p in all_pages
-                                    if p.get("source_name") == src.name
+                                    p for p in all_pages if p.get("source_name") == src.name
                                 ]
                                 for pg in src_pages:
                                     pg_url = pg.get("url", "")
-                                    pg_leads = url_lead_map.get(src.id, {}).get(
-                                        pg_url, 0
-                                    )
+                                    pg_leads = url_lead_map.get(src.id, {}).get(pg_url, 0)
                                     src_intel.record_url_result(
                                         url=pg_url,
                                         produced_lead=pg_leads > 0,
@@ -808,9 +764,7 @@ async def scrape_with_progress(request: Request):
                                     leads_found=source_leads,
                                     leads_saved=source_leads,
                                     duration_seconds=0,
-                                    mode="gold"
-                                    if source_obj.gold_urls
-                                    else "discovery",
+                                    mode="gold" if source_obj.gold_urls else "discovery",
                                 )
                                 src_intel.save()
                                 source_obj.source_intelligence = dict(src_intel._data)
@@ -935,9 +889,7 @@ async def extract_url_stream(request: Request):
     """SSE endpoint for real-time URL extraction progress"""
 
     extract_id = request.query_params.get("extract_id", "")
-    target_url = (
-        pop_pending(_pending_extract_urls, extract_id, "") if extract_id else ""
-    )
+    target_url = pop_pending(_pending_extract_urls, extract_id, "") if extract_id else ""
 
     if not target_url:
 
@@ -976,16 +928,11 @@ async def extract_url_stream(request: Request):
             page_content = ""
 
             try:
-                scrape_result = await orchestrator.scraping_engine.http_scraper.scrape(
-                    target_url
-                )
+                scrape_result = await orchestrator.scraping_engine.http_scraper.scrape(target_url)
                 if scrape_result and scrape_result.success:
                     page_content = scrape_result.text or scrape_result.html or ""
                     # Safety: if we got raw HTML instead of clean text, strip it
-                    if (
-                        page_content.strip().startswith("<")
-                        and len(page_content) > 30000
-                    ):
+                    if page_content.strip().startswith("<") and len(page_content) > 30000:
                         from app.services.utils import clean_html_to_text
 
                         page_content = clean_html_to_text(page_content)
@@ -1022,32 +969,14 @@ async def extract_url_stream(request: Request):
                             yield f"data: {json.dumps({'type': 'error', 'message': f'Failed to fetch URL: HTTP {resp.status_code}'})}\n\n"
                             # Mark source as failed before returning so the
                             # health badge updates even on fetch failure.
-                            try:
-                                async with async_session() as fail_sess:
-                                    fail_src = await _find_source_by_url(
-                                        fail_sess, target_url
-                                    )
-                                    if fail_src:
-                                        fail_src.record_failure()
-                                        fail_src.last_scraped_at = local_now()
-                                        await fail_sess.commit()
-                            except Exception as _fe:
-                                logger.warning(
-                                    f"URL extract failure-mark failed: {_fe}"
-                                )
+                            # Shielded — survives a client disconnect.
+                            await asyncio.shield(_mark_url_source_failure(target_url))
                             return
                 except Exception as e2:
                     _err = f"All fetch methods failed: {safe_error(e2)}"
                     yield f"data: {json.dumps({'type': 'error', 'message': _err})}\n\n"
-                    try:
-                        async with async_session() as fail_sess:
-                            fail_src = await _find_source_by_url(fail_sess, target_url)
-                            if fail_src:
-                                fail_src.record_failure()
-                                fail_src.last_scraped_at = local_now()
-                                await fail_sess.commit()
-                    except Exception as _fe:
-                        logger.warning(f"URL extract failure-mark failed: {_fe}")
+                    # Shielded — survives a client disconnect.
+                    await asyncio.shield(_mark_url_source_failure(target_url))
                     return
 
             if not page_content:
@@ -1107,9 +1036,7 @@ async def extract_url_stream(request: Request):
             if orchestrator.deduplicator and pipeline_result.final_leads:
                 yield f"data: {json.dumps({'type': 'info', 'message': 'Phase 3: Deduplication...'})}\n\n"
 
-                leads_for_dedup = [
-                    lead.to_dict() for lead in pipeline_result.final_leads
-                ]
+                leads_for_dedup = [lead.to_dict() for lead in pipeline_result.final_leads]
                 merged_leads = orchestrator.deduplicator.deduplicate(leads_for_dedup)
                 dedup_stats = orchestrator.deduplicator.get_stats()
 
@@ -1119,15 +1046,11 @@ async def extract_url_stream(request: Request):
 
                 # Convert to dicts
                 lead_dicts = [
-                    merged_lead_to_dict(
-                        ml, fallback_url=target_url, fallback_source=source_label
-                    )
+                    merged_lead_to_dict(ml, fallback_url=target_url, fallback_source=source_label)
                     for ml in merged_leads
                 ]
             else:
-                lead_dicts = [
-                    lead.to_dict() for lead in (pipeline_result.final_leads or [])
-                ]
+                lead_dicts = [lead.to_dict() for lead in (pipeline_result.final_leads or [])]
                 # Ensure source_url is set
                 for d in lead_dicts:
                     if not d.get("source_url"):
@@ -1184,6 +1107,12 @@ async def extract_url_stream(request: Request):
 
             yield f"data: {json.dumps({'type': 'complete', 'stats': final_stats, 'duration_seconds': duration})}\n\n"
 
+        except asyncio.CancelledError:
+            # FIX 2026-06-04: client closed the SSE stream (navigated away or
+            # the UI closed on the error event). Not a server error — exit
+            # quietly and let uvicorn finish the cancellation.
+            logger.info("URL extract stream: client disconnected")
+            raise
         except BaseException as e:
             logger.error(f"URL extract stream error: {e}", exc_info=True)
             try:
@@ -1216,9 +1145,7 @@ async def _update_source_health_for_url_extract(
     async with async_session() as session:
         source_obj = await _find_source_by_url(session, target_url)
         if not source_obj:
-            logger.info(
-                f"URL extract: no matching Source for {target_url} — health not updated"
-            )
+            logger.info(f"URL extract: no matching Source for {target_url} — health not updated")
             return ""
 
         source_obj.total_scrapes = (source_obj.total_scrapes or 0) + 1
@@ -1239,17 +1166,14 @@ async def _update_source_health_for_url_extract(
             # Keep avg_lead_yield consistent with the full scrape's formula
             scrapes = source_obj.total_scrapes or 1
             old_avg = float(source_obj.avg_lead_yield or 0)
-            source_obj.avg_lead_yield = (
-                (old_avg * (scrapes - 1)) + leads_saved
-            ) / scrapes
+            source_obj.avg_lead_yield = ((old_avg * (scrapes - 1)) + leads_saved) / scrapes
         else:
             source_obj.record_failure()
 
         await session.commit()
 
         return (
-            f"Source health updated: {source_obj.name} "
-            f"(healthy, {leads_saved} leads this run)"
+            f"Source health updated: {source_obj.name} " f"(healthy, {leads_saved} leads this run)"
             if page_fetched_ok
             else f"Source marked failing: {source_obj.name}"
         )
@@ -1328,16 +1252,11 @@ async def discovery_start(request: Request, _csrf=Depends(require_ajax)):
                 import contextlib
 
                 def _classify_msg_type(msg):
-                    if any(
-                        s in msg
-                        for s in ["\u2705", "\u2728", "Found", "Added", "QUALIFIED"]
-                    ):
+                    if any(s in msg for s in ["\u2705", "\u2728", "Found", "Added", "QUALIFIED"]):
                         return "success"
                     if any(s in msg for s in ["\u274c", "Error", "Failed"]):
                         return "error"
-                    if any(
-                        s in msg for s in ["\u26a0\ufe0f", "Warning", "Skip", "\u26aa"]
-                    ):
+                    if any(s in msg for s in ["\u26a0\ufe0f", "Warning", "Skip", "\u26aa"]):
                         return "warning"
                     if any(
                         s in msg
@@ -1359,9 +1278,7 @@ async def discovery_start(request: Request, _csrf=Depends(require_ajax)):
                         msg = text.strip()
                         if not msg:
                             return len(text)
-                        messages.append(
-                            {"type": _classify_msg_type(msg), "message": msg}
-                        )
+                        messages.append({"type": _classify_msg_type(msg), "message": msg})
                         try:
                             messages.append(
                                 {
@@ -1400,9 +1317,7 @@ async def discovery_start(request: Request, _csrf=Depends(require_ajax)):
                             msg = msg.strip()
                             if not msg:
                                 return
-                            messages.append(
-                                {"type": _classify_msg_type(msg), "message": msg}
-                            )
+                            messages.append({"type": _classify_msg_type(msg), "message": msg})
                         except Exception:
                             pass  # Never let logging break discovery
 
@@ -1713,9 +1628,7 @@ async def smart_fill_lead(lead_id: int, request: Request, _csrf=Depends(require_
     mode = body.get("mode", "smart")
 
     async with async_session() as session:
-        result = await session.execute(
-            select(PotentialLead).where(PotentialLead.id == lead_id)
-        )
+        result = await session.execute(select(PotentialLead).where(PotentialLead.id == lead_id))
         lead = result.scalar_one_or_none()
         if not lead:
             raise HTTPException(status_code=404, detail="Lead not found")
@@ -1758,9 +1671,7 @@ async def smart_fill_lead(lead_id: int, request: Request, _csrf=Depends(require_
             "ownership_change",
         }
         proj_type = (enriched.get("project_type") or "").strip().lower()
-        is_live_reopening = proj_type in _REOPENING_TYPES and enriched.get(
-            "reopening_date"
-        )
+        is_live_reopening = proj_type in _REOPENING_TYPES and enriched.get("reopening_date")
 
         # Save project_type to the lead regardless of path — surfaces in UI
         # so sales knows what kind of deal this is (new build vs reno vs rebrand)
@@ -1777,9 +1688,7 @@ async def smart_fill_lead(lead_id: int, request: Request, _csrf=Depends(require_
         # row inherited stale values even though Smart Fill found fresher
         # ones. The auto-transfer at line ~2110 reads lead.status, so the
         # status='expired' marker we set here still triggers graduation.
-        is_already_opened_sync = (
-            bool(enriched.get("already_opened")) and not is_live_reopening
-        )
+        is_already_opened_sync = bool(enriched.get("already_opened")) and not is_live_reopening
         if is_already_opened_sync:
             lead.status = "expired"
             # BUG FIX 2026-05-11 (Kindred Resort): When grounding finds a
@@ -1792,9 +1701,7 @@ async def smart_fill_lead(lead_id: int, request: Request, _csrf=Depends(require_
             # instead of "May 7, 2026". Fall back order: opened_date,
             # then opening_date, then lead's existing value as last resort.
             lead.opening_date = (
-                enriched.get("opened_date")
-                or enriched.get("opening_date")
-                or lead.opening_date
+                enriched.get("opened_date") or enriched.get("opening_date") or lead.opening_date
             )
             lead.timeline_label = "EXPIRED"
             # Do NOT return here — fall through to apply all other fields,
@@ -1832,19 +1739,13 @@ async def smart_fill_lead(lead_id: int, request: Request, _csrf=Depends(require_
             # Don't return — continue the rest of the Full Refresh flow
             # (update brand_tier, mgmt_company, owner, etc.)
 
-        if (
-            "opening_date" in enriched
-            and not is_live_reopening
-            and not is_already_opened_sync
-        ):
+        if "opening_date" in enriched and not is_live_reopening and not is_already_opened_sync:
             # Regression guard — reject the new value if it's less specific
             # than what we already have (e.g. "Late 2026" → "2026") or if
             # the year shifted backward without any specificity gain.
             from app.services.utils import should_accept_opening_date
 
-            accept, reason = should_accept_opening_date(
-                lead.opening_date, enriched["opening_date"]
-            )
+            accept, reason = should_accept_opening_date(lead.opening_date, enriched["opening_date"])
             if accept:
                 lead.opening_date = enriched["opening_date"]
                 new_label = get_timeline_label(enriched["opening_date"])
@@ -1862,8 +1763,7 @@ async def smart_fill_lead(lead_id: int, request: Request, _csrf=Depends(require_
                     )
             else:
                 logger.info(
-                    f"Full Refresh REJECTED opening_date update for "
-                    f"{lead.hotel_name}: {reason}"
+                    f"Full Refresh REJECTED opening_date update for " f"{lead.hotel_name}: {reason}"
                 )
         # ── Core hotel attributes — protect manual edits ──
         # The user can manually set these via Edit → Save. Full Refresh
@@ -1928,9 +1828,7 @@ async def smart_fill_lead(lead_id: int, request: Request, _csrf=Depends(require_
             existing_ki = (lead.key_insights or "").strip()
             new_ki = enriched["key_insights"].strip()
             if new_ki not in existing_ki:
-                lead.key_insights = (
-                    f"{new_ki}\n{existing_ki}".strip() if existing_ki else new_ki
-                )
+                lead.key_insights = f"{new_ki}\n{existing_ki}".strip() if existing_ki else new_ki
 
         # ── Name intelligence — correct hotel name + save operator/owner ──
         if "official_name" in enriched:
@@ -2001,9 +1899,7 @@ async def smart_fill_lead(lead_id: int, request: Request, _csrf=Depends(require_
                 # Store in key_insights so sales team sees it
                 dup_note = f"⚠️ POSSIBLE DUPLICATE of {dup_names}"
                 if not lead.key_insights or dup_note not in (lead.key_insights or ""):
-                    lead.key_insights = (
-                        f"{dup_note}\n{lead.key_insights or ''}"
-                    ).strip()
+                    lead.key_insights = (f"{dup_note}\n{lead.key_insights or ''}").strip()
             elif lead.brand and lead.opening_year:
                 # Fuzzy match: same brand + same country + same opening year
                 # Catches "Royalton Chic Jamaica Paradise Cove" vs "Royalton Chic Runaway Bay"
@@ -2011,8 +1907,7 @@ async def smart_fill_lead(lead_id: int, request: Request, _csrf=Depends(require_
                     and_(
                         PotentialLead.id != lead_id,
                         func.lower(PotentialLead.brand) == lead.brand.lower(),
-                        func.lower(PotentialLead.country)
-                        == (lead.country or "").lower(),
+                        func.lower(PotentialLead.country) == (lead.country or "").lower(),
                         PotentialLead.opening_year == lead.opening_year,
                         PotentialLead.status != "rejected",
                     )
@@ -2020,22 +1915,14 @@ async def smart_fill_lead(lead_id: int, request: Request, _csrf=Depends(require_
                 fuzzy_result = await session.execute(fuzzy_query)
                 fuzzy_matches = fuzzy_result.all()
                 if fuzzy_matches:
-                    fuzzy_names = ", ".join(
-                        f"#{f.id} ({f.hotel_name})" for f in fuzzy_matches
-                    )
+                    fuzzy_names = ", ".join(f"#{f.id} ({f.hotel_name})" for f in fuzzy_matches)
                     logger.warning(
                         f"FUZZY DUPLICATE: Lead {lead_id} ({lead.hotel_name}) "
                         f"same brand+country+year as: {fuzzy_names}"
                     )
-                    dup_note = (
-                        f"⚠️ SIMILAR LEAD: same brand/country/year as {fuzzy_names}"
-                    )
-                    if not lead.key_insights or "SIMILAR LEAD" not in (
-                        lead.key_insights or ""
-                    ):
-                        lead.key_insights = (
-                            f"{dup_note}\n{lead.key_insights or ''}"
-                        ).strip()
+                    dup_note = f"⚠️ SIMILAR LEAD: same brand/country/year as {fuzzy_names}"
+                    if not lead.key_insights or "SIMILAR LEAD" not in (lead.key_insights or ""):
+                        lead.key_insights = (f"{dup_note}\n{lead.key_insights or ''}").strip()
         except Exception as ex:
             logger.debug(f"Dedup check failed: {ex}")
 
@@ -2079,9 +1966,7 @@ async def smart_fill_lead(lead_id: int, request: Request, _csrf=Depends(require_
 
                 await update_lead_revenue(lead_id)
             except Exception as e:
-                logger.warning(
-                    f"Revenue update failed after SmartFill for {lead_id}: {e}"
-                )
+                logger.warning(f"Revenue update failed after SmartFill for {lead_id}: {e}")
 
         # FIX 2026-05-01 (Reflections-ghost bug): auto-transfer to
         # existing_hotels if opening_date is now < 3 months. Mirrors the
@@ -2110,15 +1995,11 @@ async def smart_fill_lead(lead_id: int, request: Request, _csrf=Depends(require_
                     return {
                         "status": "transferred",
                         "existing_hotel_id": eh_id,
-                        "changes": (
-                            enriched.get("changes", []) + ["graduated_to_existing"]
-                        ),
+                        "changes": (enriched.get("changes", []) + ["graduated_to_existing"]),
                         "confidence": enriched.get("confidence", "unknown"),
                     }
         except Exception as e:
-            logger.warning(
-                f"Smart Fill (sync) auto-transfer check failed for #{lead_id}: {e}"
-            )
+            logger.warning(f"Smart Fill (sync) auto-transfer check failed for #{lead_id}: {e}")
 
         return {
             "status": "enriched",
@@ -2200,9 +2081,7 @@ class SmartFillJob:
 _smart_fill_jobs: dict[int, SmartFillJob] = {}
 
 
-async def _start_smart_fill_job(
-    lead_id: int, mode: str, lead_snapshot: dict
-) -> SmartFillJob:
+async def _start_smart_fill_job(lead_id: int, mode: str, lead_snapshot: dict) -> SmartFillJob:
     """Create and register a SmartFillJob. Caller must verify no existing job."""
     from app.services.lead_data_enrichment import enrich_lead_data
     from app.services.utils import get_timeline_label, normalize_hotel_name
@@ -2380,9 +2259,7 @@ async def _start_smart_fill_job(
                         from app.services.lead_transfer import transfer_lead
 
                         async with async_session() as transfer_session:
-                            tr = await transfer_lead(
-                                lead_id, transfer_session, commit=True
-                            )
+                            tr = await transfer_lead(lead_id, transfer_session, commit=True)
                         if tr.get("status") in ("transferred", "merged"):
                             eh_id = tr.get("existing_hotel_id")
                             logger.info(
@@ -2398,9 +2275,7 @@ async def _start_smart_fill_job(
                                 }
                             )
                 except Exception as e:
-                    logger.warning(
-                        f"Smart Fill auto-transfer check failed for #{lead_id}: {e}"
-                    )
+                    logger.warning(f"Smart Fill auto-transfer check failed for #{lead_id}: {e}")
 
             duration = round(time.monotonic() - job.started_at, 1)
             emit_terminal(
@@ -2485,9 +2360,7 @@ async def smart_fill_stream(lead_id: int, request: Request, mode: str = "smart")
         )
     else:
         async with async_session() as session:
-            result = await session.execute(
-                select(PotentialLead).where(PotentialLead.id == lead_id)
-            )
+            result = await session.execute(select(PotentialLead).where(PotentialLead.id == lead_id))
             lead = result.scalar_one_or_none()
             if not lead:
                 raise HTTPException(status_code=404, detail="Lead not found")
@@ -2546,8 +2419,7 @@ async def smart_fill_stream(lead_id: int, request: Request, mode: str = "smart")
                     return
         except asyncio.CancelledError:
             logger.info(
-                f"Smart Fill stream cancelled for lead {lead_id}; "
-                f"background task continues."
+                f"Smart Fill stream cancelled for lead {lead_id}; " f"background task continues."
             )
             raise
         except Exception as e:
@@ -2683,9 +2555,7 @@ def _apply_enrichment_to_lead(lead, enriched: dict, mode: str, get_timeline_labe
         # the lead's pre-existing "Fall 2026" — then transfer carried
         # "Fall 2026" into existing_hotels instead of the real date.
         lead.opening_date = (
-            enriched.get("opened_date")
-            or enriched.get("opening_date")
-            or lead.opening_date
+            enriched.get("opened_date") or enriched.get("opening_date") or lead.opening_date
         )
         lead.timeline_label = "EXPIRED"
         # Fall through to apply remaining fields below. The caller will
@@ -2704,9 +2574,7 @@ def _apply_enrichment_to_lead(lead, enriched: dict, mode: str, get_timeline_labe
         # Regression guard — reject less-specific or year-shifted-back values
         from app.services.utils import should_accept_opening_date
 
-        accept, reason = should_accept_opening_date(
-            lead.opening_date, enriched["opening_date"]
-        )
+        accept, reason = should_accept_opening_date(lead.opening_date, enriched["opening_date"])
         if accept:
             lead.opening_date = enriched["opening_date"]
             new_label = get_timeline_label(enriched["opening_date"])
@@ -2715,8 +2583,7 @@ def _apply_enrichment_to_lead(lead, enriched: dict, mode: str, get_timeline_labe
                 lead.status = "expired"
         else:
             logger.info(
-                f"Smart Fill REJECTED opening_date update for "
-                f"{lead.hotel_name!r}: {reason}"
+                f"Smart Fill REJECTED opening_date update for " f"{lead.hotel_name!r}: {reason}"
             )
             # Drop the field from enriched so downstream code doesn't
             # treat it as a "change."
@@ -2740,9 +2607,7 @@ def _apply_enrichment_to_lead(lead, enriched: dict, mode: str, get_timeline_labe
             new_rc = int(enriched.get("room_count") or 0)
         except (TypeError, ValueError):
             new_rc = 0
-        if new_rc > 0 and (
-            mode == "full" or not lead.room_count or lead.room_count <= 0
-        ):
+        if new_rc > 0 and (mode == "full" or not lead.room_count or lead.room_count <= 0):
             lead.room_count = new_rc
 
     if "brand" in enriched:
@@ -2773,9 +2638,7 @@ def _apply_enrichment_to_lead(lead, enriched: dict, mode: str, get_timeline_labe
         existing = (lead.key_insights or "").strip()
         new_insight = enriched["key_insights"].strip()
         if new_insight not in existing:
-            lead.key_insights = (
-                f"{new_insight}\n{existing}".strip() if existing else new_insight
-            )
+            lead.key_insights = f"{new_insight}\n{existing}".strip() if existing else new_insight
 
     # Hybrid geocode + website fields (set by the grounded fast-path's
     # _hybrid_geocode_and_website helper). Always update — these are

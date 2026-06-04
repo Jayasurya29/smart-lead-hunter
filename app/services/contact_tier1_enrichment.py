@@ -88,7 +88,10 @@ Field rules:
     * executive housekeeper / housekeeping director / housekeeping manager
     * food & beverage director
     * owner or founder of an independent or boutique property
-  Mark FALSE for finance, IT, HR, marketing, outbound sales reps, front-desk /
+    * human resources / people & culture / talent (HR Manager, HR Director,
+      Director of People & Culture) — HR runs onboarding + uniform issuance
+      and routes vendors to the right buyers
+  Mark FALSE for finance, IT, marketing, outbound sales reps, front-desk /
   guest services, and a bare "manager" with no buying-related department.
 - reason: <= 10 words.
 - confidence: 0.0-1.0.

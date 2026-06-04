@@ -17,18 +17,19 @@
  * Client-side (over the loaded page, per_page 200): smart-search, DM focus, sort.
  * For very large inboxes, push `search` to the server (marked below).
  */
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import {
   Sparkles, Wand2, X, RefreshCw, Inbox, Star, ChevronRight, ChevronDown,
   Mail, Phone, Linkedin, ExternalLink, MapPin, Building2, Shield, Hash,
   Eye, Users, Activity, Send, Check, Loader2, Trash2, CheckSquare, Square,
-  Radar, Briefcase, Layers,
+  Radar, Briefcase, Layers, Flame, Target, Package,
 } from 'lucide-react'
 import { cn, formatDate, relativeDate, getTierLabel } from '@/lib/utils'
 import type { InboxContact, InboxContactStats } from '@/api/inboxContacts'
 import {
   useAllInboxContacts,
+  useAllLeadContacts,
   useInboxContactStats,
   useTriggerInboxSync,
   useDeepEnrichContact,
@@ -41,7 +42,62 @@ import {
    HELPERS
    ════════════════════════════════════════════════════════════════════ */
 
-type SortKey = 'confidence' | 'opportunity' | 'recent' | 'newest' | 'oldest' | 'name' | 'org'
+type SortKey = 'confidence' | 'opportunity' | 'recent' | 'newest' | 'oldest' | 'name' | 'org' | 'warmth' | 'gaps'
+
+/** Lead-generator contact IDs are offset into their own range so they can
+ *  never collide with inbox-contact IDs in React keys / selection / the URL.
+ *  (Real DB id = displayed id − offset.) */
+const LEAD_ID_OFFSET = 10_000_000
+
+/* ── Triangulation helpers ────────────────────────────────────────────
+   Warmth = how alive the email relationship is with an account:
+   each known contact contributes interaction_count × a recency factor. */
+function recencyFactor(iso: string | null): number {
+  if (!iso) return 0.1
+  const days = (Date.now() - new Date(iso).getTime()) / 86_400_000
+  if (days <= 30) return 1
+  if (days <= 90) return 0.6
+  if (days <= 180) return 0.3
+  return 0.1
+}
+function accountWarmth(known: UnifiedContact[]): number {
+  return Math.round(known.reduce((s, c) => s + (c.interaction_count || 0) * recencyFactor(c.last_seen), 0))
+}
+type WarmthLevel = 'hot' | 'warm' | 'cool' | 'cold'
+function warmthLevel(w: number): WarmthLevel {
+  if (w >= 15) return 'hot'
+  if (w >= 4) return 'warm'
+  if (w > 0) return 'cool'
+  return 'cold'
+}
+const WARMTH_COLOR: Record<WarmthLevel, string> = {
+  hot: '#e85d4a', warm: '#c49a3c', cool: '#5b7a9e', cold: '#b0a99e',
+}
+
+/** Triangulation only counts BUYER-side relationships. Vendors (SanMar),
+ *  junk, personal, and competitors generate huge email volume that would
+ *  otherwise make supplier inboxes the "hottest accounts". Uncategorized
+ *  (null) is included — those may be buyers awaiting classification. */
+function isRelationshipContact(c: UnifiedContact): boolean {
+  return !c.contact_category || c.contact_category === 'buyer'
+}
+
+/** Per-account triangulation: who we know (warm paths), which lead-generator
+ *  decision-makers we're missing (gaps), and the suggested play. */
+type AccountIntel = {
+  known: UnifiedContact[]
+  matches: UnifiedContact[]
+  gaps: UnifiedContact[]
+  otherTargets: number
+  warmth: number
+  level: WarmthLevel
+  emails: number
+  lastTouch: string | null
+  oppScore: number | null
+  play: string
+  /** Majority of this org's contacts are sellers → it's a supplier, not a target. */
+  vendor: boolean
+}
 
 /* ────────────────────────────────────────────────────────────────────
    UNIFIED MODEL ADAPTER
@@ -68,6 +124,11 @@ type UnifiedContact = InboxContact & {
   account_type?: AccountType
   lifecycle_stage?: Stage
   management_company?: string | null
+  /** Triangulation: this inbox contact's email also exists as a lead-generator
+   *  target — a verified decision-maker you already have a relationship with. */
+  target_match?: boolean
+  target_priority?: string | null
+  target_reasoning?: string | null
 }
 
 function sourceOf(c: UnifiedContact): Source {
@@ -87,12 +148,108 @@ function stageOf(c: UnifiedContact): Stage {
   return 'potential'
 }
 
+function prettyFromEmail(email?: string | null): string | null {
+  const local = (email || '').split('@')[0]
+  if (!local) return null
+  const words = local.split('+')[0].split(/[._\-]+/)
+    .map(t => t.replace(/\d+$/, ''))
+    .filter(t => t.length >= 2 && /^[a-z]+$/i.test(t))
+  if (words.length >= 2 && words.length <= 3)
+    return words.map(w => w[0].toUpperCase() + w.slice(1)).join(' ')
+  return local.length >= 2 ? local[0].toUpperCase() + local.slice(1) : null
+}
+
 function fullName(c: InboxContact): string {
-  return [c.first_name, c.last_name].filter(Boolean).join(' ') || c.display_name || c.email || '—'
+  const dn = c.display_name && c.display_name.toLowerCase() !== (c.email || '').toLowerCase() ? c.display_name : null
+  return [c.first_name, c.last_name].filter(Boolean).join(' ') || dn || prettyFromEmail(c.email) || c.email || '—'
 }
 function initials(c: InboxContact): string {
   const both = ((c.first_name?.[0] || '') + (c.last_name?.[0] || '')).toUpperCase()
   return both || (c.display_name?.[0] || c.email?.[0] || '?').toUpperCase()
+}
+
+// ── Account tree helpers (2026-06-04) ──────────────────────────────
+// Two-level account hierarchy: chains via parent_company (Marriott →
+// Ritz-Carlton, St. Regis, W...) and domain families for independents
+// (grandbeachhotel.com → Grand Beach Hotel / ...Surfside / ...Bay Harbor).
+const FREEMAIL = new Set([
+  'gmail.com', 'yahoo.com', 'outlook.com', 'hotmail.com', 'aol.com', 'icloud.com',
+  'me.com', 'mac.com', 'msn.com', 'live.com', 'comcast.net', 'att.net',
+  'verizon.net', 'sbcglobal.net', 'bellsouth.net', 'protonmail.com', 'proton.me',
+  'ymail.com', 'gmx.com', 'mail.com',
+])
+function workDomainOf(email?: string | null): string | null {
+  const d = (email || '').split('@')[1]?.toLowerCase() || ''
+  return d && !FREEMAIL.has(d) ? d : null
+}
+/** Most common non-empty value (case-insensitive), returned in its most common original casing. */
+function modeOf(vals: (string | null | undefined)[]): string | null {
+  const counts = new Map<string, { n: number; disp: string }>()
+  for (const v of vals) {
+    const t = (v || '').trim()
+    if (!t) continue
+    const k = t.toLowerCase()
+    const e = counts.get(k) || { n: 0, disp: t }
+    e.n++
+    counts.set(k, e)
+  }
+  let best: string | null = null, bn = 0
+  for (const { n, disp } of counts.values()) if (n > bn) { bn = n; best = disp }
+  return best
+}
+/** Longest common leading word sequence — names a domain family ("Grand Beach Hotel"). */
+function commonTokenPrefix(names: string[]): string | null {
+  if (!names.length) return null
+  const tok = names.map((n) => n.split(/\s+/).filter(Boolean))
+  const out: string[] = []
+  for (let i = 0; ; i++) {
+    const w = tok[0]?.[i]
+    if (!w) break
+    if (tok.every((t) => (t[i] || '').toLowerCase() === w.toLowerCase())) out.push(w)
+    else break
+  }
+  return out.length >= 2 ? out.join(' ') : null
+}
+type GroupEntry = [string, UnifiedContact[]]
+type TreeSection = { key: string; label: string | null; children: GroupEntry[] }
+
+/** Find Email (Wiza) for lead-generator contacts in the directory drawer
+ *  (2026-06-04). Routes to the existing lead / existing-hotel enrich-email
+ *  endpoints using the contact's real (un-offset) id. */
+function LeadFindEmailBtn({ contact }: { contact: UnifiedContact }) {
+  const [state, setState] = useState<'idle' | 'busy' | 'done' | 'err'>('idle')
+  const [found, setFound] = useState<string | null>(null)
+  async function run() {
+    const realId = contact.id - LEAD_ID_OFFSET
+    const url = contact.matched_lead_id
+      ? `/api/dashboard/leads/${contact.matched_lead_id}/contacts/${realId}/enrich-email`
+      : contact.matched_hotel_id
+        ? `/api/existing-hotels/${contact.matched_hotel_id}/contacts/${realId}/enrich-email`
+        : null
+    if (!url || state === 'busy') return
+    setState('busy')
+    try {
+      const r = await fetch(url, { method: 'POST' })
+      const j = await r.json().catch(() => ({} as any))
+      const em = j?.email || j?.contact?.email || null
+      if (r.ok && em) { setFound(em); setState('done') } else setState('err')
+    } catch { setState('err') }
+  }
+  if (state === 'done' && found) {
+    return (
+      <a href={`mailto:${found}`}
+        className="inline-flex items-center gap-1.5 h-9 px-3.5 rounded-lg text-[12px] font-semibold bg-emerald-500/20 text-emerald-200 ring-1 ring-emerald-400/30">
+        <Check className="w-3.5 h-3.5" />{found}
+      </a>
+    )
+  }
+  return (
+    <button onClick={run} disabled={state === 'busy'}
+      className="inline-flex items-center gap-1.5 h-9 px-3.5 rounded-lg text-[12px] font-semibold bg-white/10 text-white/80 ring-1 ring-white/20 hover:bg-white/15 disabled:opacity-60 transition-all active:scale-[.97]">
+      {state === 'busy' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Mail className="w-3.5 h-3.5" />}
+      {state === 'err' ? 'No email found — retry?' : 'Find Email (Wiza)'}
+    </button>
+  )
 }
 /** Backend stores confidence as 0–1; surface a 0–100 integer. */
 function confidencePct(c: InboxContact): number {
@@ -143,20 +300,30 @@ function deriveSummary(c: InboxContact): string {
   const dept = c.department ? ` in ${c.department.toLowerCase()}` : ''
   const org = c.organization ? ` at ${c.organization}` : ''
   const opp = isHighOpportunity(c) ? ' Flagged as a high-opportunity account — prioritize outreach.' : ''
-  return `${fullName(c)} appears to be ${role}${dept}${org}.${opp} Run Deep Enrich to generate a full AI profile.`
+  const cta = sourceOf(c) === 'lead_generator'
+    ? ' Sourced by the Lead Generator pipeline.'
+    : ' Run Deep Enrich to generate a full AI profile.'
+  return `${fullName(c)} appears to be ${role}${dept}${org}.${opp}${cta}`
 }
 
-/** Map natural-language queries to a predicate over a contact. */
-function smartMatch(c: UnifiedContact, query: string): boolean {
-  const t = query.toLowerCase().trim()
-  if (!t) return true
+/** Build a contact's search haystack ONCE (precomputed in `indexed` below) —
+ *  previously this 20-field join+lowercase ran for every contact on every
+ *  keystroke, which is exactly what made typing drag at ~7k contacts. */
+function buildHaystack(c: UnifiedContact): string {
   const acctLabel = accountTypeOf(c) === 'management_company' ? 'management company mgmt co operator' : 'hotel'
   const srcLabel = sourceOf(c) === 'lead_generator' ? 'lead generator scraped discovery prospect' : 'email inbox'
-  const hay = [
+  return [
     c.first_name, c.last_name, c.display_name, c.title, c.inferred_role, c.organization,
     c.email, c.address, c.department, c.parent_company, c.management_company, c.gpo, getTierLabel(c.brand_tier),
     c.contact_category, c.opportunity_level, acctLabel, srcLabel, stageOf(c),
+    c.target_match ? 'verified target match' : '',
   ].filter(Boolean).join(' ').toLowerCase()
+}
+
+/** Map natural-language queries to a predicate over a contact.
+ *  `t` must already be lowercased+trimmed; `hay` comes from buildHaystack. */
+function smartMatch(c: UnifiedContact, hay: string, t: string): boolean {
+  if (!t) return true
   if (/decision|maker|\bdm\b/.test(t)) return !!c.is_decision_maker
   if (/high opp|opportun|hot lead/.test(t)) return isHighOpportunity(c)
   if (/management compan|mgmt|operator/.test(t)) return accountTypeOf(c) === 'management_company'
@@ -289,10 +456,14 @@ function DirRow({
     <div onClick={onOpen}
       className={cn('group flex items-center gap-3 pl-3 pr-4 py-2.5 rounded-xl cursor-pointer transition-colors',
         selected ? 'bg-white shadow-card ring-1 ring-navy-100' : 'hover:bg-white')}>
-      <button onClick={(e) => { e.stopPropagation(); onToggleCheck() }}
-        className={cn('flex-shrink-0 transition-opacity', checked || selectMode ? 'opacity-100' : 'opacity-0 group-hover:opacity-100')}>
-        {checked ? <CheckSquare className="w-4 h-4 text-navy-600" /> : <Square className="w-4 h-4 text-stone-300" />}
-      </button>
+      {isLead ? (
+        <span className="w-4 flex-shrink-0" />
+      ) : (
+        <button onClick={(e) => { e.stopPropagation(); onToggleCheck() }}
+          className={cn('flex-shrink-0 transition-opacity', checked || selectMode ? 'opacity-100' : 'opacity-0 group-hover:opacity-100')}>
+          {checked ? <CheckSquare className="w-4 h-4 text-navy-600" /> : <Square className="w-4 h-4 text-stone-300" />}
+        </button>
+      )}
       <div className="relative flex-shrink-0">
         <Avatar contact={contact} size={38} />
         <span className="absolute -bottom-0.5 -left-0.5 w-3.5 h-3.5 rounded-full ring-2 ring-stone-50 flex items-center justify-center"
@@ -305,6 +476,7 @@ function DirRow({
         <div className="flex items-center gap-1.5">
           <span className="truncate font-semibold text-navy-900 text-sm">{fullName(contact)}</span>
           {contact.is_decision_maker && <span className="inline-flex items-center gap-0.5 text-[10px] font-bold text-gold-700 bg-gold-50 px-1.5 py-0.5 rounded-full flex-shrink-0" title="Decision-maker">★ DM</span>}
+          {contact.target_match && <span className="text-[10px] font-bold text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded-full flex-shrink-0" title="Lead-generator target you already email — verified relationship">verified</span>}
         </div>
         <div className="truncate text-stone-500 text-[13px] mt-0.5">{hideOrg ? (roleText(contact) || 'role unknown') : `${roleText(contact) || 'role unknown'}  ·  ${contact.organization || '—'}`}</div>
       </div>
@@ -338,7 +510,7 @@ function DirRow({
    ════════════════════════════════════════════════════════════════════ */
 
 function DirGroup({
-  org, members, expanded, onToggle, selectedId, checked, selectMode, onToggleCheck, onSelect, onOpenOrg,
+  org, members, expanded, onToggle, selectedId, checked, selectMode, onToggleCheck, onSelect, onOpenOrg, intel, onOpenAccount,
 }: {
   org: string
   members: UnifiedContact[]
@@ -350,39 +522,72 @@ function DirGroup({
   onToggleCheck: (id: number) => void
   onSelect: (id: number) => void
   onOpenOrg?: (org: string) => void
+  intel?: AccountIntel
+  onOpenAccount?: (org: string) => void
 }) {
   const dm = members.filter((m) => m.is_decision_maker).length
   const isMgmt = members.length > 0 && accountTypeOf(members[0]) === 'management_company'
   const tier = members.find((m) => m.brand_tier)?.brand_tier
   const allExisting = members.every((m) => stageOf(m) === 'existing')
+  // huge buckets (e.g. "No organization") would dump hundreds of rows into
+  // the DOM — preview the first 40 and expand on demand
+  const MEMBER_PREVIEW = 40
+  const [showAll, setShowAll] = useState(false)
+  const shown = showAll ? members : members.slice(0, MEMBER_PREVIEW)
+  const canIntel = !!onOpenAccount && !!intel && org !== 'No organization'
+  const isVendor = !!intel?.vendor
   return (
     <div className="mb-2" data-org={org}>
-      <button onClick={onToggle} className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl hover:bg-white transition-colors">
+      <div onClick={onToggle} className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl hover:bg-white transition-colors cursor-pointer">
         <ChevronRight className="w-3.5 h-3.5 text-stone-300 flex-shrink-0" style={{ transform: expanded ? 'rotate(90deg)' : 'none', transition: 'transform .18s ease' }} />
-        <span className={cn('w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0', isMgmt ? 'bg-violet-50' : 'bg-navy-50')}>
-          {isMgmt ? <Briefcase className="w-4 h-4 text-violet-500" /> : <Building2 className="w-4 h-4 text-navy-500" />}
-        </span>
+        <button
+          onClick={(e) => { if (!canIntel) return; e.stopPropagation(); onOpenAccount!(org) }}
+          title={canIntel ? 'Account intelligence — warm paths & gaps' : undefined}
+          className={cn('w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 transition-all',
+            isVendor ? 'bg-gold-50' : isMgmt ? 'bg-violet-50' : 'bg-navy-50',
+            canIntel && 'hover:ring-2 hover:ring-gold-300 hover:scale-105')}>
+          {isVendor ? <Package className="w-4 h-4 text-gold-600" /> : isMgmt ? <Briefcase className="w-4 h-4 text-violet-500" /> : <Building2 className="w-4 h-4 text-navy-500" />}
+        </button>
         <div className="min-w-0 text-left flex-1">
           <div className="flex items-center gap-2">
             <span className="truncate text-[15px] font-bold text-navy-900">{org}</span>
-            {isMgmt
-              ? <span className="text-[10px] font-semibold text-violet-600 flex-shrink-0">Mgmt co.</span>
-              : (tier && <span className="text-[10px] font-semibold text-gold-600 flex-shrink-0">{getTierLabel(tier)}</span>)}
+            {isVendor
+              ? <span className="text-[10px] font-semibold text-gold-600 flex-shrink-0">Vendor</span>
+              : isMgmt
+                ? <span className="text-[10px] font-semibold text-violet-600 flex-shrink-0">Mgmt co.</span>
+                : (tier && <span className="text-[10px] font-semibold text-gold-600 flex-shrink-0">{getTierLabel(tier)}</span>)}
             {allExisting && <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 flex-shrink-0" title="Existing customer" />}
           </div>
-          <div className="text-[12px] text-stone-500 mt-0.5">
-            {members.length} contact{members.length > 1 ? 's' : ''}{dm > 0 ? `  ·  ★ ${dm}` : ''}
+          <div className="text-[12px] text-stone-500 mt-0.5 flex items-center gap-1.5 flex-wrap">
+            <span>{members.length} contact{members.length > 1 ? 's' : ''}{dm > 0 ? `  ·  ★ ${dm}` : ''}</span>
+            {canIntel && intel!.warmth > 0 && (
+              <span className="inline-flex items-center gap-0.5 font-semibold" style={{ color: WARMTH_COLOR[intel!.level] }} title={`Warmth ${intel!.warmth} · ${intel!.emails} emails`}>
+                <Flame className="w-3 h-3" />{intel!.level}
+              </span>
+            )}
+            {canIntel && intel!.matches.length > 0 && (
+              <span className="font-semibold text-emerald-600" title="Lead-generator targets you already email">· {intel!.matches.length} verified</span>
+            )}
+            {canIntel && intel!.gaps.length > 0 && (
+              <span className="inline-flex items-center gap-0.5 font-semibold text-coral-500" title="Decision-makers with no email relationship yet">· <Target className="w-3 h-3" />{intel!.gaps.length} gap{intel!.gaps.length > 1 ? 's' : ''}</span>
+            )}
           </div>
         </div>
         <span className="text-[12px] text-stone-500 font-medium">{expanded ? 'Hide' : 'Show'}</span>
-      </button>
+      </div>
       {expanded && (
         <div className="pl-5 ml-4 border-l border-stone-200/70 mt-1 space-y-0.5">
-          {members.map((c) => (
+          {shown.map((c) => (
             <DirRow key={c.id} contact={c} selected={c.id === selectedId} hideOrg
               selectMode={selectMode} checked={checked.has(c.id)}
               onOpen={() => onSelect(c.id)} onToggleCheck={() => onToggleCheck(c.id)} onOpenOrg={onOpenOrg} />
           ))}
+          {!showAll && members.length > MEMBER_PREVIEW && (
+            <button onClick={() => setShowAll(true)}
+              className="w-full text-left pl-3 py-2 text-[12px] font-semibold text-navy-600 hover:text-navy-800 hover:underline">
+              Show all {members.length.toLocaleString()} people
+            </button>
+          )}
         </div>
       )}
     </div>
@@ -402,6 +607,7 @@ const ENRICH_STEPS = [
 
 function AIBand({ contact }: { contact: InboxContact }) {
   const deepMut = useDeepEnrichContact()
+  const isLead = sourceOf(contact) === 'lead_generator'
   const [step, setStep] = useState(0)
   const [result, setResult] = useState<string | null>(null)
   const timer = useRef<number | null>(null)
@@ -448,11 +654,11 @@ function AIBand({ contact }: { contact: InboxContact }) {
             <span className="text-[10px] font-semibold text-white/40">· {confidencePct(contact)}% confidence</span>
           </div>
           <div className="flex items-center gap-2">
-            {emailMissing && !deepMut.isPending && (
+            {!isLead && emailMissing && !deepMut.isPending && (
               <button onClick={() => runEnrich(true)} title="Uses Wiza credits"
                 className="inline-flex items-center h-7 px-3 rounded-lg text-[11px] font-bold text-white/90 ring-1 ring-white/25 hover:bg-white/10 transition-all">Find Email</button>
             )}
-            {!deepMut.isPending && (
+            {!isLead && !deepMut.isPending && (
               <button onClick={() => runEnrich(false)}
                 className="inline-flex items-center gap-1.5 h-7 px-3 rounded-lg text-[11px] font-bold text-navy-900 bg-gold-300 hover:bg-gold-200 transition-all active:scale-95">
                 <Wand2 className="w-3 h-3" />{result ? 'Re-run' : 'Deep Enrich'}
@@ -557,7 +763,7 @@ function Timeline({ contact }: { contact: UnifiedContact }) {
           <>
             <div className="w-px h-9 bg-stone-200" />
             <div>
-              <div className="text-2xl font-bold tabular-nums leading-none" style={{ color: contact.opportunity_score >= 75 ? '#e85d4a' : '#c49a3c' }}>{contact.opportunity_score}</div>
+              <div className="text-2xl font-bold tabular-nums leading-none" style={{ color: contact.opportunity_score >= 75 ? '#e85d4a' : '#c49a3c' }}>{Math.round(contact.opportunity_score)}</div>
               <div className="text-[10px] uppercase tracking-wide font-bold text-stone-400 mt-1">Opp score</div>
             </div>
           </>
@@ -608,7 +814,7 @@ function ActionBtn({ icon, label, primary, done, tone, onClick, disabled }: {
   return <button onClick={onClick} disabled={disabled} className={cn(base, 'bg-white text-navy-700 ring-1 ring-stone-200 hover:ring-stone-300 hover:bg-stone-50')}>{icon} {label}</button>
 }
 
-function ProfilePanel({ contact, onDeleted }: { contact: InboxContact | null; onDeleted: () => void }) {
+function ProfilePanel({ contact, onDeleted }: { contact: UnifiedContact | null; onDeleted: () => void }) {
   const approveMut = useApproveInboxContact()
   const deleteMut = useDeleteInboxContact()
   const [confirmDelete, setConfirmDelete] = useState(false)
@@ -627,6 +833,7 @@ function ProfilePanel({ contact, onDeleted }: { contact: InboxContact | null; on
 
   const crm = inCrm(contact)
   const approved = contact.approval_status === 'approved' || crm
+  const isLead = sourceOf(contact) === 'lead_generator'
 
   function handleDelete() {
     if (!confirmDelete) { setConfirmDelete(true); return }
@@ -646,6 +853,12 @@ function ProfilePanel({ contact, onDeleted }: { contact: InboxContact | null; on
               {contact.is_decision_maker && (
                 <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-gold-400 text-navy-900">
                   <Star className="w-2.5 h-2.5" fill="#0f1d32" strokeWidth={0} /> DECISION-MAKER
+                </span>
+              )}
+              {contact.target_match && (
+                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/20 text-emerald-200 ring-1 ring-emerald-300/30"
+                  title="The lead generator independently identified this person as a target — and you already email them">
+                  <Target className="w-2.5 h-2.5" /> VERIFIED TARGET{contact.target_priority ? ` · ${contact.target_priority}` : ''}
                 </span>
               )}
               {approved && (
@@ -678,17 +891,30 @@ function ProfilePanel({ contact, onDeleted }: { contact: InboxContact | null; on
           {contact.phone && <ActionBtn icon={<Phone className="w-4 h-4" />} label="Call" onClick={() => (window.location.href = `tel:${contact.phone}`)} />}
           {contact.linkedin_url && <ActionBtn icon={<Linkedin className="w-4 h-4" />} label="LinkedIn" onClick={() => window.open(contact.linkedin_url!, '_blank')} />}
           <div className="flex-1" />
-          {/* Reject (delete) */}
-          <button onClick={handleDelete} disabled={deleteMut.isPending}
-            className={cn('inline-flex items-center gap-2 h-9 px-3.5 rounded-lg text-[13px] font-semibold transition-all active:scale-[.97] disabled:opacity-60',
-              confirmDelete ? 'bg-coral-500 text-white' : 'bg-white/10 text-white/80 ring-1 ring-white/20 hover:bg-white/15')}>
-            <Trash2 className="w-4 h-4" /> {confirmDelete ? 'Confirm reject?' : 'Reject'}
-          </button>
-          {/* Approve / Push to CRM */}
-          <ActionBtn done={crm} primary={!crm} disabled={approveMut.isPending}
-            icon={<ExternalLink className="w-4 h-4" />}
-            label={crm ? 'In CRM' : approveMut.isPending ? 'Saving…' : approved ? 'Push to CRM' : 'Approve'}
-            onClick={() => approveMut.mutate(contact.id)} />
+          {isLead ? (
+            /* Lead-gen contacts live in the lead pipeline — approve/reject
+               here would hit the inbox-contacts table with a wrong ID. */
+            <div className="flex items-center gap-2">
+              {!contact.email && <LeadFindEmailBtn contact={contact} />}
+              <span className="inline-flex items-center gap-1.5 h-9 px-3.5 rounded-lg text-[12px] font-semibold bg-white/10 text-white/70 ring-1 ring-white/15">
+                <Radar className="w-3.5 h-3.5" /> Lead Generator contact
+              </span>
+            </div>
+          ) : (
+            <>
+              {/* Reject (delete) */}
+              <button onClick={handleDelete} disabled={deleteMut.isPending}
+                className={cn('inline-flex items-center gap-2 h-9 px-3.5 rounded-lg text-[13px] font-semibold transition-all active:scale-[.97] disabled:opacity-60',
+                  confirmDelete ? 'bg-coral-500 text-white' : 'bg-white/10 text-white/80 ring-1 ring-white/20 hover:bg-white/15')}>
+                <Trash2 className="w-4 h-4" /> {confirmDelete ? 'Confirm reject?' : 'Reject'}
+              </button>
+              {/* Approve / Push to CRM */}
+              <ActionBtn done={crm} primary={!crm} disabled={approveMut.isPending}
+                icon={<ExternalLink className="w-4 h-4" />}
+                label={crm ? 'In CRM' : approveMut.isPending ? 'Saving…' : approved ? 'Push to CRM' : 'Approve'}
+                onClick={() => approveMut.mutate(contact.id)} />
+            </>
+          )}
         </div>
       </div>
 
@@ -713,7 +939,7 @@ function ProfilePanel({ contact, onDeleted }: { contact: InboxContact | null; on
             <InfoRow icon={<Hash className="w-3.5 h-3.5" />} label="Management co." value={contact.management_company} />
             <InfoRow icon={<Shield className="w-3.5 h-3.5" />} label="GPO" value={contact.gpo} />
             <InfoRow icon={<Activity className="w-3.5 h-3.5" />} label="Opportunity"
-              value={contact.opportunity_level ? `${contact.opportunity_level}${contact.opportunity_score != null ? ` · ${contact.opportunity_score}/100` : ''}` : null} />
+              value={contact.opportunity_level ? `${contact.opportunity_level}${contact.opportunity_score != null ? ` · ${Math.round(contact.opportunity_score)}/100` : ''}` : null} />
             <InfoRow icon={<ExternalLink className="w-3.5 h-3.5" />} label="Matched lead" value={contact.matched_lead_id ? `#${contact.matched_lead_id}` : null} />
             <InfoRow icon={<ExternalLink className="w-3.5 h-3.5" />} label="Matched hotel" value={contact.matched_hotel_id ? `#${contact.matched_hotel_id}` : null} />
           </SectionCard>
@@ -727,6 +953,169 @@ function ProfilePanel({ contact, onDeleted }: { contact: InboxContact | null; on
             <p className="mt-1 leading-relaxed">{contact.priority_reason}</p>
           </div>
         )}
+      </div>
+    </div>
+  )
+}
+
+/* ════════════════════════════════════════════════════════════════════
+   ACCOUNT PANEL — the triangulation view for one account
+   ════════════════════════════════════════════════════════════════════ */
+
+function AccountPanel({ org, intel, onOpenContact }: {
+  org: string
+  intel: AccountIntel | undefined
+  onOpenContact: (id: number) => void
+}) {
+  if (!intel) {
+    return (
+      <div className="flex-1 flex flex-col items-center justify-center text-stone-400 bg-stone-100/40">
+        <Building2 className="w-11 h-11 text-stone-300 mb-3" />
+        <p className="text-sm font-semibold text-stone-500">No intelligence for this account yet</p>
+      </div>
+    )
+  }
+  const sample = intel.known[0] || intel.gaps[0]
+  const isMgmt = sample ? accountTypeOf(sample) === 'management_company' : false
+  const tier = [...intel.known, ...intel.gaps].find((m) => m.brand_tier)?.brand_tier
+  const stage = sample ? stageOf(sample) : 'potential'
+
+  return (
+    <div key={org} className="flex-1 overflow-y-auto bg-stone-100/50">
+      {/* hero */}
+      <div className="relative px-7 pt-7 pb-6 text-white overflow-hidden" style={{ background: 'linear-gradient(120deg,#0a1628 0%,#152844 60%,#1f3a5c 100%)' }}>
+        <div className="pointer-events-none absolute inset-0 opacity-60" style={{ background: 'radial-gradient(900px 300px at 90% -20%, rgba(212,168,83,.18), transparent 60%)' }} />
+        <div className="relative flex items-start gap-4">
+          <span className="w-14 h-14 rounded-2xl flex items-center justify-center flex-shrink-0 bg-white/10 ring-1 ring-white/20">
+            {isMgmt ? <Briefcase className="w-6 h-6 text-violet-300" /> : <Building2 className="w-6 h-6 text-gold-300" />}
+          </span>
+          <div className="min-w-0 flex-1">
+            <h2 className="text-[22px] font-bold leading-tight">{org}</h2>
+            <div className="flex items-center gap-2 mt-1.5 flex-wrap text-[12px] text-white/60">
+              {intel.vendor ? <span>Vendor / supplier</span> : isMgmt ? <span>Management company</span> : <span>Hotel account</span>}
+              {tier && <span>· {getTierLabel(tier)}</span>}
+              {!intel.vendor && <span>· {stage === 'existing' ? 'Existing customer' : 'Potential'}</span>}
+              {intel.oppScore != null && !intel.vendor && <span>· Opp {Math.round(intel.oppScore)}/100</span>}
+            </div>
+            <div className="flex items-center gap-2 mt-3 flex-wrap">
+              {!intel.vendor && (
+                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold ring-1 ring-white/20" style={{ background: 'rgba(255,255,255,.10)', color: WARMTH_COLOR[intel.level] }}>
+                  <Flame className="w-3 h-3" /> {intel.level.toUpperCase()} · {intel.warmth}
+                </span>
+              )}
+              {intel.matches.length > 0 && (
+                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/20 text-emerald-200 ring-1 ring-emerald-300/30">
+                  {intel.matches.length} VERIFIED DM{intel.matches.length > 1 ? 'S' : ''}
+                </span>
+              )}
+              {intel.gaps.length > 0 && (
+                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-coral-500/20 text-coral-200 ring-1 ring-coral-400/30">
+                  <Target className="w-3 h-3" /> {intel.gaps.length} GAP{intel.gaps.length > 1 ? 'S' : ''}
+                </span>
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div className="px-7 py-6 space-y-4">
+        {/* suggested play */}
+        {intel.play && (
+          <div className="relative overflow-hidden rounded-2xl text-white shadow-lift" style={{ background: 'linear-gradient(135deg,#0f1d32 0%,#1a2d4a 55%,#253d5e 100%)' }}>
+            <div className="pointer-events-none absolute -top-16 -right-10 w-56 h-56 rounded-full" style={{ background: 'radial-gradient(circle,rgba(212,168,83,.28),transparent 65%)' }} />
+            <div className="relative px-5 py-4">
+              <div className="flex items-center gap-2 mb-2">
+                <span className="inline-flex items-center justify-center w-6 h-6 rounded-lg bg-gold-400/20 ring-1 ring-gold-300/40"><Sparkles className="w-3.5 h-3.5 text-gold-300" /></span>
+                <h3 className="text-xs font-bold uppercase tracking-wider text-gold-200">Suggested play</h3>
+              </div>
+              <p className="text-[13.5px] leading-relaxed text-white/90">{intel.play}</p>
+            </div>
+          </div>
+        )}
+
+        {/* numbers strip */}
+        <div className="bg-white rounded-2xl ring-1 ring-stone-200/80 shadow-card px-5 py-4 flex items-center gap-5 flex-wrap">
+          <div><div className="text-2xl font-bold text-navy-900 tabular-nums leading-none">{intel.known.length}</div><div className="text-[10px] uppercase tracking-wide font-bold text-stone-400 mt-1">People known</div></div>
+          <div className="w-px h-9 bg-stone-200" />
+          <div><div className="text-2xl font-bold text-navy-900 tabular-nums leading-none">{intel.emails.toLocaleString()}</div><div className="text-[10px] uppercase tracking-wide font-bold text-stone-400 mt-1">Emails</div></div>
+          <div className="w-px h-9 bg-stone-200" />
+          <div><div className="text-2xl font-bold tabular-nums leading-none text-emerald-600">{intel.matches.length}</div><div className="text-[10px] uppercase tracking-wide font-bold text-stone-400 mt-1">Verified DMs</div></div>
+          <div className="w-px h-9 bg-stone-200" />
+          <div><div className="text-2xl font-bold tabular-nums leading-none text-coral-500">{intel.gaps.length}</div><div className="text-[10px] uppercase tracking-wide font-bold text-stone-400 mt-1">DM gaps</div></div>
+          {intel.lastTouch && (<><div className="w-px h-9 bg-stone-200" /><div><div className="text-2xl font-bold text-navy-900 leading-none">{relativeDate(intel.lastTouch)}</div><div className="text-[10px] uppercase tracking-wide font-bold text-stone-400 mt-1">Last touch</div></div></>)}
+        </div>
+
+        {/* warm paths */}
+        <SectionCard title={`Warm paths — who you already know (${intel.known.length})`} icon={<Flame className="w-3.5 h-3.5" />}>
+          {intel.known.length === 0 ? (
+            <p className="text-[13px] text-stone-400 py-1">No email relationships at this account yet — it's a cold account.</p>
+          ) : (
+            <div className="-mx-2">
+              {intel.known.slice(0, 8).map((c) => (
+                <div key={c.id} onClick={() => onOpenContact(c.id)}
+                  className="flex items-center gap-3 px-2 py-2 rounded-xl cursor-pointer hover:bg-stone-50 transition-colors">
+                  <Avatar contact={c} size={32} />
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-1.5">
+                      <span className="truncate text-[13px] font-semibold text-navy-900">{fullName(c)}</span>
+                      {c.target_match && <span className="text-[9px] font-bold text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded-full flex-shrink-0" title="Lead-generator target you already email">VERIFIED{c.target_priority ? ` · ${c.target_priority}` : ''}</span>}
+                    </div>
+                    <div className="truncate text-[12px] text-stone-500">{roleText(c) || 'role unknown'}</div>
+                  </div>
+                  <div className="text-right flex-shrink-0">
+                    <div className="text-[12px] font-semibold text-navy-700 tabular-nums">{c.interaction_count} emails</div>
+                    <div className="text-[11px] text-stone-400">{relativeDate(c.last_seen)}</div>
+                  </div>
+                  <ChevronRight className="w-4 h-4 text-stone-300 flex-shrink-0" />
+                </div>
+              ))}
+              {intel.known.length > 8 && <div className="px-2 pt-1 text-[11px] text-stone-400">+{intel.known.length - 8} more in the directory</div>}
+            </div>
+          )}
+        </SectionCard>
+
+        {/* gaps */}
+        <SectionCard title={`Decision-maker gaps — no relationship yet (${intel.gaps.length})`} icon={<Target className="w-3.5 h-3.5" />}>
+          {intel.gaps.length === 0 ? (
+            <p className="text-[13px] text-stone-400 py-1">No open gaps — every decision-maker the lead generator identified here is already in your inbox.</p>
+          ) : (
+            <div className="-mx-2">
+              {intel.gaps.map((c) => (
+                <div key={c.id} onClick={() => onOpenContact(c.id)}
+                  className="flex items-center gap-3 px-2 py-2 rounded-xl cursor-pointer hover:bg-stone-50 transition-colors">
+                  <Avatar contact={c} size={32} />
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-1.5">
+                      <span className="truncate text-[13px] font-semibold text-navy-900">{fullName(c)}</span>
+                      {c.procurement_priority && c.procurement_priority !== 'unknown' && (
+                        <span className="text-[9px] font-bold text-gold-700 bg-gold-50 px-1.5 py-0.5 rounded-full flex-shrink-0">{c.procurement_priority}</span>
+                      )}
+                    </div>
+                    <div className="truncate text-[12px] text-stone-500">{roleText(c) || 'decision-maker'}</div>
+                  </div>
+                  {c.linkedin_url && (
+                    <button onClick={(e) => { e.stopPropagation(); window.open(c.linkedin_url!, '_blank') }} title="LinkedIn outreach"
+                      className="w-8 h-8 rounded-lg bg-navy-50 hover:bg-navy-100 flex items-center justify-center text-navy-600 flex-shrink-0">
+                      <Linkedin className="w-4 h-4" />
+                    </button>
+                  )}
+                  {c.email && (
+                    <a href={`mailto:${c.email}`} onClick={(e) => e.stopPropagation()} title="Email"
+                      className="w-8 h-8 rounded-lg bg-stone-100 hover:bg-stone-200 flex items-center justify-center text-stone-500 flex-shrink-0">
+                      <Mail className="w-4 h-4" />
+                    </a>
+                  )}
+                  <ChevronRight className="w-4 h-4 text-stone-300 flex-shrink-0" />
+                </div>
+              ))}
+            </div>
+          )}
+          {intel.otherTargets > 0 && (
+            <div className="pt-2 mt-1 border-t border-stone-100 text-[11px] text-stone-400">
+              +{intel.otherTargets} more lead-generator contact{intel.otherTargets > 1 ? 's' : ''} here below P1/P2 — see the group list
+            </div>
+          )}
+        </SectionCard>
       </div>
     </div>
   )
@@ -765,6 +1154,30 @@ export default function ContactsPage() {
   const [view, setView] = useState<'accounts' | 'people'>('accounts')
   const [collapsedOrgs, setCollapsedOrgs] = useState<Set<string>>(new Set())
 
+  // search box is debounced — typing updates `draft` instantly, the actual
+  // filter (URL `q`) follows 180ms after the user pauses. Keeps keystrokes
+  // snappy: filtering+sorting ~7k contacts no longer runs on every key.
+  const [draft, setDraft] = useState(query)
+  useEffect(() => { setDraft(query) }, [query]) // external changes (clear, back/fwd)
+  useEffect(() => {
+    if (draft === query) return
+    const t = window.setTimeout(() => patch({ q: draft || null }), 180)
+    return () => window.clearTimeout(t)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [draft])
+
+  // render windows — only this many rows/groups hit the DOM; an invisible
+  // sentinel at the bottom grows the window as you scroll. This is what
+  // fixes the draggy feel: previously ALL ~7k contacts rendered at once.
+  const PEOPLE_CHUNK = 150
+  const GROUP_CHUNK = 60
+  const [visiblePeople, setVisiblePeople] = useState(PEOPLE_CHUNK)
+  const [visibleGroups, setVisibleGroups] = useState(GROUP_CHUNK)
+  useEffect(() => {
+    setVisiblePeople(PEOPLE_CHUNK)
+    setVisibleGroups(GROUP_CHUNK)
+  }, [query, category, status, dmOnly, source, account, lifecycle, sort, view])
+
   function patch(updates: Record<string, string | null>) {
     const next = new URLSearchParams(params)
     for (const [k, v] of Object.entries(updates)) {
@@ -777,20 +1190,67 @@ export default function ContactsPage() {
   // data — load the FULL table so account grouping + scope counts are real
   const statsQ = useInboxContactStats()
   const listQ = useAllInboxContacts('priority_score')
+  const leadQ = useAllLeadContacts()
   const syncMut = useTriggerInboxSync()
   const bulkApproveMut = useBulkApproveInboxContacts()
 
   const stats: InboxContactStats | undefined = statsQ.data
 
   // ╔══════════════════════════════════════════════════════════════════╗
-  // ║ MERGE POINT — unify email-scraped + lead-generator contacts here.  ║
-  // ║ `items` below is the inbox (email_scrape) list. To add lead-gen    ║
-  // ║ contacts, fetch them (e.g. useLeadContacts()) and concat, mapping  ║
-  // ║ each into the InboxContact shape with source: 'lead_generator'.    ║
-  // ║   const items = [...inboxItems, ...leadItems.map(toUnified)]       ║
+  // ║ MERGE POINT — email-scraped + lead-generator contacts, unified.    ║
+  // ║ Lead-gen rows whose email already exists in the inbox don't get    ║
+  // ║ dropped — they ANNOTATE the inbox contact (target_match): that     ║
+  // ║ overlap is the strongest triangulation signal, a verified          ║
+  // ║ decision-maker you already have an email relationship with. The    ║
+  // ║ lead copy also fills empty fields (title/phone/linkedin/priority). ║
+  // ║ Unmatched lead rows get IDs offset into their own range so they    ║
+  // ║ can never collide with inbox IDs in keys/selection/URL.            ║
   // ╚══════════════════════════════════════════════════════════════════╝
-  const items = (listQ.data?.items || []) as UnifiedContact[]
-  const total = listQ.data?.total || 0
+  const items = useMemo<UnifiedContact[]>(() => {
+    const inboxRaw = (listQ.data?.items || []) as UnifiedContact[]
+    const leadRaw = (leadQ.data?.items || []) as UnifiedContact[]
+    const leadByEmail = new Map<string, UnifiedContact>()
+    for (const lc of leadRaw) {
+      const e = (lc.email || '').toLowerCase()
+      if (e) leadByEmail.set(e, lc)
+    }
+    const matchedEmails = new Set<string>()
+    const inbox = inboxRaw.map((c) => {
+      const e = (c.email || '').toLowerCase()
+      const lc = e ? leadByEmail.get(e) : undefined
+      if (!lc) return c
+      matchedEmails.add(e)
+      return {
+        ...c,
+        target_match: true,
+        target_priority: lc.procurement_priority && lc.procurement_priority !== 'unknown' ? lc.procurement_priority : null,
+        target_reasoning: lc.priority_reason || lc.background || null,
+        is_decision_maker: c.is_decision_maker || lc.is_decision_maker,
+        // fill-empty enrichment from the lead generator's research
+        title: c.title || lc.title,
+        phone: c.phone || lc.phone,
+        linkedin_url: c.linkedin_url || lc.linkedin_url,
+        background: c.background || lc.background,
+        priority_reason: c.priority_reason || lc.priority_reason,
+        brand_tier: c.brand_tier || lc.brand_tier,
+        management_company: c.management_company || lc.management_company,
+        opportunity_score: c.opportunity_score ?? lc.opportunity_score,
+        opportunity_level: c.opportunity_level || lc.opportunity_level,
+        matched_lead_id: c.matched_lead_id ?? lc.matched_lead_id,
+        matched_hotel_id: c.matched_hotel_id ?? lc.matched_hotel_id,
+      }
+    })
+    const leads = leadRaw
+      .filter((c) => !c.email || !matchedEmails.has(c.email.toLowerCase()))
+      .map((c) => ({ ...c, id: c.id + LEAD_ID_OFFSET }))
+    const merged = [...inbox, ...leads]
+    // Junk costs ZERO everywhere (2026-06-04): excluded from header counts,
+    // account groups, warmth math and search. Rows stay in the DB only for
+    // reversibility; the Category facet's Junk option flips to an audit view.
+    if (category === 'junk') return merged.filter((c) => c.contact_category === 'junk')
+    return merged.filter((c) => c.contact_category !== 'junk')
+  }, [listQ.data, leadQ.data, category])
+  const total = items.length
 
   // scope counts (computed over the loaded page; for full-inbox totals expose these from the backend)
   const scope = useMemo(() => {
@@ -805,10 +1265,58 @@ export default function ContactsPage() {
     return { ...s, hotelAccounts: hotelAccts.size, mgmtAccounts: mgmtAccts.size }
   }, [items])
 
+  // search index — haystacks built once per data load, reused on every keystroke
+  const indexed = useMemo(() => items.map((c) => ({ c, hay: buildHaystack(c) })), [items])
+
+  // ── TRIANGULATION — per-account intelligence over the FULL dataset ──
+  // (intentionally unfiltered: an account's warmth/gaps shouldn't change
+  // when you narrow the list)
+  const accountIntel = useMemo(() => {
+    const buckets = new Map<string, UnifiedContact[]>()
+    for (const c of items) {
+      const k = c.organization || 'No organization'
+      if (!buckets.has(k)) buckets.set(k, [])
+      buckets.get(k)!.push(c)
+    }
+    const m = new Map<string, AccountIntel>()
+    for (const [org, members] of buckets) {
+      const sellers = members.filter((c) => c.contact_category === 'seller').length
+      const vendor = members.length > 0 && sellers / members.length > 0.5
+      const known = members
+        .filter((c) => sourceOf(c) === 'email_scrape' && isRelationshipContact(c))
+        .sort((a, b) => (b.interaction_count || 0) - (a.interaction_count || 0))
+      const targets = members.filter((c) => sourceOf(c) === 'lead_generator')
+      const matches = known.filter((c) => c.target_match)
+      const gaps = targets.filter((c) => c.is_decision_maker)
+      const emails = known.reduce((s, c) => s + (c.interaction_count || 0), 0)
+      const warmth = vendor ? 0 : accountWarmth(known)
+      const lastTouch = known.reduce<string | null>(
+        (mx, c) => (c.last_seen && (!mx || c.last_seen > mx) ? c.last_seen : mx), null)
+      const oppScore = members.reduce<number | null>(
+        (mx, c) => (c.opportunity_score != null && (mx == null || c.opportunity_score > mx) ? c.opportunity_score : mx), null)
+      const best = matches[0] || known[0]
+      const gap = gaps[0]
+      let play = ''
+      if (vendor) play = 'Supplier to JA — not a sales target. Excluded from warm-path triangulation.'
+      else if (best && gap) play = `Warm path: ${fullName(best)} (${roleText(best) || 'your contact'}) → ask for an intro to ${fullName(gap)} (${roleText(gap) || 'decision-maker'}).`
+      else if (best && matches.length) play = 'Verified decision-maker relationship — keep it warm.'
+      else if (best) play = 'Relationship account — no open decision-maker gaps from the lead generator.'
+      else if (gap) play = `Cold account — no email relationship yet. LinkedIn outreach to ${fullName(gap)}${gaps.length > 1 ? ` (+${gaps.length - 1} more)` : ''}.`
+      m.set(org, {
+        known, matches, gaps,
+        otherTargets: targets.length - gaps.length,
+        warmth, level: warmthLevel(warmth), emails, lastTouch, oppScore, play, vendor,
+      })
+    }
+    return m
+  }, [items])
+  const intelOf = (c: UnifiedContact) => accountIntel.get(c.organization || 'No organization')
+
   // client-side refine + sort
   const filtered = useMemo(() => {
-    let list = items.filter((c) => smartMatch(c, query))
-    if (category) list = list.filter((c) => c.contact_category === category)
+    const t = query.toLowerCase().trim()
+    let list = t ? indexed.filter(({ c, hay }) => smartMatch(c, hay, t)).map(({ c }) => c) : items
+    if (category && category !== 'junk') list = list.filter((c) => c.contact_category === category)
     if (status) list = list.filter((c) => c.approval_status === status)
     if (dmOnly) list = list.filter((c) => c.is_decision_maker)
     if (source) list = list.filter((c) => sourceOf(c) === source)
@@ -822,9 +1330,12 @@ export default function ContactsPage() {
       oldest: (a, b) => new Date(a.first_seen || 0).getTime() - new Date(b.first_seen || 0).getTime(),
       name: (a, b) => `${a.first_name || ''} ${a.last_name || ''}`.trim().localeCompare(`${b.first_name || ''} ${b.last_name || ''}`.trim()),
       org: (a, b) => (a.organization || '~').localeCompare(b.organization || '~') || `${a.first_name || ''}${a.last_name || ''}`.localeCompare(`${b.first_name || ''}${b.last_name || ''}`),
+      warmth: (a, b) => (intelOf(b)?.warmth || 0) - (intelOf(a)?.warmth || 0),
+      gaps: (a, b) => (intelOf(b)?.gaps.length || 0) - (intelOf(a)?.gaps.length || 0),
     }
     return [...list].sort(sorters[sort])
-  }, [items, query, category, status, dmOnly, source, account, lifecycle, sort])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [items, indexed, accountIntel, query, category, status, dmOnly, source, account, lifecycle, sort])
 
   // group filtered contacts by account (hotel OR management company)
   const groups = useMemo(() => {
@@ -835,8 +1346,98 @@ export default function ContactsPage() {
       m.get(k)!.push(c)
     }
     // keep insertion order so account groups follow the active Sort (e.g. Company A–Z, Newest added)
-    return [...m.entries()]
-  }, [filtered])
+    let entries = [...m.entries()]
+    if (sort === 'warmth') entries = entries.sort((a, b) => (accountIntel.get(b[0])?.warmth || 0) - (accountIntel.get(a[0])?.warmth || 0))
+    else if (sort === 'gaps') entries = entries.sort((a, b) => (accountIntel.get(b[0])?.gaps.length || 0) - (accountIntel.get(a[0])?.gaps.length || 0))
+    return entries
+  }, [filtered, sort, accountIntel])
+
+  // ── Two-level account tree (2026-06-04) ──
+  // parent_company (chains) wins over domain family (independents with
+  // multiple properties on one email domain). Singletons stay flat.
+  // mode with an evidence bar (2026-06-04): a parent claim must appear on
+  // >=2 rows, or be a lone vote only in a tiny (<=2 member) group. Without
+  // this, one Towne Park employee stationed at a Loews property dragged all
+  // 108 Towne Park contacts under the Loews account tree.
+  function strongModeOf(values: Array<string | null | undefined>, total: number): string | null {
+    const counts = new Map<string, number>()
+    for (const v of values) {
+      const t = (v || '').trim()
+      if (t) counts.set(t, (counts.get(t) || 0) + 1)
+    }
+    let best: string | null = null
+    let n = 0
+    for (const [v, c] of counts) if (c > n) { best = v; n = c }
+    if (!best) return null
+    if (n >= 2) return best
+    return total <= 2 ? best : null
+  }
+
+  const groupTree = useMemo<TreeSection[]>(() => {
+    const pcOf = new Map<string, string>()
+    const domOf = new Map<string, string>()
+    for (const [org, members] of groups) {
+      if (org === 'No organization') continue
+      // chains via parent_company; operator relationships via
+      // management_company (the River Market GM with a Crestline email
+      // nests his property under the Crestline parent)
+      const pc = strongModeOf(members.map((m) => m.parent_company), members.length)
+        || strongModeOf(members.map((m) => m.management_company), members.length)
+      if (pc && pc.trim().toLowerCase() !== org.trim().toLowerCase()) pcOf.set(org, pc)
+      const dom = modeOf(members.map((m) => workDomainOf(m.email)))
+      if (dom) domOf.set(org, dom)
+    }
+    const famCount = new Map<string, number>()
+    for (const [org] of groups) {
+      const pc = pcOf.get(org)
+      const k = pc ? 'pc:' + pc.toLowerCase() : domOf.has(org) ? 'dom:' + domOf.get(org) : null
+      if (k) famCount.set(k, (famCount.get(k) || 0) + 1)
+    }
+    const sections: TreeSection[] = []
+    const secIdx = new Map<string, number>()
+    for (const entry of groups) {
+      const [org] = entry
+      let key = 'flat:' + org
+      let label: string | null = null
+      const pc = pcOf.get(org)
+      if (pc && (famCount.get('pc:' + pc.toLowerCase()) || 0) >= 2) {
+        key = 'pc:' + pc.toLowerCase()
+        label = pc
+      } else if (!pc && domOf.has(org) && (famCount.get('dom:' + domOf.get(org)) || 0) >= 2) {
+        key = 'dom:' + domOf.get(org)
+        label = domOf.get(org)!
+      }
+      let i = secIdx.get(key)
+      if (i === undefined) {
+        i = sections.length
+        secIdx.set(key, i)
+        sections.push({ key, label, children: [] })
+      }
+      sections[i].children.push(entry)
+    }
+    for (const s of sections) {
+      if (s.children.length < 2) { s.label = null; continue }
+      if (s.key.startsWith('dom:')) s.label = commonTokenPrefix(s.children.map(([o]) => o)) || s.label
+    }
+    // absorb an operator's OWN corporate group into its family so
+    // "Crestline Hotels & Resorts" sits as the first child under the
+    // Crestline parent header instead of floating beside it
+    const byLabel = new Map<string, TreeSection>()
+    for (const s of sections) if (s.label && s.children.length >= 2) byLabel.set(s.label.trim().toLowerCase(), s)
+    const absorbed = new Set<number>()
+    sections.forEach((s, i) => {
+      if (s.children.length !== 1 || s.label) {
+        return
+      }
+      const org = s.children[0][0]
+      const fam = byLabel.get(org.trim().toLowerCase())
+      if (fam && fam !== s) {
+        fam.children.unshift(s.children[0])
+        absorbed.add(i)
+      }
+    })
+    return sections.filter((_, i) => !absorbed.has(i))
+  }, [groups])
 
   const hotelGroups = groups.filter(([, m]) => accountTypeOf(m[0]) === 'hotel').length
   const mgmtGroups = groups.filter(([, m]) => accountTypeOf(m[0]) === 'management_company').length
@@ -848,8 +1449,31 @@ export default function ContactsPage() {
   const smartActive = query.trim().length > 0
   const selectMode = selected.size > 0
 
-  function openContact(id: number) { patch({ selected: String(id) }); setDrawerOpen(true) }
-  function closeDrawer() { setDrawerOpen(false) }
+  // grow the render window when the bottom sentinel scrolls into view
+  const moreRef = useRef<HTMLDivElement | null>(null)
+  useEffect(() => {
+    const el = moreRef.current
+    if (!el) return
+    const io = new IntersectionObserver(
+      (entries) => {
+        if (entries[0]?.isIntersecting) {
+          if (view === 'people') setVisiblePeople((v) => v + PEOPLE_CHUNK)
+          else setVisibleGroups((v) => v + GROUP_CHUNK)
+        }
+      },
+      { rootMargin: '600px' },
+    )
+    io.observe(el)
+    return () => io.disconnect()
+    // re-create after each grow so it re-fires if the sentinel is still in view
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [view, filtered.length, groups.length, visiblePeople, visibleGroups])
+
+  // drawer shows EITHER a contact profile OR an account's triangulation panel
+  const [accountOrg, setAccountOrg] = useState<string | null>(null)
+  function openContact(id: number) { setAccountOrg(null); patch({ selected: String(id) }); setDrawerOpen(true) }
+  function openAccount(org: string) { patch({ selected: null }); setAccountOrg(org); setDrawerOpen(true) }
+  function closeDrawer() { setDrawerOpen(false); setAccountOrg(null) }
   function go(delta: number) { const n = filtered[idx + delta]; if (n) patch({ selected: String(n.id) }) }
   function onDeleted() {
     const n = filtered[idx + 1] || filtered[idx - 1] || null
@@ -862,13 +1486,14 @@ export default function ContactsPage() {
     function onKey(e: KeyboardEvent) {
       if (!drawerOpen) return
       if (e.key === 'Escape') closeDrawer()
+      else if (accountOrg) return // account mode — no contact stepping
       else if (e.key === 'ArrowDown') { e.preventDefault(); go(1) }
       else if (e.key === 'ArrowUp') { e.preventDefault(); go(-1) }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [drawerOpen, idx, filtered])
+  }, [drawerOpen, accountOrg, idx, filtered])
 
   function toggleOrg(org: string) {
     setCollapsedOrgs((prev) => {
@@ -882,6 +1507,9 @@ export default function ContactsPage() {
   function openOrg(org: string) {
     setView('accounts')
     setCollapsedOrgs((prev) => { const next = new Set(prev); next.delete(org); return next })
+    // the target group must be rendered before we can scroll to it
+    const gi = groups.findIndex(([o]) => o === org)
+    if (gi >= 0) setVisibleGroups((v) => Math.max(v, gi + 3))
     const sel = `[data-org="${window.CSS && CSS.escape ? CSS.escape(org) : org}"]`
     let tries = 0
     const tick = () => {
@@ -909,7 +1537,7 @@ export default function ContactsPage() {
   }
   function clearSelection() { setSelected(new Set()) }
   function bulkApprove() { bulkApproveMut.mutate(Array.from(selected), { onSuccess: clearSelection }) }
-  function selectAllVisible() { setSelected(new Set(filtered.map((c) => c.id))) }
+  function selectAllVisible() { setSelected(new Set(filtered.filter((c) => sourceOf(c) !== 'lead_generator').map((c) => c.id))) }
 
   return (
     <div className="h-full overflow-hidden bg-stone-50" style={{ display: 'grid', gridTemplateColumns: drawerOpen ? '1fr 600px' : '1fr 0px', transition: 'grid-template-columns .28s cubic-bezier(.16,1,.3,1)' }}>
@@ -922,7 +1550,7 @@ export default function ContactsPage() {
           <div>
             <h1 className="text-2xl font-bold text-navy-900 leading-none tracking-tight">Contacts</h1>
             <p className="text-[13px] text-stone-500 mt-2">
-              <span className="text-stone-600 font-semibold tabular-nums">{(stats?.total ?? total).toLocaleString()}</span> people across{' '}
+              <span className="text-stone-600 font-semibold tabular-nums">{(total || stats?.total || 0).toLocaleString()}</span> people across{' '}
               <span className="text-stone-600 font-semibold tabular-nums">{scope.hotelAccounts} hotels</span> and{' '}
               <span className="text-stone-600 font-semibold tabular-nums">{scope.mgmtAccounts} management companies</span>
             </p>
@@ -940,11 +1568,11 @@ export default function ContactsPage() {
             style={focused ? { boxShadow: '0 0 0 4px rgba(46,74,110,.07)' } : undefined}>
             <div className="flex items-center gap-3 px-4 h-12">
               <Sparkles className="w-[18px] h-[18px] flex-shrink-0 text-navy-600" />
-              <input value={query} onChange={(e) => patch({ q: e.target.value || null })}
+              <input value={draft} onChange={(e) => setDraft(e.target.value)}
                 onFocus={() => setFocused(true)} onBlur={() => setFocused(false)}
                 placeholder='Search anyone — a name, a hotel, a company, or a role like "director of procurement"'
                 className="flex-1 bg-transparent outline-none text-[15px] text-navy-900 placeholder:text-stone-400" />
-              {query && <button onClick={() => patch({ q: null })} className="text-stone-400 hover:text-stone-600"><X className="w-[17px] h-[17px]" /></button>}
+              {draft && <button onClick={() => { setDraft(''); patch({ q: null }) }} className="text-stone-400 hover:text-stone-600"><X className="w-[17px] h-[17px]" /></button>}
             </div>
           </div>
         </div>
@@ -971,6 +1599,8 @@ export default function ContactsPage() {
             { v: 'buyer', label: 'Buyers', dot: '#1a7a55', count: stats?.buyer },
             { v: 'seller', label: 'Sellers', dot: '#c49a3c', count: stats?.seller },
             { v: 'competitor', label: 'Competitors', dot: '#e85d4a', count: stats?.competitor },
+            { v: 'personal', label: 'Personal' },
+            { v: 'junk', label: 'Junk (hidden by default)', dot: '#9ca3af' },
           ]} />
           <Facet label="Status" value={status || 'all'} onChange={(v) => patch({ status: v === 'all' ? null : v })} options={[
             { v: 'all', label: 'Any status' },
@@ -995,6 +1625,8 @@ export default function ContactsPage() {
           ]} />
           <Facet align="right" label="Sort" value={sort} onChange={(v) => patch({ sort: v })} options={[
             { v: 'confidence', label: 'Top match' },
+            { v: 'warmth', label: 'Warmest account', icon: Flame },
+            { v: 'gaps', label: 'Most DM gaps', icon: Target },
             { v: 'name', label: 'Name A–Z' },
             { v: 'org', label: 'Company A–Z' },
             { v: 'newest', label: 'Newest added' },
@@ -1015,7 +1647,7 @@ export default function ContactsPage() {
 
         {/* body */}
         <div className="flex-1 overflow-y-auto px-6 pb-24">
-          {listQ.isLoading ? (
+          {listQ.isLoading || leadQ.isLoading ? (
             <div className="space-y-2 px-1 pt-1 max-w-[1320px] mx-auto">
               {Array.from({ length: 10 }).map((_, i) => <div key={i} className="h-[60px] rounded-xl bg-stone-100 animate-pulse" />)}
             </div>
@@ -1027,20 +1659,72 @@ export default function ContactsPage() {
             </div>
           ) : view === 'people' ? (
             <div className="max-w-[1320px] mx-auto space-y-0.5">
-              {filtered.map((c) => (
+              {filtered.slice(0, visiblePeople).map((c) => (
                 <DirRow key={c.id} contact={c} selected={c.id === selectedId} selectMode={selectMode} checked={selected.has(c.id)}
                   onOpen={() => openContact(c.id)} onToggleCheck={() => toggleCheck(c.id)} onOpenOrg={openOrg} />
               ))}
+              {filtered.length > visiblePeople && (
+                <div ref={moreRef} className="py-4 text-center text-[12px] text-stone-400">
+                  Showing {visiblePeople.toLocaleString()} of {filtered.length.toLocaleString()} — scroll for more
+                </div>
+              )}
             </div>
           ) : (
             <div className="max-w-[1320px] mx-auto">
-              {groups.map(([org, members]) => (
-                <DirGroup key={org} org={org} members={members}
-                  expanded={smartActive || !collapsedOrgs.has(org)}
-                  onToggle={() => toggleOrg(org)}
-                  selectedId={selectedId} checked={selected} selectMode={selectMode}
-                  onToggleCheck={toggleCheck} onSelect={openContact} onOpenOrg={openOrg} />
-              ))}
+              {(() => {
+                const out: ReactNode[] = []
+                let used = 0
+                for (const sec of groupTree) {
+                  if (used >= visibleGroups) break
+                  const kids = sec.children.slice(0, Math.max(0, visibleGroups - used))
+                  used += kids.length
+                  const renderGroup = ([org, members]: GroupEntry) => (
+                    <DirGroup key={org} org={org} members={members}
+                      expanded={smartActive || !collapsedOrgs.has(org)}
+                      onToggle={() => toggleOrg(org)}
+                      selectedId={selectedId} checked={selected} selectMode={selectMode}
+                      onToggleCheck={toggleCheck} onSelect={openContact} onOpenOrg={openOrg}
+                      intel={accountIntel.get(org)} onOpenAccount={openAccount} />
+                  )
+                  if (sec.label && sec.children.length >= 2) {
+                    const totalContacts = sec.children.reduce((n, [, m]) => n + m.length, 0)
+                    const warmth = sec.children.reduce((n, [o]) => n + (accountIntel.get(o)?.warmth || 0), 0)
+                    const gapTotal = sec.children.reduce((n, [o]) => n + (accountIntel.get(o)?.gaps.length || 0), 0)
+                    out.push(
+                      <div key={'hdr:' + sec.key} className="flex items-center gap-2 mt-5 mb-1 px-2">
+                        <Layers className="w-4 h-4 text-navy-500" />
+                        <span className="font-semibold text-[14px] text-navy-800">{sec.label}</span>
+                        <span className="text-[12px] text-stone-500">
+                          {sec.children.length} properties · {totalContacts} contacts
+                        </span>
+                        {warmth > 0 && (
+                          <span className="inline-flex items-center gap-0.5 text-[12px] font-semibold text-orange-600">
+                            <Flame className="w-3.5 h-3.5" />{Math.round(warmth)}
+                          </span>
+                        )}
+                        {gapTotal > 0 && (
+                          <span className="inline-flex items-center gap-0.5 text-[12px] font-semibold text-rose-600">
+                            <Target className="w-3.5 h-3.5" />{gapTotal} gaps
+                          </span>
+                        )}
+                      </div>,
+                    )
+                    out.push(
+                      <div key={'kids:' + sec.key} className="border-l-2 border-stone-200 ml-3 pl-2">
+                        {kids.map(renderGroup)}
+                      </div>,
+                    )
+                  } else {
+                    for (const entry of kids) out.push(renderGroup(entry))
+                  }
+                }
+                return out
+              })()}
+              {groups.length > visibleGroups && (
+                <div ref={moreRef} className="py-4 text-center text-[12px] text-stone-400">
+                  Showing {visibleGroups.toLocaleString()} of {groups.length.toLocaleString()} accounts — scroll for more
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -1049,7 +1733,7 @@ export default function ContactsPage() {
         {selectMode && (
           <div className="absolute bottom-4 left-1/2 -translate-x-1/2 px-4 py-2.5 rounded-xl bg-navy-900 text-white shadow-lift flex items-center gap-3 z-10">
             <span className="text-xs font-bold tabular-nums">{selected.size} selected</span>
-            <button onClick={selectAllVisible} className="text-[11px] font-semibold text-white/60 hover:text-white">Select all {filtered.length}</button>
+            <button onClick={selectAllVisible} className="text-[11px] font-semibold text-white/60 hover:text-white">Select all {filtered.filter((c) => sourceOf(c) !== 'lead_generator').length}</button>
             <div className="w-px h-4 bg-white/20" />
             <button onClick={clearSelection} className="text-[11px] font-semibold text-white/60 hover:text-white">Clear</button>
             <button onClick={bulkApprove} disabled={bulkApproveMut.isPending}
@@ -1065,23 +1749,29 @@ export default function ContactsPage() {
       <div className={cn('overflow-hidden bg-stone-100', drawerOpen && 'border-l border-stone-200')}>
         <div className="h-full flex flex-col" style={{ width: 600 }}>
           <div className="flex-shrink-0 h-12 px-2.5 bg-white border-b border-stone-200 flex items-center justify-between">
-            <div className="flex items-center gap-0.5">
-              <button onClick={() => go(-1)} disabled={idx <= 0} title="Previous (↑)"
+            <div className="flex items-center gap-0.5 min-w-0">
+              <button onClick={() => go(-1)} disabled={!!accountOrg || idx <= 0} title="Previous (↑)"
                 className="w-8 h-8 rounded-lg hover:bg-stone-100 flex items-center justify-center text-stone-500 disabled:opacity-30">
                 <ChevronRight className="w-[18px] h-[18px]" style={{ transform: 'rotate(180deg)' }} />
               </button>
-              <button onClick={() => go(1)} disabled={idx >= filtered.length - 1} title="Next (↓)"
+              <button onClick={() => go(1)} disabled={!!accountOrg || idx >= filtered.length - 1} title="Next (↓)"
                 className="w-8 h-8 rounded-lg hover:bg-stone-100 flex items-center justify-center text-stone-500 disabled:opacity-30">
                 <ChevronRight className="w-[18px] h-[18px]" />
               </button>
-              {idx >= 0 && <span className="text-[11px] text-stone-400 ml-1.5 tabular-nums font-semibold">{idx + 1} of {filtered.length}</span>}
+              {accountOrg
+                ? <span className="text-[11px] text-stone-400 ml-1.5 font-semibold inline-flex items-center gap-1 truncate"><Building2 className="w-3 h-3 flex-shrink-0" /> Account intelligence</span>
+                : (idx >= 0 && <span className="text-[11px] text-stone-400 ml-1.5 tabular-nums font-semibold">{idx + 1} of {filtered.length}</span>)}
             </div>
             <button onClick={closeDrawer} className="inline-flex items-center gap-1.5 h-8 px-3 rounded-lg text-[12px] font-semibold text-stone-500 hover:bg-stone-100 transition">
               <X className="w-[15px] h-[15px]" /> Close
             </button>
           </div>
           <div className="flex-1 overflow-hidden flex flex-col">
-            {drawerOpen && activeContact ? <ProfilePanel contact={activeContact} onDeleted={onDeleted} /> : null}
+            {drawerOpen && accountOrg
+              ? <AccountPanel org={accountOrg} intel={accountIntel.get(accountOrg)} onOpenContact={openContact} />
+              : drawerOpen && activeContact
+                ? <ProfilePanel contact={activeContact} onDeleted={onDeleted} />
+                : null}
           </div>
         </div>
       </div>

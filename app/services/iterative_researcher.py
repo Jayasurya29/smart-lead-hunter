@@ -58,9 +58,7 @@ class ResearchState:
     country: Optional[str] = None
     opening_date: Optional[str] = None
     timeline_label: Optional[str] = None  # URGENT | HOT | WARM | COOL | EXPIRED
-    project_type: Optional[str] = (
-        None  # new_opening | renovation | rebrand | ownership_change
-    )
+    project_type: Optional[str] = None  # new_opening | renovation | rebrand | ownership_change
     search_name: Optional[str] = None  # Stripped name for queries ("Kali Hotel")
     former_names: Optional[list] = None  # Previous names ["Montage Kapalua Bay"]
     description: Optional[str] = None  # DB description field — richer classifier input
@@ -83,21 +81,15 @@ class ResearchState:
     )
     region_term: Optional[str] = None  # "Caribbean"
     cluster_siblings: list[str] = field(default_factory=list)
-    project_stage: Optional[str] = (
-        None  # "greenfield" | "renovation" | "reopening" | "conversion"
-    )
+    project_stage: Optional[str] = None  # "greenfield" | "renovation" | "reopening" | "conversion"
     has_named_gm: bool = False
-    discovered_names: list[dict] = field(
-        default_factory=list
-    )  # {name, title, source_url, scope}
+    discovered_names: list[dict] = field(default_factory=list)  # {name, title, source_url, scope}
 
     # ── Company verification (Shift A) ──
     verified_current_companies: list[str] = field(
         default_factory=list
     )  # companies confirmed currently in charge
-    historical_companies: list[str] = field(
-        default_factory=list
-    )  # past owners/operators to skip
+    historical_companies: list[str] = field(default_factory=list)  # past owners/operators to skip
 
     # ── Bookkeeping ──
     queries_run: list[str] = field(default_factory=list)
@@ -245,14 +237,11 @@ async def iteration_1_discovery(state: ResearchState) -> int:
             if owner_data:
                 if not state.owner_company and owner_data.get("owner_company"):
                     state.owner_company = owner_data["owner_company"]
-                    logger.info(
-                        f"[ITER 1] Owner extracted: " f"{state.owner_company!r}"
-                    )
+                    logger.info(f"[ITER 1] Owner extracted: " f"{state.owner_company!r}")
                 if not state.owner_principal and owner_data.get("owner_principal"):
                     state.owner_principal = owner_data["owner_principal"]
                     logger.info(
-                        f"[ITER 1] Owner principal extracted: "
-                        f"{state.owner_principal!r}"
+                        f"[ITER 1] Owner principal extracted: " f"{state.owner_principal!r}"
                     )
                 # ── Synthesize a contact entry for the owner principal ──
                 # Without this, the Iter 6 strategist would see the owner
@@ -336,10 +325,7 @@ async def _verify_operating_companies(state: ResearchState) -> None:
 
     for company in candidates:
         # Skip if already classified
-        if (
-            company in state.verified_current_companies
-            or company in state.historical_companies
-        ):
+        if company in state.verified_current_companies or company in state.historical_companies:
             continue
 
         verify_name = state.search_name or _shorten_hotel_name(state.hotel_name)
@@ -356,16 +342,13 @@ async def _verify_operating_companies(state: ResearchState) -> None:
             continue
 
         if not results:
-            logger.info(
-                f"[SHIFT A] No recent signal for {company} — keeping as candidate"
-            )
+            logger.info(f"[SHIFT A] No recent signal for {company} — keeping as candidate")
             state.verified_current_companies.append(company)
             continue
 
         # Build a snippet blob and let Gemini decide
         snippets = "\n\n".join(
-            f"[{r.get('url', '')}] {r.get('snippet') or r.get('title') or ''}"
-            for r in results[:5]
+            f"[{r.get('url', '')}] {r.get('snippet') or r.get('title') or ''}" for r in results[:5]
         )
         verdict = await _check_company_currency_with_gemini(
             company=company,
@@ -375,14 +358,10 @@ async def _verify_operating_companies(state: ResearchState) -> None:
 
         if verdict == "current":
             state.verified_current_companies.append(company)
-            logger.info(
-                f"[SHIFT A] {company!r} verified as CURRENT operator of {state.hotel_name}"
-            )
+            logger.info(f"[SHIFT A] {company!r} verified as CURRENT operator of {state.hotel_name}")
         elif verdict == "historical":
             state.historical_companies.append(company)
-            logger.info(
-                f"[SHIFT A] {company!r} marked HISTORICAL — skipping contact hunt inside"
-            )
+            logger.info(f"[SHIFT A] {company!r} marked HISTORICAL — skipping contact hunt inside")
         else:
             # Unknown / ambiguous — default to keep (don't drop real data on weak signal)
             state.verified_current_companies.append(company)
@@ -631,9 +610,7 @@ async def iteration_2_gm_hunt(state: ResearchState) -> int:
         facts_before = _fact_count(state)
         await _run_queries_and_extract(state, queries, ce, scrape_limit=5)
 
-        state.has_named_gm = any(
-            _looks_like_gm(n.get("title", "")) for n in state.discovered_names
-        )
+        state.has_named_gm = any(_looks_like_gm(n.get("title", "")) for n in state.discovered_names)
 
         state.iterations_done = 2
         return _fact_count(state) - facts_before
@@ -704,9 +681,7 @@ async def iteration_2_gm_hunt(state: ResearchState) -> int:
     await _run_queries_and_extract(state, queries, ce, scrape_limit=5)
 
     # Did any of the names found look like a GM?
-    state.has_named_gm = any(
-        _looks_like_gm(n.get("title", "")) for n in state.discovered_names
-    )
+    state.has_named_gm = any(_looks_like_gm(n.get("title", "")) for n in state.discovered_names)
 
     # ── D1: GM-MISSING CASCADE ──
     # No GM found yet but timeline says one SHOULD be hired by now.
@@ -951,10 +926,7 @@ async def iteration_3_corporate_hunt(state: ResearchState) -> int:
     hunt_companies: list[str] = []
 
     # 1. Management company from SmartFill (most reliable — actual operator)
-    if (
-        state.management_company
-        and state.management_company not in state.historical_companies
-    ):
+    if state.management_company and state.management_company not in state.historical_companies:
         hunt_companies.append(state.management_company)
 
     # 2. Verified current companies from Shift A
@@ -1164,9 +1136,7 @@ async def iteration_4_linkedin_lookup(state: ResearchState) -> int:
             #   2. Then with hotel + brand context — for staff already
             #      identified at the property publicly.
             mgmt = (state.management_company or "").strip()
-            primary_query = (
-                f'"{name}" "{short_name}" OR "{state.brand or ""}" linkedin'.strip()
-            )
+            primary_query = f'"{name}" "{short_name}" OR "{state.brand or ""}" linkedin'.strip()
             mgmt_query = f'"{name}" "{mgmt}" linkedin'.strip() if mgmt else None
             # Order: mgmt first when available (higher signal for pre-opening
             # hires), then hotel+brand combo. NOTE: we intentionally DROP
@@ -1226,12 +1196,7 @@ async def iteration_4_linkedin_lookup(state: ResearchState) -> int:
                 # in the slug. Now requires BOTH the first AND actual-last
                 # name tokens to appear, with titles (Dr./Mr./etc.) and
                 # initials stripped.
-                slug = (
-                    r_url.lower()
-                    .split("linkedin.com/in/")[-1]
-                    .split("?")[0]
-                    .split("/")[0]
-                )
+                slug = r_url.lower().split("linkedin.com/in/")[-1].split("?")[0].split("/")[0]
                 import unicodedata
 
                 def _norm_token(s: str) -> str:
@@ -1255,9 +1220,7 @@ async def iteration_4_linkedin_lookup(state: ResearchState) -> int:
                 # Build usable name tokens: strip titles, drop initials
                 # (< 2 chars after removing periods), normalize accents.
                 raw_parts = [_norm_token(p) for p in name.split()]
-                clean_parts = [
-                    p for p in raw_parts if len(p) >= 2 and p not in _NAME_TITLES
-                ]
+                clean_parts = [p for p in raw_parts if len(p) >= 2 and p not in _NAME_TITLES]
 
                 if not clean_parts:
                     logger.debug(
@@ -1372,9 +1335,7 @@ async def iteration_4_linkedin_lookup(state: ResearchState) -> int:
                         ]
                         toks = set()
                         for src in sources:
-                            for w in __import__("re").split(
-                                r"[^a-z0-9]+", (src or "").lower()
-                            ):
+                            for w in __import__("re").split(r"[^a-z0-9]+", (src or "").lower()):
                                 if len(w) >= 3 and w not in _CONTEXT_STOPWORDS:
                                     toks.add(w)
                         return toks
@@ -1421,23 +1382,28 @@ async def iteration_4_linkedin_lookup(state: ResearchState) -> int:
                     # hospitality, operations, culinary, banquet, sales.
                     # These rarely appear in profiles of unrelated people.
 
-                    haystack = (
-                        (r.get("snippet") or "") + " " + (r.get("title") or "")
-                    ).lower()
+                    haystack = ((r.get("snippet") or "") + " " + (r.get("title") or "")).lower()
 
                     # A candidate passes the SERP verification if EITHER:
                     #   (a) any company-context token appears (crescent, kpc, kali)
                     #   (b) any distinctive role token from the contact's
                     #       known title appears (procurement, housekeeping)
                     # If neither, reject as possible wrong-person match.
-                    context_hit = context_tokens and any(
-                        t in haystack for t in context_tokens
-                    )
+                    context_hit = context_tokens and any(t in haystack for t in context_tokens)
                     role_hit = role_tokens and any(t in haystack for t in role_tokens)
+
+                    # Full-name slug is conclusive on its own (2026-06-04):
+                    # LinkedIn SERP snippets often omit the employer — Ed
+                    # Hoganson's and James Carroll's real Crestline profiles
+                    # were rejected because the snippet didn't say
+                    # 'crestline'. If the slug carries every name token
+                    # (>2 chars), trust the URL without snippet corroboration.
+                    _name_parts = [p for p in name.lower().replace(".", "").split() if len(p) > 2]
+                    full_name_slug = bool(_name_parts) and all(p in slug for p in _name_parts)
 
                     # Only fail the check if we had tokens to check AND none matched.
                     if (context_tokens or role_tokens) and not (
-                        context_hit or role_hit
+                        context_hit or role_hit or full_name_slug
                     ):
                         logger.debug(
                             f"LinkedIn URL rejected for {name}: slug "
@@ -1540,9 +1506,7 @@ async def iteration_5_verify_current_role(state: ResearchState) -> int:
                 f"⚠ Could not verify {name} is currently at {state.hotel_name}. "
                 f"No recent (2025-2026) mentions found. Verify before outreach."
             )
-            logger.info(
-                f"[ITER 5] {name}: no recent mentions → downgraded to chain_area"
-            )
+            logger.info(f"[ITER 5] {name}: no recent mentions → downgraded to chain_area")
             continue
 
         # Scrape top 2 results to let Gemini extract current role + dates
@@ -1564,9 +1528,7 @@ async def iteration_5_verify_current_role(state: ResearchState) -> int:
         )
 
         combined = (
-            snippets_blob
-            + "\n\n"
-            + "\n\n".join(f"[{s['url']}] {s['text']}" for s in scraped_texts)
+            snippets_blob + "\n\n" + "\n\n".join(f"[{s['url']}] {s['text']}" for s in scraped_texts)
         )
 
         verdict = await _verify_role_with_gemini(
@@ -1600,11 +1562,7 @@ async def iteration_5_verify_current_role(state: ResearchState) -> int:
             contact["source_detail"] = (
                 f"✓ Current: {verdict.get('current_title') or contact.get('title')} "
                 f"at {state.hotel_name}"
-                + (
-                    f" ({verdict.get('role_period')})"
-                    if verdict.get("role_period")
-                    else ""
-                )
+                + (f" ({verdict.get('role_period')})" if verdict.get("role_period") else "")
             )
         elif verdict.get("status") == "currently_at_sibling":
             # At a sibling property in the same cluster → chain_area
@@ -1655,9 +1613,7 @@ async def iteration_5_verify_current_role(state: ResearchState) -> int:
     # "Marriott" instead of "Michael Metcalf" "Crescent Hotels" — the
     # wrong company, so stale/departed signals were never picked up.
     # Bug #3 follow-up — 2026-04-22.
-    operator = (
-        state.management_company or state.operator_parent or state.brand_parent or ""
-    )
+    operator = state.management_company or state.operator_parent or state.brand_parent or ""
     if operator:
         for contact in state.discovered_names:
             scope = (contact.get("scope") or "").lower()
@@ -1692,8 +1648,7 @@ async def iteration_5_verify_current_role(state: ResearchState) -> int:
 
             # Check snippets for red flags: "former", "left", "joined [other company]"
             blob = " ".join(
-                (r.get("snippet") or "") + " " + (r.get("title") or "")
-                for r in results[:3]
+                (r.get("snippet") or "") + " " + (r.get("title") or "") for r in results[:3]
             ).lower()
 
             # ── DEPARTURE DETECTION — CONTEXT-AWARE ──
@@ -1955,9 +1910,7 @@ async def iteration_5_5_regional_fit(state: ResearchState) -> int:
     # when the lead is in the US and the brand operates in the US.
     country = (state.country or "").lower()
     if country in ("usa", "united states", "us", "u.s.", "u.s.a."):
-        logger.info(
-            "[ITER 5.5/REGION] Skipped — US-only lead, no region ambiguity to resolve"
-        )
+        logger.info("[ITER 5.5/REGION] Skipped — US-only lead, no region ambiguity to resolve")
         return 0
 
     (state.region_term or "").lower()  # region used via _REGION_MARKERS
@@ -1999,7 +1952,9 @@ async def iteration_5_5_regional_fit(state: ResearchState) -> int:
             continue
 
         # One query per candidate — look up which region they cover
-        query = f'"{name}" {state.operator_parent or ""} region OR based OR located OR covers'.strip()
+        query = (
+            f'"{name}" {state.operator_parent or ""} region OR based OR located OR covers'.strip()
+        )
         if query in state.queries_run:
             continue
         state.queries_run.append(query)
@@ -2136,10 +2091,7 @@ async def _check_title_currency_with_gemini(
 
     # Search for recent announcements of this title. Covers both
     # "[Name] appointed [Title]" and "[Title] announced as..." phrasings.
-    query = (
-        f'"{company}" "{title}" appointed OR named OR new OR announces '
-        f"2025 OR {_CY}"
-    )
+    query = f'"{company}" "{title}" appointed OR named OR new OR announces ' f"2025 OR {_CY}"
     if query in state.queries_run:
         return None
     state.queries_run.append(query)
@@ -2844,9 +2796,9 @@ CANDIDATES:
     _DEPARTED_VERIFICATION_VALUES = {"former_employee", "possibly_departed"}
     demoted_departed = 0
     for contact in state.discovered_names:
-        if contact.get(
-            "_verification_result"
-        ) in _DEPARTED_VERIFICATION_VALUES and contact.get("_final_priority") in (
+        if contact.get("_verification_result") in _DEPARTED_VERIFICATION_VALUES and contact.get(
+            "_final_priority"
+        ) in (
             "P1",
             "P2",
         ):
@@ -3030,9 +2982,7 @@ async def iteration_6_5_employment_verification(state: ResearchState) -> int:
             u = (r.get("url") or "").strip()
             t = (r.get("title") or "").strip()
             s = (r.get("snippet") or "").strip()
-            snippet_block += (
-                f"\n\nResult {i+1}:\n  URL: {u}\n  Title: {t}\n  Snippet: {s}"
-            )
+            snippet_block += f"\n\nResult {i+1}:\n  URL: {u}\n  Title: {t}\n  Snippet: {s}"
 
         prompt = f"""You are verifying whether a business contact is CURRENTLY employed at a specific company as of 2025-2026.
 
@@ -3164,8 +3114,7 @@ async def run_iterative_research(
             hotel_name=state.hotel_name or "",
             description=state.description or "",  # ← PHASE B fix: use DB description
             project_type=state.project_type or "",
-            source_text=state.description
-            or "",  # same — source_text AND description match
+            source_text=state.description or "",  # same — source_text AND description match
             timeline_label=state.timeline_label or "",
             management_company=state.management_company or state.brand or "",
         )
@@ -3255,9 +3204,7 @@ async def run_iterative_research(
     if _should_continue(state):
         await _emit_progress(3, "Iter 2.5 · Department heads")
         new_facts = await iteration_2_5_property_staff(state)
-        logger.info(
-            f"[ITER 2.5/STAFF] +{new_facts} facts. Names={len(state.discovered_names)}"
-        )
+        logger.info(f"[ITER 2.5/STAFF] +{new_facts} facts. Names={len(state.discovered_names)}")
 
     # ── Iteration 3: corporate / owner hunt ──
     # Lean mode (existing hotels) + we already found enough property-level
@@ -3653,9 +3600,7 @@ If no contacts found, return {{"contacts": []}}
                 last_lower = parts[-1].lower().rstrip(".,;:'\"")
                 # Strip titles
                 if first_lower in ("dr", "mr", "mrs", "ms", "miss", "prof"):
-                    first_lower = (
-                        parts[1].lower().rstrip(".,;:'\"") if len(parts) > 2 else ""
-                    )
+                    first_lower = parts[1].lower().rstrip(".,;:'\"") if len(parts) > 2 else ""
             else:
                 first_lower = name.lower()
                 last_lower = ""
@@ -3780,10 +3725,7 @@ async def _run_queries_and_extract(
         name = (c.get("name") or "").strip()
         if not name or len(name) < 3 or len(name.split()) < 2:
             continue
-        if any(
-            n.get("name", "").lower().strip() == name.lower()
-            for n in state.discovered_names
-        ):
+        if any(n.get("name", "").lower().strip() == name.lower() for n in state.discovered_names):
             continue
         # Find the source URL — match snippet back to result.
         # SKIP junk URLs (Facebook, Instagram — can't be opened, useless as evidence).
@@ -3816,9 +3758,9 @@ async def _run_queries_and_extract(
         name_lower = name.lower()
         for r in all_results:
             blob = ((r.get("snippet") or "") + " " + (r.get("title") or "")).lower()
-            if name_lower.replace(" ", "").replace(".", "") not in blob.replace(
-                " ", ""
-            ).replace(".", ""):
+            if name_lower.replace(" ", "").replace(".", "") not in blob.replace(" ", "").replace(
+                ".", ""
+            ):
                 continue
             url = r.get("url", "")
             url_lower = url.lower()
@@ -3870,10 +3812,11 @@ async def _run_queries_and_extract(
             # Check if name appears in snippet
             name_in_snippet = cname.replace(" ", "") in snippet.replace(" ", "")
             # Check if name parts appear in URL slug (carl-ainscough in slug)
+            # NOTE (2026-06-04): do NOT reject surname-match-without-first-name
+            # here — nicknames make that wrong (Roman (Jonathon) Varjabedian's
+            # real profile is linkedin.com/in/jonathonvarjabedian).
             name_in_slug = all(
-                part.replace(".", "") in url_slug
-                for part in name_parts
-                if len(part) > 2
+                part.replace(".", "") in url_slug for part in name_parts if len(part) > 2
             )
             if name_in_snippet or name_in_slug:
                 contact["linkedin"] = ce_module._canonicalize_linkedin_url(url)
@@ -3931,8 +3874,7 @@ async def _run_queries_and_extract(
                 continue
             # Skip if already discovered (from snippets or earlier)
             if any(
-                n.get("name", "").lower().strip() == name.lower()
-                for n in state.discovered_names
+                n.get("name", "").lower().strip() == name.lower() for n in state.discovered_names
             ):
                 continue
             entry = {
@@ -4073,10 +4015,7 @@ def _guess_stage_from_state(state: ResearchState) -> str:
         # Defensive fallback to the old keyword heuristic
         logger.debug(f"Phase A classifier failed in _guess_stage; fallback. {exc}")
         text_blob = " ".join(state.urls_scraped).lower()
-        if any(
-            k in text_blob
-            for k in ("reopen", "post-hurricane", "renovation", "rebuild")
-        ):
+        if any(k in text_blob for k in ("reopen", "post-hurricane", "renovation", "rebuild")):
             return "reopening"
         if any(k in text_blob for k in ("rebrand", "conversion", "joins")):
             return "conversion"

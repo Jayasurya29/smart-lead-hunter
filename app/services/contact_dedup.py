@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from datetime import datetime, timezone
 from typing import Any, Optional
 
@@ -46,6 +47,219 @@ VALID_APPROVAL_STATUSES = ("pending", "approved", "pushed_to_insightly")
 
 # Valid procurement_priority values (matches CHECK constraint)
 VALID_PRIORITIES = ("P1", "P2", "P3", "P4", "P_unknown")
+
+# ── Name/org derivation (2026-06-04) ────────────────────────────────
+# Hundreds of header-harvested contacts arrived with no name (UI showed the
+# raw email) and same-domain contacts fragmented across org variants
+# ('Rosenplaza' / 'rosenplaza.com' / 'Rosen Plaza Hotel' / 'Rosen Plaza').
+
+_FREEMAIL_DOMAINS = {
+    "gmail.com",
+    "yahoo.com",
+    "outlook.com",
+    "hotmail.com",
+    "aol.com",
+    "icloud.com",
+    "me.com",
+    "mac.com",
+    "msn.com",
+    "live.com",
+    "comcast.net",
+    "att.net",
+    "verizon.net",
+    "sbcglobal.net",
+    "bellsouth.net",
+    "protonmail.com",
+    "proton.me",
+    "ymail.com",
+    "gmx.com",
+    "mail.com",
+}
+
+_ROLE_LOCALPARTS = {
+    "info",
+    "sales",
+    "contact",
+    "admin",
+    "office",
+    "reservations",
+    "frontdesk",
+    "noreply",
+    "no-reply",
+    "donotreply",
+    "support",
+    "hello",
+    "team",
+    "hr",
+    "accounting",
+    "ap",
+    "ar",
+    "billing",
+    "events",
+    "catering",
+    "marketing",
+    "reception",
+    "concierge",
+    "purchasing",
+    "orders",
+    "accounts",
+    "payable",
+    "receivable",
+    "invoice",
+    "invoices",
+    "payroll",
+    "careers",
+    "jobs",
+    "recruiting",
+    "recruitment",
+    "newsletter",
+    "notifications",
+    "notification",
+    "alerts",
+    "alert",
+    "updates",
+    "digest",
+    "news",
+    "security",
+    "postmaster",
+    "webmaster",
+    "mailer",
+    "bounce",
+    "bounces",
+    "unsubscribe",
+    "helpdesk",
+    "booking",
+    "bookings",
+    "press",
+    "media",
+    "service",
+    "services",
+}
+
+# Domain labels that mark machine/ESP senders — never derive person names
+# from these (noreply.github.com, em5875.globalindustrial.com,
+# invoice.plateiq.com produced 'Smart Hunter', 'Jauniforms Com',
+# 'Graduate Auburn' in the 2026-06-04 dry run).
+_JUNK_DOMAIN_LABEL_RE = re.compile(
+    r"^(noreply|no-reply|donotreply|notifications?|mailer|mailers|bounce|"
+    r"bounces|invoice|invoices|billing|email|mail|smtp|mta\d*|em\d+|e\d+)$"
+)
+
+# Tokens that are never name parts
+_NON_NAME_TOKENS = {"com", "net", "org", "www", "mail", "email", "info"}
+
+
+def is_freemail_domain(domain: str) -> bool:
+    return (domain or "").lower().strip() in _FREEMAIL_DOMAINS
+
+
+def is_degenerate_org(org: Optional[str], domain: str) -> bool:
+    """True when org is missing or just an echo of the email domain
+    ('rosenplaza.com', 'rosenplaza') rather than a real company name."""
+    o = (org or "").strip().lower()
+    if not o:
+        return True
+    d = (domain or "").lower().strip()
+    core = d.split(".")[0] if d else ""
+    return o in {d, core, core.replace("-", " "), core.replace("-", "")}
+
+
+def derive_name_from_email(
+    email: str,
+) -> tuple[Optional[str], Optional[str], Optional[str]]:
+    """Derive (first_name, last_name, display_name) from an email localpart.
+
+    jay.finkelstein@x → ('Jay', 'Finkelstein', 'Jay Finkelstein')
+    andres_zuluaga@x  → ('Andres', 'Zuluaga', 'Andres Zuluaga')
+    fching@x          → (None, None, None)   # single token — can't split safely
+    sales@x           → (None, None, None)   # role address
+    """
+    local = (email or "").split("@", 1)[0].lower().split("+", 1)[0]
+    if not local or local in _ROLE_LOCALPARTS:
+        return None, None, None
+    _dom = (email or "").split("@", 1)[1].lower() if "@" in (email or "") else ""
+    if any(_JUNK_DOMAIN_LABEL_RE.match(lbl) for lbl in _dom.split(".")):
+        return None, None, None  # machine/ESP sender — not a person
+    toks = [t for t in re.split(r"[._\-]+", local) if t and not t.isdigit()]
+    toks = [re.sub(r"\d+$", "", t) for t in toks]
+    toks = [t for t in toks if len(t) >= 2 and t.isalpha()]
+    if len(toks) < 2 or len(toks) > 3:
+        return None, None, None
+    if any(t in _ROLE_LOCALPARTS or t in _NON_NAME_TOKENS for t in toks):
+        return None, None, None
+    first, last = toks[0].title(), toks[-1].title()
+    return first, last, f"{first} {last}"
+
+
+def _compressed_org(s: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "", (s or "").lower())
+
+
+async def domain_org_profile(session: AsyncSession, domain: str) -> tuple[bool, Optional[str]]:
+    """(is_operator_domain, canonical_org) for an email domain.
+
+    is_operator_domain=True when the domain hosts 2+ genuinely distinct
+    organizations (crestlinehotels.com → 'Crestline Hotels & Resorts' AND
+    'River Market Hotel' AND other properties). Compressed-containment
+    variants ('Rosen Plaza' vs 'Rosen Plaza Hotel') count as ONE org.
+    """
+    rows = (
+        (
+            await session.execute(
+                text(
+                    "SELECT organization, count(*) AS n FROM contacts "
+                    "WHERE email LIKE :pat AND organization IS NOT NULL "
+                    "AND organization != '' "
+                    "GROUP BY organization ORDER BY n DESC LIMIT 25"
+                ),
+                {"pat": f"%@{domain}"},
+            )
+        )
+        .mappings()
+        .all()
+    )
+    candidates = {
+        r["organization"]: r["n"] for r in rows if not is_degenerate_org(r["organization"], domain)
+    }
+    canonical = pick_canonical_org(candidates, domain)
+    if not canonical:
+        return False, None
+    cc = _compressed_org(canonical)
+    distinct = 1
+    for org in candidates:
+        oc = _compressed_org(org)
+        if oc and oc != cc and oc not in cc and cc not in oc:
+            distinct += 1
+    return distinct >= 2, canonical
+
+
+async def most_common_org_for_domain(session: AsyncSession, domain: str) -> Optional[str]:
+    """Back-compat wrapper: canonical org for a domain."""
+    _, canonical = await domain_org_profile(session, domain)
+    return canonical
+
+
+def pick_canonical_org(candidates: dict, domain: str) -> Optional[str]:
+    """Pick the best canonical org name among same-domain variants.
+
+    Quality beats raw frequency (2026-06-04: frequency alone crowned
+    'DENISON' over 'Denison Parking'): prefer multi-word, then
+    not-ALL-CAPS, then frequency, then length.
+    """
+    best, best_key = None, None
+    for org, n in (candidates or {}).items():
+        org = (org or "").strip()
+        if not org or is_degenerate_org(org, domain):
+            continue
+        key = (
+            1 if " " in org else 0,
+            0 if org.isupper() else 1,
+            int(n or 0),
+            len(org),
+        )
+        if best_key is None or key > best_key:
+            best_key, best = key, org
+    return best
 
 
 # ──────────────────────────────────────────────────────────────────────
@@ -136,6 +350,36 @@ async def upsert_contact(
 
     now = _now_utc()
 
+    # ── Name fallback from email localpart (2026-06-04) ──
+    # If the caller has no name at all, derive one from the localpart so the
+    # UI never has to show a raw email address as the person's name.
+    if not (first_name or last_name or display_name):
+        _dfirst, _dlast, _ddisp = derive_name_from_email(email)
+        first_name = first_name or _dfirst
+        last_name = last_name or _dlast
+        display_name = display_name or _ddisp
+
+    # ── Organization fallback from domain (2026-06-04) ──
+    # Single-org domains (rosenplaza.com): missing/bare-domain orgs inherit
+    # the canonical org so same-hotel contacts land in ONE account.
+    # OPERATOR domains (crestlinehotels.com hosting many properties): never
+    # stamp the domain org as a person's organization — the GM of River
+    # Market Hotel works AT the property even though the email is at the
+    # management company, and fill-empty semantics would lock a wrong org in
+    # forever. Record the operator in management_company instead and let the
+    # signature / tier-1 enrichment fill the true property org.
+    try:
+        _domain = email.split("@", 1)[1]
+        if not is_freemail_domain(_domain):
+            _is_operator, _dom_org = await domain_org_profile(session, _domain)
+            if _is_operator:
+                if _dom_org and not (management_company or "").strip():
+                    management_company = _dom_org
+            elif _dom_org and is_degenerate_org(organization, _domain):
+                organization = _dom_org
+    except Exception as _oe:
+        logger.debug(f"Org-from-domain fallback skipped for {email}: {_oe}")
+
     # ── Fetch existing row with lock ─────────────────────────────────
     result = await session.execute(
         text("SELECT * FROM contacts WHERE email = :email FOR UPDATE"),
@@ -219,9 +463,7 @@ async def upsert_contact(
     def _fill(field: str, new_val: Any):
         """Fill-empty rule — only set if existing is null/empty AND new is truthy."""
         if new_val and not existing[field]:
-            updates[field] = (
-                _coerce_str(new_val) if isinstance(new_val, str) else new_val
-            )
+            updates[field] = _coerce_str(new_val) if isinstance(new_val, str) else new_val
 
     _fill("first_name", first_name)
     _fill("last_name", last_name)
@@ -267,9 +509,7 @@ async def upsert_contact(
     # Always update
     updates["last_seen"] = now
     updates["updated_at"] = now
-    updates["interaction_count"] = (
-        existing["interaction_count"] or 0
-    ) + interaction_increment
+    updates["interaction_count"] = (existing["interaction_count"] or 0) + interaction_increment
 
     # source_mailboxes — append without duplicating
     if source_mailbox:
@@ -367,9 +607,7 @@ async def bulk_upsert_contacts(
                 updated += 1
         except Exception as e:
             errors += 1
-            logger.warning(
-                f"contact_dedup: upsert failed for {c.get('email', '?')}: {e}"
-            )
+            logger.warning(f"contact_dedup: upsert failed for {c.get('email', '?')}: {e}")
 
     logger.info(
         f"contact_dedup: bulk_upsert done — "
@@ -494,9 +732,7 @@ async def list_contacts(
         params["search"] = f"%{search}%"
 
     if matched_only is True:
-        where_clauses.append(
-            "(matched_lead_id IS NOT NULL OR matched_hotel_id IS NOT NULL)"
-        )
+        where_clauses.append("(matched_lead_id IS NOT NULL OR matched_hotel_id IS NOT NULL)")
     elif matched_only is False:
         where_clauses.append("matched_lead_id IS NULL AND matched_hotel_id IS NULL")
 
@@ -537,9 +773,7 @@ async def list_contacts(
     params["offset"] = offset
 
     rows_result = await session.execute(
-        text(
-            f"SELECT * FROM contacts{where_sql} {order_sql} LIMIT :limit OFFSET :offset"
-        ),
+        text(f"SELECT * FROM contacts{where_sql} {order_sql} LIMIT :limit OFFSET :offset"),
         params,
     )
     rows = [dict(r) for r in rows_result.mappings().all()]
@@ -563,8 +797,7 @@ async def update_approval_status(
     """
     if new_status not in VALID_APPROVAL_STATUSES:
         raise ValueError(
-            f"Invalid status: {new_status!r} "
-            f"(must be one of {VALID_APPROVAL_STATUSES})"
+            f"Invalid status: {new_status!r} " f"(must be one of {VALID_APPROVAL_STATUSES})"
         )
 
     now = _now_utc()

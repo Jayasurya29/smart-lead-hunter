@@ -90,6 +90,7 @@ JA_TEAM_NAMES: set[str] = {
 NOREPLY_PATTERNS = [
     "noreply",
     "no-reply",
+    "no.reply",
     "donotreply",
     "do-not-reply",
     "mailer-daemon",
@@ -123,9 +124,12 @@ NOREPLY_PATTERNS = [
     "webmaster",
 ]
 
-MASS_MAIL_PATTERNS = ["newsletter", "unsubscribe", "digest"]
+MASS_MAIL_PATTERNS = ["newsletter", "unsubscribe", "digest", "dmarc", "mailer-daemon"]
 
 SAAS_DOMAINS: set[str] = {
+    # ESP / blast platforms (2026-06-04 Phase-3 additions)
+    "ccsend.com",
+    "kajabimail.net",
     "mailchimp.com",
     "constantcontact.com",
     "campaignmonitor.com",
@@ -240,6 +244,19 @@ ROLE_LOCALPARTS: set[str] = {
     "surveys",
     "marketingteam",
     "newsroom",
+    "list",
+    "lists",
+    "dmarc",
+    "dmarcreport",
+    "abuse",
+    "postmaster",
+    "daemon",
+    "notifications",
+    "notification",
+    "alerts",
+    "alert",
+    "reports",
+    "report",
 }
 
 # Marketing / bulk subdomain prefixes — when the leftmost domain label is one of
@@ -264,6 +281,20 @@ BULK_SUBDOMAIN_PREFIXES: tuple = (
     "promotions",
     "engage",
     "members",
+    "comms",
+    "messages",
+    "message",
+    "eg",
+    "mg",
+    "broadcast",
+    "blast",
+    "reply",
+    "notify",
+    "notifications",
+    "alerts",
+    "updates",
+    "bounce",
+    "mta",
 )
 
 # Consumer / e-commerce / news / job-board / social domains — never hotel
@@ -451,6 +482,11 @@ Rules:
   role-only sigs ('Sales Team', 'Front Desk'), bots, transactional receipts.
 - confidence 0.0–1.0: 1.0 = clean name+title+org, 0.5 = partial, 0.0 = not a sig.
 - Do NOT invent data not visible in the block.
+- address: copy the street/city/state EXACTLY as printed in the block,
+  partial is fine (city only is OK). NEVER infer a city or state from the
+  company, hotel, or district name — e.g. for a "River Market Hotel"
+  signature with no printed address, address MUST be null (do not guess
+  Little Rock or Kansas City). A wrong guessed address is far worse than null.
 
 Block:
 """
@@ -492,9 +528,7 @@ _IMAGE_MARKER_RE = re.compile(r"\[image:[^\]]*\]", re.IGNORECASE)
 _CID_RE = re.compile(r"\[cid:[^\]]*\]", re.IGNORECASE)
 _WARNING_RE = [
     re.compile(r"^\s*CAUTION:.*$", re.MULTILINE | re.IGNORECASE),
-    re.compile(
-        r"^.*This message is from an EXTERNAL SENDER.*$", re.MULTILINE | re.IGNORECASE
-    ),
+    re.compile(r"^.*This message is from an EXTERNAL SENDER.*$", re.MULTILINE | re.IGNORECASE),
     re.compile(r"^\s*\[EXTERNAL\].*$", re.MULTILINE | re.IGNORECASE),
     re.compile(r"^\s*\*\*\* EXTERNAL EMAIL.*$", re.MULTILINE | re.IGNORECASE),
 ]
@@ -523,15 +557,11 @@ def _build_creds(mailbox: str) -> service_account.Credentials:
 
 
 def _gmail(mailbox: str):
-    return build(
-        "gmail", "v1", credentials=_build_creds(mailbox), cache_discovery=False
-    )
+    return build("gmail", "v1", credentials=_build_creds(mailbox), cache_discovery=False)
 
 
 def _people(mailbox: str):
-    return build(
-        "people", "v1", credentials=_build_creds(mailbox), cache_discovery=False
-    )
+    return build("people", "v1", credentials=_build_creds(mailbox), cache_discovery=False)
 
 
 # ──────────────────────────────────────────────────────────────────────────
@@ -551,9 +581,7 @@ def _b64(data: str) -> str:
 def _strip_html(html: str) -> str:
     if not html:
         return ""
-    html = re.sub(
-        r"<(script|style)[^>]*>.*?</\1>", "", html, flags=re.IGNORECASE | re.DOTALL
-    )
+    html = re.sub(r"<(script|style)[^>]*>.*?</\1>", "", html, flags=re.IGNORECASE | re.DOTALL)
     html = re.sub(r"</td>\s*<td[^>]*>", " | ", html, flags=re.IGNORECASE)
     html = re.sub(r"</?(br|p|div|tr|li|h[1-6])[^>]*>", "\n", html, flags=re.IGNORECASE)
     text_out = _HTML_TAG_RE.sub("", html)
@@ -673,6 +701,46 @@ def _seg_name(segment: str) -> str:
     return ""
 
 
+def _normalize_header_name(name: str) -> str:
+    """'Doe, Jane' (Outlook header order) → 'Jane Doe'."""
+    n = (name or "").strip().strip('"').strip()
+    if "," in n and "@" not in n:
+        last, _, first = n.partition(",")
+        first, last = first.strip(), last.strip()
+        if first and last:
+            return f"{first} {last}"
+    return n
+
+
+_HDR_PAIR_RE = re.compile(
+    r'"?([^"<>\n;@]{2,60}?)"?\s*<([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})>'
+)
+
+
+def _seg_participants(segment: str) -> list[tuple[str, str]]:
+    """(name, email) pairs from embedded To:/Cc: lines in a forwarded/quoted
+    segment head (2026-06-04). Forwarded hotel threads name people — the GM
+    cc'd on a quote thread a colleague forwarded — who never emailed us
+    directly and have no signature in the thread. Without this they were
+    invisible to the harvest."""
+    head = segment[:1500]
+    out: list[tuple[str, str]] = []
+    seen: set[str] = set()
+    for m in re.finditer(r"^[\s>]*(?:To|Cc|CC):\s*(.+)$", head, re.MULTILINE):
+        line = m.group(1)[:500]
+        for pm in _HDR_PAIR_RE.finditer(line):
+            nm = _normalize_header_name(pm.group(1).strip(' ,"'))
+            em = pm.group(2).lower()
+            if em not in seen:
+                seen.add(em)
+                out.append((nm, em))
+        for em in _extract_emails(line):
+            if em not in seen:
+                seen.add(em)
+                out.append(("", em))
+    return out[:10]
+
+
 def _name_matches_header(parsed: dict, header_name: str) -> bool:
     fn = (parsed.get("first_name") or "").lower().strip()
     ln = (parsed.get("last_name") or "").lower().strip()
@@ -706,10 +774,21 @@ def _is_role_localpart(local: str) -> bool:
     return any(t in ROLE_LOCALPARTS for t in tokens)
 
 
+# ESP machine labels: short alpha prefix + digits, optional hyphen/suffix —
+# em5875, em-681158, mta01, k1, shared1, mailera3u (2026-06-04, widened after
+# the Phase-3 report showed the narrow form missing real blast senders).
+_BULK_NUMBERED_RE = re.compile(r"^[a-z]{1,6}-?\d+[a-z0-9]*$")
+
+
 def _is_bulk_subdomain(domain: str) -> bool:
-    """True if the leftmost label is a marketing/blast subdomain (e.x.com…)."""
+    """True if the leftmost label is a marketing/blast subdomain — exact
+    prefixes (e.x.com, comms.x.com) or numbered ESP labels (em5875.x.com,
+    mta01.x.com), which the exact list missed (2026-06-04)."""
     parts = domain.split(".")
-    return len(parts) >= 3 and parts[0] in BULK_SUBDOMAIN_PREFIXES
+    if len(parts) < 3:
+        return False
+    head = parts[0]
+    return head in BULK_SUBDOMAIN_PREFIXES or bool(_BULK_NUMBERED_RE.match(head))
 
 
 def _passes_hard_filters(email: str, own_mailbox: str) -> tuple[bool, str]:
@@ -721,6 +800,16 @@ def _passes_hard_filters(email: str, own_mailbox: str) -> tuple[bool, str]:
     if d in OWN_DOMAINS:
         return False, "own_company"
     local = email.split("@")[0].lower()
+    # Echo address (2026-06-04): localpart IS a domain — vendor ESPs encode
+    # the recipient domain as the localpart (jauniforms.com@em5486.sanmar.com).
+    # Never a person, regardless of the sending domain.
+    if local in OWN_DOMAINS or local.endswith((".com", ".net", ".org", ".io")):
+        return False, "echo_address"
+    # Cold-outreach spam farms rotate throwaway TLDs — no hotel or operator
+    # has ever mailed JA from .info/.help/.click (Phase-3 evidence:
+    # composely*.info ×4, tcpr*.info ×3, *.help ×4...).
+    if d.endswith((".info", ".help", ".click")):
+        return False, "spam_tld"
     if any(p in local for p in NOREPLY_PATTERNS):
         return False, "noreply"
     if any(p in local for p in MASS_MAIL_PATTERNS):
@@ -749,9 +838,7 @@ def _infer_org(domain: str) -> Optional[str]:
     if len(parts) == 2:
         stem = ".".join(parts[:-1])
     elif (
-        len(parts) >= 3
-        and parts[-2] in {"co", "com", "org", "net", "gov"}
-        and len(parts[-1]) == 2
+        len(parts) >= 3 and parts[-2] in {"co", "com", "org", "net", "gov"} and len(parts[-1]) == 2
     ):
         stem = ".".join(parts[:-2])
     else:
@@ -779,11 +866,7 @@ def _infer_org(domain: str) -> Optional[str]:
             return brand_info.parent_company
 
     chunks = stem.replace("_", "-").split("-")
-    words = [
-        c.upper() if 2 <= len(c) <= 3 and c.isalpha() else c.capitalize()
-        for c in chunks
-        if c
-    ]
+    words = [c.upper() if 2 <= len(c) <= 3 and c.isalpha() else c.capitalize() for c in chunks if c]
     name = " ".join(words).strip()
     return name or None
 
@@ -819,16 +902,14 @@ def _validate_phone(raw: Optional[str]) -> Optional[str]:
         if low.startswith(p):
             raw = raw[len(p) :].strip()
             break
-    raw_base = re.split(
-        r"\s*(?:ext|x|extension)\.?\s*\d", raw, flags=re.IGNORECASE, maxsplit=1
-    )[0].strip()
+    raw_base = re.split(r"\s*(?:ext|x|extension)\.?\s*\d", raw, flags=re.IGNORECASE, maxsplit=1)[
+        0
+    ].strip()
     for region in (PHONE_DEFAULT_REGION, None):
         try:
             num = phonenumbers.parse(raw_base, region)
             if phonenumbers.is_valid_number(num):
-                return phonenumbers.format_number(
-                    num, phonenumbers.PhoneNumberFormat.E164
-                )
+                return phonenumbers.format_number(num, phonenumbers.PhoneNumberFormat.E164)
         except phonenumbers.NumberParseException:
             continue
     return None
@@ -956,8 +1037,7 @@ async def _normalize_saved_contact_orgs(
 
     async def _split_batch(batch_emails: list[str]) -> tuple[list[str], list[dict]]:
         entries = [
-            {"id": i, "original": candidates[e]["organization"]}
-            for i, e in enumerate(batch_emails)
+            {"id": i, "original": candidates[e]["organization"]} for i, e in enumerate(batch_emails)
         ]
         prompt = ORG_SPLIT_PROMPT + json.dumps(entries, ensure_ascii=False)
         async with sem:
@@ -1099,12 +1179,7 @@ def _get_current_history_id(gmail) -> Optional[str]:
 
 def _fetch_message(gmail, msg_id: str) -> Optional[dict]:
     try:
-        return (
-            gmail.users()
-            .messages()
-            .get(userId="me", id=msg_id, format="full")
-            .execute()
-        )
+        return gmail.users().messages().get(userId="me", id=msg_id, format="full").execute()
     except HttpError:
         return None
 
@@ -1210,9 +1285,7 @@ _PROC_HINTS = ("procurement", "purchasing", "buyer", "sourcing", "supply chain")
 
 
 def _word_match(text_str: str, tokens: tuple) -> bool:
-    return any(
-        re.search(rf"\b{re.escape(t)}\b", text_str, re.IGNORECASE) for t in tokens
-    )
+    return any(re.search(rf"\b{re.escape(t)}\b", text_str, re.IGNORECASE) for t in tokens)
 
 
 def _classify_priority(title: Optional[str], brand_info: BrandInfo) -> tuple[str, str]:
@@ -1299,8 +1372,7 @@ def _enrich(contact: dict) -> dict:
     if gw:
         contact["procurement_priority"] = gw["priority"]  # P1
         contact["priority_reason"] = (
-            f"{gw['short']} — centralized procurement gateway "
-            f"({gw['covers']}). {gw['note']}"
+            f"{gw['short']} — centralized procurement gateway " f"({gw['covers']}). {gw['note']}"
         )
     else:
         brand_gw = gateway_for_brand(org, contact.get("parent_company"))
@@ -1311,9 +1383,7 @@ def _enrich(contact: dict) -> dict:
             )
 
     interactions = contact.get("interaction_count") or 0
-    contact["opportunity_score"] = round(
-        interactions * brand_info.contact_score_multiplier, 2
-    )
+    contact["opportunity_score"] = round(interactions * brand_info.contact_score_multiplier, 2)
     return contact
 
 
@@ -1361,9 +1431,7 @@ async def _upsert_sync_state(session: AsyncSession, mailbox: str, **kwargs) -> N
         cols = ["mailbox", "updated_at", "created_at"] + list(kwargs.keys())
         vals = [":mailbox", ":now", ":now"] + [f":{k}" for k in kwargs]
         await session.execute(
-            text(
-                f"INSERT INTO mailbox_sync_state ({', '.join(cols)}) VALUES ({', '.join(vals)})"
-            ),
+            text(f"INSERT INTO mailbox_sync_state ({', '.join(cols)}) VALUES ({', '.join(vals)})"),
             {"mailbox": mailbox, "now": now, **kwargs},
         )
     else:
@@ -1445,9 +1513,7 @@ async def sync_mailbox(
             message_ids = _list_message_ids_full(gmail, mailbox, scan_days_override)
             new_history_id = _get_current_history_id(gmail)
         else:
-            logger.info(
-                f"inbox_sync: {mailbox} — incremental from history_id={last_history_id}"
-            )
+            logger.info(f"inbox_sync: {mailbox} — incremental from history_id={last_history_id}")
             message_ids, new_history_id = _list_message_ids_incremental(
                 gmail, mailbox, last_history_id
             )
@@ -1466,9 +1532,7 @@ async def sync_mailbox(
             # ── Step 0: Normalize saved contact org fields ────────────
             # Fixes "Towne Park - Cindy Wetzel" → org + person name split
             # BEFORE any merge logic runs, so all downstream code gets clean data.
-            saved_contacts = await _normalize_saved_contact_orgs(
-                http_client, saved_contacts
-            )
+            saved_contacts = await _normalize_saved_contact_orgs(http_client, saved_contacts)
 
             # ── Phase 1: Fetch messages, track headers, queue sig blocks ──
             # Pure sync work — no Gemini calls here. Collects:
@@ -1479,9 +1543,7 @@ async def sync_mailbox(
 
             for idx, msg_id in enumerate(message_ids):
                 if idx % 200 == 0 and idx > 0:
-                    logger.debug(
-                        f"inbox_sync: {mailbox} — phase1 {idx}/{len(message_ids)}"
-                    )
+                    logger.debug(f"inbox_sync: {mailbox} — phase1 {idx}/{len(message_ids)}")
 
                 msg = _fetch_message(gmail, msg_id)
                 if not msg:
@@ -1521,10 +1583,50 @@ async def sync_mailbox(
                     sig_owner = top_sender if seg_idx == 0 else _seg_email(seg)
                     header_name = top_sender_name if seg_idx == 0 else _seg_name(seg)
 
+                    # ── Embedded To:/Cc: participants (2026-06-04) ──
+                    # People named on forwarded threads who never emailed us
+                    # directly. Feed them into seen_in_headers so they ride
+                    # the exact same merge + hard-filter pipeline as
+                    # top-level recipients.
+                    if seg_idx > 0:
+                        for p_name, p_email in _seg_participants(seg):
+                            if p_email == mailbox or _domain(p_email) in OWN_DOMAINS:
+                                continue
+                            entry = seen_in_headers.setdefault(
+                                p_email,
+                                {
+                                    "email": p_email,
+                                    "display_name": p_name,
+                                    "interaction_count": 0,
+                                },
+                            )
+                            entry["interaction_count"] += 1
+                            if p_name and not entry["display_name"]:
+                                entry["display_name"] = p_name
+
                     if not sig_owner or sig_owner == mailbox:
                         continue
                     if _domain(sig_owner) in OWN_DOMAINS:
                         continue
+
+                    # ── No-signature forwarded sender (2026-06-04) ──
+                    # The embedded From: line already gave us name + email.
+                    # Previously these died at the sig-block check below;
+                    # now they survive via the header path even when the
+                    # forwarded message carried no signature.
+                    if seg_idx > 0:
+                        _hn = _normalize_header_name(header_name)
+                        entry = seen_in_headers.setdefault(
+                            sig_owner,
+                            {
+                                "email": sig_owner,
+                                "display_name": _hn,
+                                "interaction_count": 0,
+                            },
+                        )
+                        entry["interaction_count"] += 1
+                        if _hn and not entry["display_name"]:
+                            entry["display_name"] = _hn
 
                     sig_block = _extract_sig_block(seg)
                     if not sig_block or len(sig_block) < 30:
@@ -1551,13 +1653,9 @@ async def sync_mailbox(
                         return h, await _parse_sig(http_client, b)
 
                 parse_tasks = [
-                    _parse_one(h, b)
-                    for h, b in pending_sigs.items()
-                    if h not in sig_cache
+                    _parse_one(h, b) for h, b in pending_sigs.items() if h not in sig_cache
                 ]
-                parse_results = await asyncio.gather(
-                    *parse_tasks, return_exceptions=True
-                )
+                parse_results = await asyncio.gather(*parse_tasks, return_exceptions=True)
                 for r in parse_results:
                     if isinstance(r, Exception):
                         logger.debug(f"inbox_sync: sig parse task error: {r}")
@@ -1566,8 +1664,7 @@ async def sync_mailbox(
                     sig_cache[h] = parsed or {}
 
                 logger.info(
-                    f"inbox_sync: {mailbox} — sig parsing done, "
-                    f"cache={len(sig_cache)} entries"
+                    f"inbox_sync: {mailbox} — sig parsing done, " f"cache={len(sig_cache)} entries"
                 )
 
             # ── Phase 3: Apply results, validation gauntlet ──────────
@@ -1578,10 +1675,7 @@ async def sync_mailbox(
 
                 # Layer 1: explicit JA org in parsed sig
                 parsed_org = (parsed.get("organization") or "").lower()
-                if any(
-                    t in parsed_org
-                    for t in ("jauniforms", "j.a. uniforms", "ja uniforms")
-                ):
+                if any(t in parsed_org for t in ("jauniforms", "j.a. uniforms", "ja uniforms")):
                     rejections["ja_org_mismatch"] += 1
                     continue
 
@@ -1648,9 +1742,7 @@ async def sync_mailbox(
 
                 # Keep richest sig per email
                 new_score = sum(1 for v in parsed.values() if v)
-                old_score = sum(
-                    1 for v in (gmail_contacts.get(sig_owner) or {}).values() if v
-                )
+                old_score = sum(1 for v in (gmail_contacts.get(sig_owner) or {}).values() if v)
                 if not gmail_contacts.get(sig_owner) or new_score > old_score:
                     gmail_contacts[sig_owner] = parsed
 
@@ -1664,9 +1756,7 @@ async def sync_mailbox(
 
         # ── Merge all sources ─────────────────────────────────────────
         all_emails = (
-            set(seen_in_headers.keys())
-            | set(saved_contacts.keys())
-            | set(gmail_contacts.keys())
+            set(seen_in_headers.keys()) | set(saved_contacts.keys()) | set(gmail_contacts.keys())
         )
 
         merged_contacts: list[dict] = []
@@ -1749,9 +1839,7 @@ async def sync_mailbox(
             merged_contacts.append(contact)
 
         stats["contacts_found"] = len(merged_contacts)
-        logger.info(
-            f"inbox_sync: {mailbox} — {len(merged_contacts)} contacts after merge/filter"
-        )
+        logger.info(f"inbox_sync: {mailbox} — {len(merged_contacts)} contacts after merge/filter")
 
         if merged_contacts:
             upsert_stats = await bulk_upsert_contacts(
@@ -1793,9 +1881,7 @@ async def sync_mailbox(
 
         try:
             state_row = await session.execute(
-                text(
-                    "SELECT consecutive_errors FROM mailbox_sync_state WHERE mailbox = :m"
-                ),
+                text("SELECT consecutive_errors FROM mailbox_sync_state WHERE mailbox = :m"),
                 {"m": mailbox},
             )
             row = state_row.mappings().first()
@@ -1810,8 +1896,6 @@ async def sync_mailbox(
             )
             await session.commit()
         except Exception as inner:
-            logger.error(
-                f"inbox_sync: failed to record error state for {mailbox}: {inner}"
-            )
+            logger.error(f"inbox_sync: failed to record error state for {mailbox}: {inner}")
 
         return stats

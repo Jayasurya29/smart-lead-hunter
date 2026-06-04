@@ -123,6 +123,16 @@ export async function fetchInboxContacts(
   return data
 }
 
+/**
+ * Lead-generator contacts (lead_contacts joined to their potential lead /
+ * existing hotel), served by the backend already shaped like InboxContact
+ * with source='lead_generator' + explicit account_type / lifecycle_stage.
+ */
+export async function fetchLeadContacts(page = 1, per_page = 500): Promise<InboxContactListResponse> {
+  const { data } = await api.get<InboxContactListResponse>(`/api/lead-contacts?page=${page}&per_page=${per_page}`)
+  return data
+}
+
 export async function fetchInboxContactStats(): Promise<InboxContactStats> {
   const { data } = await api.get<InboxContactStats>('/api/inbox-contacts/stats')
   return data

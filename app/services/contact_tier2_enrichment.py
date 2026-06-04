@@ -40,6 +40,7 @@ SYNTH_PROMPT = """You are building a CRM dossier for a sales team at JA Uniforms
 
 Given a contact and raw web snippets about them, produce ONLY this JSON:
 {"role":"","seniority":"","department":"","is_decision_maker":false,
+ "person_first_name":"","person_last_name":"",
  "background":"","relevant_to_uniforms":true,"confidence":0.0}
 
 Rules:
@@ -62,6 +63,11 @@ Rules:
   line. Write in plain factual prose. Never invent facts not in the snippets —
   if a section has no support, simply omit it. "" only if the snippets contain
   nothing usable about this person.
+- person_first_name / person_last_name: the contact's REAL full name when
+  the snippets clearly identify the owner of this email or role (staff
+  directory, LinkedIn profile, press release naming them at this company).
+  "" when not clearly established — NEVER guess a name from the email
+  pattern alone.
 - relevant_to_uniforms: true if this person/company could be a JA customer.
 - confidence: 0.0-1.0 based on how much the snippets actually told you.
 Do not invent facts not supported by the snippets.
@@ -82,7 +88,7 @@ def _domain(email: str) -> str:
     return email.split("@")[-1].lower().strip() if email and "@" in email else ""
 
 
-async def _web_research(name: str, org: str, domain: str) -> list[str]:
+async def _web_research(name: str, org: str, domain: str, email: str = "") -> list[str]:
     """Reuse the Outreach researcher's Serper search for material on a person."""
     try:
         from app.services.outreach.researcher import smart_search
@@ -90,6 +96,16 @@ async def _web_research(name: str, org: str, domain: str) -> list[str]:
         logger.warning(f"tier2: researcher import failed: {e}")
         return []
     queries = []
+    # Nameless contact (2026-06-04): hunt the email address itself — staff
+    # directories, press releases and indexed profiles reveal who owns it
+    # (fching@rosenplaza.com → "Frank Ching, Chief Engineer, Rosen Plaza").
+    local = (email or "").split("@", 1)[0]
+    if not name and email:
+        queries.append(f'"{email}"')
+        if local and org:
+            queries.append(f'"{local}" "{org}"')
+        if local and domain:
+            queries.append(f'"{local}" {domain.split(".")[0]}')
     if name and org:
         queries.append(f'"{name}" {org}')
         queries.append(f'"{name}" {org} title role')
@@ -150,14 +166,12 @@ async def enrich_contact_deep(contact_id: int, find_email: bool = False) -> dict
         if not row:
             return {"error": "not found"}
 
-    name = " ".join([p for p in (row.first_name, row.last_name) if p]) or (
-        row.display_name or ""
-    )
+    name = " ".join([p for p in (row.first_name, row.last_name) if p]) or (row.display_name or "")
     org = row.organization or ""
     domain = _domain(row.email or "")
 
     # 1) Web research
-    snippets = await _web_research(name, org, domain)
+    snippets = await _web_research(name, org, domain, row.email or "")
 
     # 2) Wiza — only if asked and we lack a usable email
     found_email = None
@@ -182,9 +196,7 @@ async def enrich_contact_deep(contact_id: int, find_email: bool = False) -> dict
 
     client = httpx.AsyncClient(timeout=90)
     try:
-        raw = await ai_generate(
-            client, prompt, model=MODEL, temperature=0.25, max_tokens=1200
-        )
+        raw = await ai_generate(client, prompt, model=MODEL, temperature=0.25, max_tokens=1200)
     except Exception as e:
         logger.warning(f"tier2: synthesis failed for {contact_id}: {e}")
         raw = None
@@ -196,6 +208,8 @@ async def enrich_contact_deep(contact_id: int, find_email: bool = False) -> dict
         "seniority": "unknown",
         "department": "unknown",
         "is_decision_maker": False,
+        "person_first_name": "",
+        "person_last_name": "",
         "background": "",
         "relevant_to_uniforms": True,
         "confidence": 0.0,
@@ -214,6 +228,16 @@ async def enrich_contact_deep(contact_id: int, find_email: bool = False) -> dict
         GROUNDED_CONFIDENCE_FLOOR if dossier.get("background") else 0.0,
     )
 
+    # Name resolution (2026-06-04): if the row had no name and research
+    # clearly identified the person, fill it — and replace a display_name
+    # that was just the email address.
+    _nf = (dossier.get("person_first_name") or "").strip()
+    _nl = (dossier.get("person_last_name") or "").strip()
+    _row_nameless = not ((row.first_name or "").strip() or (row.last_name or "").strip())
+    do_name_fill = bool(_row_nameless and _nf and _nl)
+    if do_name_fill:
+        logger.info(f"tier2: resolved name for contact {contact_id} " f"({row.email}): {_nf} {_nl}")
+
     # 4) Write back (grounded source; only fill email if Wiza found one)
     async with async_session() as session:
         await session.execute(
@@ -226,6 +250,13 @@ async def enrich_contact_deep(contact_id: int, find_email: bool = False) -> dict
                 "enrichment_source = 'grounded', enrichment_confidence = :conf, "
                 "enriched_at = :now, enrichment_model = :model "
                 + (", email = COALESCE(email, :found_email)" if found_email else "")
+                + (
+                    ", first_name = :nf, last_name = :nl, "
+                    "display_name = CASE WHEN COALESCE(display_name,'') = '' "
+                    "OR display_name = email THEN :nd ELSE display_name END"
+                    if do_name_fill
+                    else ""
+                )
                 + " WHERE id = :id"
             ),
             {
@@ -239,6 +270,7 @@ async def enrich_contact_deep(contact_id: int, find_email: bool = False) -> dict
                 "model": MODEL,
                 "id": contact_id,
                 **({"found_email": found_email} if found_email else {}),
+                **({"nf": _nf, "nl": _nl, "nd": f"{_nf} {_nl}"} if do_name_fill else {}),
             },
         )
         await session.commit()
@@ -257,9 +289,7 @@ async def enrich_contact_deep(contact_id: int, find_email: bool = False) -> dict
     }
 
 
-async def enrich_batch_deep(
-    contact_ids: list[int], find_email: bool = False
-) -> list[dict]:
+async def enrich_batch_deep(contact_ids: list[int], find_email: bool = False) -> list[dict]:
     """Deep-enrich a chosen set (e.g. one company's contacts, or all DMs)."""
     out = []
     for cid in contact_ids:

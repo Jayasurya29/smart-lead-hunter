@@ -80,6 +80,19 @@ MAX_CONTACTS_TO_SAVE = 8
 _CONTACT_GROUNDING_TIMEOUT_S = 90.0  # 3.5 Flash takes 10-40s; 90s allows retries
 _CONTACT_GROUNDING_MIN_CONTACTS = 2  # below this, fall back to iterative pipeline
 
+_PERSON_NAME_SUFFIXES = {"jr", "sr", "ii", "iii", "iv"}
+
+
+def _normalize_person_name(name: str) -> str:
+    """Person-aware dedup key: lowercase, punctuation stripped, one-letter
+    initials and Jr/Sr/III suffixes dropped — so 'Aaron J. Olson',
+    'Aaron Olson' and 'Aaron Olson Jr.' all collapse to 'aaron olson'.
+    (2026-06-04: lead 1415 persisted 'Aaron Olson' and 'Aaron J. Olson' as
+    two separate contacts because merge keys kept the middle initial.)
+    """
+    toks = re.split(r"[^a-z]+", (name or "").lower())
+    return " ".join(t for t in toks if t and len(t) > 1 and t not in _PERSON_NAME_SUFFIXES)
+
 
 def _build_grounding_url(project: str, model: str) -> tuple:
     """Build the Vertex AI grounding endpoint URL for the given model.
@@ -139,9 +152,7 @@ _SMART_CAP_TARGETS = {
 # but stored as-is they look unprofessional in the dashboard and may
 # trip up downstream tools (Wiza expects www.). Canonicalize at every
 # write site so the DB only ever holds www.linkedin.com URLs.
-_LINKEDIN_SUBDOMAIN_RE = re.compile(
-    r"^https?://([a-z]{2,3})\.linkedin\.com/", re.IGNORECASE
-)
+_LINKEDIN_SUBDOMAIN_RE = re.compile(r"^https?://([a-z]{2,3})\.linkedin\.com/", re.IGNORECASE)
 
 
 def _canonicalize_linkedin_url(url: Optional[str]) -> Optional[str]:
@@ -197,9 +208,7 @@ _GEMINI_RETRY_ATTEMPTS = (
     # quickly."). DSQ bursts typically clear in 30-60 seconds, so
     # patient retry is the correct response.
 )
-_GEMINI_RETRY_JITTER = (
-    0.5  # ±50% randomness on each backoff to de-sync parallel callers
-)
+_GEMINI_RETRY_JITTER = 0.5  # ±50% randomness on each backoff to de-sync parallel callers
 _GEMINI_RETRY_MAX_DELAY = (
     30  # seconds — cap on any single retry delay. Bumped from 8s to 30s
     # because DSQ throttles can take ~30 sec to clear during demand
@@ -490,9 +499,7 @@ async def _call_gemini_single(
                 candidates = data.get("candidates", [])
                 if not candidates:
                     feedback = data.get("promptFeedback", {})
-                    logger.warning(
-                        f"Gemini returned no candidates. Feedback: {feedback}"
-                    )
+                    logger.warning(f"Gemini returned no candidates. Feedback: {feedback}")
                     return None
                 try:
                     text = candidates[0]["content"]["parts"][0]["text"]
@@ -570,9 +577,7 @@ async def _call_gemini_single(
                 # Google's Vertex AI returns a Retry-After header on 429
                 # indicating exactly when the throttle clears. Use it
                 # when present — beats our exponential backoff guess.
-                retry_after = resp.headers.get("Retry-After") or resp.headers.get(
-                    "retry-after"
-                )
+                retry_after = resp.headers.get("Retry-After") or resp.headers.get("retry-after")
                 if retry_after:
                     try:
                         # Header can be seconds (int) or HTTP date.
@@ -756,9 +761,7 @@ async def _call_gemini(
         label = f"{attempt_model} @ {attempt_endpoint}"
 
         if is_fallback:
-            logger.warning(
-                f"[FALLBACK #{idx}] Trying {label} " f"(prev failed: {last_label})"
-            )
+            logger.warning(f"[FALLBACK #{idx}] Trying {label} " f"(prev failed: {last_label})")
 
         result = await _call_gemini_single(
             prompt,
@@ -793,9 +796,7 @@ class EnrichmentResult:
 
     def __init__(self):
         self.contacts: list[dict] = []
-        self.fallback_contacts: list[
-            dict
-        ] = []  # rescued rejects for zero-contact cases
+        self.fallback_contacts: list[dict] = []  # rescued rejects for zero-contact cases
         self.management_company: Optional[str] = None
         self.developer: Optional[str] = None
         self.opening_update: Optional[str] = None
@@ -911,9 +912,7 @@ def _get_priority_titles(mode: str, brand: Optional[str] = None) -> list[str]:
     If brand is provided, prepends brand-specific pre-opening titles
     from BrandRegistry so we search for the right decision makers first.
     """
-    priorities = CONTACT_SEARCH_PRIORITIES.get(
-        mode, CONTACT_SEARCH_PRIORITIES["pre_opening"]
-    )
+    priorities = CONTACT_SEARCH_PRIORITIES.get(mode, CONTACT_SEARCH_PRIORITIES["pre_opening"])
     titles = []
     for group in priorities:
         titles.extend(group["titles"])
@@ -995,9 +994,7 @@ def _clean_title(raw_title: str) -> str:
 
     raw_title = re.sub(r"\s*\|?\s*LinkedIn.*$", "", raw_title, flags=re.IGNORECASE)
     raw_title = re.sub(r"\s*#\w+.*$", "", raw_title)
-    raw_title = re.sub(
-        r"\s*\|\s*\d+\s*comments?.*$", "", raw_title, flags=re.IGNORECASE
-    )
+    raw_title = re.sub(r"\s*\|\s*\d+\s*comments?.*$", "", raw_title, flags=re.IGNORECASE)
     raw_title = re.sub(r"\s*-\s*LinkedIn.*$", "", raw_title, flags=re.IGNORECASE)
 
     if len(raw_title) > 60:
@@ -1292,9 +1289,7 @@ def _likely_same_person(name_a: str, name_b: str) -> bool:
     # Rule 3b: prefix match with min 4-char overlap catches short variants
     # like "Vogel" (nickname/shortened) vs "Vogelsang" (full surname)
     min_shared = 4
-    shorter, longer = (
-        (last_a, last_b) if len(last_a) <= len(last_b) else (last_b, last_a)
-    )
+    shorter, longer = (last_a, last_b) if len(last_a) <= len(last_b) else (last_b, last_a)
     if len(shorter) >= min_shared and longer.startswith(shorter):
         return True
 
@@ -1925,9 +1920,7 @@ async def _scrape_url(url: str) -> Optional[str]:
                 },
             )
             if resp.status_code == 200:
-                text = re.sub(
-                    r"<script[^>]*>.*?</script>", "", resp.text, flags=re.DOTALL
-                )
+                text = re.sub(r"<script[^>]*>.*?</script>", "", resp.text, flags=re.DOTALL)
                 text = re.sub(r"<style[^>]*>.*?</style>", "", text, flags=re.DOTALL)
                 text = re.sub(r"<[^>]+>", " ", text)
                 text = re.sub(r"\s+", " ", text).strip()
@@ -1961,15 +1954,11 @@ async def _scrape_url(url: str) -> Optional[str]:
                             resp2.text,
                             flags=re.DOTALL,
                         )
-                        text = re.sub(
-                            r"<style[^>]*>.*?</style>", "", text, flags=re.DOTALL
-                        )
+                        text = re.sub(r"<style[^>]*>.*?</style>", "", text, flags=re.DOTALL)
                         text = re.sub(r"<[^>]+>", " ", text)
                         text = re.sub(r"\s+", " ", text).strip()
                         if len(text) > 200:
-                            logger.info(
-                                f"httpx retry succeeded: {url} ({len(text)} chars)"
-                            )
+                            logger.info(f"httpx retry succeeded: {url} ({len(text)} chars)")
                             return text[: ENRICHMENT_SETTINGS["max_article_chars"]]
                 except Exception:
                     pass
@@ -2357,9 +2346,7 @@ not a substitute. Always exhaust property-level searches first."""
     # ──────────────────────────────────────────────────────────────────
     li_searches = []
     # Property-level searches FIRST — anchored to the hotel name itself.
-    li_searches.append(
-        f'  site:linkedin.com/in "{hotel_name}" "Director of Housekeeping"'
-    )
+    li_searches.append(f'  site:linkedin.com/in "{hotel_name}" "Director of Housekeeping"')
     li_searches.append(
         f'  site:linkedin.com/in "{hotel_name}" "General Manager" OR "Hotel Manager"'
     )
@@ -2370,16 +2357,12 @@ not a substitute. Always exhaust property-level searches first."""
     li_searches.append(
         f'  site:linkedin.com/in "{hotel_name}" "Director of Purchasing" OR "Purchasing Manager"'
     )
-    li_searches.append(
-        f'  "{hotel_name}" "appointed" OR "joins" OR "named" site:linkedin.com'
-    )
+    li_searches.append(f'  "{hotel_name}" "appointed" OR "joins" OR "named" site:linkedin.com')
     # Mgmt-company fallback searches — only run AFTER property-level.
     primary_org = management_company or brand or hotel_name
     if management_company:
         for title in all_primary[:2]:
-            li_searches.append(
-                f'  (FALLBACK) site:linkedin.com/in "{primary_org}" "{title}"'
-            )
+            li_searches.append(f'  (FALLBACK) site:linkedin.com/in "{primary_org}" "{title}"')
     if developer and is_pre_opening:
         li_searches.append(
             f'  (FALLBACK) site:linkedin.com/in "{developer}" CEO OR President OR CFO'
@@ -2696,6 +2679,21 @@ Also search: press releases, appointment announcements, trade publications
 filter by Tier 1 (property-level) before falling back to Tier 2.
 
 ═══════════════════════════════════════════════════════
+MANDATORY PROPERTY-STAFF SEARCHES (DO NOT SKIP)
+═══════════════════════════════════════════════════════
+Before returning ANY answer you MUST run these web searches — never answer
+from memory alone:
+  • "{hotel_name}" general manager
+  • "{hotel_name}" "hotel manager" OR "GM" appointed
+  • "{hotel_name}" "director of human resources" OR "people and culture"
+  • site:linkedin.com/in "{hotel_name}"
+A pre-opening hotel hiring its team is news — appointment announcements and
+LinkedIn profiles appear months before opening. If the searches truly return
+nobody, say so in search_summary — but you must LOOK first. Returning only
+owners/corporate executives without having searched for property staff is a
+FAILED response.
+
+═══════════════════════════════════════════════════════
 RETURN FORMAT
 ═══════════════════════════════════════════════════════
 Return up to 8 contacts as JSON, in CASCADE ORDER (Tier 1 first, then
@@ -2828,9 +2826,7 @@ async def _enrich_contacts_grounded(
         )
         return None
     except Exception as e:
-        logger.warning(
-            f"Contact grounding ERROR for '{hotel_name}': {e} — falling back"
-        )
+        logger.warning(f"Contact grounding ERROR for '{hotel_name}': {e} — falling back")
         return None
 
     elapsed = _time.monotonic() - start
@@ -2933,9 +2929,7 @@ Return a JSON object:
   "vacant_roles": ["Director of Housekeeping", "Director of F&B"]}}"""
 
         try:
-            extract_result = await _call_gemini(
-                extract_prompt, model=lite_model, timeout=30
-            )
+            extract_result = await _call_gemini(extract_prompt, model=lite_model, timeout=30)
         except Exception as ex:
             logger.warning(f"Contact extraction from grounded text failed: {ex}")
             return None
@@ -2945,9 +2939,7 @@ Return a JSON object:
             if isinstance(extract_result, list):
                 contacts_raw = extract_result
             else:
-                logger.warning(
-                    f"Contact extraction returned unexpected format for '{hotel_name}'"
-                )
+                logger.warning(f"Contact extraction returned unexpected format for '{hotel_name}'")
                 return None
         else:
             # New currency-aware format: use "current" bucket, ignore "former"
@@ -2957,8 +2949,7 @@ Return a JSON object:
             if former:
                 logger.info(
                     f"Contact grounding filtered out {len(former)} former contacts "
-                    f"for '{hotel_name}': "
-                    + ", ".join(f.get("name", "?") for f in former[:5])
+                    f"for '{hotel_name}': " + ", ".join(f.get("name", "?") for f in former[:5])
                 )
             if vacant:
                 logger.info(
@@ -3046,9 +3037,7 @@ Return a JSON object:
                                 f"citing {title}"
                             ),
                             "source_url": "",  # redirect URLs are not usable
-                            "source_domain": title.split(" - ")[0]
-                            if " - " in title
-                            else title,
+                            "source_domain": title.split(" - ")[0] if " - " in title else title,
                             "trust_tier": "official"
                             if any(
                                 d in title.lower()
@@ -3154,11 +3143,7 @@ Return a JSON object:
         ]
         all_from_known_org = (
             all(
-                any(
-                    org in (c.get("organization") or "").lower()
-                    for org in known_orgs
-                    if org
-                )
+                any(org in (c.get("organization") or "").lower() for org in known_orgs if org)
                 for c in high_conf_contacts
             )
             if (known_orgs and high_conf_contacts)
@@ -3244,9 +3229,7 @@ Return a JSON object:
         validated_li = None
         if raw_li and "linkedin.com/in/" in raw_li:
             slug = raw_li.lower().split("linkedin.com/in/")[-1].rstrip("/")
-            name_tokens = [
-                t for t in (c.get("name") or "").lower().split() if len(t) >= 3
-            ]
+            name_tokens = [t for t in (c.get("name") or "").lower().split() if len(t) >= 3]
             if name_tokens and any(t in slug for t in name_tokens):
                 validated_li = raw_li
             else:
@@ -3276,9 +3259,7 @@ Return a JSON object:
                     "quote": c.get("why_relevant") or "",
                     "source_url": source_urls[0] if source_urls else "",
                     "source_title": sources[0] if sources else "Grounding search",
-                    "source_domain": sources[0].split(" ")[0]
-                    if sources
-                    else "grounding",
+                    "source_domain": sources[0].split(" ")[0] if sources else "grounding",
                     "trust_tier": "official" if confidence == "high" else "trade",
                     "source_year": None,
                 }
@@ -3289,6 +3270,163 @@ Return a JSON object:
         result_contacts.append(contact)
 
     return result_contacts
+
+
+async def _ground_property_level_rescue(
+    hotel_name: str,
+    brand: Optional[str],
+    management_company: Optional[str],
+    city: Optional[str],
+    state: Optional[str],
+    country: Optional[str],
+    opening_date: Optional[str],
+) -> Optional[list[dict]]:
+    """Targeted second grounding pass: property-level staff ONLY (2026-06-04).
+
+    Fired when the main grounding call returns contacts but nobody AT the
+    property (the River Market pattern: LLC owners + mgmt-co corporate from
+    model memory). One ~13s Gemini googleSearch call with a laser prompt:
+    GM / Hotel Manager / HR / Exec Housekeeper / property purchasing at THIS
+    property, searches mandatory.
+
+    CITATIONS REQUIRED: if groundingChunks comes back empty the model answered
+    from memory. A phantom GM name would poison outreach, so unlike corporate
+    contacts (where phantom-trust is allowed) we discard and return None.
+    """
+    import time as _time
+
+    try:
+        from app.services.gemini_client import get_gemini_headers
+        from app.services.ai_client import _get_config, _ensure_init
+
+        _ensure_init()
+        config = _get_config()
+        project = config["vertex_project_id"]
+        model = config["model"]
+        url, _ = _build_grounding_url(project, model)
+        headers = get_gemini_headers()
+    except Exception as e:
+        logger.warning(f"Property rescue grounding: cannot build URL/headers: {e}")
+        return None
+
+    location = ", ".join(filter(None, [city, state, country]))
+    opening_bit = f" The hotel opens {opening_date}." if opening_date else ""
+    operator_bit = f" It is managed by {management_company}." if management_company else ""
+    brand_bit = f" Brand: {brand}." if brand else ""
+    prompt = f"""Search the web for people CURRENTLY working AT the property "{hotel_name}" in {location}.{opening_bit}{operator_bit}{brand_bit}
+
+I need ONLY property-level staff (people whose job is at THIS specific hotel):
+General Manager, Hotel Manager, Director of HR / People & Culture,
+Executive Housekeeper / Director of Housekeeping, Director of Operations,
+Director of Food & Beverage, Purchasing Manager.
+
+MANDATORY: run web searches before answering — do NOT answer from memory:
+  • "{hotel_name}" general manager
+  • "{hotel_name}" {city or ""} "hotel manager" OR GM
+  • "{hotel_name}" "director of human resources" OR "people and culture"
+  • "{hotel_name}" appoints OR names OR "joins as"
+  • site:linkedin.com/in "{hotel_name}"
+
+DO NOT return: owners, developers, investors, board members, or corporate
+executives at {management_company or "the management company"} — those are
+already known. ONLY people whose role is at the property itself.
+ONLY include a person if a search result names them — never from memory.
+
+Return ONLY valid JSON, no markdown fences:
+{{"contacts": [{{"name": "Full Name", "title": "Exact Title", "organization": "{hotel_name}", "linkedin_url": null, "confidence": "high|medium", "why_relevant": "1 sentence citing where you found them"}}], "search_summary": "what you searched and what you found"}}
+If you find nobody verifiable: {{"contacts": [], "search_summary": "reason"}}"""
+
+    payload = {
+        "contents": [{"role": "user", "parts": [{"text": prompt}]}],
+        "tools": [{"googleSearch": {}}],
+        "generationConfig": {
+            "temperature": 1.0,  # required for grounding per Vertex docs
+            "maxOutputTokens": 4096,
+            "thinkingConfig": {"thinkingBudget": 0},
+        },
+    }
+
+    start = _time.monotonic()
+    try:
+        async with httpx.AsyncClient(timeout=_CONTACT_GROUNDING_TIMEOUT_S) as gc:
+            resp = await gc.post(url, headers=headers, json=payload)
+        resp.raise_for_status()
+        data = resp.json()
+    except Exception as e:
+        logger.warning(f"Property rescue grounding ERROR for '{hotel_name}': {e}")
+        return None
+    elapsed = _time.monotonic() - start
+
+    try:
+        candidate = data["candidates"][0]
+        parts = (candidate.get("content") or {}).get("parts") or []
+        content_text = ((parts[0].get("text") if parts else "") or "").strip()
+    except (KeyError, IndexError):
+        logger.warning(f"Property rescue grounding: bad response shape for '{hotel_name}'")
+        return None
+    if not content_text:
+        return None
+    if content_text.startswith("```"):
+        seg = content_text.split("```")
+        if len(seg) >= 2:
+            inner = seg[1]
+            content_text = inner[4:] if inner.startswith("json") else inner
+        content_text = content_text.strip()
+
+    try:
+        parsed = json.loads(content_text)
+    except json.JSONDecodeError:
+        logger.warning(f"Property rescue grounding: JSON parse failed for '{hotel_name}'")
+        return None
+    raw = parsed.get("contacts") if isinstance(parsed, dict) else None
+    if not isinstance(raw, list) or not raw:
+        logger.info(
+            f"Property rescue grounding: no property-level staff found for "
+            f"'{hotel_name}' ({(parsed or {}).get('search_summary', '')[:120]})"
+        )
+        return None
+
+    # ── Citations are NON-NEGOTIABLE for property-level people ──
+    meta = candidate.get("groundingMetadata", {}) or {}
+    sources, source_urls = [], []
+    for chunk in (meta.get("groundingChunks", []) or [])[:5]:
+        web = chunk.get("web", {}) or {}
+        if web.get("title"):
+            sources.append(web["title"])
+            source_urls.append(web.get("uri") or "")
+    if not sources:
+        logger.warning(
+            f"Property rescue grounding: {len(raw)} contact(s) for '{hotel_name}' "
+            f"but ZERO citations — phantom property staff are not trusted, discarding"
+        )
+        return None
+
+    out = []
+    for c in raw:
+        name = (c.get("name") or "").strip()
+        if not name or len(name.split()) < 2:
+            continue
+        out.append(
+            {
+                "name": name,
+                "title": (c.get("title") or "").strip(),
+                "organization": (c.get("organization") or hotel_name).strip(),
+                "linkedin": c.get("linkedin_url"),
+                "scope": "hotel_specific",
+                "confidence": (c.get("confidence") or "medium").lower(),
+                "source": source_urls[0] if source_urls else None,
+                "source_type": "grounding_rescue",
+                "source_detail": c.get("why_relevant")
+                or "Found via targeted property-staff grounding search",
+            }
+        )
+    if out:
+        logger.info(
+            f"Property rescue grounding SUCCESS for '{hotel_name}' in "
+            f"{elapsed:.1f}s: {len(out)} property-level contact(s), "
+            f"{len(sources)} citation(s): {[c['name'] for c in out]}"
+        )
+    return out or None
 
 
 async def _layer_web_search(
@@ -3374,8 +3512,7 @@ async def _layer_web_search(
             opportunity = (layer1_brand_info.opportunity_level or "").lower()
             is_independent = (
                 uniform_freedom in ("high", "full")
-                or procurement_model
-                in ("fully_open", "independent", "owner_decides", "open")
+                or procurement_model in ("fully_open", "independent", "owner_decides", "open")
                 or opportunity == "high"
             )
         else:
@@ -3411,9 +3548,7 @@ async def _layer_web_search(
         if not article_text or len(article_text) < 100:
             continue
 
-        extracted = await _extract_contacts_with_gemini(
-            article_text, hotel_name, location
-        )
+        extracted = await _extract_contacts_with_gemini(article_text, hotel_name, location)
         if not extracted:
             continue
 
@@ -3442,23 +3577,17 @@ async def _layer_web_search(
                     if contact.get("scope") == "unknown" or not contact.get("scope"):
                         contact["scope"] = "chain_corporate"
                 else:
-                    logger.info(
-                        f"Filtered out: {name} (corporate title: {contact.get('title')})"
-                    )
+                    logger.info(f"Filtered out: {name} (corporate title: {contact.get('title')})")
                     # Stash as fallback — if enrichment ends with zero contacts,
                     # a corporate/founder contact at a small brand is better than nothing.
-                    contact["_fallback_reason"] = (
-                        f"corporate_title: {contact.get('title')}"
-                    )
+                    contact["_fallback_reason"] = f"corporate_title: {contact.get('title')}"
                     contact["source"] = url
                     contact["source_type"] = "press_release"
                     result.fallback_contacts.append(contact)
                     continue
 
             if _is_irrelevant_org(contact.get("organization", "")):
-                logger.info(
-                    f"Filtered out: {name} (irrelevant org: {contact.get('organization')})"
-                )
+                logger.info(f"Filtered out: {name} (irrelevant org: {contact.get('organization')})")
                 continue
 
             contact["source"] = url
@@ -3584,9 +3713,7 @@ async def _layer_linkedin_snippets(
                     operator_queries.append(f'"{operator}" "{title}"')
                 # Title + region combo for highest-priority Phase 1 titles
                 if corporate_titles and region_terms:
-                    operator_queries.append(
-                        f'"{operator}" "General Manager" {region_terms[0]}'
-                    )
+                    operator_queries.append(f'"{operator}" "General Manager" {region_terms[0]}')
 
             queries = operator_queries + queries  # prepend → runs first
             logger.info(
@@ -3609,9 +3736,7 @@ async def _layer_linkedin_snippets(
             f"{short_hotel_name} {location_str} hotel staff OR manager site:linkedin.com"
         )
     if brand and brand.lower() not in hotel_name.lower():
-        queries.append(
-            f"{brand} {location_str} hotel manager OR director site:linkedin.com"
-        )
+        queries.append(f"{brand} {location_str} hotel manager OR director site:linkedin.com")
     # Parent/management company query
     parent = management_company or brand
     if parent:
@@ -3728,20 +3853,17 @@ async def _layer_linkedin_snippets(
 
                     # Check if this person already exists — update title if missing
                     existing_names = [
-                        c.get("name", "").lower() for c in result.contacts
+                        _normalize_person_name(c.get("name", "")) for c in result.contacts
                     ]
-                    if cd_name.lower() in existing_names:
+                    if _normalize_person_name(cd_name) in existing_names:
                         if cd_title:
                             for existing_c in result.contacts:
-                                if (
-                                    existing_c.get("name", "").lower()
-                                    == cd_name.lower()
-                                ):
+                                if _normalize_person_name(
+                                    existing_c.get("name", "")
+                                ) == _normalize_person_name(cd_name):
                                     if not existing_c.get("title"):
                                         existing_c["title"] = cd_title
-                                        if cd_org and not existing_c.get(
-                                            "organization"
-                                        ):
+                                        if cd_org and not existing_c.get("organization"):
                                             existing_c["organization"] = cd_org
                                         logger.info(
                                             f"{source_site} title update: {cd_name} -> {cd_title}"
@@ -3759,15 +3881,11 @@ async def _layer_linkedin_snippets(
                     if match_ratio >= 0.5:
                         scope = "hotel_specific"
                         confidence = "medium"
-                        confidence_note = (
-                            f"{source_site} confirms {cd_title} at {cd_org}"
-                        )
+                        confidence_note = f"{source_site} confirms {cd_title} at {cd_org}"
                     else:
                         scope = "chain_area"
                         confidence = "low"
-                        confidence_note = (
-                            f"{source_site}: {cd_org} (hotel match unclear)"
-                        )
+                        confidence_note = f"{source_site}: {cd_org} (hotel match unclear)"
 
                     contact = {
                         "name": cd_name,
@@ -3787,9 +3905,7 @@ async def _layer_linkedin_snippets(
                     result.contacts.append(contact)
                     result.sources_used.append(f"{source_site}: {cd_name}")
                     found = True
-                    logger.info(
-                        f"{source_site}: {cd_name} - {cd_title} at {cd_org} [{scope}]"
-                    )
+                    logger.info(f"{source_site}: {cd_name} - {cd_title} at {cd_org} [{scope}]")
                 continue
 
             name = None
@@ -3851,9 +3967,7 @@ async def _layer_linkedin_snippets(
                             "collection",
                             "nora",
                         ]
-                        is_org_not_title = any(
-                            kw in title_lower for kw in org_indicators
-                        )
+                        is_org_not_title = any(kw in title_lower for kw in org_indicators)
 
                         # Also check: real titles have role words
                         role_words = [
@@ -3992,9 +4106,7 @@ async def _layer_linkedin_snippets(
                                 )
                             )
                             if is_real_name:
-                                existing = [
-                                    c.get("name", "").lower() for c in result.contacts
-                                ]
+                                existing = [c.get("name", "").lower() for c in result.contacts]
                                 if mentioned_name.lower() not in existing:
                                     mentioned_contact = {
                                         "name": mentioned_name,
@@ -4061,9 +4173,7 @@ async def _layer_linkedin_snippets(
                 if post_slug:
                     linkedin_url = f"https://www.linkedin.com/in/{post_slug.group(1)}"
 
-                logger.info(
-                    f"LinkedIn post parsed: {name} - {extracted_title} (from post snippet)"
-                )
+                logger.info(f"LinkedIn post parsed: {name} - {extracted_title} (from post snippet)")
 
             if not name or len(name) < 4:
                 continue
@@ -4142,25 +4252,23 @@ async def _layer_linkedin_snippets(
             else:
                 scope = "chain_area"
                 confidence = "low"
-                confidence_note = (
-                    "Found in LinkedIn search but hotel name not confirmed"
-                )
+                confidence_note = "Found in LinkedIn search but hotel name not confirmed"
 
-            existing_names = [c.get("name", "").lower() for c in result.contacts]
-            if name.lower() in existing_names:
+            existing_names = [_normalize_person_name(c.get("name", "")) for c in result.contacts]
+            if _normalize_person_name(name) in existing_names:
                 # If existing contact has no title but this one does, UPDATE it
                 if extracted_title:
                     for existing_c in result.contacts:
-                        if existing_c.get("name", "").lower() == name.lower():
+                        if _normalize_person_name(
+                            existing_c.get("name", "")
+                        ) == _normalize_person_name(name):
                             if not existing_c.get("title"):
                                 existing_c["title"] = extracted_title
                                 existing_c["_raw_snippet"] = sr.get("snippet", "")
                                 existing_c["_raw_title"] = title
                                 if scope == "hotel_specific":
                                     existing_c["scope"] = scope
-                                logger.info(
-                                    f"Title updated for {name}: {extracted_title}"
-                                )
+                                logger.info(f"Title updated for {name}: {extracted_title}")
                             break
                 continue
 
@@ -4234,9 +4342,7 @@ async def _layer_linkedin_snippets(
             combined = f"{snippet_lower} {title_text}"
             # Name MUST appear in same snippet - prevents stealing another person's title
             name_parts = recovery_name.lower().split()
-            name_in_snippet = any(
-                part in combined for part in name_parts if len(part) > 2
-            )
+            name_in_snippet = any(part in combined for part in name_parts if len(part) > 2)
             if not name_in_snippet:
                 continue
             for kw in title_keywords:
@@ -4277,9 +4383,14 @@ Uniform Manager, Wardrobe Manager, Laundry Manager, Supply Chain Manager, Procur
 Director of Purchasing, Director of Finance, Controller, Procurement Manager, Housekeeping Director.
 
 GATEWAY CONTACTS (DO NOT REJECT — classify normally for scope):
-- Director of People & Culture, Director of Talent & Culture, HR Director, HR Manager
-- These may be kept or dropped later based on how many operational contacts we find.
-- Classify their scope normally (hotel_specific vs chain_area) based on evidence.
+- Human Resources / People & Culture / Talent at ANY level and ANY seniority:
+  HR Manager, HR Director, Director of People & Culture, Director of Talent
+  & Culture, VP/SVP of Human Resources, CHRO — at the property OR at the
+  management company / chain. HR owns onboarding and uniform issuance, sets
+  dress-code policy, responds to vendors fastest, and routes them to the GM
+  and department heads. NEVER reject an HR contact.
+- Classify their scope normally based on evidence: property HR →
+  hotel_specific; management-company / chain HR → management_corporate.
 
 NOT operational hotel staff (REJECT these):
 - C-suite executives at the chain parent: CEO, COO, CFO, Chairman, Board
@@ -4294,6 +4405,11 @@ NOT operational hotel staff (REJECT these):
   Director of Marketing, AVP Marketing, VP Marketing, Chief Marketing
   Officer, Director of Branding, Director of PR, Director of Revenue,
   Director of Key Accounts, National Sales Manager
+- Back-office corporate roles at the chain or management company regardless
+  of seniority: Legal / General Counsel, IT / Technology, Accounting /
+  Controller, Internal Communications — they do not buy, specify, or route
+  uniform programs. (Human Resources is NOT back-office here — HR is a
+  GATEWAY contact, see above. KEEP HR at every level.)
 - People at other hotels, not the target hotel
 - People mentioned in a LinkedIn post who are NOT the post author
 
@@ -4306,6 +4422,10 @@ CONCRETE REJECT EXAMPLES (make sure these get rejected):
   • Melanie Benozich (AVP Marketing & Global Branding, Hyatt Inclusive
     Collection) → REJECT
     Reason: Pure marketing role, doesn't manage uniformed staff
+  • CONTRAST — Deanne Johnson-Anderson (SVP Human Resources, Crestline
+    Hotels & Resorts) → KEEP as corrected_scope="management_corporate"
+    Reason: HR is a gateway — owns onboarding and uniform issuance and
+    connects vendors to GMs across every property the company manages
 
 EXCEPTION — VP/Director of Development at the BRAND PARENT or MGMT COMPANY → KEEP:
 "VP of Development", "SVP of Development", "Chief Development Officer",
@@ -4726,8 +4846,7 @@ async def _verify_contacts_with_gemini(
             # Independent / founder-led / boutique signals
             is_independent = (
                 uniform_freedom in ("high", "full")
-                or procurement_model
-                in ("fully_open", "independent", "owner_decides", "open")
+                or procurement_model in ("fully_open", "independent", "owner_decides", "open")
                 or opportunity == "high"
             )
 
@@ -4944,9 +5063,7 @@ async def _verify_contacts_with_gemini(
     # None/unknown (conservative default — better to include owner contacts
     # for ambiguous leads than to wrongly reject them).
     _PRE_OPENING_TYPES = {"new_opening", "greenfield", "", None}
-    if (
-        project_type or ""
-    ).strip().lower() in _PRE_OPENING_TYPES or project_type is None:
+    if (project_type or "").strip().lower() in _PRE_OPENING_TYPES or project_type is None:
         pre_opening_override = (
             "\n═══════════════════════════════════════════════════════════════\n"
             "PRE-OPENING OWNER / DEVELOPER OVERRIDE (new-build property)\n"
@@ -5029,15 +5146,11 @@ async def _verify_contacts_with_gemini(
         # instead of pinning to primary model which has no recovery on timeout.
         verifications = await _call_gemini(prompt, timeout=120)
         if verifications is None:
-            logger.warning(
-                "Gemini verification returned no data, keeping contacts as-is"
-            )
+            logger.warning("Gemini verification returned no data, keeping contacts as-is")
             return contacts
         # _call_gemini returns parsed JSON — for verification, it's a list
         if not isinstance(verifications, list):
-            logger.error(
-                f"Gemini verification returned non-list: {type(verifications)}"
-            )
+            logger.error(f"Gemini verification returned non-list: {type(verifications)}")
             return contacts
 
     except Exception as e:
@@ -5113,9 +5226,8 @@ async def _verify_contacts_with_gemini(
             # (Facebook, Instagram, press releases often use different titles than LinkedIn)
             source_type = match.get("source_type", "")
             source_url = match.get("source", "")
-            is_linkedin_profile = (
-                source_type == "linkedin_snippet"
-                and "linkedin.com/in/" in (source_url or "")
+            is_linkedin_profile = source_type == "linkedin_snippet" and "linkedin.com/in/" in (
+                source_url or ""
             )
 
             if title_is_missing or title_is_incomplete or title_is_expansion:
@@ -5125,10 +5237,7 @@ async def _verify_contacts_with_gemini(
                         f"'{old_title}' -> '{verified_title}'"
                     )
                 match["title"] = verified_title
-            elif (
-                not is_linkedin_profile
-                and not match.get("_title_source") == "web_resolution"
-            ):
+            elif not is_linkedin_profile and not match.get("_title_source") == "web_resolution":
                 # Non-LinkedIn source — trust Gemini's correction (likely from LinkedIn data)
                 # BUT never override titles we resolved from press releases / official sources
                 if old_lower != verified_title.lower().strip():
@@ -5162,8 +5271,7 @@ async def _verify_contacts_with_gemini(
             old_scope = match.get("scope", "")
             if old_scope != corrected_scope:
                 logger.info(
-                    f"Gemini scope fix: {v.get('name')}: "
-                    f"'{old_scope}' -> '{corrected_scope}'"
+                    f"Gemini scope fix: {v.get('name')}: " f"'{old_scope}' -> '{corrected_scope}'"
                 )
             match["scope"] = corrected_scope
 
@@ -5561,9 +5669,7 @@ _ROLE_FAMILIES: dict[str, set[str]] = {
 }
 
 # Flattened set for quick "is this a hospitality role?" check
-_ALL_ROLE_KEYWORDS: set[str] = {
-    kw for family in _ROLE_FAMILIES.values() for kw in family
-}
+_ALL_ROLE_KEYWORDS: set[str] = {kw for family in _ROLE_FAMILIES.values() for kw in family}
 
 # Org name aliases — LinkedIn profiles often abbreviate company names.
 # Key = lowercase canonical form, values = aliases seen on LinkedIn.
@@ -5688,9 +5794,7 @@ def _org_tokens_match(org_name: str, haystack: str) -> bool:
         "services",
     }
     org_words = [
-        w
-        for w in re.split(r"[^a-z0-9]+", org_lower)
-        if len(w) >= 4 and w not in _ORG_STOPWORDS
+        w for w in re.split(r"[^a-z0-9]+", org_lower) if len(w) >= 4 and w not in _ORG_STOPWORDS
     ]
     if len(org_words) >= 2:
         matched = sum(1 for w in org_words if w in haystack)
@@ -5719,9 +5823,7 @@ def _name_in_serp(name: str, serp_title: str) -> bool:
     import unicodedata
 
     def _strip_accents(s: str) -> str:
-        return (
-            unicodedata.normalize("NFKD", s).encode("ascii", "ignore").decode().lower()
-        )
+        return unicodedata.normalize("NFKD", s).encode("ascii", "ignore").decode().lower()
 
     name_lower = _strip_accents(name.strip())
     title_lower = _strip_accents(serp_title)
@@ -5738,8 +5840,7 @@ def _name_in_serp(name: str, serp_title: str) -> bool:
     parts = [
         p.strip(strip_chars)
         for p in clean_name.split()
-        if len(p.strip(strip_chars)) >= 2
-        and p.strip(strip_chars).lower() not in _NAME_STOP
+        if len(p.strip(strip_chars)) >= 2 and p.strip(strip_chars).lower() not in _NAME_STOP
     ]
 
     if not parts:
@@ -5832,9 +5933,7 @@ def _is_clean_name_slug(url: str, name: str) -> bool:
     # Build the candidate clean slug from the name (diacritic-stripped)
     import unicodedata
 
-    name_norm = (
-        unicodedata.normalize("NFKD", name).encode("ascii", "ignore").decode().lower()
-    )
+    name_norm = unicodedata.normalize("NFKD", name).encode("ascii", "ignore").decode().lower()
     name_norm = re.sub(r"[^a-z\s-]", "", name_norm).strip()
     # Two parsings: (a) drop initials/short tokens for hyphenated forms,
     # (b) keep all tokens for concatenated forms (handles "Steven M Rubin")
@@ -5897,27 +5996,44 @@ def _slug_obviously_wrong_person(url: str, name: str) -> bool:
 
     import unicodedata
 
-    name_norm = (
-        unicodedata.normalize("NFKD", name).encode("ascii", "ignore").decode().lower()
-    )
+    name_norm = unicodedata.normalize("NFKD", name).encode("ascii", "ignore").decode().lower()
     name_norm = re.sub(r"[^a-z\s-]", "", name_norm).strip()
     name_tokens = [p for p in re.split(r"[\s-]+", name_norm) if p and len(p) >= 3]
     if not name_tokens:
         return False  # name too short to validate; trust the SERP
 
-    # Check 1: any name token (3+ chars) appears as substring in slug?
+    # Check 1 (2026-06-04 retune): surname is the identity anchor — first
+    # names are nickname-land (Roman (Jonathon) Varjabedian goes by Roman,
+    # his slug says jonathon; Ed/Edward, Mike/Michael...).
+    #   • surname in slug → trust, regardless of first name
+    #   • first name in slug WITHOUT surname → reject only if the slug also
+    #     carries somebody ELSE's surname-like token ('susan-scott' for
+    #     Susan Heitmann = different person; bare 'susan'/'susan123' stays
+    #     ambiguous → trust the sparse SERP)
     slug_clean = slug.replace("-", "").replace("_", "")
-    for tok in name_tokens:
-        if tok in slug_clean:
-            return False  # token found → trust this URL
+    first_tok = name_tokens[0]
+    last_tok = name_tokens[-1]
+    if last_tok in slug_clean:
+        return False  # surname found → trust this URL
+    if len(name_tokens) >= 2 and first_tok in slug_clean:
+        _foreign_runs = [
+            t
+            for t in re.findall(r"[a-z]{4,}", slug)
+            if t != first_tok
+            and t not in first_tok
+            and first_tok not in t
+            and t not in last_tok
+            and last_tok not in t
+        ]
+        if _foreign_runs:
+            return True  # first name + someone else's surname → wrong person
+        return False
 
     # Check 2: first or last initial + 2+ chars of other name token in slug?
     # Handles "g-sindhi" / "gsindhi" patterns where first token isn't full
     if len(name_tokens) >= 2:
         first_init = name_tokens[0][0]
         last_init = name_tokens[-1][0]
-        if name_tokens[-1] in slug_clean or name_tokens[0] in slug_clean:
-            return False
         # initial+last fragment
         if (
             f"{first_init}{name_tokens[-1][:3]}" in slug_clean
@@ -5988,8 +6104,7 @@ def _linkedin_serp_valid(
         hotel_words = [
             w
             for w in re.split(r"[^a-z0-9]+", hotel_name.lower())
-            if len(w) >= 4
-            and w not in {"hotel", "resort", "the", "and", "collection", "suites"}
+            if len(w) >= 4 and w not in {"hotel", "resort", "the", "and", "collection", "suites"}
         ]
         if hotel_words:
             matched_hotel = sum(1 for w in hotel_words if w in serp_title)
@@ -6201,9 +6316,7 @@ async def enrich_lead_contacts(
                     is_existing_hotel=is_existing_hotel,
                 )
             except Exception as ex:
-                logger.warning(
-                    f"Grounding contact verification failed (keeping raw): {ex}"
-                )
+                logger.warning(f"Grounding contact verification failed (keeping raw): {ex}")
 
         # ── LinkedIn URL lookup for grounded contacts missing a URL ──
         # Grounding sometimes finds names but not their LinkedIn profile URL.
@@ -6475,11 +6588,105 @@ async def enrich_lead_contacts(
 
         # has_operational = at least one contact with operational buying authority
         has_operational = any(
-            (c.get("scope") or "").lower() in _OPERATIONAL_SCOPES
-            for c in result.contacts
+            (c.get("scope") or "").lower() in _OPERATIONAL_SCOPES for c in result.contacts
         )
 
-        if not all_cxo and has_operational and not is_existing_hotel:
+        # has_property_level = at least one contact AT THE PROPERTY ITSELF.
+        # FIX 2026-06-04 (River Market Hotel): grounding kept returning the
+        # development cast — LLC owners + management-company corporate (EVP/SVP
+        # at Crestline) — which satisfied has_operational, so the iterative
+        # pipeline (the part that actually SEARCHES for the GM, exec
+        # housekeeper, property procurement) was skipped on every re-run.
+        # Model memory knows who BUILT a hotel; only live search finds who was
+        # hired to RUN it. Skipping is now allowed only when grounding produced
+        # at least one hotel_specific contact. Grounded owners/corporate are
+        # not lost — the fall-through merges them after iterative completes.
+        has_property_level = any(
+            (c.get("scope") or "").lower() == "hotel_specific" for c in result.contacts
+        )
+
+        # ── Timeline-tiered property-staff policy (2026-06-04) ──
+        # How hard we hunt property-level staff depends on how far out the
+        # opening is — a GM can't be found if they haven't been hired:
+        #   URGENT (3-6 mo) + EXPIRED edge cases: team exists and is the
+        #     prize — property-level REQUIRED; rescue fires; iterative runs
+        #     if both grounding shots miss.
+        #   HOT (6-12 mo) / TBD / no label: hiring may not have happened —
+        #     rescue is worth one ~13s shot, but a miss does NOT trigger the
+        #     2-3 min iterative pipeline just for property staff.
+        #   WARM / COOL (12+ mo): hotel isn't built; property staff don't
+        #     exist. No rescue, no forced iterative — owners + corporate is
+        #     a complete answer.
+        # Existing hotels keep their own always-iterative path below.
+        _tl = (timeline_label or "").lower()
+        _urgent_like = ("urgent" in _tl) or ("expired" in _tl)
+        _hot_like = ("hot" in _tl) or ("tbd" in _tl) or (not _tl.strip())
+        require_property_level = _urgent_like
+        attempt_rescue = _urgent_like or _hot_like
+
+        # ── Property-level RESCUE grounding (2026-06-04) ──
+        # Main grounding answered without anyone AT the property (the River
+        # Market pattern). Before paying 2-3 minutes of iterative Serper
+        # searches, fire ONE ~13s targeted grounding call hunting ONLY
+        # property-level staff, citations mandatory. If it lands a GM / HR /
+        # housekeeper, the fast-path skip below proceeds; if not, the
+        # iterative pipeline remains the last resort (URGENT leads only).
+        if not has_property_level and not is_existing_hotel and result.contacts and attempt_rescue:
+            if progress_callback is not None:
+                try:
+                    await progress_callback(6, 11, "Hunting property-level staff (targeted search)")
+                except Exception:
+                    pass
+            rescue = None
+            try:
+                rescue = await _ground_property_level_rescue(
+                    hotel_name=hotel_name,
+                    brand=brand,
+                    management_company=management_company,
+                    city=city,
+                    state=state,
+                    country=country,
+                    opening_date=opening_date,
+                )
+            except Exception as _re:
+                logger.warning(f"Property rescue grounding failed: {_re}")
+            if rescue:
+                try:
+                    rescue = await _verify_contacts_with_gemini(
+                        contacts=rescue,
+                        hotel_name=hotel_name,
+                        brand=brand,
+                        management_company=management_company,
+                        city=city,
+                        state=state,
+                        country=country,
+                        opening_date=opening_date,
+                        project_type=project_type_str,
+                        developer=developer,
+                        owner=owner,
+                        is_existing_hotel=is_existing_hotel,
+                    )
+                except Exception as _ve:
+                    logger.warning(f"Rescue verification failed (keeping raw): {_ve}")
+                _have = {_normalize_person_name(c.get("name") or "") for c in result.contacts}
+                _new = [
+                    rc
+                    for rc in (rescue or [])
+                    if _normalize_person_name(rc.get("name") or "") not in _have
+                ]
+                if _new:
+                    result.contacts.extend(_new)
+                    result.layers_tried.append("grounding_rescue")
+                    has_property_level = any(
+                        (c.get("scope") or "").lower() == "hotel_specific" for c in result.contacts
+                    )
+
+        if (
+            not all_cxo
+            and has_operational
+            and (has_property_level or not require_property_level)
+            and not is_existing_hotel
+        ):
             # Grounding found useful contacts (operational staff, mgmt company,
             # or properly scoped owners) — trust it, skip iterative.
             # EXCEPTION: existing hotels ALWAYS run iterative because grounding
@@ -6554,8 +6761,7 @@ async def enrich_lead_contacts(
 
                 if li_results:
                     li_snippets = " ".join(
-                        (r.get("snippet") or "") + " " + (r.get("title") or "")
-                        for r in li_results
+                        (r.get("snippet") or "") + " " + (r.get("title") or "") for r in li_results
                     )
 
                     # Find date ranges in the LinkedIn snippets
@@ -6639,8 +6845,7 @@ async def enrich_lead_contacts(
 
                 # Check snippets for employer match
                 snippets_text = " ".join(
-                    (r.get("snippet") or "") + " " + (r.get("title") or "")
-                    for r in verify_results
+                    (r.get("snippet") or "") + " " + (r.get("title") or "") for r in verify_results
                 ).lower()
 
                 hotel_tokens = set(hotel_name.lower().split()) - {
@@ -6667,14 +6872,11 @@ async def enrich_lead_contacts(
                 }
                 relevant_tokens = hotel_tokens | org_tokens
 
-                has_match = any(
-                    t in snippets_text for t in relevant_tokens if len(t) > 3
-                )
+                has_match = any(t in snippets_text for t in relevant_tokens if len(t) > 3)
 
                 if has_match:
                     logger.info(
-                        f"[VERIFY PART A] {c_name}: CONFIRMED — "
-                        f"recent mentions at {verify_org}"
+                        f"[VERIFY PART A] {c_name}: CONFIRMED — " f"recent mentions at {verify_org}"
                     )
                     verified_contacts.append(c)
                 else:
@@ -6697,34 +6899,25 @@ async def enrich_lead_contacts(
                 logger.info(
                     f"[VERIFY PART C] Hunting replacements for {len(departed_roles)} "
                     f"departed roles at {hotel_name}: "
-                    + ", ".join(
-                        f"{title} (was {name})" for title, name in departed_roles
-                    )
+                    + ", ".join(f"{title} (was {name})" for title, name in departed_roles)
                 )
 
                 for departed_title, departed_name in departed_roles:
                     # Build a targeted replacement query
                     # Use the role title + hotel name + site:linkedin.com
                     replacement_query = (
-                        f'"{hotel_name}" "{departed_title}" '
-                        f"site:linkedin.com 2025 OR 2026"
+                        f'"{hotel_name}" "{departed_title}" ' f"site:linkedin.com 2025 OR 2026"
                     )
                     try:
-                        repl_results = await _search_web(
-                            replacement_query, max_results=5
-                        )
+                        repl_results = await _search_web(replacement_query, max_results=5)
                     except Exception:
                         repl_results = []
 
                     if not repl_results:
                         # Try without year filter
-                        replacement_query = (
-                            f'"{hotel_name}" "{departed_title}" site:linkedin.com'
-                        )
+                        replacement_query = f'"{hotel_name}" "{departed_title}" site:linkedin.com'
                         try:
-                            repl_results = await _search_web(
-                                replacement_query, max_results=5
-                            )
+                            repl_results = await _search_web(replacement_query, max_results=5)
                         except Exception:
                             repl_results = []
 
@@ -6737,9 +6930,7 @@ async def enrich_lead_contacts(
 
                     # Parse SERP results for a person who ISN'T the departed one
                     for r in repl_results:
-                        snippet = (
-                            (r.get("snippet") or "") + " " + (r.get("title") or "")
-                        )
+                        snippet = (r.get("snippet") or "") + " " + (r.get("title") or "")
                         snippet_lower = snippet.lower()
 
                         # Skip if it's about the departed person
@@ -6751,9 +6942,7 @@ async def enrich_lead_contacts(
                             # Try to extract a name from the SERP title
                             # LinkedIn titles are "FirstName LastName - Title at Company"
                             title_text = r.get("title", "")
-                            name_match = _re.match(
-                                r"^([A-Z][a-z]+ [A-Z][a-zA-Z'-]+)", title_text
-                            )
+                            name_match = _re.match(r"^([A-Z][a-z]+ [A-Z][a-zA-Z'-]+)", title_text)
                             if name_match:
                                 replacement_name = name_match.group(1).strip()
 
@@ -6763,10 +6952,10 @@ async def enrich_lead_contacts(
 
                                 # Don't add if already in verified_contacts
                                 existing_names = {
-                                    (vc.get("name") or "").lower()
+                                    _normalize_person_name(vc.get("name") or "")
                                     for vc in verified_contacts
                                 }
-                                if replacement_name.lower() in existing_names:
+                                if _normalize_person_name(replacement_name) in existing_names:
                                     continue
 
                                 replacement_contact = {
@@ -6918,7 +7107,7 @@ async def enrich_lead_contacts(
 
                 hotel_short = search_name or hotel_name
                 existing_names = {
-                    (c.get("name") or "").lower() for c in result.contacts
+                    _normalize_person_name(c.get("name") or "") for c in result.contacts
                 }
                 gap_fills_found = 0
 
@@ -6946,8 +7135,7 @@ async def enrich_lead_contacts(
 
                     if not serper_results:
                         logger.info(
-                            f"[SERPER GAP-FILL] No results for {family} "
-                            f"at {hotel_name}"
+                            f"[SERPER GAP-FILL] No results for {family} " f"at {hotel_name}"
                         )
                         continue
 
@@ -7049,7 +7237,7 @@ async def enrich_lead_contacts(
                             continue
 
                         # Skip if already in contacts or is a departed person
-                        if found_name.lower() in existing_names:
+                        if _normalize_person_name(found_name) in existing_names:
                             continue
 
                         # Skip if not LinkedIn
@@ -7107,9 +7295,7 @@ async def enrich_lead_contacts(
                                 # Reject if it looks like a hotel/company name
                                 # instead of a job title
                                 extracted_lower = extracted.lower()
-                                is_hotel_name = any(
-                                    w in extracted_lower for w in hotel_words
-                                )
+                                is_hotel_name = any(w in extracted_lower for w in hotel_words)
                                 is_title = any(
                                     kw in extracted_lower
                                     for kw in (
@@ -7147,17 +7333,13 @@ async def enrich_lead_contacts(
                                 {
                                     "quote": sr_snippet[:200],
                                     "source_url": sr_link,
-                                    "source_domain": "linkedin.com"
-                                    if is_linkedin
-                                    else "",
-                                    "trust_tier": "official"
-                                    if is_linkedin
-                                    else "trade",
+                                    "source_domain": "linkedin.com" if is_linkedin else "",
+                                    "trust_tier": "official" if is_linkedin else "trade",
                                 }
                             ],
                         }
                         result.contacts.append(gap_contact)
-                        existing_names.add(found_name.lower())
+                        existing_names.add(_normalize_person_name(found_name))
                         gap_fills_found += 1
                         logger.info(
                             f"[SERPER GAP-FILL] 🎯 Found {found_name} as "
@@ -7178,9 +7360,7 @@ async def enrich_lead_contacts(
                     for c in result.contacts:
                         c_name = (c.get("name") or "").strip()
                         # Only process gap-fill contacts (they have this source_detail)
-                        if "Serper LinkedIn gap-fill" not in (
-                            c.get("source_detail") or ""
-                        ):
+                        if "Serper LinkedIn gap-fill" not in (c.get("source_detail") or ""):
                             continue
                         if not c_name or c.get("linkedin"):
                             continue  # Already has LinkedIn URL or no name
@@ -7222,25 +7402,20 @@ async def enrich_lead_contacts(
                             ):
                                 c["linkedin"] = lr_link
                                 logger.info(
-                                    f"[GAP-FILL LINKEDIN] Found URL for "
-                                    f"{c_name}: {lr_link}"
+                                    f"[GAP-FILL LINKEDIN] Found URL for " f"{c_name}: {lr_link}"
                                 )
 
                                 # Quick currency check from snippet
                                 if "present" in lr_snippet.lower():
                                     c["confidence"] = "medium"
-                                    c["source_detail"] += (
-                                        " — LinkedIn confirmed current"
-                                    )
+                                    c["source_detail"] += " — LinkedIn confirmed current"
                                     logger.info(
                                         f"[GAP-FILL VERIFY] {c_name}: "
                                         f"LinkedIn shows 'Present' → CURRENT"
                                     )
 
                                 # Check for end date = departed
-                                date_ranges = _LINKEDIN_DATE_RANGE_RE.findall(
-                                    lr_snippet
-                                )
+                                date_ranges = _LINKEDIN_DATE_RANGE_RE.findall(lr_snippet)
                                 for start_d, end_d in date_ranges:
                                     if end_d.lower() != "present":
                                         c["confidence"] = "low"
@@ -7269,17 +7444,13 @@ async def enrich_lead_contacts(
                             c_org = c.get("organization") or hotel_name
                             verify_query = f'"{c_name}" "{c_org}" 2024 OR 2025 OR 2026'
                             try:
-                                verify_results = await _search_web(
-                                    verify_query, max_results=3
-                                )
+                                verify_results = await _search_web(verify_query, max_results=3)
                             except Exception:
                                 verify_results = []
 
                             if verify_results:
                                 verify_text = " ".join(
-                                    (r.get("snippet") or "")
-                                    + " "
-                                    + (r.get("title") or "")
+                                    (r.get("snippet") or "") + " " + (r.get("title") or "")
                                     for r in verify_results
                                 ).lower()
                                 hotel_words_verify = [
@@ -7296,13 +7467,8 @@ async def enrich_lead_contacts(
                                 ]
                                 if any(w in verify_text for w in hotel_words_verify):
                                     c["confidence"] = "medium"
-                                    if (
-                                        "confirmed"
-                                        not in (c.get("source_detail") or "").lower()
-                                    ):
-                                        c["source_detail"] += (
-                                            " — web mentions confirm association"
-                                        )
+                                    if "confirmed" not in (c.get("source_detail") or "").lower():
+                                        c["source_detail"] += " — web mentions confirm association"
                                     logger.info(
                                         f"[GAP-FILL VERIFY] {c_name}: "
                                         f"web mentions confirm at {hotel_name}"
@@ -7435,19 +7601,15 @@ async def enrich_lead_contacts(
                 "_current_title": n.get("_current_title"),
                 "_role_period": n.get("_role_period"),
                 "_final_priority": n.get("_final_priority"),  # Iter 6: P1/P2/P3/P4
-                "_final_reasoning": n.get(
-                    "_final_reasoning"
-                ),  # Iter 6: strategist reasoning
+                "_final_reasoning": n.get("_final_reasoning"),  # Iter 6: strategist reasoning
             }
         )
     # Merge grounding contacts in — dedupe by normalized name
     if grounding_contacts:
-        existing_names = {
-            (c.get("name") or "").lower().strip() for c in result.contacts
-        }
+        existing_names = {_normalize_person_name(c.get("name") or "") for c in result.contacts}
         added_from_grounding = 0
         for gc in grounding_contacts:
-            gc_name = (gc.get("name") or "").lower().strip()
+            gc_name = _normalize_person_name(gc.get("name") or "")
             if gc_name and gc_name not in existing_names:
                 result.contacts.append(gc)
                 existing_names.add(gc_name)
@@ -7687,9 +7849,7 @@ async def _enrich_lead_contacts_v4_legacy(
             project_type=pt.project_type,
         )
         if found:
-            hotel_specific = [
-                c for c in result.contacts if c.get("scope") == "hotel_specific"
-            ]
+            hotel_specific = [c for c in result.contacts if c.get("scope") == "hotel_specific"]
             logger.info(
                 f"Layer 1: {len(result.contacts)} contacts "
                 f"({len(hotel_specific)} hotel-specific)"
@@ -7759,9 +7919,7 @@ async def _enrich_lead_contacts_v4_legacy(
                     queries.append(f'"{name}" {loose}')
 
                 # Loose fallback 2: name + linkedin (catches profile pages directly)
-                queries.append(
-                    f'"{name}" linkedin {core_words[0] if core_words else ""}'.strip()
-                )
+                queries.append(f'"{name}" linkedin {core_words[0] if core_words else ""}'.strip())
 
                 search_results = []
                 for q in queries:
@@ -7770,9 +7928,7 @@ async def _enrich_lead_contacts_v4_legacy(
                         break
 
                 for sr in search_results:
-                    snippet = (
-                        sr.get("snippet", "") + " " + sr.get("title", "")
-                    ).lower()
+                    snippet = (sr.get("snippet", "") + " " + sr.get("title", "")).lower()
                     # Check for direct role mentions
                     role_keywords = [
                         "general manager",
@@ -7942,9 +8098,7 @@ async def _enrich_lead_contacts_v4_legacy(
                 }
                 return title not in generic_titles
 
-            restored_names = {
-                c.get("name", "").lower().strip() for c in result.contacts
-            }
+            restored_names = {c.get("name", "").lower().strip() for c in result.contacts}
             for c in contacts_before_verify:
                 if (
                     c.get("_protected_title_match")
@@ -8023,9 +8177,7 @@ async def _enrich_lead_contacts_v4_legacy(
         )
 
         # Check if we should retry (all name collisions / no decision makers)
-        should_retry, retry_reason = contact_validator.should_retry_search(
-            scored_contacts
-        )
+        should_retry, retry_reason = contact_validator.should_retry_search(scored_contacts)
         if should_retry:
             logger.info(f"Validation says retry: {retry_reason}")
 
@@ -8051,8 +8203,7 @@ async def _enrich_lead_contacts_v4_legacy(
                         contacts=result.contacts,
                         hotel_name=hotel_name,
                         brand=brand,
-                        management_company=management_company
-                        or result.management_company,
+                        management_company=management_company or result.management_company,
                         city=city,
                         state=state,
                         country=country,
@@ -8252,9 +8403,7 @@ async def _enrich_lead_contacts_v4_legacy(
                     return out
 
                 # Detect contact scope — this drives which tokens we use.
-                scope = (
-                    c.get("scope", "") or c.get("_validation_scope", "") or ""
-                ).lower()
+                scope = (c.get("scope", "") or c.get("_validation_scope", "") or "").lower()
 
                 # TIER 1 (property / operator) — for hotel-specific or
                 # chain-area contacts, i.e. people who actually work at
@@ -8276,9 +8425,7 @@ async def _enrich_lead_contacts_v4_legacy(
                 # against the stopword list so "Autograph" etc. are out.
                 fallback = set()
                 if not tier1 and not tier2:
-                    fallback = _extract_tokens(
-                        [c.get("organization"), operator_context]
-                    )
+                    fallback = _extract_tokens([c.get("organization"), operator_context])
 
                 distinctive = tier1 | tier2 | fallback
 
@@ -8423,9 +8570,7 @@ async def save_enrichment_to_lead(lead_id: int, result: EnrichmentResult) -> dic
         return {"status": "no_data", "message": "No contacts or details found"}
 
     async with async_session() as session:
-        db_result = await session.execute(
-            select(PotentialLead).where(PotentialLead.id == lead_id)
-        )
+        db_result = await session.execute(select(PotentialLead).where(PotentialLead.id == lead_id))
         lead = db_result.scalar_one_or_none()
         if not lead:
             return {"status": "error", "message": f"Lead {lead_id} not found"}
@@ -8632,9 +8777,7 @@ async def persist_enrichment_contacts(
     lead = parent_result.scalar_one_or_none()
     if not lead:
         summary["status"] = "lead_not_found"
-        logger.warning(
-            f"persist_enrichment_contacts: {parent_kind} {parent_id} not found"
-        )
+        logger.warning(f"persist_enrichment_contacts: {parent_kind} {parent_id} not found")
         return summary
 
     # ── Update flat lead fields (fill-empty only) ──
@@ -8665,6 +8808,129 @@ async def persist_enrichment_contacts(
 
     lead.updated_at = local_now()
 
+    # ── Inbox-known contacts injection (triangulation, 2026-06-04) ──
+    # People we ALREADY EMAIL at this property are the highest-trust contacts
+    # possible: real humans, real addresses, real engagement. (River Market
+    # Hotel: the GM sat in the inbox with a direct mobile while grounding kept
+    # returning phantom LLC owners.) Pull buyer-side inbox contacts whose
+    # organization matches this property and PREPEND them — first in payload
+    # also makes the best of them the lead's primary contact.
+    try:
+        from sqlalchemy import text as _sql_text
+
+        from app.services.contact_scoring import score_contact as _score_contact
+
+        _hotel = (getattr(lead, "hotel_name", None) or "").strip()
+        if _hotel:
+            # Match variants: full name, search_name, and a "core" name with
+            # generic words stripped ('River Market Hotel' → 'River Market').
+            # Inbox orgs are often stored without the generic word, which made
+            # the exact-name match miss the River Market GM on 2026-06-04.
+            _GENERIC_WORDS = {
+                "hotel",
+                "hotels",
+                "resort",
+                "resorts",
+                "inn",
+                "suites",
+                "lodge",
+                "spa",
+                "the",
+                "a",
+                "an",
+            }
+
+            def _core_name(nm: str) -> str:
+                toks = [t for t in re.split(r"[^A-Za-z0-9]+", nm or "") if t]
+                kept = [t for t in toks if t.lower() not in _GENERIC_WORDS]
+                # require 2+ distinctive tokens to avoid over-matching
+                return " ".join(kept) if len(kept) >= 2 else ""
+
+            _variants: list = []
+            for _cand in (
+                _hotel,
+                (getattr(lead, "search_name", None) or "").strip(),
+                _core_name(_hotel),
+            ):
+                if _cand and _cand.lower() not in {v.lower() for v in _variants}:
+                    _variants.append(_cand)
+            _variants = _variants[:3]
+            _conds = " OR ".join(
+                f"(organization ILIKE :h{i} OR title ILIKE :h{i})" for i in range(len(_variants))
+            )
+            _params = {f"h{i}": f"%{v}%" for i, v in enumerate(_variants)}
+            _inbox_rows = (
+                (
+                    await session.execute(
+                        _sql_text(
+                            "SELECT first_name, last_name, display_name, email, "
+                            "title, inferred_role, phone, linkedin_url, "
+                            "organization, interaction_count, last_seen "
+                            "FROM contacts "
+                            "WHERE (" + _conds + ") "
+                            "AND COALESCE(contact_category, 'buyer') = 'buyer' "
+                            "AND email IS NOT NULL AND email != '' "
+                            "ORDER BY interaction_count DESC NULLS LAST "
+                            "LIMIT 5"
+                        ),
+                        _params,
+                    )
+                )
+                .mappings()
+                .all()
+            )
+            if not _inbox_rows:
+                logger.info(
+                    f"persist_enrichment_contacts: {parent_kind} {parent_id}: "
+                    f"no inbox contacts matched {_variants}"
+                )
+            _payload_names = {
+                _normalize_person_name(c.get("name") or "")
+                for c in (enrichment_result.contacts or [])
+            }
+            _injected = []
+            for r in _inbox_rows:
+                _nm = (
+                    " ".join(p for p in [r["first_name"], r["last_name"]] if p)
+                    or (r["display_name"] or "")
+                ).strip()
+                if not _nm or "@" in _nm:
+                    continue
+                if _normalize_person_name(_nm) in _payload_names:
+                    continue  # pipeline already found this person — merge handles it
+                _title = r["title"] or r["inferred_role"] or ""
+                _s = _score_contact(title=_title, scope="hotel_specific", strategist_priority=None)
+                _last = r["last_seen"]
+                _injected.append(
+                    {
+                        "name": _nm,
+                        "title": _title or None,
+                        "email": r["email"],
+                        "phone": r["phone"],
+                        "linkedin": r["linkedin_url"],
+                        "organization": r["organization"],
+                        "scope": "hotel_specific",
+                        "confidence": "high",
+                        "_validation_confidence": "high",
+                        "_validation_score": _s["score"],
+                        "_buyer_tier": _s["tier"],
+                        "_score_breakdown": _s["breakdown"],
+                        "source_detail": (
+                            f"Known inbox contact — {r['interaction_count'] or 0} email(s)"
+                            + (f", last {_last:%Y-%m-%d}" if _last else "")
+                        ),
+                    }
+                )
+            if _injected:
+                logger.info(
+                    f"persist_enrichment_contacts: {parent_kind} {parent_id}: "
+                    f"injecting {len(_injected)} known inbox contact(s) for "
+                    f"'{_hotel}': {[c['name'] for c in _injected]}"
+                )
+                enrichment_result.contacts = _injected + list(enrichment_result.contacts or [])
+    except Exception as _ie:
+        logger.warning(f"Inbox contact injection skipped: {_ie}")
+
     # ── Persist contacts to lead_contacts table (MERGE) ──
     if enrichment_result.contacts:
         # Filter contacts by whichever parent FK is set (dual-FK schema —
@@ -8673,11 +8939,10 @@ async def persist_enrichment_contacts(
             existing_filter = LeadContact.lead_id == parent_id
         else:
             existing_filter = LeadContact.existing_hotel_id == parent_id
-        existing_result = await session.execute(
-            select(LeadContact).where(existing_filter)
-        )
+        existing_result = await session.execute(select(LeadContact).where(existing_filter))
         existing_by_norm: dict = {
-            normalize_hotel_name(c.name): c for c in existing_result.scalars().all()
+            (_normalize_person_name(c.name) or normalize_hotel_name(c.name)): c
+            for c in existing_result.scalars().all()
         }
 
         for i, c in enumerate(enrichment_result.contacts):
@@ -8685,7 +8950,7 @@ async def persist_enrichment_contacts(
             if not name:
                 continue
 
-            normalized = normalize_hotel_name(name)
+            normalized = _normalize_person_name(name) or normalize_hotel_name(name)
             existing = existing_by_norm.get(normalized)
 
             if existing:
@@ -8758,9 +9023,7 @@ async def persist_enrichment_contacts(
                 if new_evidence:
                     existing_evidence = existing.evidence or []
                     existing_urls = {
-                        e.get("source_url")
-                        for e in existing_evidence
-                        if isinstance(e, dict)
+                        e.get("source_url") for e in existing_evidence if isinstance(e, dict)
                     }
                     added = 0
                     for ev in new_evidence:
@@ -8810,14 +9073,10 @@ async def persist_enrichment_contacts(
                     linkedin=_canonicalize_linkedin_url(c.get("linkedin")),
                     organization=c.get("organization"),
                     scope=c.get("scope", "unknown"),
-                    confidence=c.get(
-                        "_validation_confidence", c.get("confidence", "medium")
-                    ),
+                    confidence=c.get("_validation_confidence", c.get("confidence", "medium")),
                     tier=c.get("_buyer_tier"),
                     score=c.get("_validation_score", 0),
-                    score_breakdown=c.get(
-                        "_score_breakdown"
-                    ),  # Unified scoring breakdown
+                    score_breakdown=c.get("_score_breakdown"),  # Unified scoring breakdown
                     evidence=c.get("_evidence_items")
                     or None,  # Evidence array from snippet extraction
                     # Iter 6 strategist verdict — authoritative priority + reasoning
@@ -8835,17 +9094,17 @@ async def persist_enrichment_contacts(
                     last_enriched_at=local_now(),
                 )
                 session.add(contact)
+                # Register in the map so a same-payload variant of this name
+                # ('Aaron J. Olson' after 'Aaron Olson') merges instead of
+                # inserting a duplicate row.
+                existing_by_norm[normalized] = contact
                 summary["contacts_added"] += 1
                 logger.info(
                     f"persist_enrichment_contacts: {parent_kind} {parent_id}: "
                     f"added '{name}' [{c.get('scope', 'unknown')}]"
                 )
 
-    if (
-        summary["contacts_added"]
-        or summary["contacts_updated"]
-        or summary["flat_fields_updated"]
-    ):
+    if summary["contacts_added"] or summary["contacts_updated"] or summary["flat_fields_updated"]:
         summary["status"] = "saved"
 
     return summary

@@ -40,9 +40,7 @@ async def enrich_lead(lead_id: int, _csrf=Depends(require_ajax)):
     """Enrich a lead with contact information via web search."""
     # Session 1: Read lead data (extract to local vars, then close)
     async with async_session() as session:
-        result = await session.execute(
-            select(PotentialLead).where(PotentialLead.id == lead_id)
-        )
+        result = await session.execute(select(PotentialLead).where(PotentialLead.id == lead_id))
         lead = result.scalar_one_or_none()
         if not lead:
             raise HTTPException(status_code=404, detail="Lead not found")
@@ -123,9 +121,7 @@ async def enrich_lead(lead_id: int, _csrf=Depends(require_ajax)):
                             f"not auto-rejected)"
                         )
                         existing = (lead.key_insights or "").strip()
-                        lead.key_insights = (
-                            f"{existing}\n{marker}" if existing else marker
-                        )[:5000]
+                        lead.key_insights = (f"{existing}\n{marker}" if existing else marker)[:5000]
                         await session.commit()
                         logger.info(
                             f"Lead {lead_id} auto-reject SUPPRESSED "
@@ -144,13 +140,12 @@ async def enrich_lead(lead_id: int, _csrf=Depends(require_ajax)):
                         )
 
                     lead.status = "rejected"
-                    lead.rejection_reason = (
-                        enrichment_result.rejection_reason or "auto_reject"
-                    )[:100]  # VARCHAR(100) guard
+                    lead.rejection_reason = (enrichment_result.rejection_reason or "auto_reject")[
+                        :100
+                    ]  # VARCHAR(100) guard
                     await session.commit()
                     logger.info(
-                        f"Lead {lead_id} auto-rejected: "
-                        f"{enrichment_result.rejection_reason}"
+                        f"Lead {lead_id} auto-rejected: " f"{enrichment_result.rejection_reason}"
                     )
             return JSONResponse(
                 content={
@@ -161,9 +156,7 @@ async def enrich_lead(lead_id: int, _csrf=Depends(require_ajax)):
                 status_code=200,
             )
         except Exception as e:
-            logger.error(
-                f"Failed to mark lead {lead_id} as rejected: {e}", exc_info=True
-            )
+            logger.error(f"Failed to mark lead {lead_id} as rejected: {e}", exc_info=True)
             # Fall through — still return the empty contacts result rather than 500
 
     # Session 2: Save results (with optimistic lock check)
@@ -185,11 +178,7 @@ async def enrich_lead(lead_id: int, _csrf=Depends(require_ajax)):
             # FIX C-04: Optimistic lock — warn if lead was edited during enrichment
             # Only fill empty fields (never overwrite), so concurrent edits are safe
             # for fields that were already populated. Log a warning for awareness.
-            if (
-                lead_updated_at
-                and lead.updated_at
-                and lead.updated_at > lead_updated_at
-            ):
+            if lead_updated_at and lead.updated_at and lead.updated_at > lead_updated_at:
                 logger.warning(
                     f"Lead {lead_id} was modified during enrichment "
                     f"(before={lead_updated_at}, now={lead.updated_at}). "
@@ -308,9 +297,7 @@ async def enrich_lead(lead_id: int, _csrf=Depends(require_ajax)):
                         if new_tier and new_tier != ec.tier:
                             filled.append("tier")
                             ec.tier = new_tier
-                        new_confidence = c.get("_validation_confidence") or c.get(
-                            "confidence"
-                        )
+                        new_confidence = c.get("_validation_confidence") or c.get("confidence")
                         if new_confidence and new_confidence != ec.confidence:
                             filled.append("confidence")
                             ec.confidence = new_confidence
@@ -323,9 +310,7 @@ async def enrich_lead(lead_id: int, _csrf=Depends(require_ajax)):
                         if new_evidence:
                             existing_ev = ec.evidence or []
                             existing_urls = {
-                                e.get("source_url")
-                                for e in existing_ev
-                                if isinstance(e, dict)
+                                e.get("source_url") for e in existing_ev if isinstance(e, dict)
                             }
                             added = 0
                             for ev in new_evidence:
@@ -355,9 +340,7 @@ async def enrich_lead(lead_id: int, _csrf=Depends(require_ajax)):
                             ec.source_detail = new_detail
                             filled.append("source_detail")
                         if filled:
-                            logger.info(
-                                f"Updated {ec.name}: filled {', '.join(filled)}"
-                            )
+                            logger.info(f"Updated {ec.name}: filled {', '.join(filled)}")
                         continue
 
                     contact = LeadContact(
@@ -369,9 +352,7 @@ async def enrich_lead(lead_id: int, _csrf=Depends(require_ajax)):
                         linkedin=c.get("linkedin"),
                         organization=c.get("organization"),
                         scope=c.get("scope", "unknown"),
-                        confidence=c.get(
-                            "_validation_confidence", c.get("confidence", "medium")
-                        ),
+                        confidence=c.get("_validation_confidence", c.get("confidence", "medium")),
                         tier=c.get("_buyer_tier"),
                         score=c.get("_validation_score", 0),
                         # Unified scoring breakdown (migration 013)
@@ -415,9 +396,7 @@ async def enrich_lead(lead_id: int, _csrf=Depends(require_ajax)):
         }
 
     except Exception as e:
-        logger.error(
-            f"Failed to save enrichment for lead {lead_id}: {e}", exc_info=True
-        )
+        logger.error(f"Failed to save enrichment for lead {lead_id}: {e}", exc_info=True)
         return JSONResponse(
             content={"status": "error", "message": f"Failed to save: {str(e)[:200]}"},
             status_code=500,
@@ -474,9 +453,7 @@ async def save_contact(
     _csrf=Depends(require_ajax),
 ):
     result = await db.execute(
-        select(LeadContact).where(
-            LeadContact.id == contact_id, LeadContact.lead_id == lead_id
-        )
+        select(LeadContact).where(LeadContact.id == contact_id, LeadContact.lead_id == lead_id)
     )
     contact = result.scalar_one_or_none()
     if not contact:
@@ -504,9 +481,7 @@ async def unsave_contact(
     _csrf=Depends(require_ajax),
 ):
     result = await db.execute(
-        select(LeadContact).where(
-            LeadContact.id == contact_id, LeadContact.lead_id == lead_id
-        )
+        select(LeadContact).where(LeadContact.id == contact_id, LeadContact.lead_id == lead_id)
     )
     contact = result.scalar_one_or_none()
     if not contact:
@@ -525,9 +500,7 @@ async def delete_contact(
     _csrf=Depends(require_ajax),
 ):
     result = await db.execute(
-        select(LeadContact).where(
-            LeadContact.id == contact_id, LeadContact.lead_id == lead_id
-        )
+        select(LeadContact).where(LeadContact.id == contact_id, LeadContact.lead_id == lead_id)
     )
     contact = result.scalar_one_or_none()
     if not contact:
@@ -553,9 +526,7 @@ async def update_contact(
 ):
     body = await request.json()
     result = await db.execute(
-        select(LeadContact).where(
-            LeadContact.id == contact_id, LeadContact.lead_id == lead_id
-        )
+        select(LeadContact).where(LeadContact.id == contact_id, LeadContact.lead_id == lead_id)
     )
     contact = result.scalar_one_or_none()
     if not contact:
@@ -575,9 +546,7 @@ async def update_contact(
             setattr(contact, fld, value)
     # Sync primary contact changes back to lead record
     if contact.is_primary:
-        lead_result = await db.execute(
-            select(PotentialLead).where(PotentialLead.id == lead_id)
-        )
+        lead_result = await db.execute(select(PotentialLead).where(PotentialLead.id == lead_id))
         lead = lead_result.scalar_one_or_none()
         if lead:
             lead.contact_name = contact.name
@@ -639,9 +608,7 @@ async def toggle_contact_scope(
             detail=f"Invalid scope. Must be one of: {', '.join(_VALID_SCOPES)}",
         )
     result = await db.execute(
-        select(LeadContact).where(
-            LeadContact.id == contact_id, LeadContact.lead_id == lead_id
-        )
+        select(LeadContact).where(LeadContact.id == contact_id, LeadContact.lead_id == lead_id)
     )
     contact = result.scalar_one_or_none()
     if not contact:
@@ -685,9 +652,7 @@ async def add_contact(
         raise HTTPException(status_code=400, detail="Contact name is required")
 
     # Check lead exists
-    lead_result = await db.execute(
-        select(PotentialLead).where(PotentialLead.id == lead_id)
-    )
+    lead_result = await db.execute(select(PotentialLead).where(PotentialLead.id == lead_id))
     lead = lead_result.scalar_one_or_none()
     if not lead:
         raise HTTPException(status_code=404, detail="Lead not found")
@@ -761,14 +726,10 @@ async def set_primary_contact(
     _csrf=Depends(require_ajax),
 ):
     await db.execute(
-        update(LeadContact)
-        .where(LeadContact.lead_id == lead_id)
-        .values(is_primary=False)
+        update(LeadContact).where(LeadContact.lead_id == lead_id).values(is_primary=False)
     )
     result = await db.execute(
-        select(LeadContact).where(
-            LeadContact.id == contact_id, LeadContact.lead_id == lead_id
-        )
+        select(LeadContact).where(LeadContact.id == contact_id, LeadContact.lead_id == lead_id)
     )
     contact = result.scalar_one_or_none()
     if not contact:
@@ -776,9 +737,7 @@ async def set_primary_contact(
     contact.is_primary = True
     contact.is_saved = True
     contact.updated_at = local_now()
-    lead_result = await db.execute(
-        select(PotentialLead).where(PotentialLead.id == lead_id)
-    )
+    lead_result = await db.execute(select(PotentialLead).where(PotentialLead.id == lead_id))
     lead = lead_result.scalar_one_or_none()
     if lead:
         lead.contact_name = contact.name
@@ -812,9 +771,7 @@ async def enrich_contact_email_route(
     from app.services.wiza_enrichment import enrich_contact_email
 
     result = await db.execute(
-        select(LeadContact).where(
-            LeadContact.id == contact_id, LeadContact.lead_id == lead_id
-        )
+        select(LeadContact).where(LeadContact.id == contact_id, LeadContact.lead_id == lead_id)
     )
     contact = result.scalar_one_or_none()
     if not contact:
@@ -845,9 +802,7 @@ async def enrich_contact_email_route(
 
     # Sync to lead primary contact if applicable
     if contact.is_primary:
-        lead_res = await db.execute(
-            select(PotentialLead).where(PotentialLead.id == lead_id)
-        )
+        lead_res = await db.execute(select(PotentialLead).where(PotentialLead.id == lead_id))
         lead = lead_res.scalar_one_or_none()
         if lead:
             lead.contact_email = contact.email
@@ -1199,10 +1154,7 @@ async def _start_enrichment_job(
             # ── Phase B early-rejection (residences_only, etc.) ──
             # Only applies to potential_leads — existing_hotels are already
             # operating, can't be rejected as "not a real hotel".
-            if (
-                getattr(enrichment_result, "should_reject", False)
-                and parent_kind == "lead"
-            ):
+            if getattr(enrichment_result, "should_reject", False) and parent_kind == "lead":
                 try:
                     async with async_session() as rej_session:
                         rej_result = await rej_session.execute(
@@ -1216,9 +1168,7 @@ async def _start_enrichment_job(
                             )[:100]
                             await rej_session.commit()
                 except Exception as ex:
-                    logger.error(
-                        f"Failed to mark {parent_kind} {parent_id} rejected: {ex}"
-                    )
+                    logger.error(f"Failed to mark {parent_kind} {parent_id} rejected: {ex}")
 
                 duration = round(time.monotonic() - job.started_at, 1)
                 emit_terminal(
@@ -1361,9 +1311,7 @@ async def enrich_lead_stream(lead_id: int, request: Request):
     else:
         # First request for this lead — verify lead exists, then start task.
         async with async_session() as session:
-            result = await session.execute(
-                select(PotentialLead).where(PotentialLead.id == lead_id)
-            )
+            result = await session.execute(select(PotentialLead).where(PotentialLead.id == lead_id))
             lead = result.scalar_one_or_none()
             if not lead:
                 raise HTTPException(status_code=404, detail="Lead not found")
@@ -1443,10 +1391,7 @@ async def enrich_lead_stream(lead_id: int, request: Request):
                     return
 
         except asyncio.CancelledError:
-            logger.info(
-                f"SSE stream cancelled for lead {lead_id}; "
-                f"background task continues."
-            )
+            logger.info(f"SSE stream cancelled for lead {lead_id}; " f"background task continues.")
             raise
         except Exception as e:
             logger.error(f"Enrich stream error (lead {lead_id}): {e}")
@@ -1561,3 +1506,146 @@ async def enrich_contacts_deep_batch_endpoint(
 
     results = await enrich_batch_deep([int(i) for i in ids], find_email=find_email)
     return {"enriched": len(results), "results": results}
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# UNIFIED CONTACT DIRECTORY FEED — added 2026-06-03
+# Serves lead-generator contacts (lead_contacts attached to potential leads
+# OR existing hotels) shaped like inbox contacts, so the Contacts page can
+# merge both sources into one directory with a Source filter. Read-only.
+# ═══════════════════════════════════════════════════════════════════════════
+
+_LC_CONFIDENCE = {"high": 0.9, "medium": 0.6, "low": 0.3}
+
+
+def _lead_contact_to_directory(lc, pl, eh) -> dict:
+    """Shape a LeadContact (+ its parent lead/hotel) like an InboxContact."""
+    parent_name = pl.hotel_name if pl is not None else (eh.hotel_name if eh is not None else None)
+    mgmt = (
+        pl.management_company
+        if pl is not None
+        else (eh.management_company if eh is not None else None)
+    )
+    tier = pl.brand_tier if pl is not None else (eh.brand_tier if eh is not None else None)
+    city = pl.city if pl is not None else (eh.city if eh is not None else None)
+
+    # The contact's OWN org (e.g. HPI, a management company) wins; else the property.
+    org = (lc.organization or "").strip() or parent_name
+    is_mgmt_co = lc.scope == "management_corporate" or bool(
+        lc.organization and mgmt and lc.organization.strip().lower() == mgmt.strip().lower()
+    )
+
+    parts = (lc.name or "").strip().split()
+    first = parts[0] if parts else None
+    last = " ".join(parts[1:]) or None
+
+    prio_label, prio_reason = lc._compute_priority()
+    is_dm = (prio_label or "").startswith(("P1", "P2"))
+
+    score = pl.lead_score if pl is not None else None
+
+    def _iso(d):
+        return d.isoformat() if d else None
+
+    return {
+        "id": lc.id,
+        "email": lc.email or "",
+        "first_name": first,
+        "last_name": last,
+        "display_name": lc.name,
+        "title": lc.title,
+        "organization": org,
+        "phone": lc.phone,
+        "address": city,
+        "linkedin_url": lc.linkedin,
+        "org_source": lc.found_via,
+        "has_signature": False,
+        "confidence": _LC_CONFIDENCE.get((lc.confidence or "").lower(), 0.5),
+        "parent_company": parent_name if (org and parent_name and org != parent_name) else None,
+        "brand_tier": tier,
+        "operating_model": None,
+        "gpo": None,
+        "procurement_priority": (prio_label or "unknown").split(" ")[0],
+        "priority_reason": prio_reason,
+        "contact_category": "buyer",
+        "category_source": "lead_generator",
+        "inferred_role": None,
+        "seniority": None,
+        "department": None,
+        "is_decision_maker": is_dm,
+        "background": lc.strategist_reasoning,
+        "enrichment_source": "lead_generator",
+        "enrichment_confidence": None,
+        "opportunity_level": "high" if (score or 0) >= 80 else None,
+        "opportunity_score": score,
+        "management_company": mgmt,
+        "interaction_count": 0,
+        "source_mailboxes": [],
+        "first_seen": _iso(lc.created_at),
+        "last_seen": _iso(lc.updated_at or lc.created_at),
+        "approval_status": "lead",  # sentinel — these live outside the inbox approval workflow
+        "insightly_contact_id": None,
+        "pushed_to_insightly_at": None,
+        "matched_lead_id": lc.lead_id,
+        "matched_hotel_id": lc.existing_hotel_id,
+        "sync_history": None,
+        "created_at": _iso(lc.created_at),
+        "updated_at": _iso(lc.updated_at),
+        # Explicit unified-directory dimensions. Inbox contacts don't send
+        # these; the frontend falls back to heuristics for them.
+        "source": "lead_generator",
+        "account_type": "management_company" if is_mgmt_co else "hotel",
+        "lifecycle_stage": "existing" if lc.existing_hotel_id else "potential",
+    }
+
+
+@router.get("/api/lead-contacts")
+async def list_lead_contacts(
+    page: int = 1,
+    per_page: int = 500,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Paginated feed of lead-generator contacts for the unified Contacts
+    directory — ONLY contacts a human explicitly clicked Save on (trust
+    gate, 2026-06-04): enrichment can produce wrong people or wrong info,
+    so the save click is the manual verification signal that gates entry
+    into the directory. Each contact is joined to its parent (potential
+    lead or existing hotel) for org / brand-tier / management-company
+    context. Contacts on rejected leads are excluded.
+    """
+    from sqlalchemy import and_, func, or_  # local import — module imports stay untouched
+
+    from app.models.existing_hotel import ExistingHotel
+
+    page = max(1, page)
+    per_page = max(1, min(per_page, 500))
+
+    not_rejected = or_(LeadContact.lead_id.is_(None), PotentialLead.status != "rejected")
+    visible = and_(not_rejected, LeadContact.is_saved.is_(True))
+
+    total = (
+        await db.execute(
+            select(func.count(LeadContact.id))
+            .select_from(LeadContact)
+            .outerjoin(PotentialLead, PotentialLead.id == LeadContact.lead_id)
+            .where(visible)
+        )
+    ).scalar() or 0
+
+    rows = (
+        await db.execute(
+            select(LeadContact, PotentialLead, ExistingHotel)
+            .outerjoin(PotentialLead, PotentialLead.id == LeadContact.lead_id)
+            .outerjoin(ExistingHotel, ExistingHotel.id == LeadContact.existing_hotel_id)
+            .where(visible)
+            .order_by(LeadContact.id)
+            .limit(per_page)
+            .offset((page - 1) * per_page)
+        )
+    ).all()
+
+    items = [_lead_contact_to_directory(lc, pl, eh) for (lc, pl, eh) in rows]
+    pages = max(1, (total + per_page - 1) // per_page)
+
+    return {"items": items, "total": total, "page": page, "per_page": per_page, "pages": pages}

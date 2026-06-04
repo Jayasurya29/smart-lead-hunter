@@ -1,6 +1,7 @@
 import { useQuery, useMutation, useQueryClient, type QueryClient } from '@tanstack/react-query'
 import {
   fetchInboxContacts,
+  fetchLeadContacts,
   fetchInboxContactStats,
   approveInboxContact,
   bulkApproveInboxContacts,
@@ -48,6 +49,33 @@ export function useAllInboxContacts(orderBy = 'priority_score') {
           Array.from({ length: pages - 1 }, (_, i) =>
             fetchInboxContacts({ page: i + 2, per_page, order_by: orderBy }),
           ),
+        )
+        for (const r of rest) items.push(...r.items)
+      }
+      return { items, total: first.total }
+    },
+    staleTime: 60_000,
+    refetchInterval: false,
+    refetchOnWindowFocus: false,
+  })
+}
+
+/**
+ * Load ALL lead-generator contacts (every page) for the unified directory.
+ * Same paginate-all pattern as useAllInboxContacts. If the endpoint is
+ * unavailable the query just errors and the page degrades to inbox-only.
+ */
+export function useAllLeadContacts() {
+  return useQuery({
+    queryKey: ['lead-contacts', 'all'],
+    queryFn: async () => {
+      const per_page = 500
+      const first = await fetchLeadContacts(1, per_page)
+      const pages = Math.min(first.pages || 1, 40) // safety cap ~20k
+      const items = [...first.items]
+      if (pages > 1) {
+        const rest = await Promise.all(
+          Array.from({ length: pages - 1 }, (_, i) => fetchLeadContacts(i + 2, per_page)),
         )
         for (const r of rest) items.push(...r.items)
       }

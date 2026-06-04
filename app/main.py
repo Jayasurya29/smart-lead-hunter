@@ -124,6 +124,18 @@ async def lifespan(app: FastAPI):
 
     logger.info("Shutting down Smart Lead Hunter...")
 
+    # FIX 2026-06-03: the shared Playwright browser (app/tasks/scraping_tasks)
+    # was never closed at shutdown — every uvicorn stop/reload orphaned its
+    # connection task + chromium subprocess ("Task was destroyed but it is
+    # pending" / "unclosed transport" spam, leaked browser processes).
+    try:
+        from app.tasks.scraping_tasks import _close_shared_browser
+
+        await _close_shared_browser()
+        logger.info("Shared Playwright browser closed")
+    except Exception:
+        pass
+
     try:
         from app.services.insightly import get_insightly_client
 
@@ -180,9 +192,7 @@ class RequestIDMiddleware:
             return
 
         headers_dict = dict(scope.get("headers", []))
-        request_id = (
-            headers_dict.get(b"x-request-id", b"").decode() or str(uuid.uuid4())[:8]
-        )
+        request_id = headers_dict.get(b"x-request-id", b"").decode() or str(uuid.uuid4())[:8]
 
         async def send_with_header(message):
             if message["type"] == "http.response.start":
@@ -221,16 +231,12 @@ def _cleanup_rate_limit_store(now: float) -> None:
         return
     _rate_limit_last_cleanup = now
     expired = [
-        ip
-        for ip, bucket in _rate_limit_store.items()
-        if now > bucket["reset"] + _RATE_LIMIT_WINDOW
+        ip for ip, bucket in _rate_limit_store.items() if now > bucket["reset"] + _RATE_LIMIT_WINDOW
     ]
     for ip in expired:
         del _rate_limit_store[ip]
     if len(_rate_limit_store) > _RATE_LIMIT_MAX_ENTRIES:
-        sorted_ips = sorted(
-            _rate_limit_store.keys(), key=lambda ip: _rate_limit_store[ip]["reset"]
-        )
+        sorted_ips = sorted(_rate_limit_store.keys(), key=lambda ip: _rate_limit_store[ip]["reset"])
         for ip in sorted_ips[: len(_rate_limit_store) - _RATE_LIMIT_MAX_ENTRIES // 2]:
             del _rate_limit_store[ip]
 

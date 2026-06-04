@@ -222,9 +222,7 @@ async def _get_shared_browser():
                 from playwright.async_api import async_playwright
 
                 _playwright_instance = await async_playwright().start()
-                _playwright_browser = await _playwright_instance.chromium.launch(
-                    headless=True
-                )
+                _playwright_browser = await _playwright_instance.chromium.launch(headless=True)
                 logger.info("Shared Playwright browser launched")
             except ImportError:
                 logger.warning("Playwright not available")
@@ -248,6 +246,23 @@ async def _close_shared_browser():
             except Exception:
                 pass
             _playwright_instance = None
+
+
+# FIX 2026-06-03: _close_shared_browser existed but was never wired to any
+# shutdown path. Close the shared browser when a Celery worker stops so the
+# chromium subprocess and its connection task don't get orphaned. (The
+# uvicorn/web side is handled by the lifespan hook in app/main.py.)
+try:
+    from celery.signals import worker_shutdown
+
+    @worker_shutdown.connect
+    def _shutdown_shared_browser(**_kwargs):
+        try:
+            run_async(_close_shared_browser())
+        except Exception:
+            logger.warning("Could not close shared Playwright browser at worker shutdown")
+except Exception:  # celery not importable in some contexts — nothing to wire
+    pass
 
 
 async def scrape_url_async(url: str, use_playwright: bool = False) -> Optional[str]:
@@ -293,9 +308,7 @@ async def scrape_url_async(url: str, use_playwright: bool = False) -> Optional[s
         async with httpx.AsyncClient(
             timeout=30.0,
             follow_redirects=True,
-            headers={
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
-            },
+            headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"},
         ) as client:
             response = await client.get(url)
 
@@ -330,9 +343,7 @@ async def process_scraped_content(
     try:
         if pipeline is None:
             pipeline = LeadExtractionPipeline()
-        result = await pipeline.extract(
-            text, source_url=source_url, source_name=source_site
-        )
+        result = await pipeline.extract(text, source_url=source_url, source_name=source_site)
 
         if not result.success or not result.leads:
             logger.info(f"No hotels found in {source_url}")
@@ -344,9 +355,7 @@ async def process_scraped_content(
         async with async_session() as session:
             for lead in result.leads:
                 try:
-                    hotel = (
-                        lead.to_dict() if hasattr(lead, "to_dict") else lead.__dict__
-                    )
+                    hotel = lead.to_dict() if hasattr(lead, "to_dict") else lead.__dict__
                     hotel["source_url"] = source_url
                     hotel["source_site"] = source_site
 
@@ -708,9 +717,7 @@ def convert_lead_to_insightly(lead_id: int) -> Dict[str, Any]:
         from app.services.insightly import get_insightly_client
 
         async with async_session() as session:
-            result = await session.execute(
-                select(PotentialLead).where(PotentialLead.id == lead_id)
-            )
+            result = await session.execute(select(PotentialLead).where(PotentialLead.id == lead_id))
             lead = result.scalar_one_or_none()
 
         if not lead:
