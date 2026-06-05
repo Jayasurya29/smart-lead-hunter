@@ -87,9 +87,7 @@ def smart_scrape(self) -> Dict[str, Any]:
         now = local_now()
 
         async with async_session() as session:
-            db_result = await session.execute(
-                select(Source).where(Source.is_active.is_(True))
-            )
+            db_result = await session.execute(select(Source).where(Source.is_active.is_(True)))
             sources = db_result.scalars().all()
             results["sources_checked"] = len(sources)
 
@@ -105,10 +103,7 @@ def smart_scrape(self) -> Dict[str, Any]:
                 runs = len(intel.history)
                 pub_freq = intel.behavior.get("publish_frequency_days", 7)
 
-                if (
-                    runs >= MIN_RUNS_TO_GRADUATE
-                    and yield_rate > PRODUCER_YIELD_THRESHOLD
-                ):
+                if runs >= MIN_RUNS_TO_GRADUATE and yield_rate > PRODUCER_YIELD_THRESHOLD:
                     interval_hours = max(
                         pub_freq * PRODUCER_FREQ_MULTIPLIER, MIN_PRODUCER_INTERVAL_HOURS
                     )
@@ -202,9 +197,7 @@ def smart_scrape(self) -> Dict[str, Any]:
                         # Save
                         if lead_dicts:
                             async with async_session() as save_session:
-                                db_result = await save_leads_batch(
-                                    lead_dicts, save_session
-                                )
+                                db_result = await save_leads_batch(lead_dicts, save_session)
                                 saved = db_result.get("saved", 0)
                                 # Track enriched separately. A source that
                                 # consistently re-finds leads we already
@@ -241,13 +234,9 @@ def smart_scrape(self) -> Dict[str, Any]:
                         try:
                             _pr = locals().get("pipeline_result")
                             if _pr is not None:
-                                _pages_classified = (
-                                    getattr(_pr, "pages_classified", 0) or 0
-                                )
+                                _pages_classified = getattr(_pr, "pages_classified", 0) or 0
                                 _pages_relevant = getattr(_pr, "pages_relevant", 0) or 0
-                                _leads_extracted = (
-                                    getattr(_pr, "leads_extracted", 0) or 0
-                                )
+                                _leads_extracted = getattr(_pr, "leads_extracted", 0) or 0
                         except Exception:
                             pass
                         src_intel.record_scrape_run(
@@ -279,9 +268,7 @@ def smart_scrape(self) -> Dict[str, Any]:
                                 if productive_leads > 0:
                                     src_obj.record_success(productive_leads)
                                 else:
-                                    src_obj.total_scrapes = (
-                                        src_obj.total_scrapes or 0
-                                    ) + 1
+                                    src_obj.total_scrapes = (src_obj.total_scrapes or 0) + 1
                                     src_obj.last_scraped_at = local_now()
                                 # Sync gold URL count from intelligence
                                 intel_data = src_intel._data or {}
@@ -392,9 +379,7 @@ def auto_enrich(self) -> Dict[str, Any]:
                     )
                     from app.services.rescore import rescore_lead
 
-                    logger.info(
-                        f"  Enriching: {lead.hotel_name} (score={lead.lead_score})"
-                    )
+                    logger.info(f"  Enriching: {lead.hotel_name} (score={lead.lead_score})")
 
                     enrich_result = await enrich_lead_contacts(
                         lead_id=lead.id,
@@ -413,9 +398,9 @@ def auto_enrich(self) -> Dict[str, Any]:
                     # Phase B: if researcher flagged as residences_only etc, reject the lead
                     if enrich_result and enrich_result.should_reject:
                         lead.status = "rejected"
-                        lead.rejection_reason = (
-                            enrich_result.rejection_reason or "auto_reject"
-                        )[:100]  # VARCHAR(100) guard
+                        lead.rejection_reason = (enrich_result.rejection_reason or "auto_reject")[
+                            :100
+                        ]  # VARCHAR(100) guard
                         results["rejected"] = results.get("rejected", 0) + 1
                         logger.info(
                             f"  {lead.hotel_name}: auto-rejected "
@@ -487,9 +472,7 @@ def weekly_discovery(self) -> Dict[str, Any]:
 
             from scripts.discover_sources import WebDiscoveryEngine
 
-            engine = WebDiscoveryEngine(
-                dry_run=False, min_quality=35, sources_only=False
-            )
+            engine = WebDiscoveryEngine(dry_run=False, min_quality=35, sources_only=False)
             await engine.initialize()
             await engine.run(max_queries=None)
 
@@ -499,8 +482,7 @@ def weekly_discovery(self) -> Dict[str, Any]:
             await engine.close()
 
             logger.info(
-                f"Discovery: {results['sources_found']} sources, "
-                f"{results['leads_found']} leads"
+                f"Discovery: {results['sources_found']} sources, " f"{results['leads_found']} leads"
             )
         except Exception as e:
             logger.error(f"Discovery failed: {e}")
@@ -533,9 +515,7 @@ def daily_health_check(self) -> Dict[str, Any]:
         }
 
         async with async_session() as session:
-            db_result = await session.execute(
-                select(Source).where(Source.is_active.is_(True))
-            )
+            db_result = await session.execute(select(Source).where(Source.is_active.is_(True)))
             sources = db_result.scalars().all()
             results["sources_checked"] = len(sources)
 
@@ -556,16 +536,12 @@ def daily_health_check(self) -> Dict[str, Any]:
                     source.is_active = False
                     source.health_status = "dead"
                     results["sources_deactivated"] += 1
-                    logger.info(
-                        f"  Deactivated: {source.name} (score={intel.efficiency_score})"
-                    )
+                    logger.info(f"  Deactivated: {source.name} (score={intel.efficiency_score})")
                     continue
 
                 gold = dict(source.gold_urls or {})
                 cleaned = {
-                    url: meta
-                    for url, meta in gold.items()
-                    if meta.get("miss_streak", 0) < 3
+                    url: meta for url, meta in gold.items() if meta.get("miss_streak", 0) < 3
                 }
                 removed = len(gold) - len(cleaned)
                 if removed > 0:
@@ -633,9 +609,7 @@ def daily_health_check(self) -> Dict[str, Any]:
             cutoff = datetime.now(timezone.utc) - timedelta(hours=24)
             async with async_session() as session:
                 expired = await session.execute(
-                    select(PendingRegistration).where(
-                        PendingRegistration.otp_expires_at < cutoff
-                    )
+                    select(PendingRegistration).where(PendingRegistration.otp_expires_at < cutoff)
                 )
                 expired_rows = expired.scalars().all()
                 cleaned_pending = len(expired_rows)
@@ -643,9 +617,7 @@ def daily_health_check(self) -> Dict[str, Any]:
                     await session.delete(row)
                 await session.commit()
                 if cleaned_pending:
-                    logger.info(
-                        f"  Cleaned {cleaned_pending} expired pending registrations"
-                    )
+                    logger.info(f"  Cleaned {cleaned_pending} expired pending registrations")
                 results["pending_registrations_cleaned"] = cleaned_pending
         except Exception as e:
             logger.warning(f"  Pending registration cleanup failed: {e}")
@@ -795,6 +767,30 @@ def rescore_all_leads_task(self) -> Dict[str, Any]:
     return run_async(_rescore())
 
 
+@celery_app.task(bind=True, base=BaseTask, name="hotel_news_scan")
+def hotel_news_scan(self) -> Dict[str, Any]:
+    """Daily hospitality news scan (9:45 AM Mon-Fri): appointments + market
+    news for USA/Caribbean 4-star+, triangulated against our contacts.
+    External APIs: Serper /news + one flash call per 20 headlines."""
+    from app.services.news_intel import run_news_scan
+
+    async def _scan():
+        summary = await run_news_scan(apply=True)
+        logger.info(
+            "hotel_news_scan: fetched=%s new=%s relevant=%s appointments=%s "
+            "relationship_flags=%s",
+            summary["fetched"],
+            summary["new"],
+            summary["relevant"],
+            summary["appointments"],
+            summary["relationship_flags"],
+        )
+        summary.pop("items", None)
+        return summary
+
+    return run_async(_scan())
+
+
 @celery_app.task(bind=True, base=BaseTask, name="recompute_timeline_labels")
 def recompute_timeline_labels(self) -> Dict[str, Any]:
     """Recompute timeline_label on every active lead based on today's date.
@@ -838,9 +834,7 @@ def recompute_timeline_labels(self) -> Dict[str, Any]:
 
         async with async_session() as session:
             leads_q = await session.execute(
-                select(PotentialLead).where(
-                    PotentialLead.status.notin_(["deleted", "rejected"])
-                )
+                select(PotentialLead).where(PotentialLead.status.notin_(["deleted", "rejected"]))
             )
             for lead in leads_q.scalars().all():
                 results["leads_checked"] += 1
@@ -860,10 +854,7 @@ def recompute_timeline_labels(self) -> Dict[str, Any]:
 
                 # RESURRECTION: opening_date moved forward, no longer expired.
                 # Reset status if it was stuck at 'expired' from a previous run.
-                if (
-                    new_label in ("URGENT", "HOT", "WARM", "COOL")
-                    and lead.status == "expired"
-                ):
+                if new_label in ("URGENT", "HOT", "WARM", "COOL") and lead.status == "expired":
                     lead.status = "new"
                     results["resurrected"] += 1
                     logger.info(
@@ -900,15 +891,11 @@ def recompute_timeline_labels(self) -> Dict[str, Any]:
                     if status == "transferred":
                         results["auto_transferred"] += 1
                         logger.info(
-                            f"   ✓ Auto-transferred lead #{lid} → "
-                            f"existing_hotel #{eh_id}"
+                            f"   ✓ Auto-transferred lead #{lid} → " f"existing_hotel #{eh_id}"
                         )
                     elif status == "merged":
                         results["auto_merged"] += 1
-                        logger.info(
-                            f"   ⇄ Auto-merged lead #{lid} → "
-                            f"existing_hotel #{eh_id}"
-                        )
+                        logger.info(f"   ⇄ Auto-merged lead #{lid} → " f"existing_hotel #{eh_id}")
                     elif status == "not_found":
                         # Lead disappeared between pass 1 and pass 2 —
                         # could be concurrent edit. Not an error.
@@ -916,9 +903,7 @@ def recompute_timeline_labels(self) -> Dict[str, Any]:
                     else:
                         results["transfer_errors"] += 1
                         failed_transfer_ids.append(lid)
-                        logger.warning(
-                            f"   ✗ Auto-transfer #{lid}: unexpected status {status!r}"
-                        )
+                        logger.warning(f"   ✗ Auto-transfer #{lid}: unexpected status {status!r}")
                 except Exception as e:
                     results["transfer_errors"] += 1
                     failed_transfer_ids.append(lid)
@@ -955,9 +940,7 @@ def recompute_timeline_labels(self) -> Dict[str, Any]:
             f"resurrected={results['resurrected']}"
         )
         if results["by_label"]:
-            for transition, count in sorted(
-                results["by_label"].items(), key=lambda x: -x[1]
-            ):
+            for transition, count in sorted(results["by_label"].items(), key=lambda x: -x[1]):
                 logger.info(f"    {transition}: {count}")
         return results
 
@@ -1065,9 +1048,7 @@ def pre_opening_digest_task():
         # the whole transaction (and we still want to record what was
         # sent if the email succeeded).
         if sent and stamped_ids:
-            stamp = (
-                f"\n{_MARKER} " f"{datetime.now(_tz.utc).strftime('%Y-%m-%dT%H:%MZ')}"
-            )
+            stamp = f"\n{_MARKER} " f"{datetime.now(_tz.utc).strftime('%Y-%m-%dT%H:%MZ')}"
             try:
                 async with async_session() as stamp_session:
                     fetch = await stamp_session.execute(
@@ -1136,9 +1117,7 @@ def sync_inbox_contacts(self) -> Dict[str, Any]:
             results["success"] = True
             return results
 
-        logger.info(
-            f"Inbox Contact Sync: syncing {len(mailboxes)} mailbox(es): {mailboxes}"
-        )
+        logger.info(f"Inbox Contact Sync: syncing {len(mailboxes)} mailbox(es): {mailboxes}")
         results["mailboxes_attempted"] = len(mailboxes)
 
         for mailbox in mailboxes:
@@ -1156,14 +1135,10 @@ def sync_inbox_contacts(self) -> Dict[str, Any]:
                         f"error={mb_result.get('error', '')}"
                     )
 
-                results["total_messages_scanned"] += mb_result.get(
-                    "messages_scanned", 0
-                )
+                results["total_messages_scanned"] += mb_result.get("messages_scanned", 0)
                 results["total_contacts_found"] += mb_result.get("contacts_found", 0)
                 results["total_new_contacts"] += mb_result.get("new_contacts", 0)
-                results["total_updated_contacts"] += mb_result.get(
-                    "updated_contacts", 0
-                )
+                results["total_updated_contacts"] += mb_result.get("updated_contacts", 0)
                 results["total_errors"] += mb_result.get("errors", 0)
                 results["per_mailbox"].append(
                     {
@@ -1185,9 +1160,7 @@ def sync_inbox_contacts(self) -> Dict[str, Any]:
                         "error": str(e)[:200],
                     }
                 )
-                logger.exception(
-                    f"Inbox Contact Sync: unhandled error for {mailbox}: {e}"
-                )
+                logger.exception(f"Inbox Contact Sync: unhandled error for {mailbox}: {e}")
 
         results["success"] = True
         logger.info(

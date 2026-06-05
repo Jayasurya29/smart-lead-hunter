@@ -118,6 +118,15 @@ celery_app.conf.update(
             "schedule": crontab(hour=9, minute=40, day_of_week="1-5"),
             "options": {"queue": "maintenance"},
         },
+        # Hotel intelligence news scan: 10:00 AM Mon-Fri (added 2026-06-05).
+        # Serper /news + flash classification + relationship triangulation.
+        # Deliberately AFTER sync-inbox-contacts (9:45) so triangulation
+        # runs against a freshly synced contacts table.
+        "hotel-news-scan": {
+            "task": "hotel_news_scan",
+            "schedule": crontab(hour=10, minute=0, day_of_week="1-5"),
+            "options": {"queue": "maintenance"},
+        },
         # Inbox Contact Sync: 9:45 AM Mon-Fri (added 2026-05-14).
         # Syncs Gmail signatures → contacts table for all active JA mailboxes.
         # Incremental after first run via History API cursor.

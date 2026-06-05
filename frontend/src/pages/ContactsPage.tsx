@@ -628,13 +628,19 @@ function AIBand({ contact }: { contact: InboxContact }) {
     setResult(null)
     try {
       const r = await deepMut.mutateAsync({ id: contact.id, findEmail })
-      const bits = [
-        r.role && `Role: ${r.role}`,
-        r.background || undefined,
-        r.found_email && `Found email: ${r.found_email}`,
-        `(${r.sources_used} sources · ${Math.round((r.confidence || 0) * 100)}% confidence)`,
-      ].filter(Boolean)
-      setResult(bits.join(' · ') || 'No new info found.')
+      // Compact run receipt only — the narrative itself renders in the
+      // band above (contact.background refreshes via query invalidation).
+      // Repeating r.background here duplicated the whole paragraph.
+      if (!r.background && !r.role && !r.found_email) {
+        setResult('No new info found.')
+      } else {
+        const bits = [
+          r.found_email && `Found email: ${r.found_email}`,
+          r.role && `Role: ${r.role}`,
+          `Profile updated · ${r.sources_used} sources · ${Math.round((r.confidence || 0) * 100)}% confidence`,
+        ].filter(Boolean)
+        setResult(bits.join(' · '))
+      }
     } catch {
       setResult('Enrichment failed — check Serper/Wiza keys or try again.')
     }
@@ -1695,7 +1701,7 @@ export default function ContactsPage() {
                         <Layers className="w-4 h-4 text-navy-500" />
                         <span className="font-semibold text-[14px] text-navy-800">{sec.label}</span>
                         <span className="text-[12px] text-stone-500">
-                          {sec.children.length} properties · {totalContacts} contacts
+                          {sec.children.length} {sec.children.some(([, m]) => m.some((c) => c.matched_lead_id || c.matched_hotel_id || c.contact_category === 'buyer')) ? 'properties' : 'orgs'} · {totalContacts} contacts
                         </span>
                         {warmth > 0 && (
                           <span className="inline-flex items-center gap-0.5 text-[12px] font-semibold text-orange-600">

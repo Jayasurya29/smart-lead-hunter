@@ -332,6 +332,12 @@ app.include_router(sources_router)
 app.include_router(dashboard_router)
 app.include_router(scraping_router)
 app.include_router(contacts_router)
+from app.routes.news import router as news_router  # noqa: E402
+
+app.include_router(news_router)
+from app.routes.relationships import router as relationships_router  # noqa: E402
+
+app.include_router(relationships_router)
 app.include_router(existing_hotels_router)
 app.include_router(existing_hotels_parity_router)
 app.include_router(sap_router)

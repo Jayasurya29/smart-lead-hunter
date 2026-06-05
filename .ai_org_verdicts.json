@@ -1,0 +1,4302 @@
+{
+ "10ksb.mail.gs.com": [
+  {
+   "org": "GS",
+   "canonical": "Goldman Sachs",
+   "distinct": false,
+   "reason": "GS is a common abbreviation for Goldman Sachs."
+  },
+  {
+   "org": "Goldman Sachs",
+   "canonical": "Goldman Sachs",
+   "distinct": true,
+   "reason": "This is the full, canonical name for the organization."
+  }
+ ],
+ "1060brickell.com": [
+  {
+   "org": "1060 Brickell",
+   "canonical": "1060 Brickell",
+   "distinct": false,
+   "reason": "Base name for the property."
+  },
+  {
+   "org": "1060 BRICKELL CONDO",
+   "canonical": "1060 Brickell",
+   "distinct": false,
+   "reason": "Refers to the same property, just with 'condo' appended."
+  }
+ ],
+ "717parking.com": [
+  {
+   "org": "717 Parking Uniform Ordering",
+   "canonical": "717 PARKING ENTERPRISES",
+   "distinct": false,
+   "reason": "Sub-department of the main company."
+  },
+  {
+   "org": "717 PARKING ENTERPRISES",
+   "canonical": "717 PARKING ENTERPRISES",
+   "distinct": true,
+   "reason": "Main company, canonical form."
+  }
+ ],
+ "aim.com": [
+  {
+   "org": "Cintas",
+   "canonical": "Cintas",
+   "distinct": true,
+   "reason": "Unique organization, no other similar names."
+  },
+  {
+   "org": "Digitizing Tailand",
+   "canonical": "Digitizing Tailand",
+   "distinct": true,
+   "reason": "Unique organization, no other similar names."
+  }
+ ],
+ "alphabroder.com": [
+  {
+   "org": "Alpha Broader",
+   "canonical": "Alpha Broder",
+   "distinct": false,
+   "reason": "Typo in 'Broader', same company."
+  },
+  {
+   "org": "Alpha Broder",
+   "canonical": "Alpha Broder",
+   "distinct": true,
+   "reason": "Canonical form, distinct entity."
+  }
+ ],
+ "akam.com": [
+  {
+   "org": "SKYLINE CONDO",
+   "canonical": "SKYLINE CONDO",
+   "distinct": true,
+   "reason": "Distinct property, no other matching entities."
+  },
+  {
+   "org": "The Bentley Bay Condominiums",
+   "canonical": "The Bentley Bay Condominiums",
+   "distinct": true,
+   "reason": "Distinct property, no other matching entities."
+  },
+  {
+   "org": "BEACHWALK RESORT",
+   "canonical": "BEACHWALK RESORT",
+   "distinct": false,
+   "reason": "Likely same entity as 'BEACHWALK AT HALLANDALE CONDO'."
+  },
+  {
+   "org": "BEACHWALK AT HALLANDALE CONDO",
+   "canonical": "BEACHWALK RESORT",
+   "distinct": false,
+   "reason": "Likely same entity as 'BEACHWALK RESORT'."
+  }
+ ],
+ "accor.com": [
+  {
+   "org": "PULLMAN MIAMI AIRPORT HOTEL",
+   "canonical": "PULLMAN MIAMI AIRPORT HOTEL",
+   "distinct": true,
+   "reason": "Specific hotel property, distinct from brand or other properties."
+  },
+  {
+   "org": "Accor",
+   "canonical": "Accor",
+   "distinct": false,
+   "reason": "Corporate entity, same as Accor Hospitality, Accor Corporate, Pullman - Accor."
+  },
+  {
+   "org": "PULLMAN MIAMI",
+   "canonical": "PULLMAN MIAMI AIRPORT HOTEL",
+   "distinct": false,
+   "reason": "Refers to the same specific hotel property."
+  },
+  {
+   "org": "PULLMAN HOTEL MIAMI",
+   "canonical": "PULLMAN MIAMI AIRPORT HOTEL",
+   "distinct": false,
+   "reason": "Refers to the same specific hotel property."
+  },
+  {
+   "org": "Accor Hospitality",
+   "canonical": "Accor",
+   "distinct": false,
+   "reason": "Corporate entity, same as Accor, Accor Corporate, Pullman - Accor."
+  },
+  {
+   "org": "Pullman - Accor",
+   "canonical": "Accor",
+   "distinct": false,
+   "reason": "Corporate entity, same as Accor, Accor Hospitality, Accor Corporate."
+  },
+  {
+   "org": "PULLMAN HOTEL - MIAMI",
+   "canonical": "PULLMAN MIAMI AIRPORT HOTEL",
+   "distinct": false,
+   "reason": "Refers to the same specific hotel property."
+  },
+  {
+   "org": "Accor Corporate",
+   "canonical": "Accor",
+   "distinct": false,
+   "reason": "Corporate entity, same as Accor, Accor Hospitality, Pullman - Accor."
+  },
+  {
+   "org": "Pullman",
+   "canonical": "Pullman",
+   "distinct": true,
+   "reason": "Hotel brand, distinct from specific properties or corporate."
+  },
+  {
+   "org": "Pullman Miami FD",
+   "canonical": "PULLMAN MIAMI AIRPORT HOTEL",
+   "distinct": false,
+   "reason": "Refers to the same specific hotel property (FD likely department)."
+  }
+ ],
+ "americanvalet.com": [
+  {
+   "org": "American Valet",
+   "canonical": "American Valet",
+   "distinct": false,
+   "reason": "Base company name"
+  },
+  {
+   "org": "American Valet HR",
+   "canonical": "American Valet",
+   "distinct": false,
+   "reason": "HR is a department of the main company"
+  }
+ ],
+ "andaz.com": [
+  {
+   "org": "Andaz Miami Beach",
+   "canonical": "Andaz Miami Beach",
+   "distinct": true,
+   "reason": "Specific hotel property, distinct from brand."
+  },
+  {
+   "org": "Hyatt",
+   "canonical": "Hyatt",
+   "distinct": true,
+   "reason": "Corporate brand, distinct from specific properties."
+  }
+ ],
+ "ameripark.com": [
+  {
+   "org": "Ameripark Long Beach",
+   "canonical": "Ameripark Long Beach",
+   "distinct": true,
+   "reason": "Distinct hotel property."
+  },
+  {
+   "org": "ACCTS. PAYABLE  @ AMERIPARK - OTHER",
+   "canonical": "Ameripark",
+   "distinct": false,
+   "reason": "Department of the main Ameripark entity."
+  },
+  {
+   "org": "Ameripark Miami",
+   "canonical": "Ameripark Miami",
+   "distinct": true,
+   "reason": "Distinct hotel property."
+  }
+ ],
+ "apmanagement.net": [
+  {
+   "org": "METROPOLIS DADELAND",
+   "canonical": "METROPOLIS DADELAND",
+   "distinct": true,
+   "reason": "Distinct property."
+  },
+  {
+   "org": "300 COLLINS CONDO",
+   "canonical": "300 COLLINS CONDO",
+   "distinct": true,
+   "reason": "Distinct property."
+  },
+  {
+   "org": "Beach Club Condo",
+   "canonical": "Beach Club Condo",
+   "distinct": true,
+   "reason": "Distinct property."
+  }
+ ],
+ "arazoza.com": [
+  {
+   "org": "Charlie Arazoza",
+   "canonical": "Arazoza & Company",
+   "distinct": false,
+   "reason": "Individual name likely refers to the company."
+  },
+  {
+   "org": "Arazoza & Company",
+   "canonical": "Arazoza & Company",
+   "distinct": true,
+   "reason": "This is the primary company name."
+  }
+ ],
+ "artesurfside.net": [
+  {
+   "org": "Arte Surfside",
+   "canonical": "Arte Surfside",
+   "distinct": false,
+   "reason": "Base name for the property."
+  },
+  {
+   "org": "ARTE SURFSIDE (OTKZ)",
+   "canonical": "Arte Surfside",
+   "distinct": false,
+   "reason": "Internal identifier for the same property."
+  }
+ ],
+ "atlantisparadise.com": [
+  {
+   "org": "Atlantis Paradise Island",
+   "canonical": "Atlantis Paradise Island",
+   "distinct": false,
+   "reason": "Primary name for the resort."
+  },
+  {
+   "org": "Atlantis Nassau Bahamas",
+   "canonical": "Atlantis Paradise Island",
+   "distinct": false,
+   "reason": "Nassau Bahamas is location of Atlantis Paradise Island."
+  }
+ ],
+ "asicentral.com": [
+  {
+   "org": "Advertising Specialty Institute(r)",
+   "canonical": "Advertising Specialty Institute(r)",
+   "distinct": false,
+   "reason": "Primary entity for asicentral.com domain."
+  },
+  {
+   "org": "ASI",
+   "canonical": "Advertising Specialty Institute(r)",
+   "distinct": false,
+   "reason": "Common abbreviation of Advertising Specialty Institute."
+  },
+  {
+   "org": "ASI MAGAZINE",
+   "canonical": "Advertising Specialty Institute(r)",
+   "distinct": false,
+   "reason": "Sub-brand/publication of Advertising Specialty Institute."
+  }
+ ],
+ "ashcity.com": [
+  {
+   "org": "Ash City",
+   "canonical": "Ash City",
+   "distinct": false,
+   "reason": "Primary company name."
+  },
+  {
+   "org": "Ashcity Orders & Artwork",
+   "canonical": "Ash City",
+   "distinct": false,
+   "reason": "Department of Ash City."
+  },
+  {
+   "org": "Ash City Website",
+   "canonical": "Ash City",
+   "distinct": false,
+   "reason": "Department of Ash City."
+  },
+  {
+   "org": "Aadesh \"Customer Service\"",
+   "canonical": "Aadesh \"Customer Service\"",
+   "distinct": true,
+   "reason": "Distinct entity, likely a sub-brand or separate business."
+  }
+ ],
+ "auroraanguilla.com": [
+  {
+   "org": "AURORA ANGUILLA RESORT & GOLF CLUB",
+   "canonical": "AURORA ANGUILLA RESORT & GOLF CLUB",
+   "distinct": false,
+   "reason": "Same entity, different capitalization/abbreviation."
+  },
+  {
+   "org": "Aurora Resort & Golf Club",
+   "canonical": "AURORA ANGUILLA RESORT & GOLF CLUB",
+   "distinct": false,
+   "reason": "Same entity, different capitalization/abbreviation."
+  }
+ ],
+ "axiomamerica.com": [
+  {
+   "org": "Axiom America",
+   "canonical": "Axiom America",
+   "distinct": false,
+   "reason": "Primary company name for axiomamerica.com domain."
+  },
+  {
+   "org": "Axiom Tech",
+   "canonical": "Axiom America",
+   "distinct": false,
+   "reason": "Likely a sub-brand or department of Axiom America."
+  }
+ ],
+ "biltmorehotel.com": [
+  {
+   "org": "Biltmore Hotel",
+   "canonical": "Biltmore Hotel",
+   "distinct": false,
+   "reason": "Primary entity, other entries are departments/functions."
+  },
+  {
+   "org": "Biltmore Hotel Photo",
+   "canonical": "Biltmore Hotel",
+   "distinct": false,
+   "reason": "Department of the main Biltmore Hotel."
+  },
+  {
+   "org": "Biltmore Cascade",
+   "canonical": "Biltmore Cascade",
+   "distinct": true,
+   "reason": "Likely a distinct property or sub-brand."
+  },
+  {
+   "org": "Biltmore Culinary",
+   "canonical": "Biltmore Hotel",
+   "distinct": false,
+   "reason": "Department of the main Biltmore Hotel."
+  },
+  {
+   "org": "Biltmore Hotel Housekeeping",
+   "canonical": "Biltmore Hotel",
+   "distinct": false,
+   "reason": "Department of the main Biltmore Hotel."
+  },
+  {
+   "org": "Biltmore Hotel Culinary",
+   "canonical": "Biltmore Hotel",
+   "distinct": false,
+   "reason": "Department of the main Biltmore Hotel."
+  }
+ ],
+ "boceanfortlauderdale.com": [
+  {
+   "org": "B Ocean Fort Lauderdale",
+   "canonical": "B Ocean Fort Lauderdale",
+   "distinct": true,
+   "reason": "Primary and most complete name."
+  },
+  {
+   "org": "B Ocean Ft. Lauderdale",
+   "canonical": "B Ocean Fort Lauderdale",
+   "distinct": false,
+   "reason": "Abbreviation of 'Fort' makes it the same entity."
+  }
+ ],
+ "britishcolonial.com": [
+  {
+   "org": "British Colonial Hotel",
+   "canonical": "British Colonial Hotel",
+   "distinct": false,
+   "reason": "This is the primary name for the hotel."
+  },
+  {
+   "org": "BRITISH COLONIAL, NASSAU",
+   "canonical": "British Colonial Hotel",
+   "distinct": false,
+   "reason": "Same hotel, just with location specified."
+  }
+ ],
+ "cable.comcast.com": [
+  {
+   "org": "Comcast Business Class Services",
+   "canonical": "Comcast Cable",
+   "distinct": false,
+   "reason": "Business unit of Comcast Cable"
+  },
+  {
+   "org": "Comcast Cable",
+   "canonical": "Comcast Cable",
+   "distinct": false,
+   "reason": "Primary entity for the domain"
+  }
+ ],
+ "caribbeanproperty.cc": [
+  {
+   "org": "Caribbean Management",
+   "canonical": "Caribbean Property",
+   "distinct": false,
+   "reason": "Likely internal departments of the same company."
+  },
+  {
+   "org": "Caribbean Property",
+   "canonical": "Caribbean Property",
+   "distinct": true,
+   "reason": "Base company name."
+  }
+ ],
+ "careismatic.com": [
+  {
+   "org": "Careismatic Brands, LLC",
+   "canonical": "Careismatic Brands, LLC",
+   "distinct": false,
+   "reason": "This is the primary corporate entity."
+  },
+  {
+   "org": "Careismatic",
+   "canonical": "Careismatic Brands, LLC",
+   "distinct": false,
+   "reason": "Shorthand for the main corporate entity."
+  },
+  {
+   "org": "Cherokee Scrubs",
+   "canonical": "Cherokee Scrubs",
+   "distinct": true,
+   "reason": "This is a distinct sub-brand/product line of Careismatic Brands, LLC."
+  }
+ ],
+ "cbayresort.com": [
+  {
+   "org": "Coconut Bay Beach Resort & Spa / Serenity at Coconut Bay",
+   "canonical": "Coconut Bay Beach Resort & Spa / Serenity at Coconut Bay",
+   "distinct": false,
+   "reason": "Includes both entities, so it is the canonical."
+  },
+  {
+   "org": "COCONUT BAY BEACH RESORT & SPA-ST. LUCIA",
+   "canonical": "Coconut Bay Beach Resort & Spa / Serenity at Coconut Bay",
+   "distinct": false,
+   "reason": "Refers to the same resort, just with location."
+  },
+  {
+   "org": "Curtain Bluff Resort",
+   "canonical": "Curtain Bluff Resort",
+   "distinct": true,
+   "reason": "Clearly a different resort, distinct entity."
+  }
+ ],
+ "casinomiami.net": [
+  {
+   "org": "Casino Miami",
+   "canonical": "Casino Miami",
+   "distinct": false,
+   "reason": "Primary entity for casinomiami.net"
+  },
+  {
+   "org": "Miami Jai-Alai",
+   "canonical": "Casino Miami",
+   "distinct": false,
+   "reason": "Miami Jai-Alai is the former name of Casino Miami"
+  }
+ ],
+ "chase.com": [
+  {
+   "org": "JP Morgan Chase Bank",
+   "canonical": "JP Morgan Chase Bank",
+   "distinct": false,
+   "reason": "Primary entity for the domain."
+  },
+  {
+   "org": "Chase Business Banking",
+   "canonical": "JP Morgan Chase Bank",
+   "distinct": false,
+   "reason": "Business unit of JP Morgan Chase Bank."
+  }
+ ],
+ "carrtextile.com": [
+  {
+   "org": "Carr Textiles",
+   "canonical": "Carr Textiles",
+   "distinct": false,
+   "reason": "Main company name, most contacts."
+  },
+  {
+   "org": "Carr Textile Corp",
+   "canonical": "Carr Textiles",
+   "distinct": false,
+   "reason": "Variation of main company name."
+  }
+ ],
+ "cipriani.com": [
+  {
+   "org": "Cipriani Socialista Miami",
+   "canonical": "Cipriani Socialista Miami",
+   "distinct": true,
+   "reason": "Specific property, distinct from other Cipriani entities."
+  },
+  {
+   "org": "Mr. C Hotels",
+   "canonical": "Mr. C Hotels",
+   "distinct": true,
+   "reason": "Sub-brand of Cipriani, distinct from other properties."
+  }
+ ],
+ "ciiblu.com": [
+  {
+   "org": "C.I. Iblu",
+   "canonical": "C.I. Iblu",
+   "distinct": false,
+   "reason": "Base company name, most contacts."
+  },
+  {
+   "org": "CI Iblue",
+   "canonical": "C.I. Iblu",
+   "distinct": false,
+   "reason": "Typo of the base company name."
+  },
+  {
+   "org": "CI Iblu Production",
+   "canonical": "C.I. Iblu",
+   "distinct": false,
+   "reason": "Department of the base company."
+  },
+  {
+   "org": "PRODUCION",
+   "canonical": "C.I. Iblu",
+   "distinct": false,
+   "reason": "Typo of a department of the base company."
+  }
+ ],
+ "comohotels.com": [
+  {
+   "org": "PARROT CAY RESORT",
+   "canonical": "PARROT CAY RESORT",
+   "distinct": false,
+   "reason": "This is the full name of the resort."
+  },
+  {
+   "org": "Como Metropolitan Housekeeping",
+   "canonical": "Como Metropolitan Housekeeping",
+   "distinct": true,
+   "reason": "Specific department of a distinct property."
+  },
+  {
+   "org": "PARROT CAY",
+   "canonical": "PARROT CAY RESORT",
+   "distinct": false,
+   "reason": "Shorthand for PARROT CAY RESORT."
+  },
+  {
+   "org": "Como by Metropolitan",
+   "canonical": "Como by Metropolitan",
+   "distinct": true,
+   "reason": "Distinct property, different from 'Como Metropolitan Housekeeping'."
+  }
+ ],
+ "concordhotels.com": [
+  {
+   "org": "Marriott Hutchinson Island Beach Resort, Golf & Marina",
+   "canonical": "Marriott Hutchinson Island Beach Resort, Golf & Marina",
+   "distinct": true,
+   "reason": "Specific hotel property, distinct from others."
+  },
+  {
+   "org": "Hyatt House Raleigh Downtown/Seaboard Station",
+   "canonical": "Hyatt House Raleigh Downtown/Seaboard Station",
+   "distinct": true,
+   "reason": "Specific hotel property, distinct from others."
+  }
+ ],
+ "compass-usa.com": [
+  {
+   "org": "University of Miami",
+   "canonical": "University of Miami",
+   "distinct": true,
+   "reason": "Specific university, likely a client or partner."
+  },
+  {
+   "org": "COMPASS USA - CHARTWELLS FIU",
+   "canonical": "COMPASS USA - CHARTWELLS FIU",
+   "distinct": false,
+   "reason": "FIU Chartwells is a specific Compass USA operation."
+  },
+  {
+   "org": "UMIAMI-CHARTWELLS RETAIL",
+   "canonical": "UMIAMI-CHARTWELLS RETAIL",
+   "distinct": true,
+   "reason": "Specific retail unit within UMiami Chartwells."
+  },
+  {
+   "org": "Compass USA",
+   "canonical": "Compass USA",
+   "distinct": true,
+   "reason": "The main corporate entity."
+  },
+  {
+   "org": "Palm & Pine Catering",
+   "canonical": "Palm & Pine Catering",
+   "distinct": true,
+   "reason": "Specific catering sub-brand or unit."
+  },
+  {
+   "org": "COMPASS USA-CHARTWELLS FIU",
+   "canonical": "COMPASS USA - CHARTWELLS FIU",
+   "distinct": false,
+   "reason": "FIU Chartwells is a specific Compass USA operation."
+  }
+ ],
+ "conradhotels.com": [
+  {
+   "org": "Hilton",
+   "canonical": "Hilton",
+   "distinct": true,
+   "reason": "Bare brand name, distinct from specific properties."
+  },
+  {
+   "org": "CONRAD FT. LAUDERDALE BEACH",
+   "canonical": "CONRAD FT. LAUDERDALE BEACH",
+   "distinct": false,
+   "reason": "Same entity as 'Conrad Fort Lauderdale Beach'."
+  },
+  {
+   "org": "Conrad Fort Lauderdale Beach",
+   "canonical": "CONRAD FT. LAUDERDALE BEACH",
+   "distinct": false,
+   "reason": "Same entity as 'CONRAD FT. LAUDERDALE BEACH'."
+  },
+  {
+   "org": "Conrad Hotel Miami",
+   "canonical": "Conrad Hotel Miami",
+   "distinct": false,
+   "reason": "Same entity as 'Conrad Hotels Miami'."
+  },
+  {
+   "org": "Conrad Hotel Ft. Lauderdale",
+   "canonical": "CONRAD FT. LAUDERDALE BEACH",
+   "distinct": false,
+   "reason": "Same entity as 'CONRAD FT. LAUDERDALE BEACH'."
+  },
+  {
+   "org": "Conrad Hotels Miami",
+   "canonical": "Conrad Hotel Miami",
+   "distinct": false,
+   "reason": "Same entity as 'Conrad Hotel Miami'."
+  }
+ ],
+ "coralgables.com": [
+  {
+   "org": "Salvador Park",
+   "canonical": "Salvador Park",
+   "distinct": false,
+   "reason": "Bare name is the primary entity."
+  },
+  {
+   "org": "Biltmore",
+   "canonical": "Biltmore",
+   "distinct": true,
+   "reason": "Distinct property, no other matching names."
+  },
+  {
+   "org": "SALVADOR PARK TENNIS CENTER",
+   "canonical": "Salvador Park",
+   "distinct": false,
+   "reason": "Sub-unit of Salvador Park."
+  }
+ ],
+ "crestlinehotels.com": [
+  {
+   "org": "River Market Hotel",
+   "canonical": "River Market Hotel",
+   "distinct": true,
+   "reason": "Distinct hotel property."
+  },
+  {
+   "org": "Marriot Plaza San Antonio",
+   "canonical": "Marriot Plaza San Antonio",
+   "distinct": true,
+   "reason": "Distinct hotel property."
+  },
+  {
+   "org": "Hilton Singer Island",
+   "canonical": "Hilton Singer Island",
+   "distinct": true,
+   "reason": "Distinct hotel property."
+  }
+ ],
+ "correctcarers.com": [
+  {
+   "org": "CORRECT CARE-FLORIDA CITY, FL",
+   "canonical": "CORRECT CARE-FLORIDA CITY, FL",
+   "distinct": true,
+   "reason": "Specific location, likely a distinct property."
+  },
+  {
+   "org": "CORRECT CARE-PEMBROKE PINES, FL",
+   "canonical": "CORRECT CARE-PEMBROKE PINES, FL",
+   "distinct": false,
+   "reason": "Same location as 'PEMBROKE PINES, FL / WELLPATH'."
+  },
+  {
+   "org": "PEMBROKE PINES, FL / WELLPATH",
+   "canonical": "CORRECT CARE-PEMBROKE PINES, FL",
+   "distinct": false,
+   "reason": "Same location as 'CORRECT CARE-PEMBROKE PINES, FL'."
+  }
+ ],
+ "curacao-marriott.com": [
+  {
+   "org": "Marriott Curacao",
+   "canonical": "Cura\u00e7ao Marriott Beach Resort | The Pyrmont Cura\u00e7ao Beach Resort, an Autograph Collection All-Inclusive",
+   "distinct": false,
+   "reason": "Same property, different naming conventions"
+  },
+  {
+   "org": "Cura\u00e7ao Marriott Beach Resort | The Pyrmont Cura\u00e7ao Beach Resort, an Autograph Collection All-Inclusive",
+   "canonical": "Cura\u00e7ao Marriott Beach Resort | The Pyrmont Cura\u00e7ao Beach Resort, an Autograph Collection All-Inclusive",
+   "distinct": true,
+   "reason": "This is the most complete and descriptive name for the property."
+  }
+ ],
+ "daystarapparel.com": [
+  {
+   "org": "Day Star Apparel",
+   "canonical": "Day Star Apparel",
+   "distinct": false,
+   "reason": "Primary company name"
+  },
+  {
+   "org": "Daystar Custom",
+   "canonical": "Day Star Apparel",
+   "distinct": false,
+   "reason": "Sub-brand or division of Day Star Apparel"
+  }
+ ],
+ "delanohotels.com": [
+  {
+   "org": "Accor",
+   "canonical": "Accor",
+   "distinct": true,
+   "reason": "Accor is a distinct hotel brand, not a Delano property."
+  },
+  {
+   "org": "DELANO MIAMI BEACH",
+   "canonical": "DELANO MIAMI BEACH",
+   "distinct": true,
+   "reason": "Specific hotel property, distinct from other potential Delano locations."
+  }
+ ],
+ "deloitteuniversity.com": [
+  {
+   "org": "Deloitte University",
+   "canonical": "Deloitte University",
+   "distinct": false,
+   "reason": "This is the primary entity for deloitteuniversity.com."
+  },
+  {
+   "org": "Brandi (Laundry)",
+   "canonical": "Deloitte University",
+   "distinct": false,
+   "reason": "This appears to be an internal department or role within Deloitte University."
+  }
+ ],
+ "dhl.com": [
+  {
+   "org": "DHL Miami Purchasing",
+   "canonical": "DHL Miami Purchasing",
+   "distinct": true,
+   "reason": "Specific location and department."
+  },
+  {
+   "org": "DHL Aero Expreso/DHL Aviation Americas",
+   "canonical": "DHL Aero Expreso/DHL Aviation Americas",
+   "distinct": true,
+   "reason": "Specific business units/airlines."
+  },
+  {
+   "org": "DHL Express - main contact \"Mark Minnick\"",
+   "canonical": "DHL Express",
+   "distinct": false,
+   "reason": "Contact label, same as DHL Express."
+  },
+  {
+   "org": "DHL Express",
+   "canonical": "DHL Express",
+   "distinct": true,
+   "reason": "Specific sub-brand."
+  },
+  {
+   "org": "DHL US",
+   "canonical": "DHL US",
+   "distinct": true,
+   "reason": "Specific regional entity."
+  },
+  {
+   "org": "DHL network Operation, Inc.",
+   "canonical": "DHL network Operation, Inc.",
+   "distinct": true,
+   "reason": "Specific corporate entity."
+  }
+ ],
+ "diplomatresort.com": [
+  {
+   "org": "Diplomat Resort & Spa",
+   "canonical": "THE DIPLOMAT BEACH RESORT",
+   "distinct": false,
+   "reason": "Same hotel property, different naming convention"
+  },
+  {
+   "org": "THE DIPLOMAT BEACH RESORT",
+   "canonical": "THE DIPLOMAT BEACH RESORT",
+   "distinct": false,
+   "reason": "This is the most complete and official name"
+  }
+ ],
+ "disney.com": [
+  {
+   "org": "Walt Disney Company",
+   "canonical": "Walt Disney Company",
+   "distinct": false,
+   "reason": "Primary corporate entity for Disney."
+  },
+  {
+   "org": "Disney Sourcing",
+   "canonical": "Walt Disney Company",
+   "distinct": false,
+   "reason": "Department within the main Walt Disney Company."
+  },
+  {
+   "org": "Walt Disney World",
+   "canonical": "Walt Disney World",
+   "distinct": true,
+   "reason": "Specific theme park resort, distinct business unit."
+  },
+  {
+   "org": "Disney Purchasing",
+   "canonical": "Walt Disney Company",
+   "distinct": false,
+   "reason": "Department within the main Walt Disney Company."
+  }
+ ],
+ "dominicis.com": [
+  {
+   "org": "Sonia Dominicis",
+   "canonical": "Sonia Dominicis",
+   "distinct": true,
+   "reason": "Individual name, distinct entity."
+  },
+  {
+   "org": "Xavier Dominicis Sr.",
+   "canonical": "Xavier Dominicis Sr.",
+   "distinct": true,
+   "reason": "Individual name, distinct entity."
+  }
+ ],
+ "eclecticarray.com": [
+  {
+   "org": "Eclecticarray",
+   "canonical": "Eclecticarray",
+   "distinct": false,
+   "reason": "Bare company name is canonical."
+  },
+  {
+   "org": "eclecticarray.com",
+   "canonical": "Eclecticarray",
+   "distinct": false,
+   "reason": "Domain name refers to the same company."
+  }
+ ],
+ "diviresorts.com": [
+  {
+   "org": "Divi Little Bay Beach Resort",
+   "canonical": "Divi Little Bay Beach Resort",
+   "distinct": false,
+   "reason": "Specific property, canonical for similar names."
+  },
+  {
+   "org": "Divi Resorts",
+   "canonical": "Divi Resorts",
+   "distinct": true,
+   "reason": "Parent brand, distinct from specific properties."
+  },
+  {
+   "org": "Divi Little Bay, St. Maarten",
+   "canonical": "Divi Little Bay Beach Resort",
+   "distinct": false,
+   "reason": "Same property as Divi Little Bay Beach Resort."
+  },
+  {
+   "org": "Divi Resorts St. Maartens",
+   "canonical": "Divi Little Bay Beach Resort",
+   "distinct": false,
+   "reason": "Refers to the Divi Little Bay property in St. Maarten."
+  }
+ ],
+ "expodevco.com": [
+  {
+   "org": "Exposition Development Co",
+   "canonical": "Exposition Development Co",
+   "distinct": false,
+   "reason": "This is the parent company, likely the canonical name."
+  },
+  {
+   "org": "Independent Hotel Show Miami",
+   "canonical": "Independent Hotel Show Miami",
+   "distinct": true,
+   "reason": "This is a distinct event, not the parent company."
+  }
+ ],
+ "fashionbiz.ca": [
+  {
+   "org": "Fashin Biz",
+   "canonical": "Fashin Biz",
+   "distinct": false,
+   "reason": "Typo of 'Fashion Biz', likely same entity."
+  },
+  {
+   "org": "Biz Corporate",
+   "canonical": "Fashin Biz",
+   "distinct": false,
+   "reason": "Refers to the corporate entity of 'Fashion Biz'."
+  }
+ ],
+ "fedex.com": [
+  {
+   "org": "FedEx Ocean Freight",
+   "canonical": "FedEx Ocean Freight",
+   "distinct": true,
+   "reason": "Specific business unit of FedEx."
+  },
+  {
+   "org": "FedEx Domestic",
+   "canonical": "FedEx Domestic",
+   "distinct": true,
+   "reason": "Specific business unit of FedEx."
+  }
+ ],
+ "f3marina.com": [
+  {
+   "org": "Plattsburgh Boat Basin",
+   "canonical": "Plattsburgh Boat Basin",
+   "distinct": true,
+   "reason": "Distinct marina property."
+  },
+  {
+   "org": "Sioux City Marina",
+   "canonical": "Sioux City Marina",
+   "distinct": true,
+   "reason": "Distinct marina property."
+  },
+  {
+   "org": "City of Sanford",
+   "canonical": "City of Sanford",
+   "distinct": true,
+   "reason": "Distinct municipal entity."
+  },
+  {
+   "org": "VALLEJO MARINA",
+   "canonical": "VALLEJO MARINA",
+   "distinct": true,
+   "reason": "Distinct marina property."
+  },
+  {
+   "org": "F3 Marina",
+   "canonical": "F3 Marina",
+   "distinct": true,
+   "reason": "Corporate entity, distinct from properties."
+  },
+  {
+   "org": "SUNSET MARINA",
+   "canonical": "SUNSET MARINA",
+   "distinct": true,
+   "reason": "Distinct marina property."
+  }
+ ],
+ "fontainebleau.com": [
+  {
+   "org": "Fontainebleau Development (Independent)",
+   "canonical": "Fontainebleau Development (Independent)",
+   "distinct": true,
+   "reason": "Development is distinct from a specific hotel property."
+  },
+  {
+   "org": "Fontainebleau Miami Beach",
+   "canonical": "Fontainebleau Miami Beach",
+   "distinct": true,
+   "reason": "Specific hotel property, distinct from development arm."
+  }
+ ],
+ "foxxsound.com": [
+  {
+   "org": "Foxx Sounds & Video",
+   "canonical": "Foxx Sounds & Video",
+   "distinct": false,
+   "reason": "Same entity as 'Foxx Sound and Video'"
+  },
+  {
+   "org": "Foxx Sound and Video",
+   "canonical": "Foxx Sounds & Video",
+   "distinct": false,
+   "reason": "Same entity as 'Foxx Sounds & Video'"
+  }
+ ],
+ "globalmia.com": [
+  {
+   "org": "Global Miami Ventures",
+   "canonical": "Global Miami Ventures",
+   "distinct": false,
+   "reason": "Same entity as GLOBAL MIAMI JOINT VENTURES"
+  },
+  {
+   "org": "GLOBAL MIAMI JOINT VENTURES",
+   "canonical": "Global Miami Ventures",
+   "distinct": false,
+   "reason": "Same entity as Global Miami Ventures"
+  }
+ ],
+ "fourseasons.com": [
+  {
+   "org": "Four Seasons",
+   "canonical": "Four Seasons",
+   "distinct": false,
+   "reason": "This is the corporate entity for all Four Seasons properties."
+  },
+  {
+   "org": "Four Seasons Resort Nevis",
+   "canonical": "Four Seasons Resort Nevis",
+   "distinct": true,
+   "reason": "Specific hotel property, distinct from the corporate entity."
+  },
+  {
+   "org": "Four Seasons Anguilla",
+   "canonical": "Four Seasons Anguilla",
+   "distinct": true,
+   "reason": "Specific hotel property, distinct from the corporate entity."
+  },
+  {
+   "org": "Four Seasons Hotel Miami",
+   "canonical": "Four Seasons Hotel Miami",
+   "distinct": true,
+   "reason": "Specific hotel property, distinct from the corporate entity."
+  },
+  {
+   "org": "Four Seasons Nieves",
+   "canonical": "Four Seasons Resort Nevis",
+   "distinct": false,
+   "reason": "Likely a misspelling or abbreviation of Four Seasons Resort Nevis."
+  },
+  {
+   "org": "Four Seasons Resort Orlando",
+   "canonical": "Four Seasons Resort Orlando",
+   "distinct": true,
+   "reason": "Specific hotel property, distinct from the corporate entity."
+  },
+  {
+   "org": "Four Seasons Surfside",
+   "canonical": "Four Seasons Surfside",
+   "distinct": true,
+   "reason": "Specific hotel property, distinct from the corporate entity."
+  },
+  {
+   "org": "Four Seasons Resort Bora Bora",
+   "canonical": "Four Seasons Resort Bora Bora",
+   "distinct": true,
+   "reason": "Specific hotel property, distinct from the corporate entity."
+  }
+ ],
+ "gocss.com": [
+  {
+   "org": "CSS Miami office",
+   "canonical": "CSS Miami office",
+   "distinct": true,
+   "reason": "Specific office location, distinct entity."
+  },
+  {
+   "org": "CSS security",
+   "canonical": "CSS security",
+   "distinct": true,
+   "reason": "Specific department, distinct entity."
+  }
+ ],
+ "goexplorus.com": [
+  {
+   "org": "Explor Us",
+   "canonical": "Explor Us",
+   "distinct": false,
+   "reason": "Likely a variation of 'Go Explore Us'"
+  },
+  {
+   "org": "Go Explore Us",
+   "canonical": "Explor Us",
+   "distinct": false,
+   "reason": "Likely the main company name"
+  }
+ ],
+ "goldmanproperties.com": [
+  {
+   "org": "The Hotel of South Beach",
+   "canonical": "The Hotel of South Beach",
+   "distinct": true,
+   "reason": "Distinct hotel property."
+  },
+  {
+   "org": "Wynwood Kitchen and Bar",
+   "canonical": "Wynwood Kitchen and Bar",
+   "distinct": true,
+   "reason": "Distinct restaurant/bar property."
+  }
+ ],
+ "fsresidential.com": [
+  {
+   "org": "OCEAN HOUSE SOUTH BEACH",
+   "canonical": "OCEAN HOUSE SOUTH BEACH",
+   "distinct": true,
+   "reason": "Unique property name."
+  },
+  {
+   "org": "Akoya Condominium",
+   "canonical": "Akoya Condominium",
+   "distinct": true,
+   "reason": "Unique property name."
+  },
+  {
+   "org": "RESIDENCES AT PIER 4",
+   "canonical": "RESIDENCES AT PIER 4",
+   "distinct": true,
+   "reason": "Unique property name."
+  },
+  {
+   "org": "300 Collins Condominium",
+   "canonical": "300 Collins Condominium",
+   "distinct": true,
+   "reason": "Unique property name."
+  },
+  {
+   "org": "680 LAKE RESIDENCE",
+   "canonical": "680 LAKE RESIDENCE",
+   "distinct": false,
+   "reason": "Same property as 'FSR: 680 LAKE RESIDENCE'."
+  },
+  {
+   "org": "First Services",
+   "canonical": "First Services",
+   "distinct": true,
+   "reason": "Likely the parent company, distinct from properties."
+  },
+  {
+   "org": "FSR: 680 LAKE RESIDENCE",
+   "canonical": "680 LAKE RESIDENCE",
+   "distinct": false,
+   "reason": "Same property as '680 LAKE RESIDENCE'."
+  }
+ ],
+ "graduateathens.com": [
+  {
+   "org": "GRADAUTE ATHENS",
+   "canonical": "GRADAUTE ATHENS",
+   "distinct": false,
+   "reason": "Base organization for Graduate Athens."
+  },
+  {
+   "org": "CHG - GRADUATE ATHENS",
+   "canonical": "GRADAUTE ATHENS",
+   "distinct": false,
+   "reason": "CHG is likely a department or internal identifier."
+  }
+ ],
+ "grandplazaflorida.com": [
+  {
+   "org": "Grand Plaza Florida",
+   "canonical": "Grand Plaza Florida",
+   "distinct": false,
+   "reason": "Primary entity, no further distinction needed."
+  },
+  {
+   "org": "Benchmark Management St. Pete",
+   "canonical": "Benchmark Management St. Pete",
+   "distinct": true,
+   "reason": "Likely a distinct management company, not the hotel itself."
+  }
+ ],
+ "grandbeachhotel.com": [
+  {
+   "org": "Grand Beach Hotel",
+   "canonical": "Grand Beach Hotel",
+   "distinct": false,
+   "reason": "Primary entity for the domain"
+  },
+  {
+   "org": "GRAND BEACH HOTEL SURFSIDE",
+   "canonical": "GRAND BEACH HOTEL SURFSIDE",
+   "distinct": true,
+   "reason": "Specific property, distinct from the general brand"
+  }
+ ],
+ "greccorp.com": [
+  {
+   "org": "Sedano\u2019s",
+   "canonical": "Sedano\u2019s",
+   "distinct": true,
+   "reason": "Distinct entity, no merging needed."
+  },
+  {
+   "org": "General Realestate",
+   "canonical": "General Realestate",
+   "distinct": true,
+   "reason": "Distinct entity, no merging needed."
+  }
+ ],
+ "grncovington.com": [
+  {
+   "org": "Global Recruiters of Covington",
+   "canonical": "Global Recruiters of Covington",
+   "distinct": false,
+   "reason": "Primary name for the company."
+  },
+  {
+   "org": "GRN Covington",
+   "canonical": "Global Recruiters of Covington",
+   "distinct": false,
+   "reason": "Abbreviation of 'Global Recruiters of Covington'."
+  }
+ ],
+ "grovebaygroup.com": [
+  {
+   "org": "Stubborn Seed",
+   "canonical": "Stubborn Seed",
+   "distinct": true,
+   "reason": "Distinct restaurant property."
+  },
+  {
+   "org": "Big Easy Wine & Grill",
+   "canonical": "Big Easy Wine & Grill",
+   "distinct": true,
+   "reason": "Distinct restaurant property."
+  }
+ ],
+ "hengdaclothes.com": [
+  {
+   "org": "Qingdao Hengda",
+   "canonical": "Qingdao Hengda",
+   "distinct": false,
+   "reason": "Primary company name for Hengda Clothes."
+  },
+  {
+   "org": "TENDA INDUSTRY CO/QINGDAO HENGDA",
+   "canonical": "Qingdao Hengda",
+   "distinct": false,
+   "reason": "TENDA INDUSTRY CO is an alias for Qingdao Hengda."
+  }
+ ],
+ "hic.us": [
+  {
+   "org": "Hirsch - Tajima",
+   "canonical": "Hirsch International",
+   "distinct": false,
+   "reason": "Tajima is likely a division or product line of Hirsch International."
+  },
+  {
+   "org": "Hirsch International",
+   "canonical": "Hirsch International",
+   "distinct": true,
+   "reason": "This is the primary organization name."
+  }
+ ],
+ "hyatt.com": [
+  {
+   "org": "Grand Hyatt Grand Cayman",
+   "canonical": "Grand Hyatt Grand Cayman",
+   "distinct": true,
+   "reason": "Specific hotel property."
+  },
+  {
+   "org": "Hyatt Regency Miami",
+   "canonical": "Hyatt Regency Miami",
+   "distinct": true,
+   "reason": "Specific hotel property."
+  },
+  {
+   "org": "Hyatt Centric Las Olas",
+   "canonical": "Hyatt Centric Las Olas",
+   "distinct": true,
+   "reason": "Specific hotel property."
+  },
+  {
+   "org": "Hyatt Tampa",
+   "canonical": "Hyatt Tampa",
+   "distinct": true,
+   "reason": "Specific hotel property."
+  },
+  {
+   "org": "Hyatt Coconut Point",
+   "canonical": "Hyatt Coconut Point",
+   "distinct": true,
+   "reason": "Specific hotel property."
+  },
+  {
+   "org": "Hyatt Miami",
+   "canonical": "Hyatt Miami",
+   "distinct": true,
+   "reason": "Specific hotel property."
+  },
+  {
+   "org": "Hyatt Bonita Springs Spa",
+   "canonical": "Hyatt Coconut Point",
+   "distinct": false,
+   "reason": "Spa is part of Hyatt Coconut Point (Bonita Springs)."
+  },
+  {
+   "org": "Hyatt \"Bonita Springs, FL\"",
+   "canonical": "Hyatt Coconut Point",
+   "distinct": false,
+   "reason": "Refers to the Hyatt Coconut Point property."
+  },
+  {
+   "org": "Hyatt Plaza Hall Jamaica",
+   "canonical": "Hyatt Plaza Hall Jamaica",
+   "distinct": true,
+   "reason": "Specific hotel property."
+  }
+ ],
+ "hyattvoi.com": [
+  {
+   "org": "Hyatt Beach House",
+   "canonical": "Hyatt Beach House",
+   "distinct": true,
+   "reason": "Distinct hotel property."
+  },
+  {
+   "org": "Hyatt Siesta Key",
+   "canonical": "Hyatt Siesta Key",
+   "distinct": false,
+   "reason": "Canonical for Siesta Key properties."
+  },
+  {
+   "org": "Hyatt Sunset Harbor",
+   "canonical": "Hyatt Sunset Harbor",
+   "distinct": true,
+   "reason": "Distinct hotel property."
+  },
+  {
+   "org": "Hyatt Coconut Plantation",
+   "canonical": "Hyatt Coconut Plantation",
+   "distinct": true,
+   "reason": "Distinct hotel property."
+  },
+  {
+   "org": "Hyatt Siest Key",
+   "canonical": "Hyatt Siesta Key",
+   "distinct": false,
+   "reason": "Typo of Hyatt Siesta Key."
+  },
+  {
+   "org": "Hyatt Siesta Key Main Accounting",
+   "canonical": "Hyatt Siesta Key",
+   "distinct": false,
+   "reason": "Department of Hyatt Siesta Key."
+  }
+ ],
+ "iconbrickell.com": [
+  {
+   "org": "Icon Brickell T2",
+   "canonical": "Icon Brickell T2",
+   "distinct": true,
+   "reason": "Refers to a specific tower, likely distinct from other towers."
+  },
+  {
+   "org": "Icon Brickell 1",
+   "canonical": "Icon Brickell 1",
+   "distinct": true,
+   "reason": "Refers to a specific tower, likely distinct from other towers."
+  }
+ ],
+ "ihg.com": [
+  {
+   "org": "InterContinental Miami",
+   "canonical": "InterContinental Miami",
+   "distinct": true,
+   "reason": "Specific hotel property, distinct from corporate or other properties."
+  },
+  {
+   "org": "IHG \u00ae Hotels & Resorts",
+   "canonical": "IHG \u00ae Hotels & Resorts",
+   "distinct": true,
+   "reason": "Corporate entity, distinct from individual properties."
+  },
+  {
+   "org": "Kimpton Surfcomber Hotel",
+   "canonical": "Kimpton Surfcomber Hotel",
+   "distinct": true,
+   "reason": "Specific hotel property, distinct from corporate or other properties."
+  },
+  {
+   "org": "Z Ocean Hotel",
+   "canonical": "Z Ocean Hotel",
+   "distinct": true,
+   "reason": "Specific hotel property, distinct from corporate or other properties."
+  }
+ ],
+ "impark.com": [
+  {
+   "org": "Impark San Francisco",
+   "canonical": "Impark San Francisco",
+   "distinct": true,
+   "reason": "Specific location, likely distinct business unit."
+  },
+  {
+   "org": "Impark Health",
+   "canonical": "Impark Health",
+   "distinct": true,
+   "reason": "Specific division, likely distinct business unit."
+  }
+ ],
+ "hilton.com": [
+  {
+   "org": "Hotel Maren",
+   "canonical": "Hotel Maren",
+   "distinct": true,
+   "reason": "Specific hotel property."
+  },
+  {
+   "org": "Graduate by Hilton Evanston",
+   "canonical": "Graduate by Hilton Evanston",
+   "distinct": true,
+   "reason": "Specific hotel property."
+  },
+  {
+   "org": "Hilton",
+   "canonical": "Hilton",
+   "distinct": true,
+   "reason": "Bare brand name, represents the corporate entity or general brand."
+  },
+  {
+   "org": "MIAMI DOWNTOWN",
+   "canonical": "Hilton Miami Downtown",
+   "distinct": false,
+   "reason": "Abbreviated name for Hilton Miami Downtown."
+  },
+  {
+   "org": "Gallery One Fort Lauderdale - A Doubletree Suites by Hilton",
+   "canonical": "GALLERYOne Fort Lauderdale \u2013 A DoubleTree Suites by Hilton",
+   "distinct": false,
+   "reason": "Variations of the same hotel property name."
+  },
+  {
+   "org": "GALLERYOne Fort Lauderdale \u2013 A DoubleTree Suites by Hilton",
+   "canonical": "GALLERYOne Fort Lauderdale \u2013 A DoubleTree Suites by Hilton",
+   "distinct": false,
+   "reason": "Canonical form for this hotel property."
+  },
+  {
+   "org": "GALLERYOne Fort Lauderdale - A Doubletree Suites by Hilton",
+   "canonical": "GALLERYOne Fort Lauderdale \u2013 A DoubleTree Suites by Hilton",
+   "distinct": false,
+   "reason": "Variations of the same hotel property name."
+  },
+  {
+   "org": "COCOA BEACH OCEANFRONT",
+   "canonical": "COCOA BEACH OCEANFRONT",
+   "distinct": true,
+   "reason": "Specific hotel property, likely a Hilton brand."
+  },
+  {
+   "org": "Hilton Miami Downtown",
+   "canonical": "Hilton Miami Downtown",
+   "distinct": true,
+   "reason": "Specific hotel property."
+  },
+  {
+   "org": "Embassy Suites by Hilton",
+   "canonical": "Embassy Suites by Hilton",
+   "distinct": true,
+   "reason": "Bare brand name, represents the corporate entity or general brand."
+  },
+  {
+   "org": "EMBASSY SUITES- CHARLESTON HARBOR",
+   "canonical": "EMBASSY SUITES- CHARLESTON HARBOR",
+   "distinct": true,
+   "reason": "Specific hotel property."
+  },
+  {
+   "org": "Hilton Oceanfront Resort",
+   "canonical": "Hilton Oceanfront Resort",
+   "distinct": true,
+   "reason": "Specific hotel property."
+  },
+  {
+   "org": "HILTON NASHVILLE DOWNTOWN",
+   "canonical": "HILTON NASHVILLE DOWNTOWN",
+   "distinct": true,
+   "reason": "Specific hotel property."
+  },
+  {
+   "org": "EMBASSY SUITES ST. AUGUSTINE BEACH",
+   "canonical": "EMBASSY SUITES ST. AUGUSTINE BEACH",
+   "distinct": true,
+   "reason": "Specific hotel property."
+  },
+  {
+   "org": "Hilton Tucson",
+   "canonical": "Hilton Tucson",
+   "distinct": true,
+   "reason": "Specific hotel property."
+  },
+  {
+   "org": "Hilton Key West",
+   "canonical": "Hilton Key West",
+   "distinct": true,
+   "reason": "Specific hotel property."
+  },
+  {
+   "org": "DOUBLETREE HILTON MAINE",
+   "canonical": "DOUBLETREE HILTON MAINE",
+   "distinct": true,
+   "reason": "Specific hotel property."
+  },
+  {
+   "org": "HILTON - PHILADELPHIA PENN'S LANDING",
+   "canonical": "HILTON - PHILADELPHIA PENN'S LANDING",
+   "distinct": true,
+   "reason": "Specific hotel property."
+  },
+  {
+   "org": "Hilton Key Largo",
+   "canonical": "Hilton Key Largo",
+   "distinct": true,
+   "reason": "Specific hotel property."
+  },
+  {
+   "org": "Hilton Garden Inn",
+   "canonical": "Hilton Garden Inn",
+   "distinct": true,
+   "reason": "Bare brand name, represents the corporate entity or general brand."
+  }
+ ],
+ "inspiredliving.care": [
+  {
+   "org": "SUPERIOR RESIDENCES CLERMONT (not SRI)",
+   "canonical": "SUPERIOR RESIDENCES CLERMONT (not SRI)",
+   "distinct": true,
+   "reason": "Specific property, distinct from others."
+  },
+  {
+   "org": "SUPERIOR RESIDENCES NICEVILLE",
+   "canonical": "SUPERIOR RESIDENCES NICEVILLE",
+   "distinct": true,
+   "reason": "Specific property, distinct from others."
+  }
+ ],
+ "kiteflag.com": [
+  {
+   "org": "J&F Promotions LTD",
+   "canonical": "J&F Promotions LTD",
+   "distinct": true,
+   "reason": "Unique organization name, no clear relation to others."
+  },
+  {
+   "org": "Kite Flag",
+   "canonical": "Kite Flag",
+   "distinct": true,
+   "reason": "Unique organization name, no clear relation to others."
+  }
+ ],
+ "jungleisland.com": [
+  {
+   "org": "Jungle Island",
+   "canonical": "Jungle Island",
+   "distinct": false,
+   "reason": "Base company name"
+  },
+  {
+   "org": "Jungle Island & Joia Beach",
+   "canonical": "Jungle Island & Joia Beach",
+   "distinct": true,
+   "reason": "Distinct sub-brand or property"
+  }
+ ],
+ "kutesmart.com": [
+  {
+   "org": "kutesmart",
+   "canonical": "kutesmart",
+   "distinct": false,
+   "reason": "Case difference, same core company name."
+  },
+  {
+   "org": "Kutesmart",
+   "canonical": "kutesmart",
+   "distinct": false,
+   "reason": "Case difference, same core company name."
+  }
+ ],
+ "lafayette.com": [
+  {
+   "org": "Textiles Lafayette S.A.S",
+   "canonical": "Textiles Lafayette S.A.S",
+   "distinct": false,
+   "reason": "Primary entity for lafayette.com domain."
+  },
+  {
+   "org": "Lafayette - USA sales",
+   "canonical": "Textiles Lafayette S.A.S",
+   "distinct": false,
+   "reason": "Sales division of the main Lafayette entity."
+  },
+  {
+   "org": "LAFAYETTE UNI FOR ME",
+   "canonical": "LAFAYETTE UNI FOR ME",
+   "distinct": true,
+   "reason": "Likely a distinct sub-brand or business unit."
+  }
+ ],
+ "landau.com": [
+  {
+   "org": "Landau Uniforms, Inc.",
+   "canonical": "Landau Uniforms, Inc.",
+   "distinct": false,
+   "reason": "Primary company name."
+  },
+  {
+   "org": "Chefwear",
+   "canonical": "Landau Uniforms, Inc.",
+   "distinct": false,
+   "reason": "Chefwear is a sub-brand of Landau Uniforms."
+  }
+ ],
+ "lanierparking.com": [
+  {
+   "org": "Citizens Parking (Lanier)",
+   "canonical": "Lanier Parking",
+   "distinct": false,
+   "reason": "Parent company with 'Lanier' in parentheses is the same entity."
+  },
+  {
+   "org": "Lanier Parking",
+   "canonical": "Lanier Parking",
+   "distinct": false,
+   "reason": "This is the canonical name for the organization."
+  }
+ ],
+ "laplayaresort.com": [
+  {
+   "org": "LaPlaya Beach Resort",
+   "canonical": "LaPlaya Beach Resort",
+   "distinct": false,
+   "reason": "Same entity as 'La Playa Beach & Golf Resort'"
+  },
+  {
+   "org": "La Playa Beach & Golf Resort",
+   "canonical": "LaPlaya Beach Resort",
+   "distinct": false,
+   "reason": "Same entity as 'LaPlaya Beach Resort'"
+  }
+ ],
+ "lectra.com": [
+  {
+   "org": "Lectra Expertise Center N.A.",
+   "canonical": "Lectra Expertise Center N.A.",
+   "distinct": true,
+   "reason": "Specific business unit, likely distinct from general Lectra operations."
+  },
+  {
+   "org": "Gerber Technology, LLC",
+   "canonical": "Gerber Technology, LLC",
+   "distinct": true,
+   "reason": "Acquired company, distinct legal entity and brand."
+  },
+  {
+   "org": "Lectra Training",
+   "canonical": "Lectra Training",
+   "distinct": true,
+   "reason": "Specific department or unit, likely distinct from general Lectra operations."
+  }
+ ],
+ "kwpmc.com": [
+  {
+   "org": "KW Properties",
+   "canonical": "KW Properties",
+   "distinct": false,
+   "reason": "Primary company, other entries are properties or sub-brands."
+  },
+  {
+   "org": "KW: BRICKELL HEIGHTS",
+   "canonical": "BRICKELL HEIGHTS",
+   "distinct": false,
+   "reason": "Specific property, matches other Brickell Heights entries."
+  },
+  {
+   "org": "MARQUIS MIAMI / KW PROPERTY",
+   "canonical": "MARQUIS MIAMI",
+   "distinct": true,
+   "reason": "Distinct property managed by KW Property."
+  },
+  {
+   "org": "ELYSEE CONDO",
+   "canonical": "ELYSEE CONDO",
+   "distinct": false,
+   "reason": "Specific property, matches other Elysee Condo entries."
+  },
+  {
+   "org": "OCEANA BAL HARBOR CONDO ASSOC.",
+   "canonical": "OCEANA BAL HARBOR CONDO ASSOC.",
+   "distinct": true,
+   "reason": "Distinct property."
+  },
+  {
+   "org": "KW: YACHT HARBOUR ASSOCIATION",
+   "canonical": "YACHT HARBOUR ASSOCIATION",
+   "distinct": true,
+   "reason": "Distinct property."
+  },
+  {
+   "org": "Grove at Grand Bay",
+   "canonical": "Grove at Grand Bay",
+   "distinct": false,
+   "reason": "Specific property, matches other Grove at Grand Bay entries."
+  },
+  {
+   "org": "KW: 87 PARK MIAMI",
+   "canonical": "87 PARK MIAMI",
+   "distinct": true,
+   "reason": "Distinct property."
+  },
+  {
+   "org": "VISTA BLUE SINGER ISLAND / KWPMC",
+   "canonical": "VISTA BLUE SINGER ISLAND",
+   "distinct": true,
+   "reason": "Distinct property managed by KWPMC."
+  },
+  {
+   "org": "Mr. C",
+   "canonical": "Mr. C Residences",
+   "distinct": false,
+   "reason": "Refers to the same brand/property as Mr. C Residences."
+  },
+  {
+   "org": "KW - MONAD TERRACE",
+   "canonical": "MONAD TERRACE",
+   "distinct": true,
+   "reason": "Distinct property."
+  },
+  {
+   "org": "KW: BRICKELL FLATIRON",
+   "canonical": "BRICKELL FLATIRON",
+   "distinct": true,
+   "reason": "Distinct property."
+  },
+  {
+   "org": "Mr. C Residences",
+   "canonical": "Mr. C Residences",
+   "distinct": false,
+   "reason": "Specific property, matches other Mr. C entries."
+  },
+  {
+   "org": "KW: GROVE AT GRAND BAY",
+   "canonical": "Grove at Grand Bay",
+   "distinct": false,
+   "reason": "Specific property, matches other Grove at Grand Bay entries."
+  },
+  {
+   "org": "One Miami",
+   "canonical": "One Miami",
+   "distinct": true,
+   "reason": "Distinct property."
+  },
+  {
+   "org": "BRICKELL HEIGHTS",
+   "canonical": "BRICKELL HEIGHTS",
+   "distinct": false,
+   "reason": "Specific property, matches other Brickell Heights entries."
+  },
+  {
+   "org": "KW Properties Brickell Heights",
+   "canonical": "BRICKELL HEIGHTS",
+   "distinct": false,
+   "reason": "Specific property, matches other Brickell Heights entries."
+  },
+  {
+   "org": "KW Properties/Park Grove",
+   "canonical": "Park Grove",
+   "distinct": true,
+   "reason": "Distinct property managed by KW Properties."
+  },
+  {
+   "org": "Elysee Miami Condo",
+   "canonical": "ELYSEE CONDO",
+   "distinct": false,
+   "reason": "Specific property, matches other Elysee Condo entries."
+  }
+ ],
+ "libertyuniform.com": [
+  {
+   "org": "Liberty Uniforms",
+   "canonical": "Liberty Uniforms",
+   "distinct": false,
+   "reason": "Primary company name, most contacts"
+  },
+  {
+   "org": "Libery Uniforms",
+   "canonical": "Liberty Uniforms",
+   "distinct": false,
+   "reason": "Typo of 'Liberty Uniforms'"
+  },
+  {
+   "org": "National Sales",
+   "canonical": "Liberty Uniforms",
+   "distinct": false,
+   "reason": "Department of 'Liberty Uniforms'"
+  }
+ ],
+ "levi.com": [
+  {
+   "org": "Levi Strauss & Co.",
+   "canonical": "Levi Strauss & Co.",
+   "distinct": false,
+   "reason": "Primary company name, canonical for the organization."
+  },
+  {
+   "org": "Levi's brand",
+   "canonical": "Levi Strauss & Co.",
+   "distinct": false,
+   "reason": "Refers to the brand owned by Levi Strauss & Co."
+  }
+ ],
+ "lazparking.com": [
+  {
+   "org": "Laz Parking",
+   "canonical": "Laz Parking",
+   "distinct": false,
+   "reason": "Main company, all others are sub-units or locations."
+  },
+  {
+   "org": "Laz Parking Miami",
+   "canonical": "Laz Parking Miami",
+   "distinct": false,
+   "reason": "Specific location of the main company."
+  },
+  {
+   "org": "LAZ PARKING CHICAGO OTHER",
+   "canonical": "LAZ Parking Chicago",
+   "distinct": false,
+   "reason": "Specific location of the main company."
+  },
+  {
+   "org": "LAZ PARKING - MIAMI",
+   "canonical": "Laz Parking Miami",
+   "distinct": false,
+   "reason": "Specific location of the main company."
+  },
+  {
+   "org": "LAZ Parking of Florida",
+   "canonical": "Laz Parking",
+   "distinct": false,
+   "reason": "Regional office of the main company."
+  },
+  {
+   "org": "Laz Parking Maryland",
+   "canonical": "Laz Parking Maryland",
+   "distinct": false,
+   "reason": "Specific location of the main company."
+  },
+  {
+   "org": "Laz Parking Healthcare",
+   "canonical": "Laz Parking Healthcare",
+   "distinct": true,
+   "reason": "Distinct business unit within Laz Parking."
+  },
+  {
+   "org": "LAZ PARKING MIAMI",
+   "canonical": "Laz Parking Miami",
+   "distinct": false,
+   "reason": "Specific location of the main company."
+  },
+  {
+   "org": "Laz Parking Texas - San Antonio",
+   "canonical": "Laz Parking Texas - San Antonio",
+   "distinct": true,
+   "reason": "Specific location within a state, keep distinct."
+  },
+  {
+   "org": "Laz Chicago",
+   "canonical": "LAZ Parking Chicago",
+   "distinct": false,
+   "reason": "Specific location of the main company."
+  },
+  {
+   "org": "LAZ PARKING - TN/GA/FL, ALOOMA ALHASSAN",
+   "canonical": "Laz Parking",
+   "distinct": false,
+   "reason": "Regional office of the main company, contact name appended."
+  },
+  {
+   "org": "Laz Parking Orlando",
+   "canonical": "Laz Parking Orlando",
+   "distinct": true,
+   "reason": "Specific location, keep distinct."
+  },
+  {
+   "org": "Laz Parking Texas",
+   "canonical": "Laz Parking Texas",
+   "distinct": true,
+   "reason": "Specific location, keep distinct."
+  },
+  {
+   "org": "Sunset Parking",
+   "canonical": "Sunset Parking",
+   "distinct": true,
+   "reason": "Appears to be a distinct sub-brand or partner."
+  },
+  {
+   "org": "LAZ Live Event Services",
+   "canonical": "LAZ Live Event Services",
+   "distinct": true,
+   "reason": "Distinct business unit within Laz Parking."
+  },
+  {
+   "org": "LAZ Parking Chicago",
+   "canonical": "LAZ Parking Chicago",
+   "distinct": false,
+   "reason": "Specific location of the main company."
+  },
+  {
+   "org": "Laz Parking Chicago",
+   "canonical": "LAZ Parking Chicago",
+   "distinct": false,
+   "reason": "Specific location of the main company."
+  }
+ ],
+ "linousa.com": [
+  {
+   "org": "Natural Collection",
+   "canonical": "Natural Collection",
+   "distinct": false,
+   "reason": "Base entity for Natural Collection Guayavera."
+  },
+  {
+   "org": "Natural Collection Guayavera",
+   "canonical": "Natural Collection",
+   "distinct": false,
+   "reason": "Sub-brand/product line of Natural Collection."
+  }
+ ],
+ "lonestarvalet.com": [
+  {
+   "org": "Lone Star Valet",
+   "canonical": "Lone Star Valet",
+   "distinct": false,
+   "reason": "Primary company name"
+  },
+  {
+   "org": "Lone Star Parking",
+   "canonical": "Lone Star Valet",
+   "distinct": false,
+   "reason": "Likely a sub-brand or service of Lone Star Valet"
+  }
+ ],
+ "luxuryresorts.com": [
+  {
+   "org": "Boca Raton Resort & Club",
+   "canonical": "Boca Raton Resort & Club",
+   "distinct": true,
+   "reason": "Distinct hotel property."
+  },
+  {
+   "org": "Casa Marina Resort and The Reach Resort",
+   "canonical": "Casa Marina Resort and The Reach Resort",
+   "distinct": true,
+   "reason": "Distinct hotel properties."
+  }
+ ],
+ "mainsailhotels.com": [
+  {
+   "org": "Innovation Hotel",
+   "canonical": "Innovation Hotel",
+   "distinct": true,
+   "reason": "Specific hotel property."
+  },
+  {
+   "org": "Epicurean Atlanta",
+   "canonical": "Epicurean Atlanta",
+   "distinct": true,
+   "reason": "Specific hotel property."
+  },
+  {
+   "org": "Scrub Island Reosrt, Spa & Marina, BVI",
+   "canonical": "Scrub Island Reosrt, Spa & Marina, BVI",
+   "distinct": true,
+   "reason": "Specific hotel property."
+  },
+  {
+   "org": "Mainsail Lodging & Development",
+   "canonical": "Mainsail Lodging & Development",
+   "distinct": false,
+   "reason": "Parent company/development arm."
+  },
+  {
+   "org": "Mainsail Hotels",
+   "canonical": "Mainsail Lodging & Development",
+   "distinct": false,
+   "reason": "Refers to the main brand/parent company."
+  }
+ ],
+ "maketraveleasier.com": [
+  {
+   "org": "Make Travel Easier",
+   "canonical": "Make Travel Easier",
+   "distinct": true,
+   "reason": "This is the primary company domain, distinct entity."
+  },
+  {
+   "org": "BAGS PARKING",
+   "canonical": "Bags Hospitality Services",
+   "distinct": false,
+   "reason": "Sub-brand/service of Bags Hospitality Services."
+  },
+  {
+   "org": "Bags Hospitality Services",
+   "canonical": "Bags Hospitality Services",
+   "distinct": true,
+   "reason": "This is a distinct entity, likely the parent 'Bags' company."
+  },
+  {
+   "org": "Bags Inc.",
+   "canonical": "Bags Hospitality Services",
+   "distinct": false,
+   "reason": "Common abbreviation for Bags Hospitality Services."
+  },
+  {
+   "org": "Bags",
+   "canonical": "Bags Hospitality Services",
+   "distinct": false,
+   "reason": "Common short name for Bags Hospitality Services."
+  }
+ ],
+ "margaritavilleresortnassau.com": [
+  {
+   "org": "Margaritaville Nassau",
+   "canonical": "Margaritaville Nassau",
+   "distinct": false,
+   "reason": "Base entity for the resort."
+  },
+  {
+   "org": "Margaritaville Nassau OPH",
+   "canonical": "Margaritaville Nassau",
+   "distinct": false,
+   "reason": "OPH is likely an internal identifier for the same resort."
+  }
+ ],
+ "loewshotels.com": [
+  {
+   "org": "Loews Hotels",
+   "canonical": "Loews Hotels",
+   "distinct": true,
+   "reason": "Main corporate entity, distinct from specific properties or sub-brands."
+  },
+  {
+   "org": "Loews Business Services Center",
+   "canonical": "Loews Hotels",
+   "distinct": false,
+   "reason": "Business unit of the main Loews Hotels corporate entity."
+  },
+  {
+   "org": "Loews Financial Service Center",
+   "canonical": "Loews Hotels",
+   "distinct": false,
+   "reason": "Business unit of the main Loews Hotels corporate entity."
+  },
+  {
+   "org": "Loews Sapphire Falls Resort at Universal Orlando",
+   "canonical": "Loews Sapphire Falls Resort at Universal Orlando",
+   "distinct": true,
+   "reason": "Specific hotel property, distinct from other properties."
+  },
+  {
+   "org": "Helios Grand Hotel",
+   "canonical": "Helios Grand Hotel",
+   "distinct": true,
+   "reason": "Specific hotel property, distinct from other properties."
+  },
+  {
+   "org": "Loews Hotel Coral Gables",
+   "canonical": "Loews Hotel Coral Gables",
+   "distinct": true,
+   "reason": "Specific hotel property, distinct from other properties."
+  },
+  {
+   "org": "Stella",
+   "canonical": "Loews Stella",
+   "distinct": false,
+   "reason": "Nickname/shortened name for Loews Stella property."
+  },
+  {
+   "org": "LOEWS VENTANA CANYON RESORT",
+   "canonical": "LOEWS VENTANA CANYON RESORT",
+   "distinct": true,
+   "reason": "Specific hotel property, distinct from other properties."
+  },
+  {
+   "org": "Terra Luna",
+   "canonical": "Terra Luna",
+   "distinct": true,
+   "reason": "Specific hotel property, distinct from other properties."
+  },
+  {
+   "org": "Stella/Terra",
+   "canonical": "Loews Stella",
+   "distinct": false,
+   "reason": "Refers to the 'Stella' property, likely a combined reference."
+  },
+  {
+   "org": "Loews Royal Pacific Resort at Universal Orlando",
+   "canonical": "Loews Royal Pacific Resort at Universal Orlando",
+   "distinct": true,
+   "reason": "Specific hotel property, distinct from other properties."
+  },
+  {
+   "org": "Loews Procurement",
+   "canonical": "Loews Hotels",
+   "distinct": false,
+   "reason": "Business unit of the main Loews Hotels corporate entity."
+  },
+  {
+   "org": "Loews Hotels at Universal Orlando",
+   "canonical": "Loews Hotels at Universal Orlando",
+   "distinct": true,
+   "reason": "Specific hotel complex, distinct from individual properties."
+  },
+  {
+   "org": "Universal Hardrock",
+   "canonical": "Universal Hardrock",
+   "distinct": true,
+   "reason": "Specific hotel property, distinct from other properties."
+  },
+  {
+   "org": "Loews Stella",
+   "canonical": "Loews Stella",
+   "distinct": true,
+   "reason": "Specific hotel property, distinct from other properties."
+  },
+  {
+   "org": "Loews Corporate",
+   "canonical": "Loews Hotels",
+   "distinct": false,
+   "reason": "Refers to the main Loews Hotels corporate entity."
+  }
+ ],
+ "metclub.org": [
+  {
+   "org": "METROPOLITAN CLUB",
+   "canonical": "METROPOLITAN CLUB",
+   "distinct": false,
+   "reason": "This is the correct spelling and primary entity."
+  },
+  {
+   "org": "METROPILITAN CLUB",
+   "canonical": "METROPOLITAN CLUB",
+   "distinct": false,
+   "reason": "Typo of 'METROPOLITAN CLUB'."
+  }
+ ],
+ "marriott.com": [
+  {
+   "org": "Marriott Harbor Beach Resort & Spa",
+   "canonical": "Marriott Harbor Beach Resort & Spa",
+   "distinct": true,
+   "reason": "Specific hotel property."
+  },
+  {
+   "org": "MARRIOTT ORLANDO DOWNTOWN",
+   "canonical": "MARRIOTT ORLANDO DOWNTOWN",
+   "distinct": true,
+   "reason": "Specific hotel property."
+  },
+  {
+   "org": "Marriott Grand Harbor",
+   "canonical": "Marriott Grand Harbor",
+   "distinct": true,
+   "reason": "Specific hotel property."
+  },
+  {
+   "org": "Marriott",
+   "canonical": "Marriott",
+   "distinct": true,
+   "reason": "Bare brand name, distinct from properties."
+  },
+  {
+   "org": "AC HOTEL MISSOULA DOWNTOWN",
+   "canonical": "AC HOTEL MISSOULA DOWNTOWN",
+   "distinct": true,
+   "reason": "Specific hotel property."
+  },
+  {
+   "org": "Doral Golf Resort and Spa",
+   "canonical": "Doral Golf Resort and Spa",
+   "distinct": true,
+   "reason": "Specific hotel property."
+  },
+  {
+   "org": "Residence Inn / Marriott",
+   "canonical": "Residence Inn / Marriott",
+   "distinct": true,
+   "reason": "Specific hotel property / sub-brand."
+  },
+  {
+   "org": "Marriot Harbor Beach",
+   "canonical": "Marriott Harbor Beach Resort & Spa",
+   "distinct": false,
+   "reason": "Typo/abbreviation of 'Marriott Harbor Beach Resort & Spa'."
+  },
+  {
+   "org": "Doral Resort & Spa",
+   "canonical": "Doral Golf Resort and Spa",
+   "distinct": false,
+   "reason": "Abbreviation of 'Doral Golf Resort and Spa'."
+  },
+  {
+   "org": "POMPANO BEACH",
+   "canonical": "POMPANO BEACH",
+   "distinct": true,
+   "reason": "Insufficient information to link to a specific Marriott property."
+  }
+ ],
+ "metropolis.io": [
+  {
+   "org": "SP+ | A Metropolis Company",
+   "canonical": "SP+ | A Metropolis Company",
+   "distinct": false,
+   "reason": "This is the most complete name for the entity."
+  },
+  {
+   "org": "Metropolis",
+   "canonical": "SP+ | A Metropolis Company",
+   "distinct": false,
+   "reason": "Likely a shortened reference to the parent company."
+  },
+  {
+   "org": "Metropolis Parking",
+   "canonical": "SP+ | A Metropolis Company",
+   "distinct": false,
+   "reason": "Likely a business unit of the main company."
+  },
+  {
+   "org": "SP Plus",
+   "canonical": "SP+ | A Metropolis Company",
+   "distinct": false,
+   "reason": "Likely a variation of 'SP+' within the company."
+  }
+ ],
+ "mhs97.com": [
+  {
+   "org": "METROPOLITAN HEALTHCARE SVCS.",
+   "canonical": "METROPOLITAN HEALTHCARE SVCS.",
+   "distinct": false,
+   "reason": "Abbreviation of 'Service' and 'Services' are the same entity."
+  },
+  {
+   "org": "METROPOLITAN HEALTHCARE SERVICE MHS",
+   "canonical": "METROPOLITAN HEALTHCARE SVCS.",
+   "distinct": false,
+   "reason": "Full name and abbreviation are the same entity."
+  }
+ ],
+ "med.miami.edu": [
+  {
+   "org": "Miami",
+   "canonical": "University of Miami Miller School of Medicine",
+   "distinct": false,
+   "reason": "General reference to the university's medical school."
+  },
+  {
+   "org": "Bascom Palmer Eye Institute",
+   "canonical": "Bascom Palmer Eye Institute",
+   "distinct": true,
+   "reason": "Specific institute, distinct entity."
+  },
+  {
+   "org": "UM",
+   "canonical": "University of Miami Miller School of Medicine",
+   "distinct": false,
+   "reason": "Abbreviation for University of Miami."
+  },
+  {
+   "org": "UM (UMIAMI-BASCOM PALMER OPTHALMOLOGY DOCTORS)",
+   "canonical": "Bascom Palmer Eye Institute",
+   "distinct": false,
+   "reason": "UM with specific Bascom Palmer reference."
+  },
+  {
+   "org": "UMIAMI-UHEALTH SYSTEM",
+   "canonical": "UHealth- University of Miami Health System",
+   "distinct": false,
+   "reason": "Specific health system within UM."
+  },
+  {
+   "org": "UM Sylvester Cancer Center",
+   "canonical": "UM Sylvester Comprehensive Cancer Center",
+   "distinct": false,
+   "reason": "Specific cancer center within UM."
+  },
+  {
+   "org": "Desai Sethi Medical Center",
+   "canonical": "Desai Sethi Medical Center",
+   "distinct": true,
+   "reason": "Specific medical center, distinct entity."
+  },
+  {
+   "org": "Bascompalmer.org",
+   "canonical": "Bascom Palmer Eye Institute",
+   "distinct": false,
+   "reason": "Website domain for Bascom Palmer."
+  },
+  {
+   "org": "UMIAMI- BASCOM PALMER ANNE BATES",
+   "canonical": "Bascom Palmer Eye Institute",
+   "distinct": false,
+   "reason": "Bascom Palmer with additional internal identifier."
+  },
+  {
+   "org": "Desai Sethi Urology Institute",
+   "canonical": "Desai Sethi Urology Institute",
+   "distinct": true,
+   "reason": "Specific institute, distinct entity."
+  },
+  {
+   "org": "UMIAMI-BASCOM PALMER OPTHALMOLOGY DOCTORS",
+   "canonical": "Bascom Palmer Eye Institute",
+   "distinct": false,
+   "reason": "Specific Bascom Palmer reference."
+  },
+  {
+   "org": "Bascom Palmer Eye Institute, UHealth- University of Miami Health System",
+   "canonical": "Bascom Palmer Eye Institute",
+   "distinct": false,
+   "reason": "Bascom Palmer with UHealth affiliation."
+  },
+  {
+   "org": "University of Miami Miller School of Medicine",
+   "canonical": "University of Miami Miller School of Medicine",
+   "distinct": true,
+   "reason": "Full name of the medical school, distinct entity."
+  }
+ ],
+ "miamibeachconvention.com": [
+  {
+   "org": "MBCC Security",
+   "canonical": "MBCC Security",
+   "distinct": true,
+   "reason": "Distinct business unit within MBCC."
+  },
+  {
+   "org": "MBCC Spectra",
+   "canonical": "MBCC Spectra",
+   "distinct": true,
+   "reason": "Distinct business unit within MBCC."
+  }
+ ],
+ "miamibeachfl.gov": [
+  {
+   "org": "City of Miami Beach Procurement Department",
+   "canonical": "City of Miami Beach Procurement Department",
+   "distinct": true,
+   "reason": "Specific department, distinct entity."
+  },
+  {
+   "org": "Bobby Hernandez",
+   "canonical": "City of Miami Beach",
+   "distinct": false,
+   "reason": "Individual, likely works for the city."
+  },
+  {
+   "org": "Miami Beach Transportation",
+   "canonical": "Miami Beach Transportation",
+   "distinct": true,
+   "reason": "Specific department, distinct entity."
+  },
+  {
+   "org": "Miami Beach Tourism Office",
+   "canonical": "Miami Beach Tourism Office",
+   "distinct": true,
+   "reason": "Specific department, distinct entity."
+  }
+ ],
+ "miamidade.gov": [
+  {
+   "org": "Miami-Dade County Procurement",
+   "canonical": "Miami-Dade County Procurement",
+   "distinct": false,
+   "reason": "Same entity as MDC Procurement."
+  },
+  {
+   "org": "Elections Department: Miami",
+   "canonical": "Elections Department: Miami",
+   "distinct": true,
+   "reason": "Distinct department within Miami-Dade County."
+  },
+  {
+   "org": "MDC Procurement",
+   "canonical": "Miami-Dade County Procurement",
+   "distinct": false,
+   "reason": "Abbreviation of Miami-Dade County Procurement."
+  }
+ ],
+ "miami.edu": [
+  {
+   "org": "University of Miami",
+   "canonical": "University of Miami",
+   "distinct": false,
+   "reason": "Canonical name for the university."
+  },
+  {
+   "org": "The Office of Patient Experience, University of Miami Health System",
+   "canonical": "University of Miami Health System",
+   "distinct": false,
+   "reason": "Sub-unit of the University of Miami Health System."
+  },
+  {
+   "org": "Matt Cooper Friend Attorney Columbus",
+   "canonical": "Matt Cooper Friend Attorney Columbus",
+   "distinct": true,
+   "reason": "Distinct individual/firm, not directly part of the university."
+  },
+  {
+   "org": "UMIAMI",
+   "canonical": "University of Miami",
+   "distinct": false,
+   "reason": "Abbreviation for University of Miami."
+  },
+  {
+   "org": "UM professor",
+   "canonical": "University of Miami",
+   "distinct": false,
+   "reason": "Refers to a professor at the University of Miami."
+  },
+  {
+   "org": "UM",
+   "canonical": "University of Miami",
+   "distinct": false,
+   "reason": "Abbreviation for University of Miami."
+  },
+  {
+   "org": "Desai Sethi Urology Institute, Sylvester Comprehensive Cancer Center, University of Miami Miller School of Medicine",
+   "canonical": "University of Miami Miller School of Medicine",
+   "distinct": false,
+   "reason": "Sub-unit of the University of Miami Miller School of Medicine."
+  },
+  {
+   "org": "UHealth Premier Concierge",
+   "canonical": "University of Miami Health System",
+   "distinct": false,
+   "reason": "Service within the University of Miami Health System."
+  },
+  {
+   "org": "Chartwells @ UM",
+   "canonical": "Chartwells",
+   "distinct": false,
+   "reason": "Chartwells is a distinct entity operating at UM."
+  },
+  {
+   "org": "UMIAMI-CHARTWELLS:UMIAMI-CHARTWELLS CATERING",
+   "canonical": "Chartwells",
+   "distinct": false,
+   "reason": "Refers to Chartwells catering services at UMIAMI."
+  },
+  {
+   "org": "Office of University Communications",
+   "canonical": "University of Miami",
+   "distinct": false,
+   "reason": "Department within the University of Miami."
+  }
+ ],
+ "miamiparking.com": [
+  {
+   "org": "Miami Parking Authority",
+   "canonical": "Miami Parking Authority",
+   "distinct": false,
+   "reason": "Primary name for the parking authority."
+  },
+  {
+   "org": "MPA",
+   "canonical": "Miami Parking Authority",
+   "distinct": false,
+   "reason": "Abbreviation for Miami Parking Authority."
+  },
+  {
+   "org": "Jackson Memorial Hospital Parking Services",
+   "canonical": "Jackson Memorial Hospital Parking Services",
+   "distinct": true,
+   "reason": "Specific parking services for a distinct hospital."
+  },
+  {
+   "org": "Jackson",
+   "canonical": "Jackson Memorial Hospital Parking Services",
+   "distinct": false,
+   "reason": "Shortened name for Jackson Memorial Hospital Parking Services."
+  },
+  {
+   "org": "Miami Parking Authority (MPA)",
+   "canonical": "Miami Parking Authority",
+   "distinct": false,
+   "reason": "Full name with abbreviation, same as Miami Parking Authority."
+  }
+ ],
+ "mindspring.com": [
+  {
+   "org": "Atlantic Fish & Chop House",
+   "canonical": "Atlantic Fish & Chop House",
+   "distinct": true,
+   "reason": "Unique business entity."
+  },
+  {
+   "org": "Walls Industries",
+   "canonical": "Walls Industries",
+   "distinct": true,
+   "reason": "Unique business entity."
+  }
+ ],
+ "ml.com": [
+  {
+   "org": "Maria Arazoza",
+   "canonical": "Maria Arazoza",
+   "distinct": true,
+   "reason": "Individual contact, not an organization."
+  },
+  {
+   "org": "Roberto Baerga",
+   "canonical": "Roberto Baerga",
+   "distinct": true,
+   "reason": "Individual contact, not an organization."
+  }
+ ],
+ "momentecbrands.com": [
+  {
+   "org": "Momentecbrands",
+   "canonical": "Momentecbrands",
+   "distinct": false,
+   "reason": "Canonical form for the company."
+  },
+  {
+   "org": "momentecbrands.com",
+   "canonical": "Momentecbrands",
+   "distinct": false,
+   "reason": "Domain name refers to the same company."
+  }
+ ],
+ "nationalhotel.com": [
+  {
+   "org": "National Hotel",
+   "canonical": "National Hotel Miami Beach",
+   "distinct": false,
+   "reason": "General name for the specific Miami Beach property."
+  },
+  {
+   "org": "National Hotel Miami Beach",
+   "canonical": "National Hotel Miami Beach",
+   "distinct": true,
+   "reason": "Specific property, no other distinct properties mentioned."
+  }
+ ],
+ "mrchotels.com": [
+  {
+   "org": "Mr. C",
+   "canonical": "Mr. C",
+   "distinct": false,
+   "reason": "This is the corporate entity for all Mr. C hotels."
+  },
+  {
+   "org": "Mr. C Miami \u2013 Coconut Grove",
+   "canonical": "Mr. C Miami \u2013 Coconut Grove",
+   "distinct": true,
+   "reason": "Specific hotel property, distinct from the corporate brand."
+  },
+  {
+   "org": "MR. C COCONUT GROVE",
+   "canonical": "Mr. C Miami \u2013 Coconut Grove",
+   "distinct": false,
+   "reason": "Same property as 'Mr. C Miami \u2013 Coconut Grove', different capitalization."
+  },
+  {
+   "org": "Mr. C Miami - Coconut Grove",
+   "canonical": "Mr. C Miami \u2013 Coconut Grove",
+   "distinct": false,
+   "reason": "Same property as 'Mr. C Miami \u2013 Coconut Grove', different dash."
+  },
+  {
+   "org": "Mr. C Coconut Grove",
+   "canonical": "Mr. C Miami \u2013 Coconut Grove",
+   "distinct": false,
+   "reason": "Same property as 'Mr. C Miami \u2013 Coconut Grove', slightly abbreviated."
+  }
+ ],
+ "mohg.com": [
+  {
+   "org": "Mandarin Oriental",
+   "canonical": "Mandarin Oriental",
+   "distinct": false,
+   "reason": "Corporate entity, other entries are properties or departments."
+  },
+  {
+   "org": "MIAMI",
+   "canonical": "MIAMI",
+   "distinct": false,
+   "reason": "Refers to the Mandarin Oriental, Miami property."
+  },
+  {
+   "org": "Mandarin Miami",
+   "canonical": "MIAMI",
+   "distinct": false,
+   "reason": "Refers to the Mandarin Oriental, Miami property."
+  },
+  {
+   "org": "Mandarin Oriental, Canouan",
+   "canonical": "Mandarin Oriental, Canouan",
+   "distinct": true,
+   "reason": "Specific hotel property, distinct from corporate."
+  },
+  {
+   "org": "ACCTS. PAYABLE @ MANDARIN ORIENTAL - MIAMI",
+   "canonical": "MIAMI",
+   "distinct": false,
+   "reason": "Department of the Mandarin Oriental, Miami property."
+  },
+  {
+   "org": "MANDARIN ORIENTAL, MIAMI",
+   "canonical": "MIAMI",
+   "distinct": false,
+   "reason": "Refers to the Mandarin Oriental, Miami property."
+  },
+  {
+   "org": "Mandarin Oriental Corporate",
+   "canonical": "Mandarin Oriental",
+   "distinct": false,
+   "reason": "Explicitly corporate entity."
+  },
+  {
+   "org": "Mandarin Oriental Canouan",
+   "canonical": "Mandarin Oriental, Canouan",
+   "distinct": true,
+   "reason": "Specific hotel property, distinct from corporate."
+  },
+  {
+   "org": "Mandarin Restaurant",
+   "canonical": "Mandarin Restaurant",
+   "distinct": true,
+   "reason": "Likely a distinct restaurant, not a hotel property."
+  },
+  {
+   "org": "Mandrain Oriental",
+   "canonical": "Mandarin Oriental",
+   "distinct": false,
+   "reason": "Typo for the corporate entity."
+  }
+ ],
+ "nationalpositionshq.org": [
+  {
+   "org": "NP",
+   "canonical": "NP",
+   "distinct": true,
+   "reason": "Insufficient information to merge with other entities."
+  },
+  {
+   "org": "Ecom Agency",
+   "canonical": "Ecom Agency",
+   "distinct": true,
+   "reason": "Insufficient information to merge with other entities."
+  }
+ ],
+ "naumd.com": [
+  {
+   "org": "Naumd",
+   "canonical": "Naumd",
+   "distinct": false,
+   "reason": "Case variation of the same company name."
+  },
+  {
+   "org": "NAUMD",
+   "canonical": "Naumd",
+   "distinct": false,
+   "reason": "Case variation of the same company name."
+  }
+ ],
+ "navy.mil": [
+  {
+   "org": "U.S NAVY BASE",
+   "canonical": "U.S NAVY BASE",
+   "distinct": true,
+   "reason": "Distinct entity."
+  },
+  {
+   "org": "NAVY GATEWAY INN & SUITES",
+   "canonical": "NAVY GATEWAY INN & SUITES",
+   "distinct": true,
+   "reason": "Distinct entity."
+  }
+ ],
+ "neo-valet.com": [
+  {
+   "org": "NEO Valet",
+   "canonical": "NEO Valet",
+   "distinct": false,
+   "reason": "Case variation of the same company name."
+  },
+  {
+   "org": "Neo Valet",
+   "canonical": "NEO Valet",
+   "distinct": false,
+   "reason": "Case variation of the same company name."
+  }
+ ],
+ "npapark.org": [
+  {
+   "org": "NPA",
+   "canonical": "National Parking Association",
+   "distinct": false,
+   "reason": "Acronym for National Parking Association."
+  },
+  {
+   "org": "National Parking Association",
+   "canonical": "National Parking Association",
+   "distinct": true,
+   "reason": "Full name, is the canonical form."
+  }
+ ],
+ "nikkibeach.com": [
+  {
+   "org": "Olga - Alex Guerra",
+   "canonical": "Olga - Alex Guerra",
+   "distinct": true,
+   "reason": "Likely individual or small team, distinct from other entities."
+  },
+  {
+   "org": "Nikki Beach Clothing",
+   "canonical": "Nikki Beach Clothing",
+   "distinct": true,
+   "reason": "Specific sub-brand/business unit, distinct from other entities."
+  }
+ ],
+ "oakwoodsoutheast.com": [
+  {
+   "org": "Oakwood & ExecuStay Miami",
+   "canonical": "Oakwood & ExecuStay Miami",
+   "distinct": true,
+   "reason": "Represents a distinct property location."
+  },
+  {
+   "org": "Oakwood & ExecuStay Orlando",
+   "canonical": "Oakwood & ExecuStay Orlando",
+   "distinct": true,
+   "reason": "Represents a distinct property location."
+  }
+ ],
+ "oasismarinas.com": [
+  {
+   "org": "OASIS Marinas",
+   "canonical": "OASIS Marinas",
+   "distinct": false,
+   "reason": "Primary entity, no further consolidation needed."
+  },
+  {
+   "org": "ACCTS. PAYABLE @ OASIS MARINA",
+   "canonical": "OASIS Marinas",
+   "distinct": false,
+   "reason": "Department of Oasis Marinas, same entity."
+  }
+ ],
+ "occunomix.com": [
+  {
+   "org": "Occunomix",
+   "canonical": "Occunomix",
+   "distinct": false,
+   "reason": "Case variation of the same company name."
+  },
+  {
+   "org": "OccuNomix",
+   "canonical": "Occunomix",
+   "distinct": false,
+   "reason": "Case variation of the same company name."
+  }
+ ],
+ "oceanakb.com": [
+  {
+   "org": "OCEANA KEY BISCAYNE",
+   "canonical": "OCEANA KEY BISCAYNE",
+   "distinct": false,
+   "reason": "Primary organization name."
+  },
+  {
+   "org": "KW: OCEANA KEY BISCAYNE",
+   "canonical": "OCEANA KEY BISCAYNE",
+   "distinct": false,
+   "reason": "Keyword prefix, same entity."
+  }
+ ],
+ "ogstech.com": [
+  {
+   "org": "Waterbury Buttons",
+   "canonical": "Waterbury Buttons",
+   "distinct": false,
+   "reason": "This is the most complete and common name for the entity."
+  },
+  {
+   "org": "Waterbury Button Co.",
+   "canonical": "Waterbury Buttons",
+   "distinct": false,
+   "reason": "Shortened version of 'Waterbury Buttons', refers to the same entity."
+  },
+  {
+   "org": "Waterbury Botton",
+   "canonical": "Waterbury Buttons",
+   "distinct": false,
+   "reason": "Typo of 'Waterbury Buttons', refers to the same entity."
+  }
+ ],
+ "oceanreef.com": [
+  {
+   "org": "Ocean Reef Club",
+   "canonical": "Ocean Reef Club",
+   "distinct": false,
+   "reason": "Primary entity for Ocean Reef"
+  },
+  {
+   "org": "Ocean Reef Housekeeping",
+   "canonical": "Ocean Reef Club",
+   "distinct": false,
+   "reason": "Department of Ocean Reef Club"
+  },
+  {
+   "org": "Ocean Reef Chef",
+   "canonical": "Ocean Reef Club",
+   "distinct": false,
+   "reason": "Role within Ocean Reef Club"
+  },
+  {
+   "org": "Ocean Reef Restaurant",
+   "canonical": "Ocean Reef Club",
+   "distinct": false,
+   "reason": "Venue within Ocean Reef Club"
+  },
+  {
+   "org": "Ocean Reef (airport)",
+   "canonical": "Ocean Reef Club",
+   "distinct": false,
+   "reason": "Facility related to Ocean Reef Club"
+  },
+  {
+   "org": "Ocean Reef F&B GM",
+   "canonical": "Ocean Reef Club",
+   "distinct": false,
+   "reason": "Role within Ocean Reef Club"
+  },
+  {
+   "org": "Gianni Ristorante",
+   "canonical": "Gianni Ristorante",
+   "distinct": true,
+   "reason": "Specific restaurant, potentially distinct sub-brand"
+  }
+ ],
+ "omnihotels.com": [
+  {
+   "org": "OMNI HOMESTEAD",
+   "canonical": "The Omni Homestead",
+   "distinct": false,
+   "reason": "Homestead is a specific property, 'The Omni Homestead' is more complete."
+  },
+  {
+   "org": "Omni Hotels & Resorts (TRT Holdings)",
+   "canonical": "Omni Hotels & Resorts (TRT Holdings)",
+   "distinct": true,
+   "reason": "This is the corporate entity, distinct from individual properties."
+  },
+  {
+   "org": "OMNI LA MANSION DEL RIO",
+   "canonical": "OMNI LA MANSION DEL RIO",
+   "distinct": true,
+   "reason": "This is a distinct hotel property."
+  },
+  {
+   "org": "The Omni Homestead",
+   "canonical": "The Omni Homestead",
+   "distinct": true,
+   "reason": "This is a distinct hotel property."
+  }
+ ],
+ "park1.com": [
+  {
+   "org": "Park One",
+   "canonical": "Park One",
+   "distinct": false,
+   "reason": "Canonical for Park One and Park 1"
+  },
+  {
+   "org": "Park 1",
+   "canonical": "Park One",
+   "distinct": false,
+   "reason": "Park 1 is a variation of Park One"
+  }
+ ],
+ "optonline.net": [
+  {
+   "org": "Quality Uniforms Inc.",
+   "canonical": "Quality Uniforms Inc.",
+   "distinct": true,
+   "reason": "Unique business name, no obvious relation to other orgs."
+  },
+  {
+   "org": "International Clothiers",
+   "canonical": "International Clothiers",
+   "distinct": true,
+   "reason": "Unique business name, no obvious relation to other orgs."
+  }
+ ],
+ "parking.com": [
+  {
+   "org": "USA PARKING",
+   "canonical": "USA PARKING",
+   "distinct": false,
+   "reason": "Likely a primary brand or main entity."
+  },
+  {
+   "org": "Airport Parking Associates",
+   "canonical": "USA PARKING",
+   "distinct": false,
+   "reason": "Likely a sub-brand or business unit of USA PARKING."
+  },
+  {
+   "org": "Central Parking",
+   "canonical": "USA PARKING",
+   "distinct": false,
+   "reason": "Likely a sub-brand or business unit of USA PARKING."
+  }
+ ],
+ "parkingmgt.com": [
+  {
+   "org": "PMC Parking Management",
+   "canonical": "PMC Parking Management",
+   "distinct": false,
+   "reason": "Main company, other entries are sub-units."
+  },
+  {
+   "org": "PMC - SOUTH CAROLINA",
+   "canonical": "PMC Parking Management",
+   "distinct": false,
+   "reason": "Sub-unit of PMC Parking Management."
+  }
+ ],
+ "pelicanbeach.com": [
+  {
+   "org": "Pelican Grand Beach Resort",
+   "canonical": "Pelican Grand Beach Resort",
+   "distinct": true,
+   "reason": "Specific resort property."
+  },
+  {
+   "org": "Pelicanbeach",
+   "canonical": "Pelican Grand Beach Resort",
+   "distinct": false,
+   "reason": "Abbreviated form of the resort name."
+  },
+  {
+   "org": "Pelican Beach",
+   "canonical": "Pelican Grand Beach Resort",
+   "distinct": false,
+   "reason": "Abbreviated form of the resort name."
+  }
+ ],
+ "pery.com": [
+  {
+   "org": "Supreme Corporate",
+   "canonical": "Supreme International",
+   "distinct": false,
+   "reason": "Corporate and International likely refer to the same overarching entity."
+  },
+  {
+   "org": "Supreme International",
+   "canonical": "Supreme International",
+   "distinct": true,
+   "reason": "This is the chosen canonical name for the entity."
+  }
+ ],
+ "premierparking.com": [
+  {
+   "org": "Premier Parking",
+   "canonical": "Premier Parking",
+   "distinct": false,
+   "reason": "Base company name for all related entities."
+  },
+  {
+   "org": "Premier Parking OKC",
+   "canonical": "Premier Parking OKC",
+   "distinct": true,
+   "reason": "Specific location, distinct from the main company."
+  }
+ ],
+ "pinnacleahs.com": [
+  {
+   "org": "Pinnacle AHS",
+   "canonical": "Pinnacle AHS",
+   "distinct": false,
+   "reason": "This is the primary company name."
+  },
+  {
+   "org": "PINNACLE AUTOMOTIVE HOSPITALITY",
+   "canonical": "Pinnacle AHS",
+   "distinct": false,
+   "reason": "Full name of the same company, just more verbose."
+  }
+ ],
+ "pvresorts.com": [
+  {
+   "org": "Ponte Vedra Inn & Club",
+   "canonical": "Ponte Vedra Inn & Club",
+   "distinct": true,
+   "reason": "Specific hotel property, distinct from others."
+  },
+  {
+   "org": "The Lodge & Club",
+   "canonical": "The Lodge & Club",
+   "distinct": true,
+   "reason": "Specific hotel property, distinct from others."
+  },
+  {
+   "org": "PV Resorts",
+   "canonical": "Ponte Vedra Inn & Club",
+   "distinct": false,
+   "reason": "Likely parent company or umbrella for the resorts."
+  }
+ ],
+ "questex.com": [
+  {
+   "org": "Hotec",
+   "canonical": "Hotec",
+   "distinct": true,
+   "reason": "Distinct business unit."
+  },
+  {
+   "org": "Hotel Management",
+   "canonical": "Hotel Management",
+   "distinct": true,
+   "reason": "Distinct business unit."
+  }
+ ],
+ "pyramidglobal.com": [
+  {
+   "org": "Pyramid Global Hospitality",
+   "canonical": "Pyramid Global Hospitality",
+   "distinct": false,
+   "reason": "Primary corporate entity for the domain."
+  },
+  {
+   "org": "THE WESTIN GRAND CAYMAN BEACH RESORT & SPA\nTHE SUNSHINE SUITES RESORT",
+   "canonical": "THE WESTIN GRAND CAYMAN BEACH RESORT & SPA\nTHE SUNSHINE SUITES RESORT",
+   "distinct": true,
+   "reason": "Distinct hotel properties, not the corporate entity."
+  }
+ ],
+ "ransomeverglades.org": [
+  {
+   "org": "Ransom Everglades",
+   "canonical": "Ransom Everglades",
+   "distinct": true,
+   "reason": "Primary organization, no clear sub-entities."
+  },
+  {
+   "org": "Ransom Advisor",
+   "canonical": "Ransom Everglades",
+   "distinct": false,
+   "reason": "Likely a role/department within Ransom Everglades."
+  }
+ ],
+ "rccl.com": [
+  {
+   "org": "Royal Caribbean",
+   "canonical": "Royal Caribbean Cruises Ltd.",
+   "distinct": false,
+   "reason": "Shorthand for the parent company."
+  },
+  {
+   "org": "Royal Caribbean Cruises Ltd.",
+   "canonical": "Royal Caribbean Cruises Ltd.",
+   "distinct": true,
+   "reason": "Full legal name, serves as canonical."
+  }
+ ],
+ "reefparking.com": [
+  {
+   "org": "Ameripark",
+   "canonical": "Ameripark",
+   "distinct": true,
+   "reason": "Distinct entity within Reef Parking's portfolio."
+  },
+  {
+   "org": "Reef Parking",
+   "canonical": "Reef Parking",
+   "distinct": true,
+   "reason": "The overarching parent company."
+  },
+  {
+   "org": "PARK ONE",
+   "canonical": "PARK ONE",
+   "distinct": true,
+   "reason": "Distinct entity within Reef Parking's portfolio."
+  },
+  {
+   "org": "LANIER PARKING",
+   "canonical": "LANIER PARKING",
+   "distinct": true,
+   "reason": "Distinct entity within Reef Parking's portfolio."
+  }
+ ],
+ "refrigiwear.com": [
+  {
+   "org": "Refrigiwear",
+   "canonical": "Refrigiwear",
+   "distinct": false,
+   "reason": "Case variation of the same company name."
+  },
+  {
+   "org": "RefrigiWear",
+   "canonical": "Refrigiwear",
+   "distinct": false,
+   "reason": "Case variation of the same company name."
+  }
+ ],
+ "reimaginedparking.com": [
+  {
+   "org": "Reimagined Parking",
+   "canonical": "Reimagined Parking",
+   "distinct": false,
+   "reason": "Primary company name, all other entities are sub-brands or aliases."
+  },
+  {
+   "org": "Reef Parking",
+   "canonical": "Reimagined Parking",
+   "distinct": false,
+   "reason": "Reef Parking is a sub-brand or alias of Reimagined Parking."
+  },
+  {
+   "org": "Park One",
+   "canonical": "Reimagined Parking",
+   "distinct": false,
+   "reason": "Park One is a sub-brand or alias of Reimagined Parking."
+  }
+ ],
+ "remingtonhotels.com": [
+  {
+   "org": "Remington Hotels",
+   "canonical": "Remington Hotels",
+   "distinct": false,
+   "reason": "Primary corporate entity for Remington Hotels."
+  },
+  {
+   "org": "ONEGT",
+   "canonical": "ONEGT",
+   "distinct": true,
+   "reason": "Distinct sub-brand or business unit, not Remington Hotels."
+  },
+  {
+   "org": "REMINGTON HOSPITALITY",
+   "canonical": "Remington Hotels",
+   "distinct": false,
+   "reason": "Synonym for the main Remington Hotels entity."
+  }
+ ],
+ "residentialplaza.com": [
+  {
+   "org": "Residential Plaza",
+   "canonical": "Residential Plaza",
+   "distinct": false,
+   "reason": "This is the primary organization name."
+  },
+  {
+   "org": "Assisted Living Facility",
+   "canonical": "Assisted Living Facility",
+   "distinct": true,
+   "reason": "Likely a distinct business unit or service within the organization."
+  }
+ ],
+ "resortjh.com": [
+  {
+   "org": "BUNGALOWS KEY LARGO",
+   "canonical": "BUNGALOWS KEY LARGO",
+   "distinct": false,
+   "reason": "Likely the same property as 'Johnson Properties \"Bungalow\"'."
+  },
+  {
+   "org": "Johnson Properties \"Bungalow\"",
+   "canonical": "BUNGALOWS KEY LARGO",
+   "distinct": false,
+   "reason": "Likely the same property as 'BUNGALOWS KEY LARGO'."
+  }
+ ],
+ "resume-library.com": [
+  {
+   "org": "Resume-Library",
+   "canonical": "Resume-Library",
+   "distinct": false,
+   "reason": "Same entity, different capitalization/spacing."
+  },
+  {
+   "org": "Resume Library",
+   "canonical": "Resume-Library",
+   "distinct": false,
+   "reason": "Same entity, different capitalization/spacing."
+  }
+ ],
+ "robertkaufman.com": [
+  {
+   "org": "Robert Kaufman",
+   "canonical": "Robert Kaufman",
+   "distinct": false,
+   "reason": "Base company name"
+  },
+  {
+   "org": "Robert Kaufman Inside Rep",
+   "canonical": "Robert Kaufman",
+   "distinct": false,
+   "reason": "Department of Robert Kaufman"
+  }
+ ],
+ "rosencentre.com": [
+  {
+   "org": "Rosen Centre Hotel",
+   "canonical": "Rosen Centre Hotel",
+   "distinct": false,
+   "reason": "Primary entity for Rosen Centre"
+  },
+  {
+   "org": "Rosen Shingle Creek Resort",
+   "canonical": "Rosen Shingle Creek Resort",
+   "distinct": true,
+   "reason": "Distinct hotel property"
+  }
+ ],
+ "rtfabrics.com": [
+  {
+   "org": "Richard Tie Fabrics",
+   "canonical": "Richard Tie Fabrics",
+   "distinct": false,
+   "reason": "Primary company name for rtfabrics.com domain."
+  },
+  {
+   "org": "Barbara Schoen",
+   "canonical": "Richard Tie Fabrics",
+   "distinct": false,
+   "reason": "Individual contact, likely part of the main company."
+  }
+ ],
+ "ritzcarlton.com": [
+  {
+   "org": "The Ritz-Carlton",
+   "canonical": "The Ritz-Carlton",
+   "distinct": true,
+   "reason": "Brand corporate entity, distinct from specific properties."
+  },
+  {
+   "org": "The Ritz-Carlton, Grand Cayman",
+   "canonical": "The Ritz-Carlton, Grand Cayman",
+   "distinct": true,
+   "reason": "Specific hotel property."
+  },
+  {
+   "org": "The Ritz-Carlton, Turks & Caicos",
+   "canonical": "The Ritz-Carlton, Turks & Caicos",
+   "distinct": true,
+   "reason": "Specific hotel property."
+  },
+  {
+   "org": "Ritz Carlton St. Thomas",
+   "canonical": "Ritz Carlton St. Thomas",
+   "distinct": true,
+   "reason": "Specific hotel property."
+  },
+  {
+   "org": "The Ritz-Carlton Club, St. Thomas",
+   "canonical": "The Ritz-Carlton Club, St. Thomas",
+   "distinct": true,
+   "reason": "Specific hotel property/club."
+  },
+  {
+   "org": "Marriott",
+   "canonical": "Marriott",
+   "distinct": true,
+   "reason": "Parent company, distinct from Ritz-Carlton properties."
+  },
+  {
+   "org": "Ritz-Carlton Club, St. Thomas",
+   "canonical": "The Ritz-Carlton Club, St. Thomas",
+   "distinct": false,
+   "reason": "Same entity as 'The Ritz-Carlton Club, St. Thomas'."
+  },
+  {
+   "org": "The Ritz-Carlton, G. Cayman",
+   "canonical": "The Ritz-Carlton, Grand Cayman",
+   "distinct": false,
+   "reason": "Abbreviation of 'The Ritz-Carlton, Grand Cayman'."
+  },
+  {
+   "org": "RITZ-CARLTON CLUB, ST. THOMAS",
+   "canonical": "The Ritz-Carlton Club, St. Thomas",
+   "distinct": false,
+   "reason": "Same entity as 'The Ritz-Carlton Club, St. Thomas' (case/punctuation)."
+  },
+  {
+   "org": "Ritz Carlton St Thomas",
+   "canonical": "Ritz Carlton St. Thomas",
+   "distinct": false,
+   "reason": "Same entity as 'Ritz Carlton St. Thomas' (punctuation)."
+  },
+  {
+   "org": "Ritz-Carlton Turks & Caicos",
+   "canonical": "The Ritz-Carlton, Turks & Caicos",
+   "distinct": false,
+   "reason": "Same entity as 'The Ritz-Carlton, Turks & Caicos'."
+  }
+ ],
+ "rosenhotels.com": [
+  {
+   "org": "Rosen Hotels & Resorts",
+   "canonical": "Rosen Hotels & Resorts",
+   "distinct": false,
+   "reason": "Primary corporate entity"
+  },
+  {
+   "org": "ROSEN-CLARION INN",
+   "canonical": "ROSEN-CLARION INN",
+   "distinct": true,
+   "reason": "Distinct hotel property"
+  },
+  {
+   "org": "Rosen Hotels Procurement",
+   "canonical": "Rosen Hotels & Resorts",
+   "distinct": false,
+   "reason": "Department of main entity"
+  },
+  {
+   "org": "Rosen Hotels Purchasing",
+   "canonical": "Rosen Hotels & Resorts",
+   "distinct": false,
+   "reason": "Department of main entity"
+  },
+  {
+   "org": "Rosen Procurement",
+   "canonical": "Rosen Hotels & Resorts",
+   "distinct": false,
+   "reason": "Department of main entity"
+  },
+  {
+   "org": "Rosen Inn at Pointe Orlando",
+   "canonical": "Rosen Inn at Pointe Orlando",
+   "distinct": true,
+   "reason": "Distinct hotel property"
+  },
+  {
+   "org": "Rosen Inn at Point Orlando",
+   "canonical": "Rosen Inn at Pointe Orlando",
+   "distinct": false,
+   "reason": "Typo of existing distinct property"
+  },
+  {
+   "org": "Rosen Shingle Creek",
+   "canonical": "Rosen Shingle Creek",
+   "distinct": true,
+   "reason": "Distinct hotel property"
+  }
+ ],
+ "saexcorp.com": [
+  {
+   "org": "Southern Atlantic Export Corporation",
+   "canonical": "Southern Atlantic Export Corporation",
+   "distinct": false,
+   "reason": "Primary company name"
+  },
+  {
+   "org": "COCONUT BAY BEACH RESORT & SPA-ST. LUCIA",
+   "canonical": "COCONUT BAY BEACH RESORT & SPA-ST. LUCIA",
+   "distinct": true,
+   "reason": "Distinct hotel property"
+  },
+  {
+   "org": "COCONUT BAY c/o SOUTHERN ATLANTIC",
+   "canonical": "Southern Atlantic Export Corporation",
+   "distinct": false,
+   "reason": "Sub-brand of Southern Atlantic"
+  }
+ ],
+ "sbe.com": [
+  {
+   "org": "SLS HOTEL SOUTH BEACH",
+   "canonical": "SLS HOTEL SOUTH BEACH",
+   "distinct": true,
+   "reason": "Specific hotel property."
+  },
+  {
+   "org": "SLS MIAMI",
+   "canonical": "SLS HOTEL SOUTH BEACH",
+   "distinct": false,
+   "reason": "Refers to the same hotel property."
+  }
+ ],
+ "sanmar.com": [
+  {
+   "org": "SanMar Corporation",
+   "canonical": "SanMar Corporation",
+   "distinct": false,
+   "reason": "Primary company entity"
+  },
+  {
+   "org": "Sanmar Sales Rep",
+   "canonical": "SanMar Corporation",
+   "distinct": false,
+   "reason": "Sales role within the main company"
+  },
+  {
+   "org": "Sanmar Custom Programs",
+   "canonical": "SanMar Corporation",
+   "distinct": false,
+   "reason": "Department/program within the main company"
+  },
+  {
+   "org": "Sanmar Regional Manager",
+   "canonical": "SanMar Corporation",
+   "distinct": false,
+   "reason": "Management role within the main company"
+  },
+  {
+   "org": "Sanmar Founder - Marty Lott",
+   "canonical": "SanMar Corporation",
+   "distinct": false,
+   "reason": "Founder of the main company"
+  }
+ ],
+ "seafireresortandspa.com": [
+  {
+   "org": "Kimpton Seafire Resort + Spa",
+   "canonical": "Kimpton Seafire Resort + Spa",
+   "distinct": false,
+   "reason": "Primary and most descriptive name for the property."
+  },
+  {
+   "org": "Seafire Resort and Spa",
+   "canonical": "Kimpton Seafire Resort + Spa",
+   "distinct": false,
+   "reason": "Shorter version of the same hotel property name."
+  }
+ ],
+ "sflamgt.com": [
+  {
+   "org": "SOUTH FLORIDA CONDO MGT: GABLES ON THE GREEN",
+   "canonical": "SOUTH FLORIDA CONDO MGT: GABLES ON THE GREEN",
+   "distinct": true,
+   "reason": "Specific property, distinct from general management entity."
+  },
+  {
+   "org": "SOUTH FLORIDA CONDO MGMT.",
+   "canonical": "SOUTH FLORIDA CONDO MGMT.",
+   "distinct": true,
+   "reason": "General management entity, distinct from specific property."
+  }
+ ],
+ "sherryfrontenac.net": [
+  {
+   "org": "Sherry Frontenac Hotel",
+   "canonical": "Sherry Frontenac Hotel",
+   "distinct": false,
+   "reason": "Primary spelling for the hotel."
+  },
+  {
+   "org": "Sherry Fontenac Hotel",
+   "canonical": "Sherry Frontenac Hotel",
+   "distinct": false,
+   "reason": "Typo of 'Sherry Frontenac Hotel'."
+  }
+ ],
+ "shellpoint.org": [
+  {
+   "org": "Shell Point",
+   "canonical": "Shell Point",
+   "distinct": false,
+   "reason": "Base name for the organization."
+  },
+  {
+   "org": "SHELL POINT RETIREMENT COMMUNITY",
+   "canonical": "Shell Point",
+   "distinct": false,
+   "reason": "Full name of the same entity as 'Shell Point'."
+  },
+  {
+   "org": "SHELL POINT, HOME CARE OFFICE SUPERVISOR",
+   "canonical": "Shell Point",
+   "distinct": false,
+   "reason": "Job title within the 'Shell Point' organization."
+  },
+  {
+   "org": "Shellpoint art",
+   "canonical": "Shellpoint art",
+   "distinct": true,
+   "reason": "Likely a distinct department or sub-entity."
+  },
+  {
+   "org": "Shell Point Retirement Community",
+   "canonical": "Shell Point",
+   "distinct": false,
+   "reason": "Full name of the same entity as 'Shell Point'."
+  }
+ ],
+ "shared1.ccsend.com": [
+  {
+   "org": "CC Send",
+   "canonical": "CC Send",
+   "distinct": true,
+   "reason": "This is a distinct entity."
+  },
+  {
+   "org": "US TechSystems",
+   "canonical": "US TechSystems",
+   "distinct": true,
+   "reason": "This is a distinct entity."
+  },
+  {
+   "org": "MH Miles Company, CPA, PC",
+   "canonical": "MH Miles Company, CPA, PC",
+   "distinct": true,
+   "reason": "This is a distinct entity."
+  },
+  {
+   "org": "FORTUNE CHRISTIE'S INTERNATIONAL REAL ESTATE",
+   "canonical": "FORTUNE CHRISTIE'S INTERNATIONAL REAL ESTATE",
+   "distinct": true,
+   "reason": "This is a distinct entity."
+  }
+ ],
+ "shoesforcrews.com": [
+  {
+   "org": "Shoes For Crews",
+   "canonical": "Shoes For Crews",
+   "distinct": false,
+   "reason": "Base company name."
+  },
+  {
+   "org": "SHOES FOR CREWS NORTH AMERICA",
+   "canonical": "Shoes For Crews",
+   "distinct": false,
+   "reason": "Regional division of the main company."
+  }
+ ],
+ "simonjersey.com": [
+  {
+   "org": "UK Uniform Company",
+   "canonical": "Simon Jersey",
+   "distinct": false,
+   "reason": "Generic description for the main company."
+  },
+  {
+   "org": "Simon Jersey",
+   "canonical": "Simon Jersey",
+   "distinct": false,
+   "reason": "This is the main company name."
+  }
+ ],
+ "sofitel.com": [
+  {
+   "org": "Sofitel Hotel",
+   "canonical": "Sofitel Hotel",
+   "distinct": true,
+   "reason": "Generic brand name, likely corporate or unassigned property."
+  },
+  {
+   "org": "Pullman San Francisco",
+   "canonical": "Pullman San Francisco",
+   "distinct": true,
+   "reason": "Specific hotel property, distinct from others."
+  },
+  {
+   "org": "Sofitel Miami",
+   "canonical": "Sofitel Miami",
+   "distinct": true,
+   "reason": "Specific hotel property, distinct from others."
+  }
+ ],
+ "sonesta.com": [
+  {
+   "org": "SONESTA FT. LAUDERDALE",
+   "canonical": "SONESTA FT. LAUDERDALE",
+   "distinct": true,
+   "reason": "Specific hotel property, distinct from others."
+  },
+  {
+   "org": "SONESTA AUSTIN",
+   "canonical": "SONESTA AUSTIN",
+   "distinct": true,
+   "reason": "Specific hotel property, distinct from others."
+  }
+ ],
+ "sosouthfl.com": [
+  {
+   "org": "DoubleTree Resort by Hilton Hollywood Beach",
+   "canonical": "DoubleTree Resort by Hilton Hollywood Beach",
+   "distinct": true,
+   "reason": "Distinct hotel property."
+  },
+  {
+   "org": "HYDE RESORT & RESIDENCE",
+   "canonical": "HYDE RESORT & RESIDENCE",
+   "distinct": true,
+   "reason": "Distinct property."
+  },
+  {
+   "org": "HYDE BEACH HOUSE",
+   "canonical": "HYDE BEACH HOUSE",
+   "distinct": true,
+   "reason": "Distinct property."
+  }
+ ],
+ "southbeachgroup.com": [
+  {
+   "org": "SOUTH BEACH GROUP",
+   "canonical": "SOUTH BEACH GROUP",
+   "distinct": false,
+   "reason": "Primary corporate entity for the domain."
+  },
+  {
+   "org": "Hotel Croydon",
+   "canonical": "Hotel Croydon",
+   "distinct": true,
+   "reason": "Specific hotel property, distinct from the group."
+  }
+ ],
+ "standardparking.com": [
+  {
+   "org": "Standard Parking Corporation",
+   "canonical": "Standard Parking Corporation",
+   "distinct": false,
+   "reason": "This is the parent company, other entities are sub-units."
+  },
+  {
+   "org": "Standard Parking Florida",
+   "canonical": "Standard Parking Corporation",
+   "distinct": false,
+   "reason": "Regional office of the main corporation."
+  }
+ ],
+ "sunflowersprings.com": [
+  {
+   "org": "SRI - SUNFLOWER SPRINGS HOMOSASSA",
+   "canonical": "SRI - SUNFLOWER SPRINGS HOMOSASSA",
+   "distinct": true,
+   "reason": "Distinct hotel property."
+  },
+  {
+   "org": "SRI--- SUNFLOWER SPRINGS-TRINITY",
+   "canonical": "SRI--- SUNFLOWER SPRINGS-TRINITY",
+   "distinct": true,
+   "reason": "Distinct hotel property."
+  }
+ ],
+ "stuncroft.co.uk": [
+  {
+   "org": "Club Class Corporatewear",
+   "canonical": "Club Class Corporatewear",
+   "distinct": false,
+   "reason": "Likely the primary business unit for 'Club Class'."
+  },
+  {
+   "org": "Club Class Suiting",
+   "canonical": "Club Class Corporatewear",
+   "distinct": false,
+   "reason": "Sub-brand or product line of 'Club Class Corporatewear'."
+  },
+  {
+   "org": "Stuncroft LTD",
+   "canonical": "Stuncroft LTD",
+   "distinct": true,
+   "reason": "Parent company, distinct from 'Club Class' business unit."
+  }
+ ],
+ "spplus.com": [
+  {
+   "org": "SP Plus",
+   "canonical": "SP Plus",
+   "distinct": false,
+   "reason": "Primary company name, most contacts."
+  },
+  {
+   "org": "SP+ Parking",
+   "canonical": "SP Plus",
+   "distinct": false,
+   "reason": "Variation of primary company name."
+  },
+  {
+   "org": "Central Parking Dallas",
+   "canonical": "Central Parking Dallas",
+   "distinct": true,
+   "reason": "Specific location, likely a distinct property."
+  },
+  {
+   "org": "Standard Parking",
+   "canonical": "SP Plus",
+   "distinct": false,
+   "reason": "Former name of SP Plus."
+  },
+  {
+   "org": "USA PARKING",
+   "canonical": "USA PARKING",
+   "distinct": true,
+   "reason": "Distinct entity, possibly a sub-brand or partner."
+  },
+  {
+   "org": "AIRPORT PARKING ASSOC: SP PLUS - MIAMI",
+   "canonical": "AIRPORT PARKING ASSOC: SP PLUS - MIAMI",
+   "distinct": true,
+   "reason": "Specific location and association, distinct property."
+  },
+  {
+   "org": "AIRPORT PARKING ASSOC.",
+   "canonical": "AIRPORT PARKING ASSOC.",
+   "distinct": true,
+   "reason": "Distinct association, likely a partner or sub-brand."
+  },
+  {
+   "org": "Standard Parking (spplus) ft. lauderdale",
+   "canonical": "Standard Parking (spplus) ft. lauderdale",
+   "distinct": true,
+   "reason": "Specific location, distinct property."
+  },
+  {
+   "org": "Metropolis",
+   "canonical": "Metropolis",
+   "distinct": true,
+   "reason": "Distinct entity, possibly a sub-brand or partner."
+  },
+  {
+   "org": "SP + (Standard Parking)",
+   "canonical": "SP Plus",
+   "distinct": false,
+   "reason": "Variation of primary company name, includes former name."
+  }
+ ],
+ "swandolphin.com": [
+  {
+   "org": "Walt Disney World Swan & Dolphin Resort",
+   "canonical": "Walt Disney World Swan & Dolphin Resort",
+   "distinct": false,
+   "reason": "Most complete name for the resort"
+  },
+  {
+   "org": "WDW SWAN & DOLPHIN RESORT",
+   "canonical": "Walt Disney World Swan & Dolphin Resort",
+   "distinct": false,
+   "reason": "Abbreviation of the resort name"
+  }
+ ],
+ "swirehotels.com": [
+  {
+   "org": "EAST HOTEL",
+   "canonical": "EAST HOTEL",
+   "distinct": true,
+   "reason": "Likely a distinct hotel property."
+  },
+  {
+   "org": "Evelyn Baragana",
+   "canonical": "Swire Hotels",
+   "distinct": false,
+   "reason": "Individual name, likely part of the parent company."
+  }
+ ],
+ "tampabay.rr.com": [
+  {
+   "org": "Sales Rep: Steve Johnson",
+   "canonical": "Sales Rep: Steve Johnson",
+   "distinct": true,
+   "reason": "Likely individual, not an organization."
+  },
+  {
+   "org": "Occunomix",
+   "canonical": "Occunomix",
+   "distinct": true,
+   "reason": "Unique organization name."
+  }
+ ],
+ "thened.com": [
+  {
+   "org": "The Ned",
+   "canonical": "The Ned",
+   "distinct": false,
+   "reason": "Main entity, other entries are sub-brands/locations."
+  },
+  {
+   "org": "The Ned NoMad",
+   "canonical": "The Ned NoMad",
+   "distinct": true,
+   "reason": "Specific hotel property, distinct from the main brand."
+  },
+  {
+   "org": "Ned's Club",
+   "canonical": "Ned's Club",
+   "distinct": true,
+   "reason": "Specific business unit/sub-brand, distinct from main hotel."
+  }
+ ],
+ "thesagamore.com": [
+  {
+   "org": "The Sagamore",
+   "canonical": "The Sagamore",
+   "distinct": false,
+   "reason": "Primary entity for thesagamore.com domain."
+  },
+  {
+   "org": "SAGAMORE (NY)",
+   "canonical": "The Sagamore",
+   "distinct": false,
+   "reason": "Refers to the same Sagamore property in New York."
+  }
+ ],
+ "texmacusa.com": [
+  {
+   "org": "Happy Embroidery Machine",
+   "canonical": "Texmac",
+   "distinct": false,
+   "reason": "Likely a product line or division of Texmac."
+  },
+  {
+   "org": "Texmac",
+   "canonical": "Texmac",
+   "distinct": true,
+   "reason": "This is the primary company name."
+  }
+ ],
+ "theshoreclubtc.com": [
+  {
+   "org": "The Shore Club Turks and Caicos",
+   "canonical": "The Shore Club Turks and Caicos",
+   "distinct": false,
+   "reason": "Canonical form of the hotel name."
+  },
+  {
+   "org": "The Shore Club Turcs & Caicos",
+   "canonical": "The Shore Club Turks and Caicos",
+   "distinct": false,
+   "reason": "Typo/variation of the same hotel name."
+  }
+ ],
+ "thesetaihotel.com": [
+  {
+   "org": "Setai Hotel",
+   "canonical": "Setai Hotel",
+   "distinct": false,
+   "reason": "Primary entity, other entries are departments or specific locations."
+  },
+  {
+   "org": "MARIANNE, SETAI - EDDY",
+   "canonical": "Setai Hotel",
+   "distinct": false,
+   "reason": "Individual contact within the main Setai Hotel entity."
+  },
+  {
+   "org": "THE SETAI MIAMI BEACH",
+   "canonical": "Setai Hotel",
+   "distinct": false,
+   "reason": "Specific location of the main Setai Hotel entity."
+  },
+  {
+   "org": "SETAI / PURCHASING DEPT.",
+   "canonical": "Setai Hotel",
+   "distinct": false,
+   "reason": "Department within the main Setai Hotel entity."
+  }
+ ],
+ "trailbornsurfandsound.com": [
+  {
+   "org": "Trailborn Hotels & Resorts (Independent)",
+   "canonical": "Trailborn Surf & Sound",
+   "distinct": false,
+   "reason": "Parent company for the specific property."
+  },
+  {
+   "org": "Trailborn Surf & Sound",
+   "canonical": "Trailborn Surf & Sound",
+   "distinct": true,
+   "reason": "Specific hotel property, distinct entity."
+  }
+ ],
+ "transportationamerica.com": [
+  {
+   "org": "LSF Shuttle",
+   "canonical": "Transportation America",
+   "distinct": false,
+   "reason": "LSF Shuttle is likely a sub-brand or service of Transportation America."
+  },
+  {
+   "org": "Transportation America",
+   "canonical": "Transportation America",
+   "distinct": true,
+   "reason": "This is the primary organization name."
+  }
+ ],
+ "trumpsonesta.com": [
+  {
+   "org": "Trump Sonesta",
+   "canonical": "Trump Sonesta",
+   "distinct": false,
+   "reason": "Base brand, other entries are properties."
+  },
+  {
+   "org": "Trump Sonesta Beach Resort",
+   "canonical": "Trump Sonesta Beach Resort",
+   "distinct": true,
+   "reason": "Specific property, distinct from the general brand."
+  }
+ ],
+ "tx.xmbagsss.com": [
+  {
+   "org": "Xiamen Oready Industry & Trade Co., Ltd",
+   "canonical": "Xiamen Oready Industry & Trade Co., Ltd",
+   "distinct": true,
+   "reason": "This is a distinct company name."
+  },
+  {
+   "org": "Xmbagsss",
+   "canonical": "Xiamen Oready Industry & Trade Co., Ltd",
+   "distinct": false,
+   "reason": "Likely a shortened or informal name for Xiamen Oready Industry & Trade Co., Ltd."
+  }
+ ],
+ "trusthospitality.com": [
+  {
+   "org": "Trust Hospitality",
+   "canonical": "Trust Hospitality",
+   "distinct": false,
+   "reason": "Primary company domain, likely corporate."
+  },
+  {
+   "org": "CIRC Hollywood",
+   "canonical": "CIRC Hollywood",
+   "distinct": true,
+   "reason": "Specific property, distinct from corporate."
+  }
+ ],
+ "townepark.com": [
+  {
+   "org": "Towne Park",
+   "canonical": "Towne Park",
+   "distinct": false,
+   "reason": "Primary company name, consolidate variations here."
+  },
+  {
+   "org": "towne.com",
+   "canonical": "Towne Park",
+   "distinct": false,
+   "reason": "Domain-like variation of the main company name."
+  },
+  {
+   "org": "AC Hotel, Portland OR",
+   "canonical": "AC Hotel, Portland OR",
+   "distinct": true,
+   "reason": "Specific hotel property, distinct from others."
+  },
+  {
+   "org": "Aloft/Element Austin Downtown",
+   "canonical": "Aloft/Element Austin Downtown",
+   "distinct": true,
+   "reason": "Specific hotel property, distinct from others."
+  },
+  {
+   "org": "St. Francis Hospital",
+   "canonical": "St. Francis Hospital",
+   "distinct": true,
+   "reason": "Specific hospital entity, distinct from others."
+  },
+  {
+   "org": "Okana Resort & Waterpark",
+   "canonical": "Okana Resort & Waterpark",
+   "distinct": true,
+   "reason": "Specific resort property, distinct from others."
+  },
+  {
+   "org": "Walt Disney World Swan, Dolphin, and Swan Reserve",
+   "canonical": "Walt Disney World Swan, Dolphin, and Swan Reserve",
+   "distinct": true,
+   "reason": "Specific hotel property, distinct from others."
+  },
+  {
+   "org": "Huntington Hospital & 400 Park Ave",
+   "canonical": "Huntington Hospital & 400 Park Ave",
+   "distinct": true,
+   "reason": "Specific hospital and associated location, distinct."
+  },
+  {
+   "org": "Houstonian Hotel, Club. Spa",
+   "canonical": "Houstonian Hotel, Club. Spa",
+   "distinct": true,
+   "reason": "Specific hotel property, distinct from others."
+  },
+  {
+   "org": "Renaissance Newport Beach",
+   "canonical": "Renaissance Newport Beach",
+   "distinct": true,
+   "reason": "Specific hotel property, distinct from others."
+  },
+  {
+   "org": "Walnut Creek Marriott",
+   "canonical": "Walnut Creek Marriott",
+   "distinct": true,
+   "reason": "Specific hotel property, distinct from others."
+  },
+  {
+   "org": "Austin Marriott Downtown",
+   "canonical": "Austin Marriott Downtown",
+   "distinct": true,
+   "reason": "Specific hotel property, distinct from others."
+  },
+  {
+   "org": "North Shore University Hospital",
+   "canonical": "North Shore University Hospital",
+   "distinct": true,
+   "reason": "Specific hospital entity, distinct from others."
+  },
+  {
+   "org": "Towne Parke Austin",
+   "canonical": "Towne Park",
+   "distinct": false,
+   "reason": "Variation of the main company name, likely a regional office."
+  },
+  {
+   "org": "Emplify Health System",
+   "canonical": "Emplify Health System",
+   "distinct": true,
+   "reason": "Specific health system, distinct from others."
+  },
+  {
+   "org": "SMH-Sarasota Campus",
+   "canonical": "SMH-Sarasota Campus",
+   "distinct": true,
+   "reason": "Specific medical campus, distinct from others."
+  },
+  {
+   "org": "TowneHealth",
+   "canonical": "Towne Park",
+   "distinct": false,
+   "reason": "Sub-brand or business unit of Towne Park."
+  },
+  {
+   "org": "PMC",
+   "canonical": "PMC",
+   "distinct": true,
+   "reason": "Acronym, likely a distinct entity without more context."
+  },
+  {
+   "org": "Azzurra Condominium",
+   "canonical": "Azzurra Condominium",
+   "distinct": true,
+   "reason": "Specific residential property, distinct from others."
+  },
+  {
+   "org": "Embassy Suites Nashville at Vanderbilt",
+   "canonical": "Embassy Suites Nashville at Vanderbilt",
+   "distinct": true,
+   "reason": "Specific hotel property, distinct from others."
+  },
+  {
+   "org": "Center For Advanced Medicine | Marriot Hotels",
+   "canonical": "Center For Advanced Medicine | Marriot Hotels",
+   "distinct": true,
+   "reason": "Specific medical center and associated hotels, distinct."
+  }
+ ],
+ "uniformmarket.com": [
+  {
+   "org": "Uniform Market",
+   "canonical": "Uniform Market",
+   "distinct": false,
+   "reason": "Primary company name."
+  },
+  {
+   "org": "Made to Measure Magazine",
+   "canonical": "Made to Measure Magazine",
+   "distinct": true,
+   "reason": "Distinct publication/sub-brand."
+  }
+ ],
+ "ul.com": [
+  {
+   "org": "UL Labratory Testing",
+   "canonical": "UL Labratory Testing",
+   "distinct": false,
+   "reason": "This is a specific business unit of UL."
+  },
+  {
+   "org": "Burger King",
+   "canonical": "Burger King",
+   "distinct": true,
+   "reason": "Burger King is a distinct entity, not related to UL."
+  }
+ ],
+ "unitedfabric.com": [
+  {
+   "org": "United Fabrics International Inc. (UFI)",
+   "canonical": "United Fabrics International Inc. (UFI)",
+   "distinct": false,
+   "reason": "This is the most complete name for the company."
+  },
+  {
+   "org": "UFI United Fabric International",
+   "canonical": "United Fabrics International Inc. (UFI)",
+   "distinct": false,
+   "reason": "Shorter version of the same company name."
+  }
+ ],
+ "universalorlando.com": [
+  {
+   "org": "Universal Orlando",
+   "canonical": "Universal Orlando",
+   "distinct": false,
+   "reason": "Primary entity, other names are likely sub-brands."
+  },
+  {
+   "org": "Universal Studios",
+   "canonical": "Universal Orlando",
+   "distinct": false,
+   "reason": "Universal Studios is a core component of Universal Orlando."
+  }
+ ],
+ "ups.com": [
+  {
+   "org": "UPS accounts",
+   "canonical": "UPS",
+   "distinct": false,
+   "reason": "Generic department, same as main company."
+  },
+  {
+   "org": "UPS Canada",
+   "canonical": "UPS Canada",
+   "distinct": true,
+   "reason": "Specific geographic business unit, genuinely distinct."
+  }
+ ],
+ "waldorfastoria.com": [
+  {
+   "org": "Hilton",
+   "canonical": "Hilton",
+   "distinct": true,
+   "reason": "Hotel brand corporate domain, distinct from Waldorf Astoria."
+  },
+  {
+   "org": "Waldorf Astoria",
+   "canonical": "Waldorf Astoria",
+   "distinct": true,
+   "reason": "Hotel brand corporate domain, distinct from Hilton."
+  }
+ ],
+ "vfc.com": [
+  {
+   "org": "VF Imagewear",
+   "canonical": "VF Imagewear",
+   "distinct": false,
+   "reason": "Canonical form for Imagewear"
+  },
+  {
+   "org": "VF Territory Sales Rep",
+   "canonical": "VF Imagewear",
+   "distinct": false,
+   "reason": "Sales rep likely part of Imagewear"
+  },
+  {
+   "org": "VF Imageware",
+   "canonical": "VF Imagewear",
+   "distinct": false,
+   "reason": "Typo of VF Imagewear"
+  },
+  {
+   "org": "\"Len\" Sales Florida",
+   "canonical": "\"Len\" Sales Florida",
+   "distinct": true,
+   "reason": "Specific individual sales entity, likely distinct"
+  },
+  {
+   "org": "JAU",
+   "canonical": "JAU",
+   "distinct": true,
+   "reason": "Acronym, no clear relation to other entities"
+  },
+  {
+   "org": "VF Hospitality Line",
+   "canonical": "VF Hospitality Line",
+   "distinct": true,
+   "reason": "Specific business line, distinct from Imagewear"
+  },
+  {
+   "org": "RedKap",
+   "canonical": "RedKap",
+   "distinct": true,
+   "reason": "Distinct brand/sub-brand"
+  },
+  {
+   "org": "VF The Apparel Collection",
+   "canonical": "VF The Apparel Collection",
+   "distinct": true,
+   "reason": "Specific business unit, distinct from Imagewear"
+  }
+ ],
+ "weareparking.org": [
+  {
+   "org": "We Are Parking",
+   "canonical": "We Are Parking",
+   "distinct": false,
+   "reason": "Primary organization for the weareparking.org domain."
+  },
+  {
+   "org": "National Parking Association",
+   "canonical": "We Are Parking",
+   "distinct": false,
+   "reason": "Likely a related entity or sub-brand of We Are Parking."
+  }
+ ],
+ "vip.163.com": [
+  {
+   "org": "163",
+   "canonical": "163",
+   "distinct": true,
+   "reason": "Bare domain name, likely a generic email provider."
+  },
+  {
+   "org": "China Factory Culinary",
+   "canonical": "China Factory Culinary",
+   "distinct": true,
+   "reason": "Specific business unit, no clear relation to others."
+  },
+  {
+   "org": "Necktie & Scarf China",
+   "canonical": "Necktie & Scarf China",
+   "distinct": true,
+   "reason": "Specific business unit, no clear relation to others."
+  }
+ ],
+ "wellsfargo.com": [
+  {
+   "org": "Wells Fargo - Account Manager",
+   "canonical": "Wells Fargo",
+   "distinct": false,
+   "reason": "Sub-unit of the main company"
+  },
+  {
+   "org": "Wells Fargo",
+   "canonical": "Wells Fargo",
+   "distinct": true,
+   "reason": "Base company name"
+  }
+ ],
+ "zmags.com": [
+  {
+   "org": "Zmags",
+   "canonical": "Zmags",
+   "distinct": false,
+   "reason": "Bare name is the canonical representation."
+  },
+  {
+   "org": "Zmags.com",
+   "canonical": "Zmags",
+   "distinct": false,
+   "reason": "'.com' suffix is redundant for company name."
+  }
+ ],
+ "wpb.org": [
+  {
+   "org": "City of West Palm Beach Parking Admin",
+   "canonical": "City of West Palm Beach Parking Admin",
+   "distinct": false,
+   "reason": "Full name of the parking administration."
+  },
+  {
+   "org": "Parking Administration",
+   "canonical": "City of West Palm Beach Parking Admin",
+   "distinct": false,
+   "reason": "Shorthand for City of West Palm Beach Parking Admin."
+  }
+ ]
+}
