@@ -269,6 +269,7 @@ const AVATAR_GRADIENT: Record<string, string> = {
   competitor: 'linear-gradient(135deg,#e85d4a,#d14836)',
   personal: 'linear-gradient(135deg,#3e638c,#253d5e)',
   junk: 'linear-gradient(135deg,#b0a99e,#8a847b)',
+  operational: 'linear-gradient(135deg,#5b7a9e,#3e638c)',
 }
 const avatarGradient = (cat: string | null) => AVATAR_GRADIENT[cat || 'junk'] || AVATAR_GRADIENT.junk
 
@@ -278,6 +279,7 @@ const CATEGORY_BADGE: Record<string, string> = {
   competitor: 'bg-coral-50 text-coral-600 ring-1 ring-coral-200',
   personal: 'bg-navy-50 text-navy-600 ring-1 ring-navy-200',
   junk: 'bg-stone-100 text-stone-500 ring-1 ring-stone-200',
+  operational: 'bg-navy-50 text-navy-600 ring-1 ring-navy-200',
 }
 
 /** Signal chips — derived from concrete fields (heuristics, not new API data). */
@@ -628,19 +630,13 @@ function AIBand({ contact }: { contact: InboxContact }) {
     setResult(null)
     try {
       const r = await deepMut.mutateAsync({ id: contact.id, findEmail })
-      // Compact run receipt only — the narrative itself renders in the
-      // band above (contact.background refreshes via query invalidation).
-      // Repeating r.background here duplicated the whole paragraph.
-      if (!r.background && !r.role && !r.found_email) {
-        setResult('No new info found.')
-      } else {
-        const bits = [
-          r.found_email && `Found email: ${r.found_email}`,
-          r.role && `Role: ${r.role}`,
-          `Profile updated · ${r.sources_used} sources · ${Math.round((r.confidence || 0) * 100)}% confidence`,
-        ].filter(Boolean)
-        setResult(bits.join(' · '))
-      }
+      const bits = [
+        r.role && `Role: ${r.role}`,
+        r.background || undefined,
+        r.found_email && `Found email: ${r.found_email}`,
+        `(${r.sources_used} sources · ${Math.round((r.confidence || 0) * 100)}% confidence)`,
+      ].filter(Boolean)
+      setResult(bits.join(' · ') || 'No new info found.')
     } catch {
       setResult('Enrichment failed — check Serper/Wiza keys or try again.')
     }
@@ -1253,10 +1249,22 @@ export default function ContactsPage() {
     // Junk costs ZERO everywhere (2026-06-04): excluded from header counts,
     // account groups, warmth math and search. Rows stay in the DB only for
     // reversibility; the Category facet's Junk option flips to an audit view.
+    // Shared mailboxes (2026-06-08): operational inboxes (accounting@, ap@,
+    // frontdesk@ ...) are account infrastructure, not people — hidden the
+    // same way junk is, surfaced only under the "Shared inboxes" category.
+    // Buying inboxes (purchasing@/procurement@) are category 'buyer' → stay.
     if (category === 'junk') return merged.filter((c) => c.contact_category === 'junk')
-    return merged.filter((c) => c.contact_category !== 'junk')
+    if (category === 'operational') return merged.filter((c) => c.contact_category === 'operational')
+    return merged.filter((c) => c.contact_category !== 'junk' && c.contact_category !== 'operational')
   }, [listQ.data, leadQ.data, category])
   const total = items.length
+  // operational inboxes are excluded from `items` (so they leave the people
+  // count, account groups and warmth math) — count them from the raw inbox
+  // feed for the header sub-line and the facet badge.
+  const sharedInboxCount = useMemo(
+    () => ((listQ.data?.items || []) as UnifiedContact[]).filter((c) => c.contact_category === 'operational').length,
+    [listQ.data],
+  )
 
   // scope counts (computed over the loaded page; for full-inbox totals expose these from the backend)
   const scope = useMemo(() => {
@@ -1322,7 +1330,7 @@ export default function ContactsPage() {
   const filtered = useMemo(() => {
     const t = query.toLowerCase().trim()
     let list = t ? indexed.filter(({ c, hay }) => smartMatch(c, hay, t)).map(({ c }) => c) : items
-    if (category && category !== 'junk') list = list.filter((c) => c.contact_category === category)
+    if (category && category !== 'junk' && category !== 'operational') list = list.filter((c) => c.contact_category === category)
     if (status) list = list.filter((c) => c.approval_status === status)
     if (dmOnly) list = list.filter((c) => c.is_decision_maker)
     if (source) list = list.filter((c) => sourceOf(c) === source)
@@ -1559,6 +1567,9 @@ export default function ContactsPage() {
               <span className="text-stone-600 font-semibold tabular-nums">{(total || stats?.total || 0).toLocaleString()}</span> people across{' '}
               <span className="text-stone-600 font-semibold tabular-nums">{scope.hotelAccounts} hotels</span> and{' '}
               <span className="text-stone-600 font-semibold tabular-nums">{scope.mgmtAccounts} management companies</span>
+              {sharedInboxCount > 0 && category !== 'operational' && (
+                <>{'  ·  '}<span className="text-stone-600 font-semibold tabular-nums">{sharedInboxCount.toLocaleString()}</span> shared inboxes</>
+              )}
             </p>
           </div>
           <button onClick={() => syncMut.mutate()} disabled={syncMut.isPending}
@@ -1606,6 +1617,7 @@ export default function ContactsPage() {
             { v: 'seller', label: 'Sellers', dot: '#c49a3c', count: stats?.seller },
             { v: 'competitor', label: 'Competitors', dot: '#e85d4a', count: stats?.competitor },
             { v: 'personal', label: 'Personal' },
+            { v: 'operational', label: 'Shared inboxes', dot: '#5b7a9e', count: sharedInboxCount },
             { v: 'junk', label: 'Junk (hidden by default)', dot: '#9ca3af' },
           ]} />
           <Facet label="Status" value={status || 'all'} onChange={(v) => patch({ status: v === 'all' ? null : v })} options={[
