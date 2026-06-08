@@ -31,6 +31,7 @@ from app.database import async_session
 from app.services.ai_client import ai_generate
 from app.services.contact_intelligence import assess
 from app.services.client_resolver import (
+    ClientResolver,
     is_competitor,
     is_personal,
 )
@@ -184,12 +185,17 @@ async def run_tier1(
         if limit:
             sql += f" LIMIT {int(limit)}"
         rows = (await session.execute(text(sql), params)).all()
+        # Triangulation source: the SAP customer book (in-memory domain/name
+        # sets). A contact at a known client domain/name is a real relationship,
+        # so resolve it deterministically before the LLM pass can mis-junk it.
+        resolver = await ClientResolver().load(session)
 
     if not rows:
         return {"scanned": 0, "enriched": 0, "note": "nothing to do"}
 
-    # Pass 1 — deterministic category (no AI): competitor / personal.
-    # No SAP / client lookup — client-vs-prospect is intentionally out of scope.
+    # Pass 1 — deterministic category (no AI): competitor / personal / client.
+    # SAP triangulation: a contact at a known customer domain/name resolves to
+    # 'buyer' here, before the LLM pass can mis-junk a real relationship.
     work = []
     for r in rows:
         email = (r.email or "").lower()
@@ -208,6 +214,10 @@ async def run_tier1(
             category, source = "competitor", "competitor_list"
         elif is_personal(r.organization, email):
             category, source = "personal", "personal_rule"
+        elif resolver.is_client(r.organization, email):
+            # Triangulated against the SAP book — a paying customer is a buyer,
+            # never junk. Deterministic; skips the LLM entirely.
+            category, source = "buyer", "sap_client"
         work.append(
             {
                 "id": r.id,
@@ -269,7 +279,7 @@ async def run_tier1(
                 SIGNALS_CONFIDENCE_CAP,
             )
             # Deterministic categories are certain.
-            if source in ("competitor_list", "personal_rule"):
+            if source in ("competitor_list", "personal_rule", "sap_client"):
                 conf = 1.0
 
             # Protect a richer grounded (Tier-2 Deep Enrich) profile from being

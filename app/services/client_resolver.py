@@ -82,6 +82,9 @@ PERSONAL_EMAIL_DOMAINS = {
     "sbcglobal.net",
     "bellsouth.net",
     "cox.net",
+    "mac.com",
+    "mail.com",
+    "googlemail.com",
 }
 
 
@@ -120,17 +123,20 @@ class ClientResolver:
     async def load(self, session) -> "ClientResolver":
         rows = (
             await session.execute(
-                text(
-                    "SELECT customer_name_normalized, email, hotel_website "
-                    "FROM sap_clients"
-                )
+                text("SELECT customer_name_normalized, email, hotel_website " "FROM sap_clients")
             )
         ).all()
         for norm_name, email, website in rows:
             if norm_name:
                 self.client_name_roots.add(norm_name)
             for src in (email, website):
-                d = _domain(src or "") or _domain_root(
+                full = _domain(src or "")
+                # Skip freemail/ISP providers. A customer entered with a gmail/
+                # bellsouth/yahoo address must NOT turn that whole provider into
+                # a "client domain" — that would match every personal email.
+                if full in PERSONAL_EMAIL_DOMAINS:
+                    continue
+                d = full or _domain_root(
                     (website or "").replace("https://", "").replace("http://", "")
                 )
                 if d:
