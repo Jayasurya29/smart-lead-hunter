@@ -297,7 +297,12 @@ async def inbox_contacts_manual_sync(
     try:
         from app.tasks.autonomous_tasks import sync_inbox_contacts
 
-        task = sync_inbox_contacts.delay()
+        # Route to the SAME queue the beat schedule uses for this task
+        # (celery_app.py: sync-inbox-contacts -> queue "maintenance"). A
+        # bare .delay() goes to the default "celery" queue, which the worker
+        # (-Q scraping,maintenance,crm) does not consume — so the manual job
+        # would sit unrun and the button would look dead.
+        task = sync_inbox_contacts.apply_async(queue="maintenance")
         return {
             "status": "queued",
             "task_id": task.id,

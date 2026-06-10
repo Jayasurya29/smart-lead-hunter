@@ -54,32 +54,66 @@ NEWS_QUERIES = [
     "resort renovation reopening",
     "hotel management agreement luxury",
     "new hotel construction Miami Florida",
+    # ── education (universities / colleges — dining, housing, campus) ──
+    "university new residence hall opening",
+    "university dining services contract",
+    "college new academic building opening",
+    "university campus expansion construction",
+    # ── healthcare (hospitals / medical centers) ──
+    "new hospital opening Florida",
+    "medical center expansion opening",
+    "new healthcare facility opening",
+    "hospital names chief executive",
+    # ── general industry awareness (hot news the team should know) ──
+    "hospitality industry news",
+    "hotel industry trends",
+    "luxury hotel brand launch",
+    "hotel investment deal",
+    "hotel company expansion",
+    # ── innovation / reform / regulation (what's changing in the industry) ──
+    "hotel industry technology innovation",
+    "hospitality sustainability initiative",
+    "hotel industry new regulation law",
+    "hospitality labor law change",
+    "hotel guest experience innovation",
 ]
 
-CLASSIFY_PROMPT = """You are filtering a hospitality-industry news feed for a
-company that sells uniforms to upscale hotels (4-star and above) in the USA
-and the Caribbean.
+CLASSIFY_PROMPT = """You are filtering an industry news feed for a company that
+sells uniforms to three kinds of clients in the USA and the Caribbean:
+  - upscale hotels and resorts (4-star and above)
+  - universities and colleges
+  - hospitals and medical centers / health systems
 
 For EACH numbered item below, judge:
-- relevant: true ONLY if it is about a specific hotel/resort property or
-  hotel company in the USA or Caribbean, plausibly upscale (4-star+).
-  Budget/economy brands, hostels, vacation-rental platforms, and non-
-  hospitality stories are relevant: false.
+- relevant: true if EITHER (a) it is about a specific property/institution or
+  company in one of those three sectors (USA or Caribbean), OR (b) it is a
+  notable hospitality-industry development the team should be aware of — major
+  deals/acquisitions, brand launches or expansions, significant company news,
+  market/occupancy/investment trends, new technology or innovations,
+  sustainability initiatives, regulatory or policy changes and reforms, design
+  or operational shifts, or major industry reports/events.
+  Set relevant: false for consumer travel tips, traveler deals/discounts,
+  ranking listicles, budget/economy or vacation-rental consumer stories, K-12,
+  and anything outside hospitality/education/healthcare.
+- vertical: one of "hotel", "education", "healthcare", "other".
 - category: one of "appointment", "opening", "acquisition", "rebrand",
-  "renovation", "management_change", "other".
+  "renovation", "management_change", "industry", "other". Use "industry" for
+  the (b) awareness stories that aren't a specific property/org event. For
+  education/healthcare, "opening" covers new campuses/buildings/hospitals and
+  "renovation" covers expansions/renovations.
 - region: "usa", "caribbean", or "other".
-- hotel_name: the specific property name, copied from the text ("" if a
-  company-level story).
-- brand: the brand/chain if stated ("" otherwise).
+- hotel_name: the specific property/institution name, copied from the text
+  ("" if a company-level story).
+- brand: the brand/chain/health-system if stated ("" otherwise).
 - person_name / person_title: ONLY for category "appointment" /
   "management_change", copied VERBATIM from the text — never inferred,
   never expanded. "" if not stated.
-- luxury: true if the text signals upscale/luxury/resort positioning.
+- luxury: true if the text signals upscale/luxury/resort positioning (hotels only).
 
 Respond with ONLY a JSON list, one object per item:
-[{{"i": 1, "relevant": true, "category": "appointment", "region": "usa",
-   "hotel_name": "", "brand": "", "person_name": "", "person_title": "",
-   "luxury": true}}]
+[{{"i": 1, "vertical": "hotel", "relevant": true, "category": "appointment",
+   "region": "usa", "hotel_name": "", "brand": "", "person_name": "",
+   "person_title": "", "luxury": true}}]
 
 ITEMS:
 {items}
@@ -199,10 +233,11 @@ async def run_news_scan(
     fetched: list[dict] = []
     seen_urls: set[str] = set()
     results = await asyncio.gather(*[asyncio.to_thread(serper_news, q, per_query) for q in queries])
-    for batch in results:
+    for q, batch in zip(queries, results):
         for it in batch:
             if it["link"] not in seen_urls:
                 seen_urls.add(it["link"])
+                it["_query"] = q
                 fetched.append(it)
 
     # drop URLs we already have — scan is incremental
@@ -271,6 +306,7 @@ async def run_news_scan(
                 "source": it["source"][:160],
                 "published_hint": it["date"][:80],
                 "category": (v.get("category") or "other")[:40],
+                "vertical": (v.get("vertical") or "hotel")[:20],
                 "region": (v.get("region") or "other")[:20],
                 "hotel_name": hotel[:300] or None,
                 "brand": (v.get("brand") or "")[:160] or None,
@@ -279,6 +315,7 @@ async def run_news_scan(
                 "luxury": bool(v.get("luxury")),
                 "in_pipeline": in_pipe,
                 "pipeline_ref": pipe_ref,
+                "query": (it.get("_query") or "")[:200] or None,
                 "relationship_hits": rel_hits or None,
             }
             summary["relevant"] += 1
@@ -292,13 +329,13 @@ async def run_news_scan(
                 await db.execute(
                     text(
                         "INSERT INTO hotel_news (url, title, snippet, source, "
-                        "published_hint, category, region, hotel_name, brand, "
-                        "person_name, person_title, luxury, in_pipeline, "
-                        "pipeline_ref, relationship_hits) "
+                        "published_hint, category, vertical, region, hotel_name, "
+                        "brand, person_name, person_title, luxury, in_pipeline, "
+                        "pipeline_ref, query, relationship_hits) "
                         "VALUES (:url, :title, :snippet, :source, "
-                        ":published_hint, :category, :region, :hotel_name, "
-                        ":brand, :person_name, :person_title, :luxury, "
-                        ":in_pipeline, :pipeline_ref, "
+                        ":published_hint, :category, :vertical, :region, "
+                        ":hotel_name, :brand, :person_name, :person_title, "
+                        ":luxury, :in_pipeline, :pipeline_ref, :query, "
                         "CAST(:rel AS jsonb)) "
                         "ON CONFLICT (url) DO NOTHING"
                     ),

@@ -2082,6 +2082,7 @@ def _build_contact_grounding_prompt(
     country: Optional[str],
     opening_date: Optional[str],
     is_existing_hotel: bool = False,
+    timeline_label: Optional[str] = None,
 ) -> str:
     """Build a context-aware grounding prompt using full SLH intelligence stack.
 
@@ -2111,14 +2112,108 @@ def _build_contact_grounding_prompt(
     # The natural-language prompt (old approach) triggered proper grounding
     # but returned only GM + Sales Director — too thin for sales team.
     # ══════════════════════════════════════════════════════════════
+    # ── NATURAL-LANGUAGE GROUNDED PROMPT (existing hotels AND leads) ──
+    # A natural-language ask lets Gemini actually run Google Search and
+    # return CITATIONS; a JSON instruction suppresses the search (it answers
+    # from memory -> 0 citations). Roles are targeted by what exists yet:
+    #   existing       -> current property leadership
+    #   urgent (3-6mo) -> GM + department heads (being hired now)
+    #   hot (6-12mo)   -> GM + a few department heads
+    #   warm/cool/?    -> corporate approvers (procurement/ops VP, pre-open lead)
+    location = ", ".join(filter(None, [city, state, country]))
+    _orgs = "; ".join(
+        filter(
+            None,
+            [
+                f"managed by {management_company}" if management_company else "",
+                f"developed by {developer}" if developer else "",
+                f"owned by {owner}" if owner else "",
+            ],
+        )
+    )
+    _ctx = hotel_name
+    if brand:
+        _ctx += f" ({brand})"
+    if location:
+        _ctx += f" in {location}"
+    if _orgs:
+        _ctx += f", {_orgs}"
+    _tail = (
+        " List each person's full name, exact job title, and employer, and "
+        "cite the source for each. Only include people you can find a real "
+        "source for — do not guess or infer."
+    )
+
     if is_existing_hotel:
-        location = ", ".join(filter(None, [city, state, country]))
         return (
             f"Who are the current General Manager, Director of Housekeeping, "
-            f"Director of Operations, Director of HR, Director of Purchasing, "
-            f"and Director of Food & Beverage at {hotel_name} in {location}? "
-            f"List each person's full name, exact job title, and company."
+            f"Director of Operations, Director of Human Resources, Director of "
+            f"Purchasing, and Director of Food & Beverage at {_ctx}?" + _tail
         )
+
+    # ── #1: does this brand buy uniforms CENTRALLY (corporate), not at
+    # the property? All-inclusive parents and procurement gateways (e.g.
+    # HPI for Sandals/Beaches) buy at corporate — so the real buyer is
+    # corporate procurement even for a property opening soon.
+    _centralized = False
+    _central_org = management_company or brand or "the operator"
+    try:
+        from app.config.brand_registry import BrandRegistry as _BR
+
+        _bi = _BR.lookup(brand) if brand else None
+        if _bi and (getattr(_bi, "operating_model", "") or "") == "all_inclusive":
+            _centralized = True
+    except Exception:
+        pass
+    try:
+        from app.config.procurement_intelligence import gateway_for_brand
+
+        _gw = gateway_for_brand(brand or "", management_company or "")
+        if _gw:
+            _centralized = True
+            _central_org = _gw.get("name") or _central_org
+    except Exception:
+        pass
+
+    if _centralized:
+        return (
+            f"Uniform procurement for {_ctx} is centralized — it is handled "
+            f"by the corporate/central procurement team at {_central_org}, "
+            f"not by the property. Find the people who own that decision: the "
+            f"VP or Director of Procurement, Purchasing, or Sourcing, and the "
+            f"Director of Operations, at {_central_org}." + _tail
+        )
+
+    _tl = (timeline_label or "").strip().lower()
+    if _tl == "urgent":
+        return (
+            f"This hotel opens within about 3-6 months, so its on-site "
+            f"leadership is being hired now. Find the General Manager and the "
+            f"Directors of Housekeeping, Operations, Food & Beverage, Purchasing, "
+            f"and Human Resources named at {_ctx}." + _tail
+        )
+    if _tl == "hot":
+        return (
+            f"This hotel opens in roughly 6-12 months. The General Manager is "
+            f"often announced by now; some department heads may not be hired yet. "
+            f"Find the General Manager and any already-named Directors of "
+            f"Housekeeping, Food & Beverage, or Operations at {_ctx}." + _tail
+        )
+    # warm / cool / unknown → corporate BUYERS (property staff not hired yet).
+    # #2: bias to who actually approves a uniform PO — procurement / operations
+    # directors and VPs — not top C-suite (a Group President or CIO is
+    # org-chart noise for a uniform sale).
+    _co = management_company or owner or brand or "the operator/owner"
+    return (
+        f"This hotel is more than a year from opening, so on-site staff usually "
+        f"do not exist yet. Find the corporate buyers at {_co} who would "
+        f"actually approve a uniform purchase for {_ctx} — specifically the VP "
+        f"or Director of Procurement, Purchasing, or Sourcing, and the Director "
+        f"or VP of Operations or Hotel Openings. Prioritize whoever signs the "
+        f"purchase order, not the most senior executive — do not return the CEO, "
+        f"COO, CFO, CIO, or a Group/Division President. Also include the General "
+        f"Manager if one has already been named." + _tail
+    )
     from app.config.brand_registry import BrandRegistry
     from app.config.procurement_intelligence import (
         build_prospecting_strategy,
@@ -2759,6 +2854,7 @@ async def _enrich_contacts_grounded(
     country: Optional[str],
     opening_date: Optional[str],
     is_existing_hotel: bool = False,
+    timeline_label: Optional[str] = None,
 ) -> Optional[list[dict]]:
     """One-shot grounded contact enrichment via Gemini googleSearch.
 
@@ -2795,6 +2891,7 @@ async def _enrich_contacts_grounded(
         country=country,
         opening_date=opening_date,
         is_existing_hotel=is_existing_hotel,
+        timeline_label=timeline_label,
     )
 
     payload = {
@@ -2871,7 +2968,12 @@ async def _enrich_contacts_grounded(
     # The simplified prompt for existing hotels produces natural text (not JSON)
     # because JSON format instructions suppress grounding search. We now have
     # the grounded text with real citations — extract name/title pairs from it.
-    if is_existing_hotel:
+    # Grounded-prose path. Existing hotels always used it; we now also
+    # route LEADS through it (natural-language prompt → real search →
+    # citations). Set _use_grounded_prose = False to send leads back to
+    # the old JSON-from-memory path.
+    _use_grounded_prose = True
+    if _use_grounded_prose or is_existing_hotel:
         # Capture citations BEFORE extraction
         grounding_meta = candidate.get("groundingMetadata", {}) or {}
         sources = []
@@ -2986,13 +3088,69 @@ Return a JSON object:
             and _looks_like_real_person((c.get("name") or "").strip())
         ]
 
-        if len(valid_contacts) < _CONTACT_GROUNDING_MIN_CONTACTS:
+        # A single CITED property decision-maker (General Manager or a
+        # department head) is high-value on its own — keep it and skip the
+        # pipeline rather than discarding it for being under the min count.
+        def _is_property_decision_maker(title: str) -> bool:
+            t = (title or "").lower()
+            if "general manager" in t or "hotel manager" in t:
+                return True
+            if "executive housekeeper" in t or "executive chef" in t:
+                return True
+            if "director" in t or "head of" in t:
+                if any(
+                    d in t
+                    for d in (
+                        "housekeep",
+                        "room",
+                        "operation",
+                        "food",
+                        "beverage",
+                        "f&b",
+                        "purchas",
+                        "procur",
+                        "human resource",
+                        "culinary",
+                        "guest",
+                    )
+                ):
+                    return True
+                if "hr" in t.split():
+                    return True
+            return False
+
+        # #3: a lone CORPORATE BUYER (procurement / purchasing / sourcing,
+        # or an operations VP/director) is just as keepable as a property
+        # GM — on a warm/cool lead the real buyer IS corporate.
+        def _is_corporate_buyer(title: str) -> bool:
+            t = (title or "").lower()
+            if any(k in t for k in ("procurement", "purchasing", "sourcing", "supply chain")):
+                return True
+            if "operation" in t and any(
+                r in t for r in ("vp", "vice president", "director", "head")
+            ):
+                return True
+            return False
+
+        _has_keeper = any(
+            _is_property_decision_maker(c.get("title") or "")
+            or _is_corporate_buyer(c.get("title") or "")
+            for c in valid_contacts
+        )
+
+        if len(valid_contacts) < _CONTACT_GROUNDING_MIN_CONTACTS and not _has_keeper:
             logger.info(
                 f"Contact grounding: only {len(valid_contacts)} valid contacts for "
-                f"'{hotel_name}' (min {_CONTACT_GROUNDING_MIN_CONTACTS}) — "
-                f"falling back to pipeline"
+                f"'{hotel_name}' (min {_CONTACT_GROUNDING_MIN_CONTACTS}) and no "
+                f"GM/department-head or corporate buyer — falling back to pipeline"
             )
             return None
+        if len(valid_contacts) < _CONTACT_GROUNDING_MIN_CONTACTS:
+            logger.info(
+                f"Contact grounding: {len(valid_contacts)} contact for "
+                f"'{hotel_name}' but includes a GM/department head or corporate "
+                f"procurement buyer — keeping it, skipping pipeline"
+            )
 
         logger.info(
             f"Contact grounding SUCCESS for '{hotel_name}' in {elapsed:.1f}s: "
@@ -3029,18 +3187,23 @@ Return a JSON object:
                         f"{len(sources)} verified sources "
                         f"({', '.join(sources[:3])})"
                     ),
-                    "evidence": [
+                    # Legacy single-URL fallback (evidence_url column).
+                    "source": source_urls[0] if source_urls else "",
+                    # Rich evidence — one clickable item per cited source.
+                    # Key MUST be _evidence_items (the key persistence reads
+                    # into the evidence column); pair each title with its URL.
+                    "_evidence_items": [
                         {
                             "quote": (
-                                f"Identified as {(c.get('title') or 'staff').strip()} "
-                                f"at {hotel_name} via grounded Google Search "
-                                f"citing {title}"
+                                f"Cited as {(c.get('title') or 'staff').strip()} "
+                                f"at {hotel_name} by {_t}"
                             ),
-                            "source_url": "",  # redirect URLs are not usable
-                            "source_domain": title.split(" - ")[0] if " - " in title else title,
+                            "source_url": _u,
+                            "source_title": _t,
+                            "source_domain": _t.split(" - ")[0] if " - " in _t else _t,
                             "trust_tier": "official"
                             if any(
-                                d in title.lower()
+                                d in _t.lower()
                                 for d in (
                                     "linkedin",
                                     "hotel",
@@ -3050,9 +3213,10 @@ Return a JSON object:
                                 )
                             )
                             else "trade",
+                            "source_year": None,
                         }
-                        for title in sources[:3]
-                        if title
+                        for _t, _u in zip(sources, source_urls)
+                        if _t
                     ],
                 }
             )
@@ -6275,6 +6439,7 @@ async def enrich_lead_contacts(
         country=country,
         opening_date=opening_date,
         is_existing_hotel=is_existing_hotel,
+        timeline_label=timeline_label,
     )
 
     if grounded_contacts is not None:
@@ -6373,6 +6538,22 @@ async def enrich_lead_contacts(
             "grand",
             "plaza",
             "palace",
+            # Generic business-entity words: never useful to find a PERSON on
+            # LinkedIn and generic enough to match an unrelated namesake — the
+            # bare word "corporation" in "Sonesta ... Corporation" picked the
+            # wrong Carlos Garcia. ("corp" was filtered; these full words were not.)
+            "corporation",
+            "incorporated",
+            "companies",
+            "holdings",
+            "enterprises",
+            "ventures",
+            "partners",
+            "partnership",
+            "associates",
+            "worldwide",
+            "national",
+            "limited",
         }
 
         def _li_tokens(sources_list):

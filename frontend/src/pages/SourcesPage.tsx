@@ -6,7 +6,7 @@ import {
   Radar, Clock, AlertTriangle, CheckCircle2, XCircle, Search, X,
   ChevronLeft, ChevronRight, ExternalLink, ToggleLeft, ToggleRight,
   RefreshCw, Activity, Globe, Zap, Eye, Timer, BarChart3, Loader2,
-  Mail, Sparkles, RotateCw,
+  Mail, Sparkles, RotateCw, Newspaper, Radio, Circle, Users, Target,
 } from 'lucide-react'
 import { formatDistanceToNow } from 'date-fns'
 
@@ -111,7 +111,7 @@ function HealthBadge({ status }: { status: string }) {
    ═══════════════════════════════════════════════════ */
 
 export default function SourcesPage() {
-  const [viewMode, setViewMode] = useState<'sources' | 'queries'>('sources')
+  const [viewMode, setViewMode] = useState<'sources' | 'queries' | 'news'>('sources')
   const [search, setSearch] = useState('')
   const [debouncedSearch, setDebouncedSearch] = useState('')
   const [filter, setFilter] = useState<string>('')
@@ -258,11 +258,25 @@ export default function SourcesPage() {
             <Search className="w-3.5 h-3.5" />
             Discovery Queries
           </button>
+          <button
+            onClick={() => setViewMode('news')}
+            className={cn(
+              'px-4 h-8 text-xs font-semibold rounded-md transition flex items-center gap-1.5',
+              viewMode === 'news'
+                ? 'bg-navy-900 text-white'
+                : 'text-stone-500 hover:text-stone-700',
+            )}
+          >
+            <Newspaper className="w-3.5 h-3.5" />
+            News
+          </button>
         </div>
       </div>
 
       {viewMode === 'queries' ? (
         <QueriesPanel />
+      ) : viewMode === 'news' ? (
+        <NewsPanel />
       ) : (
         <>
       {/* Filters */}
@@ -691,6 +705,232 @@ function QueriesPanel() {
           )}
         </div>
       </div>
+    </>
+  )
+}
+
+/* ═══════════════════════════════════════════════════
+   NEWS PANEL — hospitality news query / source analytics
+   ═══════════════════════════════════════════════════ */
+
+interface NewsQueryStat {
+  query: string
+  stories: number
+  fresh_30d: number
+  active_days: number
+  last_seen: string | null
+  rel_hits: number
+  pipeline_hits: number
+}
+
+interface NewsSourceStat {
+  source: string
+  stories: number
+  fresh_30d: number
+  active_days: number
+  first_seen: string | null
+  last_seen: string | null
+  rel_hits: number
+  pipeline_hits: number
+}
+
+interface NewsSourceStats {
+  queries: NewsQueryStat[]
+  sources: NewsSourceStat[]
+}
+
+// active_days > 1 means the query/source keeps producing on different days
+// (a continuous feeder); active_days === 1 is a one-time / static hit.
+function PatternBadge({ activeDays }: { activeDays: number }) {
+  const cfg =
+    activeDays >= 3
+      ? { label: 'Continuous', cls: 'bg-emerald-50 text-emerald-600 border-emerald-200', dot: 'bg-emerald-500' }
+      : activeDays === 2
+      ? { label: 'Recurring', cls: 'bg-amber-50 text-amber-600 border-amber-200', dot: 'bg-amber-500' }
+      : { label: 'One-time', cls: 'bg-slate-100 text-slate-500 border-slate-200', dot: 'bg-slate-400' }
+  return (
+    <span className={cn('inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-2xs font-semibold border', cfg.cls)}>
+      <span className={cn('w-1.5 h-1.5 rounded-full', cfg.dot)} /> {cfg.label}
+    </span>
+  )
+}
+
+// Cosmetic vertical tag inferred from the query text (edu / health / industry).
+function queryVertical(q: string): { label: string; cls: string } | null {
+  const s = q.toLowerCase()
+  if (/(universit|college|campus|residence hall|student|dining hall|academic)/.test(s))
+    return { label: 'edu', cls: 'bg-blue-50 text-blue-600' }
+  if (/(hospital|medical center|health system|healthcare|clinic)/.test(s))
+    return { label: 'health', cls: 'bg-red-50 text-red-600' }
+  if (/(industry|trend|innovation|sustainab|regulation|\blaw\b|labor|technology|guest experience)/.test(s))
+    return { label: 'industry', cls: 'bg-violet-50 text-violet-600' }
+  return null
+}
+
+function HitCell({ n }: { n: number }) {
+  return (
+    <span className={cn('text-sm tabular-nums', n > 0 ? 'font-bold text-navy-800' : 'font-medium text-stone-300')}>
+      {n}
+    </span>
+  )
+}
+
+function VolBar({ value, max }: { value: number; max: number }) {
+  const pct = max > 0 && value > 0 ? Math.max(3, Math.round((value / max) * 100)) : 0
+  return (
+    <div className="h-[3px] rounded-sm bg-stone-100 mt-1 overflow-hidden">
+      <div className="h-full bg-emerald-400 rounded-sm" style={{ width: `${pct}%` }} />
+    </div>
+  )
+}
+
+function NewsPanel() {
+  const { data, isLoading } = useQuery<NewsSourceStats>({
+    queryKey: ['news-source-stats'],
+    queryFn: async () => (await api.get('/api/news/source-stats')).data,
+    refetchInterval: 60_000,
+    staleTime: 30_000,
+  })
+
+  const queries = data?.queries ?? []
+  const sources = data?.sources ?? []
+
+  // Totals are derived from the per-source rows (every story has a source).
+  const totalStories = sources.reduce((a, s) => a + s.stories, 0)
+  const continuousSrc = sources.filter(s => s.active_days >= 3).length
+  const onetimeSrc = sources.filter(s => s.active_days === 1).length
+  const contactHits = sources.reduce((a, s) => a + s.rel_hits, 0)
+  const pipelineHits = sources.reduce((a, s) => a + s.pipeline_hits, 0)
+  const maxQ = queries.reduce((m, q) => Math.max(m, q.stories), 0)
+  const maxS = sources.reduce((m, s) => Math.max(m, s.stories), 0)
+
+  return (
+    <>
+      {/* Summary strip — same compact StatCard used across the app */}
+      <div className="px-4 pb-2 flex-shrink-0">
+        <div className="grid grid-cols-6 gap-2">
+          <StatCard label="Stories" value={totalStories} icon={Newspaper} bg="bg-sky-50" text="text-sky-600" />
+          <StatCard label="Queries" value={queries.length} icon={Search} bg="bg-emerald-50" text="text-emerald-600" />
+          <StatCard label="Continuous" value={continuousSrc} icon={Radio} bg="bg-violet-50" text="text-violet-600" />
+          <StatCard label="One-time" value={onetimeSrc} icon={Circle} bg="bg-stone-100" text="text-stone-500" />
+          <StatCard label="Contact Hits" value={contactHits} icon={Users} bg="bg-amber-50" text="text-amber-600" />
+          <StatCard label="Pipeline" value={pipelineHits} icon={Target} bg="bg-red-50" text="text-red-500" />
+        </div>
+      </div>
+
+      {isLoading ? (
+        <div className="flex items-center justify-center py-20">
+          <Loader2 className="w-8 h-8 animate-spin text-navy-400" />
+        </div>
+      ) : queries.length === 0 && sources.length === 0 ? (
+        <div className="flex items-center justify-center py-20 text-stone-400 text-sm">
+          No news tracked yet. Run a scan first:{' '}
+          <code className="ml-2 px-2 py-0.5 bg-stone-100 rounded text-xs">python news_scan.py --apply</code>
+        </div>
+      ) : (
+        <div className="flex-1 overflow-y-auto px-4 pb-3 space-y-3">
+          {/* QUERY PRODUCTIVITY */}
+          <div className="bg-white rounded-xl border border-slate-200/80 shadow-sm overflow-hidden">
+            <div className="px-4 py-3 border-b border-slate-100">
+              <h3 className="text-sm font-bold text-navy-900">Query productivity</h3>
+              <p className="text-xs text-stone-400 mt-0.5">Which scan queries surface stories — and which are dead weight.</p>
+            </div>
+            <table className="w-full">
+              <thead>
+                <tr className="bg-slate-50/90 border-b border-slate-100">
+                  <th className="px-4 py-2 text-left text-[11px] font-bold text-slate-400 uppercase tracking-wider">Query</th>
+                  <th className="px-4 py-2 text-right text-[11px] font-bold text-slate-400 uppercase tracking-wider w-28">Stories</th>
+                  <th className="px-4 py-2 text-right text-[11px] font-bold text-slate-400 uppercase tracking-wider w-20">Fresh 30d</th>
+                  <th className="px-4 py-2 text-center text-[11px] font-bold text-slate-400 uppercase tracking-wider w-28">Pattern</th>
+                  <th className="px-4 py-2 text-right text-[11px] font-bold text-slate-400 uppercase tracking-wider w-24">Last</th>
+                  <th className="px-4 py-2 text-center text-[11px] font-bold text-slate-400 uppercase tracking-wider w-14">🤝</th>
+                  <th className="px-4 py-2 text-center text-[11px] font-bold text-slate-400 uppercase tracking-wider w-14">🎯</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100/80">
+                {queries.map((q) => {
+                  const v = queryVertical(q.query)
+                  return (
+                    <tr key={q.query} className="hover:bg-slate-50/60 transition">
+                      <td className="px-4 py-2.5 max-w-[460px]">
+                        <div className="flex items-center gap-2">
+                          <span className="text-[13px] font-semibold text-navy-900 truncate">{q.query}</span>
+                          {v && (
+                            <span className={cn('text-2xs font-semibold px-1.5 py-0.5 rounded uppercase tracking-wide flex-shrink-0', v.cls)}>
+                              {v.label}
+                            </span>
+                          )}
+                        </div>
+                      </td>
+                      <td className="px-4 py-2.5 text-right">
+                        <span className="text-sm font-bold text-navy-800 tabular-nums">{q.stories}</span>
+                        <VolBar value={q.stories} max={maxQ} />
+                      </td>
+                      <td className="px-4 py-2.5 text-right text-sm font-semibold text-stone-500 tabular-nums">{q.fresh_30d}</td>
+                      <td className="px-4 py-2.5 text-center"><PatternBadge activeDays={q.active_days} /></td>
+                      <td className="px-4 py-2.5 text-right text-xs text-stone-500">
+                        {q.last_seen ? formatDistanceToNow(new Date(q.last_seen), { addSuffix: true }) : '—'}
+                      </td>
+                      <td className="px-4 py-2.5 text-center"><HitCell n={q.rel_hits} /></td>
+                      <td className="px-4 py-2.5 text-center"><HitCell n={q.pipeline_hits} /></td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+            <div className="flex items-center gap-4 px-4 py-2.5 border-t border-slate-100 bg-slate-50/60 text-2xs text-stone-500">
+              <span className="inline-flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />Continuous · 3+ days</span>
+              <span className="inline-flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-amber-500" />Recurring · 2 days</span>
+              <span className="inline-flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-slate-400" />One-time · single day, candidate to cut</span>
+            </div>
+          </div>
+
+          {/* SOURCE PRODUCTIVITY */}
+          <div className="bg-white rounded-xl border border-slate-200/80 shadow-sm overflow-hidden">
+            <div className="px-4 py-3 border-b border-slate-100">
+              <h3 className="text-sm font-bold text-navy-900">Source productivity</h3>
+              <p className="text-xs text-stone-400 mt-0.5">Which outlets feed the pipeline — continuous producers vs one-off mentions.</p>
+            </div>
+            <table className="w-full">
+              <thead>
+                <tr className="bg-slate-50/90 border-b border-slate-100">
+                  <th className="px-4 py-2 text-left text-[11px] font-bold text-slate-400 uppercase tracking-wider">Source</th>
+                  <th className="px-4 py-2 text-right text-[11px] font-bold text-slate-400 uppercase tracking-wider w-28">Stories</th>
+                  <th className="px-4 py-2 text-right text-[11px] font-bold text-slate-400 uppercase tracking-wider w-24">Active days</th>
+                  <th className="px-4 py-2 text-center text-[11px] font-bold text-slate-400 uppercase tracking-wider w-28">Pattern</th>
+                  <th className="px-4 py-2 text-right text-[11px] font-bold text-slate-400 uppercase tracking-wider w-24">First</th>
+                  <th className="px-4 py-2 text-right text-[11px] font-bold text-slate-400 uppercase tracking-wider w-24">Last</th>
+                  <th className="px-4 py-2 text-center text-[11px] font-bold text-slate-400 uppercase tracking-wider w-14">🤝</th>
+                  <th className="px-4 py-2 text-center text-[11px] font-bold text-slate-400 uppercase tracking-wider w-14">🎯</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100/80">
+                {sources.map((s) => (
+                  <tr key={s.source} className="hover:bg-slate-50/60 transition">
+                    <td className="px-4 py-2.5 max-w-[320px]">
+                      <span className="block text-[13px] font-semibold text-navy-900 truncate">{s.source}</span>
+                    </td>
+                    <td className="px-4 py-2.5 text-right">
+                      <span className="text-sm font-bold text-navy-800 tabular-nums">{s.stories}</span>
+                      <VolBar value={s.stories} max={maxS} />
+                    </td>
+                    <td className="px-4 py-2.5 text-right text-sm font-semibold text-stone-500 tabular-nums">{s.active_days}</td>
+                    <td className="px-4 py-2.5 text-center"><PatternBadge activeDays={s.active_days} /></td>
+                    <td className="px-4 py-2.5 text-right text-xs text-stone-500">
+                      {s.first_seen ? new Date(s.first_seen).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : '—'}
+                    </td>
+                    <td className="px-4 py-2.5 text-right text-xs text-stone-500">
+                      {s.last_seen ? formatDistanceToNow(new Date(s.last_seen), { addSuffix: true }) : '—'}
+                    </td>
+                    <td className="px-4 py-2.5 text-center"><HitCell n={s.rel_hits} /></td>
+                    <td className="px-4 py-2.5 text-center"><HitCell n={s.pipeline_hits} /></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
     </>
   )
 }

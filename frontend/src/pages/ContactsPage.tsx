@@ -259,8 +259,19 @@ function confidencePct(c: InboxContact): number {
 function roleText(c: InboxContact): string | null {
   return c.title || c.inferred_role || null
 }
+// A "high opportunity" contact is someone worth pitching uniforms to: a
+// buyer-side person who is either a flagged decision-maker, a verified
+// lead-gen target, or holds a buying-relevant role (procurement, F&B, GM,
+// operations, housekeeping, ownership, C-suite). This deliberately ignores
+// the brand-inherited `opportunity_level` — nearly every hotel brand is
+// hard-coded "high" in the registry, so on its own it carries no signal.
+const BUYING_ROLE = /procure|purchas|sourc|supply chain|f\s*&\s*b|food\s*(?:and|&)\s*beverage|general manager|\bgm\b|operations|housekeep|rooms division|\bowner\b|proprietor|principal|\bpresident\b|\bchief\b|\bc[eo]o\b|\bcpo\b/i
 function isHighOpportunity(c: InboxContact): boolean {
-  return (c.opportunity_level || '').toLowerCase() === 'high'
+  const cat = c.contact_category
+  if (cat === 'seller' || cat === 'competitor' || cat === 'personal' || cat === 'junk' || cat === 'operational') return false
+  if (c.is_decision_maker || (c as UnifiedContact).target_match) return true
+  const role = roleText(c)
+  return !!role && BUYING_ROLE.test(role)
 }
 
 const AVATAR_GRADIENT: Record<string, string> = {
@@ -480,7 +491,7 @@ function DirRow({
           {contact.is_decision_maker && <span className="inline-flex items-center gap-0.5 text-[10px] font-bold text-gold-700 bg-gold-50 px-1.5 py-0.5 rounded-full flex-shrink-0" title="Decision-maker">★ DM</span>}
           {contact.target_match && <span className="text-[10px] font-bold text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded-full flex-shrink-0" title="Lead-generator target you already email — verified relationship">verified</span>}
         </div>
-        <div className="truncate text-stone-500 text-[13px] mt-0.5">{hideOrg ? (roleText(contact) || 'role unknown') : `${roleText(contact) || 'role unknown'}  ·  ${contact.organization || '—'}`}</div>
+        <div className="truncate text-stone-500 text-[13px] mt-0.5">{roleText(contact) || 'role unknown'}</div>
       </div>
       {/* email — the field reps need most */}
       <div className="min-w-0 flex-1 hidden md:block">
@@ -495,11 +506,11 @@ function DirRow({
       </div>
       {/* org + meta (status pills removed — org name is more useful here). Org is a link → jumps to that company. */}
       <div className="flex items-center gap-3 flex-shrink-0">
-        {isHighOpportunity(contact) && <span className="hidden sm:inline text-[11px] font-bold text-coral-500" title="High opportunity">High</span>}
-        {contact.organization
+        {isHighOpportunity(contact) && <span className="hidden sm:inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-coral-50 text-coral-600 ring-1 ring-coral-200" title="High-opportunity account — prioritize outreach"><Flame className="w-3 h-3" />High opp</span>}
+        {!hideOrg && contact.organization
           ? <button onClick={(e) => { e.stopPropagation(); onOpenOrg?.(contact.organization!) }} title={`See everyone at ${contact.organization}`}
-              className="hidden sm:block w-[180px] text-right truncate text-[12px] font-semibold text-navy-700 hover:text-navy-900 hover:underline">{contact.organization}</button>
-          : <span className="hidden sm:block w-[180px]" />}
+              className="hidden sm:block w-[200px] text-right truncate text-[12px] font-semibold text-navy-700 hover:text-navy-900 hover:underline">{contact.organization}</button>
+          : <span className="hidden sm:block w-[200px]" />}
         <span className="w-12 text-right text-[11px] text-stone-500 whitespace-nowrap hidden xl:block">{isLead && contact.interaction_count === 0 ? 'new' : relativeDate(contact.last_seen)}</span>
         <ChevronRight className="w-4 h-4 text-stone-300 group-hover:text-navy-400 transition-colors" />
       </div>
@@ -1342,8 +1353,8 @@ export default function ContactsPage() {
       recent: (a, b) => new Date(b.last_seen || 0).getTime() - new Date(a.last_seen || 0).getTime(),
       newest: (a, b) => new Date(b.first_seen || 0).getTime() - new Date(a.first_seen || 0).getTime(),
       oldest: (a, b) => new Date(a.first_seen || 0).getTime() - new Date(b.first_seen || 0).getTime(),
-      name: (a, b) => `${a.first_name || ''} ${a.last_name || ''}`.trim().localeCompare(`${b.first_name || ''} ${b.last_name || ''}`.trim()),
-      org: (a, b) => (a.organization || '~').localeCompare(b.organization || '~') || `${a.first_name || ''}${a.last_name || ''}`.localeCompare(`${b.first_name || ''}${b.last_name || ''}`),
+      name: (a, b) => fullName(a).localeCompare(fullName(b), undefined, { sensitivity: 'base' }),
+      org: (a, b) => (a.organization || '~').localeCompare(b.organization || '~') || fullName(a).localeCompare(fullName(b), undefined, { sensitivity: 'base' }),
       warmth: (a, b) => (intelOf(b)?.warmth || 0) - (intelOf(a)?.warmth || 0),
       gaps: (a, b) => (intelOf(b)?.gaps.length || 0) - (intelOf(a)?.gaps.length || 0),
     }

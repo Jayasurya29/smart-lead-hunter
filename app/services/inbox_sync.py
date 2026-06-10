@@ -1554,10 +1554,31 @@ async def sync_mailbox(
                     for h in (msg.get("payload", {}).get("headers") or [])
                 }
 
-                for hdr in ("From", "To", "Cc", "Bcc"):
+                for hdr in ("From", "Reply-To", "To", "Cc", "Bcc"):
                     val = headers.get(hdr, "")
-                    display = _display_name(val) if hdr == "From" else ""
-                    for email in _extract_emails(val):
+                    if not val:
+                        continue
+                    if hdr == "From":
+                        _dn = _display_name(val)
+                        _pairs = [(_dn, _e) for _e in _extract_emails(val)]
+                    else:
+                        # To/Cc/Bcc/Reply-To: parse "Name <email>" pairs so
+                        # recipients keep their names (was blanked before — the
+                        # name is right there in the header). Same pair logic as
+                        # _seg_participants.
+                        _pairs = []
+                        _seen_e: set[str] = set()
+                        for _pm in _HDR_PAIR_RE.finditer(val):
+                            _e = _pm.group(2).lower()
+                            if _e in _seen_e:
+                                continue
+                            _seen_e.add(_e)
+                            _pairs.append((_normalize_header_name(_pm.group(1).strip(' ,"')), _e))
+                        for _e in _extract_emails(val):
+                            if _e not in _seen_e:
+                                _seen_e.add(_e)
+                                _pairs.append(("", _e))
+                    for display, email in _pairs:
                         entry = seen_in_headers.setdefault(
                             email,
                             {
