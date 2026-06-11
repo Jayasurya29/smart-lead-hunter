@@ -36,7 +36,7 @@ import hashlib
 import json
 import logging
 import re
-from datetime import datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Optional
 
@@ -453,6 +453,13 @@ FOOTER_MARKERS = [
 MIN_CONFIDENCE = 0.6
 SCAN_DAYS_BACK_INITIAL = 2
 MAX_EMAILS_PER_RUN = 5000
+# Large/date-windowed backfills (since-2025 pulls): a flat newer_than:Nd query
+# is capped at MAX_EMAILS_PER_RUN and Gmail returns newest-first, so anything
+# older than the newest ~5000 is silently dropped. Past this many days we walk
+# the range in date windows instead (see _list_message_ids_windowed).
+LARGE_BACKFILL_THRESHOLD_DAYS = 90
+BACKFILL_WINDOW_DAYS = 30
+MAX_EMAILS_PER_WINDOW = 10000
 PHONE_DEFAULT_REGION = "US"
 
 # Parallel Gemini limits
@@ -1132,6 +1139,69 @@ def _list_message_ids_full(
     return ids
 
 
+def _list_message_ids_windowed(
+    gmail,
+    mailbox: str,
+    days: int,
+    window_days: int = BACKFILL_WINDOW_DAYS,
+) -> list[str]:
+    """Date-chunked full listing for large backfills (e.g. a since-2025 pull).
+
+    A single ``newer_than:{days}d`` query is capped at MAX_EMAILS_PER_RUN and
+    Gmail returns newest-first, so on a busy mailbox everything older than the
+    newest ~5000 messages is silently dropped. This walks the
+    ``[today-days, today]`` range backward in ``window_days`` slices using
+    Gmail ``after:``/``before:`` so each query is small and the whole range is
+    covered. IDs are de-duplicated across window boundaries.
+    """
+    today = date.today()
+    start = today - timedelta(days=days)
+    seen: set[str] = set()
+    ids: list[str] = []
+    win_end = today + timedelta(days=1)  # include today
+    while win_end > start:
+        win_start = max(start, win_end - timedelta(days=window_days))
+        q = (
+            f"after:{win_start.strftime('%Y/%m/%d')} "
+            f"before:{win_end.strftime('%Y/%m/%d')} "
+            "-in:chats -in:spam -in:trash"
+        )
+        page_token = None
+        win_count = 0
+        while win_count < MAX_EMAILS_PER_WINDOW:
+            try:
+                resp = (
+                    gmail.users()
+                    .messages()
+                    .list(
+                        userId="me",
+                        q=q,
+                        maxResults=min(500, MAX_EMAILS_PER_WINDOW - win_count),
+                        pageToken=page_token,
+                    )
+                    .execute()
+                )
+            except HttpError as e:
+                logger.error(f"inbox_sync: windowed list error {mailbox} [{q}]: {e}")
+                break
+            for m in resp.get("messages", []):
+                mid = m["id"]
+                if mid not in seen:
+                    seen.add(mid)
+                    ids.append(mid)
+                    win_count += 1
+            page_token = resp.get("nextPageToken")
+            if not page_token:
+                break
+        logger.info(
+            f"inbox_sync: {mailbox} window {win_start}..{win_end} "
+            f"-> {win_count} msgs (running total {len(ids)})"
+        )
+        win_end = win_start
+    logger.info(f"inbox_sync: {mailbox} windowed backfill total: {len(ids)} messages")
+    return ids
+
+
 def _list_message_ids_incremental(
     gmail,
     mailbox: str,
@@ -1510,7 +1580,13 @@ async def sync_mailbox(
                 f"inbox_sync: {mailbox} — full backfill "
                 f"(last {scan_days_override or SCAN_DAYS_BACK_INITIAL}d)"
             )
-            message_ids = _list_message_ids_full(gmail, mailbox, scan_days_override)
+            _eff_days = scan_days_override or SCAN_DAYS_BACK_INITIAL
+            if _eff_days > LARGE_BACKFILL_THRESHOLD_DAYS:
+                # Big backfill -> date-windowed so nothing older than the
+                # newest ~5000 is dropped (the flat-query failure mode).
+                message_ids = _list_message_ids_windowed(gmail, mailbox, _eff_days)
+            else:
+                message_ids = _list_message_ids_full(gmail, mailbox, scan_days_override)
             new_history_id = _get_current_history_id(gmail)
         else:
             logger.info(f"inbox_sync: {mailbox} — incremental from history_id={last_history_id}")

@@ -338,6 +338,9 @@ app.include_router(news_router)
 from app.routes.relationships import router as relationships_router  # noqa: E402
 
 app.include_router(relationships_router)
+from app.routes.affiliations import router as affiliations_router  # noqa: E402
+
+app.include_router(affiliations_router)
 app.include_router(existing_hotels_router)
 app.include_router(existing_hotels_parity_router)
 app.include_router(sap_router)

@@ -27,6 +27,7 @@ import {
 } from 'lucide-react'
 import { cn, formatDate, relativeDate, getTierLabel } from '@/lib/utils'
 import type { InboxContact, InboxContactStats } from '@/api/inboxContacts'
+import AffiliationCard from '@/components/contacts/AffiliationCard'
 import {
   useAllInboxContacts,
   useAllLeadContacts,
@@ -129,6 +130,13 @@ type UnifiedContact = InboxContact & {
   target_match?: boolean
   target_priority?: string | null
   target_reasoning?: string | null
+  /** Entity-resolution grouping key (035) + how many directory rows resolve to
+   *  this same human, so duplicate per-property rows collapse into one card. */
+  person_id?: number | null
+  affiliation_count?: number
+  /** Directory (lead-contact) rows carry a save/verify flag used to pick the
+   *  richest representative when collapsing duplicates. */
+  is_saved?: boolean
 }
 
 function sourceOf(c: UnifiedContact): Source {
@@ -452,6 +460,48 @@ function Facet({ icon: Ic, label, value, options, onChange, align }: {
   )
 }
 
+/* Collapse rows that resolve to the same person (entity resolution, 035):
+   keep the richest representative (saved > has-email > most affiliations >
+   lowest id) and remember how many rows folded in. Rows without a person_id
+   pass through unchanged, preserving order. */
+/* Known company rebrands / aliases (display-only, 2026-06-10). Maps a dead or
+   alternate operator name to its current canonical name so a person split across
+   the old and new name (e.g. Jordi Pelfort, whose org was scraped as both "Blue
+   Diamond Resorts" and the post-2025 "Royalton Hotels & Resorts") groups under
+   ONE account header. Display-only: stored data is untouched, exports/API still
+   see the original. Add a line per confirmed rebrand; match is exact (normalized),
+   never substring, to avoid catching unrelated "Blue Diamond …" entities. */
+const COMPANY_ALIASES: Record<string, string> = {
+  'blue diamond resorts': 'Royalton Hotels & Resorts',
+}
+function canonCompany<T extends string | null | undefined>(name: T): T | string {
+  if (!name) return name
+  return COMPANY_ALIASES[name.trim().toLowerCase()] || name
+}
+
+function collapsePeople(list: UnifiedContact[]): UnifiedContact[] {
+  const buckets = new Map<number, UnifiedContact[]>()
+  const out: UnifiedContact[] = []
+  const slot = new Map<number, number>() // person_id → index in out (preserve order)
+  for (const c of list) {
+    const pid = c.person_id
+    if (pid == null) { out.push(c); continue }
+    if (!buckets.has(pid)) { buckets.set(pid, []); slot.set(pid, out.length); out.push(c) }
+    buckets.get(pid)!.push(c)
+  }
+  for (const [pid, rows] of buckets) {
+    if (rows.length === 1) continue
+    const best = [...rows].sort((a, b) =>
+      (Number(!!b.is_saved) - Number(!!a.is_saved)) ||
+      (Number(!!b.email) - Number(!!a.email)) ||
+      ((b.affiliation_count || 0) - (a.affiliation_count || 0)) ||
+      (a.id - b.id),
+    )[0]
+    out[slot.get(pid)!] = best
+  }
+  return out
+}
+
 function DirRow({
   contact, selected, checked, selectMode, onOpen, onToggleCheck, hideOrg, onOpenOrg,
 }: {
@@ -489,6 +539,7 @@ function DirRow({
         <div className="flex items-center gap-1.5">
           <span className="truncate font-semibold text-navy-900 text-sm">{fullName(contact)}</span>
           {contact.is_decision_maker && <span className="inline-flex items-center gap-0.5 text-[10px] font-bold text-gold-700 bg-gold-50 px-1.5 py-0.5 rounded-full flex-shrink-0" title="Decision-maker">★ DM</span>}
+          {(contact.affiliation_count || 0) > 1 && <span className="inline-flex items-center text-[10px] font-bold text-violet-700 bg-violet-50 px-1.5 py-0.5 rounded-full flex-shrink-0" title={`Resolved across ${contact.affiliation_count} records / properties`}>{contact.affiliation_count} affiliations</span>}
           {contact.target_match && <span className="text-[10px] font-bold text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded-full flex-shrink-0" title="Lead-generator target you already email — verified relationship">verified</span>}
         </div>
         <div className="truncate text-stone-500 text-[13px] mt-0.5">{roleText(contact) || 'role unknown'}</div>
@@ -957,6 +1008,13 @@ function ProfilePanel({ contact, onDeleted }: { contact: UnifiedContact | null; 
             <InfoRow icon={<ExternalLink className="w-3.5 h-3.5" />} label="Matched hotel" value={contact.matched_hotel_id ? `#${contact.matched_hotel_id}` : null} />
           </SectionCard>
 
+          <SectionCard title="Employer & coverage" icon={<Briefcase className="w-3.5 h-3.5" />}>
+            <AffiliationCard
+              personType={sourceOf(contact) === 'lead_generator' || contact.id >= LEAD_ID_OFFSET ? 'lead_contact' : 'contact'}
+              personId={contact.id >= LEAD_ID_OFFSET ? contact.id - LEAD_ID_OFFSET : contact.id}
+            />
+          </SectionCard>
+
           <Timeline contact={contact} />
         </div>
 
@@ -1256,7 +1314,15 @@ export default function ContactsPage() {
     const leads = leadRaw
       .filter((c) => !c.email || !matchedEmails.has(c.email.toLowerCase()))
       .map((c) => ({ ...c, id: c.id + LEAD_ID_OFFSET }))
-    const merged = [...inbox, ...leads]
+    // Canonicalize known company rebrands (display-only) so the old and new
+    // operator name group under one account header. Touches the name fields
+    // that drive grouping / family-nesting / display — not stored data.
+    const merged = [...inbox, ...leads].map((c) => ({
+      ...c,
+      organization: canonCompany(c.organization),
+      management_company: canonCompany(c.management_company),
+      parent_company: canonCompany(c.parent_company),
+    }))
     // Junk costs ZERO everywhere (2026-06-04): excluded from header counts,
     // account groups, warmth math and search. Rows stay in the DB only for
     // reversibility; the Category facet's Junk option flips to an audit view.
@@ -1370,6 +1436,11 @@ export default function ContactsPage() {
       if (!m.has(k)) m.set(k, [])
       m.get(k)!.push(c)
     }
+    // Entity resolution (035): within an account, rows that resolve to the SAME
+    // human (shared person_id) collapse to one card — the Account lens. A person
+    // who spans two accounts still appears once under each. Rows without a
+    // person_id (inbox contacts, unresolved leads) pass through untouched.
+    for (const [k, list] of m) m.set(k, collapsePeople(list))
     // keep insertion order so account groups follow the active Sort (e.g. Company A–Z, Newest added)
     let entries = [...m.entries()]
     if (sort === 'warmth') entries = entries.sort((a, b) => (accountIntel.get(b[0])?.warmth || 0) - (accountIntel.get(a[0])?.warmth || 0))

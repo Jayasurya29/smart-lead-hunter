@@ -34,6 +34,7 @@ from app.services.client_resolver import (
     ClientResolver,
     is_competitor,
     is_personal,
+    is_vendor,
 )
 
 logger = logging.getLogger(__name__)
@@ -59,12 +60,17 @@ Categories (choose the single best fit):
   uniforms and could buy from JA. THIS INCLUDES parking, valet, security,
   facilities-management, shuttle, and marina operators that staff hotels —
   e.g. Towne Park, SP Plus, Metropolis, Laz Parking are exactly this type and
-  are valuable BUYERS, NOT junk.
+  are valuable BUYERS, NOT junk. ALSO a buyer: a UNIVERSITY or COLLEGE (dining,
+  residence life, athletics, facilities and campus-services staff all wear
+  uniforms) and a HOSPITAL, MEDICAL CENTER, or HEALTH SYSTEM (nursing,
+  environmental services, dietary, materials-management and linen staff all
+  wear uniforms). A NAMED PERSON at a university, college, hospital, or medical
+  center is a BUYER, never junk.
 - "seller": a company that SELLS to JA (raw materials, fabric, blanks,
   apparel wholesale, embroidery, freight/shipping, software, agencies) — they
   want JA's money. Examples: SanMar, Chef Works fabric/blank suppliers.
 - "junk": newsletters, marketing blasts, job boards, e-commerce receipts, an
-  unrelated industry (grocery, real estate, auto, healthcare, political), or
+  unrelated industry (grocery, real estate, auto, political), or
   spam / unparseable garbage. NEVER put a NAMED PERSON at a hotel, resort, or
   hospitality-services company into junk — that is a BUYER, even if their title
   is blank or looks junior. Junk is only for non-people (no-reply addresses,
@@ -92,6 +98,10 @@ Field rules:
     * human resources / people & culture / talent (HR Manager, HR Director,
       Director of People & Culture) — HR runs onboarding + uniform issuance
       and routes vendors to the right buyers
+    * campus / auxiliary / dining / residence-life / facilities director at a
+      university or college
+    * director of nursing / environmental services (EVS) / materials management
+      / dietary / linen-services lead at a hospital or medical center
   Mark FALSE for finance, IT, marketing, outbound sales reps, front-desk /
   guest services, and a bare "manager" with no buying-related department.
 - reason: <= 10 words.
@@ -164,7 +174,10 @@ async def _enrich_batch(client, sem, batch: list[dict]) -> dict:
 
 
 async def run_tier1(
-    limit: int | None = None, force: bool = False, only_unknown: bool = False
+    limit: int | None = None,
+    force: bool = False,
+    only_unknown: bool = False,
+    recategorize_junk: bool = False,
 ) -> dict:
     """Categorize + enrich pending contacts. Returns a summary dict."""
     async with async_session() as session:
@@ -173,6 +186,8 @@ async def run_tier1(
             clauses.append("(enriched_at IS NULL OR enriched_at < :cutoff)")
         if only_unknown:
             clauses.append("(contact_category IS NULL OR contact_category = 'unknown')")
+        if recategorize_junk:
+            clauses.append("contact_category = 'junk'")
         where = " AND ".join(clauses)
         params = {}
         if not force:
@@ -212,6 +227,8 @@ async def run_tier1(
         category, source = None, None
         if is_competitor(r.organization, email):
             category, source = "competitor", "competitor_list"
+        elif is_vendor(r.organization, email):
+            category, source = "seller", "vendor_list"
         elif is_personal(r.organization, email):
             category, source = "personal", "personal_rule"
         elif resolver.is_client(r.organization, email):
@@ -279,7 +296,7 @@ async def run_tier1(
                 SIGNALS_CONFIDENCE_CAP,
             )
             # Deterministic categories are certain.
-            if source in ("competitor_list", "personal_rule", "sap_client"):
+            if source in ("competitor_list", "vendor_list", "personal_rule", "sap_client"):
                 conf = 1.0
 
             # Protect a richer grounded (Tier-2 Deep Enrich) profile from being
@@ -337,6 +354,13 @@ if __name__ == "__main__":
         action="store_true",
         help="only contacts not yet classified relevant/junk",
     )
+    ap.add_argument(
+        "--recategorize-junk",
+        action="store_true",
+        help="re-run ONLY rows currently filed as junk (scoped recovery)",
+    )
     args = ap.parse_args()
-    summary = asyncio.run(run_tier1(args.limit, args.force, args.only_unknown))
+    summary = asyncio.run(
+        run_tier1(args.limit, args.force, args.only_unknown, args.recategorize_junk)
+    )
     print(summary)

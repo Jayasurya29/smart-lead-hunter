@@ -1556,13 +1556,21 @@ def _lead_contact_to_directory(lc, pl, eh) -> dict:
         "title": lc.title,
         "organization": org,
         "phone": lc.phone,
-        "address": city,
+        "address": None if is_mgmt_co else city,
         "linkedin_url": lc.linkedin,
         "org_source": lc.found_via,
         "has_signature": False,
         "confidence": _LC_CONFIDENCE.get((lc.confidence or "").lower(), 0.5),
-        "parent_company": parent_name if (org and parent_name and org != parent_name) else None,
-        "brand_tier": tier,
+        # A management-company person (portfolio buyer like a VP of Procurement)
+        # is NOT parented by the single property they happen to be linked to —
+        # that hotel is one account they COVER, not their parent. Only surface a
+        # parent_company for property-side contacts.
+        "parent_company": (
+            None
+            if is_mgmt_co
+            else (parent_name if (org and parent_name and org != parent_name) else None)
+        ),
+        "brand_tier": None if is_mgmt_co else tier,
         "operating_model": None,
         "gpo": None,
         "procurement_priority": (prio_label or "unknown").split(" ")[0],
@@ -1588,6 +1596,8 @@ def _lead_contact_to_directory(lc, pl, eh) -> dict:
         "pushed_to_insightly_at": None,
         "matched_lead_id": lc.lead_id,
         "matched_hotel_id": lc.existing_hotel_id,
+        "person_id": lc.person_id,
+        "affiliation_count": 1,
         "sync_history": None,
         "created_at": _iso(lc.created_at),
         "updated_at": _iso(lc.updated_at),
@@ -1597,6 +1607,26 @@ def _lead_contact_to_directory(lc, pl, eh) -> dict:
         "account_type": "management_company" if is_mgmt_co else "hotel",
         "lifecycle_stage": "existing" if lc.existing_hotel_id else "potential",
     }
+
+
+@router.post("/api/lead-contacts/{contact_id}/save")
+async def save_lead_contact_by_id(
+    contact_id: int,
+    db: AsyncSession = Depends(get_db),
+    _csrf=Depends(require_ajax),
+):
+    """Verify (save) a lead contact by id, from the Coverage card. Works for
+    both lead- and hotel-linked contacts. Sets is_saved=True so it enters the
+    trusted directory; free (no Wiza), matching the parent-scoped save."""
+    contact = (
+        await db.execute(select(LeadContact).where(LeadContact.id == contact_id))
+    ).scalar_one_or_none()
+    if not contact:
+        raise HTTPException(status_code=404, detail="Lead contact not found")
+    contact.is_saved = True
+    contact.updated_at = local_now()
+    await db.commit()
+    return {"status": "saved", "contact_id": contact_id}
 
 
 @router.get("/api/lead-contacts")
@@ -1646,6 +1676,22 @@ async def list_lead_contacts(
     ).all()
 
     items = [_lead_contact_to_directory(lc, pl, eh) for (lc, pl, eh) in rows]
+    # affiliation_count: how many saved directory rows share each person_id,
+    # so the People lens can badge a resolved person with their footprint.
+    aff_rows = (
+        await db.execute(
+            select(LeadContact.person_id, func.count(LeadContact.id))
+            .select_from(LeadContact)
+            .outerjoin(PotentialLead, PotentialLead.id == LeadContact.lead_id)
+            .where(and_(visible, LeadContact.person_id.isnot(None)))
+            .group_by(LeadContact.person_id)
+        )
+    ).all()
+    aff_counts = {pid: n for pid, n in aff_rows}
+    for it in items:
+        pid = it.get("person_id")
+        if pid is not None and pid in aff_counts:
+            it["affiliation_count"] = aff_counts[pid]
     pages = max(1, (total + per_page - 1) // per_page)
 
     return {"items": items, "total": total, "page": page, "per_page": per_page, "pages": pages}

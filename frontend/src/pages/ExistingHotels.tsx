@@ -31,6 +31,7 @@ import { useState, useEffect, useMemo } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import api from '@/api/client'
+import HotelCoverageCard from '@/components/contacts/HotelCoverageCard'
 import {
   fetchExistingHotels, fetchExistingHotel, fetchExistingHotelStats,
   fetchHotelContacts, approveExistingHotel, rejectExistingHotel,
@@ -1179,6 +1180,9 @@ function HotelDetail({ hotelId, tab, onClose }: { hotelId: number; tab: Pipeline
               setSmartFillHotelId(null)
             }}
           />
+        )}
+        {activeTab === 'contacts' && (
+          <HotelCoverageCard accountType="existing_hotel" accountId={hotelId} />
         )}
         {activeTab === 'contacts' && (
           <HotelContactsTab

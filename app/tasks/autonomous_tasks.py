@@ -791,6 +791,29 @@ def hotel_news_scan(self) -> Dict[str, Any]:
     return run_async(_scan())
 
 
+@celery_app.task(bind=True, base=BaseTask, name="classify_pending_contacts")
+def classify_pending_contacts(self) -> Dict[str, Any]:
+    """Classify newly-ingested contacts (9:55 AM Mon-Fri, after inbox sync
+    at 9:45). Runs tier1 over pending rows still uncategorized: deterministic
+    SAP-client / vendor / competitor / personal rules first, LLM backstop for
+    the rest. Keeps the Contacts view clean as scrapes ingest new people."""
+    from app.services.contact_tier1_enrichment import run_tier1
+
+    async def _classify():
+        summary = await run_tier1(only_unknown=True)
+        logger.info(
+            "classify_pending_contacts: scanned=%s rules=%s llm=%s enriched=%s by_category=%s",
+            summary.get("scanned"),
+            summary.get("resolved_by_rules"),
+            summary.get("sent_to_llm"),
+            summary.get("enriched"),
+            summary.get("by_category"),
+        )
+        return summary
+
+    return run_async(_classify())
+
+
 @celery_app.task(bind=True, base=BaseTask, name="recompute_timeline_labels")
 def recompute_timeline_labels(self) -> Dict[str, Any]:
     """Recompute timeline_label on every active lead based on today's date.
@@ -1170,6 +1193,21 @@ def sync_inbox_contacts(self) -> Dict[str, Any]:
             f"{results['total_updated_contacts']} updated, "
             f"{results['total_messages_scanned']} messages scanned"
         )
+        # Event-driven chain (2026-06-11): classify the contacts this sync
+        # just ingested, the moment sync finishes. Only fires when there is
+        # something new/updated, so empty syncs cost nothing. No clock, no
+        # overlap with the sync that produced the rows.
+        if (results["total_new_contacts"] + results["total_updated_contacts"]) > 0:
+            try:
+                classify_pending_contacts.delay()
+                logger.info(
+                    "Inbox Contact Sync: enqueued classify_pending_contacts "
+                    "(%s new + %s updated)",
+                    results["total_new_contacts"],
+                    results["total_updated_contacts"],
+                )
+            except Exception as e:
+                logger.warning("Inbox Contact Sync: failed to enqueue classify: %s", e)
         return results
 
     return run_async(_sync())

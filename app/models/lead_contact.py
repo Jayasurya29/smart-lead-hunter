@@ -119,30 +119,25 @@ class LeadContact(Base):
     strategist_reasoning = Column(Text)
 
     # Persistence
-    is_saved = Column(
-        Boolean, default=False, index=True
-    )  # Pinned by user — survives re-enrichment
+    is_saved = Column(Boolean, default=False, index=True)  # Pinned by user — survives re-enrichment
     is_primary = Column(Boolean, default=False)  # Best contact for this lead
+    # Entity-resolution grouping key (035): rows sharing a value are the
+    # same human. NULL = unresolved. Additive; never collapses rows.
+    person_id = Column(Integer, nullable=True, index=True)
 
     # Source tracking
     found_via = Column(String(100))  # "linkedin_search", "press_release", "manual"
-    source_detail = Column(
-        Text
-    )  # e.g., "LinkedIn profile mentions Six Senses Napa Valley"
+    source_detail = Column(Text)  # e.g., "LinkedIn profile mentions Six Senses Napa Valley"
     evidence_url = Column(Text)  # URL where this contact was found (proof of relevance)
 
     # Timestamps — use UTC for storage consistency; convert at presentation layer
-    created_at = Column(
-        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
-    )
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     updated_at = Column(
         DateTime(timezone=True),
         default=lambda: datetime.now(timezone.utc),
         onupdate=lambda: datetime.now(timezone.utc),
     )
-    last_enriched_at = Column(
-        DateTime(timezone=True)
-    )  # When enrichment last touched this contact
+    last_enriched_at = Column(DateTime(timezone=True))  # When enrichment last touched this contact
 
     # Relationship
     lead = relationship("PotentialLead", backref="contacts")

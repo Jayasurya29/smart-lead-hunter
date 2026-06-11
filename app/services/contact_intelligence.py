@@ -81,6 +81,66 @@ HOSPITALITY_ROLE_KW = (
     "executive housekeeper",
 )
 
+# ── Education signals (org or title) ──────────────────────────────────────
+# JA sells uniforms to universities and colleges (dining, residence life,
+# athletics, facilities, campus services all wear them).
+EDUCATION_KW = (
+    "university",
+    "universidad",
+    "college",
+    "institute of technology",
+    "polytechnic",
+    "school district",
+    "academy",
+    "campus",
+    "alma mater",
+    "seminary",
+)
+# Education operational / buying roles — supporting signal.
+EDUCATION_ROLE_KW = (
+    "dean",
+    "provost",
+    "registrar",
+    "bursar",
+    "residence life",
+    "residential life",
+    "campus services",
+    "auxiliary services",
+    "dining services",
+    "athletics director",
+)
+
+# ── Healthcare signals (org or title) ─────────────────────────────────────
+# JA sells uniforms to hospitals and medical centers (nursing, environmental
+# services, dietary, materials-management and linen staff all wear them).
+HEALTHCARE_KW = (
+    "hospital",
+    "medical center",
+    "medical centre",
+    "health system",
+    "healthcare",
+    "health care",
+    "clinic",
+    "medical group",
+    "physicians",
+    "surgical center",
+    "rehabilitation hospital",
+    "infirmary",
+    "medical college",
+)
+# Healthcare operational / buying roles — supporting signal.
+HEALTHCARE_ROLE_KW = (
+    "chief nursing",
+    "director of nursing",
+    "environmental services",
+    "evs director",
+    "materials management",
+    "central sterile",
+    "dietary services",
+    "linen services",
+    "laundry services",
+)
+
 # ── Junk signals ──────────────────────────────────────────────────────────
 # TLDs overwhelmingly used by cold-outreach / spam in this dataset.
 JUNK_TLDS = {
@@ -137,9 +197,6 @@ JUNK_ORG_KW = (
     "recruiting",
     "staffing",
     "training hub",
-    "academy",
-    "university",
-    "college",
     "church",
     "ministries",
     "for congress",
@@ -223,8 +280,19 @@ def _tld(domain: str) -> str:
 
 def _has_any(text: str, kws) -> Optional[str]:
     t = (text or "").lower()
+    if not t:
+        return None
     for kw in kws:
-        if kw in t:
+        k = kw.strip().lower()
+        if not k:
+            continue
+        # Word-boundary match so a short keyword like 'spa' matches the WORD
+        # spa, not the letters inside 'Spain'/'Pointspark', and 'inn' doesn't
+        # fire inside 'Innovations'. Lookarounds keyed on alphanumerics (not
+        # \b) keep keywords with surrounding spaces/punctuation predictable.
+        # re caches compiled patterns internally, so this stays cheap over the
+        # whole contacts table.
+        if re.search(r"(?<![a-z0-9])" + re.escape(k) + r"(?![a-z0-9])", t):
             return kw
     return None
 
@@ -284,6 +352,66 @@ def relevance(
             "verdict": "relevant",
             "score": 65,
             "reasons": [f"hospitality role: '{rk}'"],
+        }
+
+    # ── POSITIVE: education vertical (universities / colleges) ──
+    # The .edu TLD (and academic ccTLD variants) is reserved for accredited
+    # institutions — a very high-precision signal on its own.
+    # The .edu rule excludes marketing/blast subdomains (messages.brown.edu),
+    # which are newsletter streams, not people.
+    _is_edu_dom = bool(re.search(r"\.edu(\.[a-z]{2})?$", domain)) or domain.endswith(".ac.uk")
+    _bulk_edu_head = domain.split(".")[0] in {
+        "mail",
+        "email",
+        "e",
+        "m",
+        "messages",
+        "message",
+        "news",
+        "newsletter",
+        "marketing",
+        "mktg",
+        "info",
+        "comms",
+        "alerts",
+        "notifications",
+        "notify",
+    }
+    if _is_edu_dom and not _bulk_edu_head:
+        return {
+            "verdict": "relevant",
+            "score": 85,
+            "reasons": ["education domain (.edu)"],
+        }
+    ek = _has_any(org, EDUCATION_KW) or _has_any(title or "", EDUCATION_KW)
+    if ek and domain not in PERSONAL_DOMAINS:
+        return {
+            "verdict": "relevant",
+            "score": 78,
+            "reasons": [f"education keyword: '{ek}'"],
+        }
+    erk = _has_any(title or "", EDUCATION_ROLE_KW)
+    if erk and domain not in PERSONAL_DOMAINS:
+        return {
+            "verdict": "relevant",
+            "score": 63,
+            "reasons": [f"education role: '{erk}'"],
+        }
+
+    # ── POSITIVE: healthcare vertical (hospitals / medical centers) ──
+    hck = _has_any(org, HEALTHCARE_KW) or _has_any(title or "", HEALTHCARE_KW)
+    if hck and domain not in PERSONAL_DOMAINS:
+        return {
+            "verdict": "relevant",
+            "score": 78,
+            "reasons": [f"healthcare keyword: '{hck}'"],
+        }
+    hcrk = _has_any(title or "", HEALTHCARE_ROLE_KW)
+    if hcrk and domain not in PERSONAL_DOMAINS:
+        return {
+            "verdict": "relevant",
+            "score": 63,
+            "reasons": [f"healthcare role: '{hcrk}'"],
         }
 
     # ── NEGATIVE: junk signals ──
@@ -387,11 +515,7 @@ def assess(
     rel = relevance(org, title, email, known_hotel_domains)
 
     has_name = bool(
-        (
-            contact.get("first_name")
-            or contact.get("last_name")
-            or contact.get("display_name")
-        )
+        (contact.get("first_name") or contact.get("last_name") or contact.get("display_name"))
     )
     parsed = parse_name_from_email(email) if not has_name else None
     role_hint = infer_role_from_email(email) if not (title or "").strip() else None
