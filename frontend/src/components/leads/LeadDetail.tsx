@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useLead, useContacts, useApproveLead, useRejectLead, useRestoreLead, useDeleteLead, useEnrichLead, useSmartFill, invalidateLeadEverywhere } from '@/hooks/useLeads'
 import RevenuePotential from './RevenuePotential'
+import HotelCoverageCard from '@/components/contacts/HotelCoverageCard'
 import EnrichProgress from './EnrichProgress'
 import SmartFillProgress from './SmartFillProgress'
 import ConfirmDialog from '../ui/ConfirmDialog'
@@ -211,6 +212,7 @@ export default function LeadDetail({ leadId, tab, onClose }: Props) {
       {/* ═══ TAB CONTENT — scrollable ═══ */}
       <div className="flex-1 overflow-y-auto p-5">
         {activeTab === 'overview'  && <OverviewTab lead={lead} leadId={leadId} contactList={contactList} onEnrich={() => setEnrichingLeadId(leadId)} enriching={enrichingLive} onSmartFill={(mode: 'smart' | 'full') => { setSmartFillMode(mode); setSmartFillLeadId(leadId); }} smartFilling={smartFillLive !== null} smartFillResult={smartFillMut.data} enrichingLive={enrichingLive} onEnrichComplete={() => setEnrichingLeadId(null)} smartFillLive={smartFillLive} onSmartFillComplete={() => setSmartFillLeadId(null)} />}
+        {activeTab === 'contacts'  && <HotelCoverageCard accountType="potential_lead" accountId={leadId} />}
         {activeTab === 'contacts'  && <ContactsTab contacts={contactList} loading={contactsLoading} leadId={leadId} onEnrich={() => setEnrichingLeadId(leadId)} enriching={enrichingLive} enrichingLive={enrichingLive} onEnrichComplete={() => setEnrichingLeadId(null)} />}
         {activeTab === 'edit'      && <EditTab lead={lead} leadId={leadId} />}
         {activeTab === 'sources'   && <SourcesTab lead={lead} />}

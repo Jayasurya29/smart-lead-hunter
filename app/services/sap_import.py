@@ -194,29 +194,32 @@ def _parse_row(row: dict, column_map: dict, batch_id: str) -> dict:
         value = str(raw).strip() if raw is not None else ""
         mapped[model_field] = value
 
-    # Parse numeric fields
-    mapped["revenue_current_year"] = _parse_float(
-        mapped.get("revenue_current_year", "0")
-    )
-    mapped["revenue_last_year"] = _parse_float(mapped.get("revenue_last_year", "0"))
-    mapped["revenue_lifetime"] = _parse_float(mapped.get("revenue_lifetime", "0"))
-    mapped["total_invoices"] = _parse_int(mapped.get("total_invoices", "0")) or 0
-    mapped["days_since_last_order"] = _parse_int(
-        mapped.get("days_since_last_order", "")
-    )
+    # Parse numeric fields — guard each so a PARTIAL import never overwrites
+    # existing revenue/order data with zeros. Only touch a column that the
+    # source file actually carries (absent column => key omitted => upsert
+    # leaves the stored value untouched).
+    present_fields = set(column_map.values())
+    if "revenue_current_year" in present_fields:
+        mapped["revenue_current_year"] = _parse_float(mapped.get("revenue_current_year", "0"))
+    if "revenue_last_year" in present_fields:
+        mapped["revenue_last_year"] = _parse_float(mapped.get("revenue_last_year", "0"))
+    if "revenue_lifetime" in present_fields:
+        mapped["revenue_lifetime"] = _parse_float(mapped.get("revenue_lifetime", "0"))
+    if "total_invoices" in present_fields:
+        mapped["total_invoices"] = _parse_int(mapped.get("total_invoices", "0")) or 0
+    if "days_since_last_order" in present_fields:
+        mapped["days_since_last_order"] = _parse_int(mapped.get("days_since_last_order", ""))
 
-    # Normalize name
-    mapped["customer_name_normalized"] = _normalize_name(
-        mapped.get("customer_name", "")
-    )
-
-    # Auto-classify
-    ctype, is_hotel = _classify_customer(
-        mapped.get("customer_name", ""),
-        mapped.get("customer_group", ""),
-    )
-    mapped["customer_type"] = ctype
-    mapped["is_hotel"] = is_hotel
+    # Normalize + classify — only when the source file carries the name, so a
+    # partial import can't blank out normalized name / customer_type / is_hotel.
+    if "customer_name" in present_fields:
+        mapped["customer_name_normalized"] = _normalize_name(mapped.get("customer_name", ""))
+        ctype, is_hotel = _classify_customer(
+            mapped.get("customer_name", ""),
+            mapped.get("customer_group", ""),
+        )
+        mapped["customer_type"] = ctype
+        mapped["is_hotel"] = is_hotel
 
     mapped["import_batch"] = batch_id
 
@@ -328,9 +331,7 @@ async def import_sap_csv(
 
     # Remap column_map keys to actual header names from the file
     effective_column_map = {
-        headers_lower_to_orig[k]: v
-        for k, v in column_map.items()
-        if k in headers_lower_to_orig
+        headers_lower_to_orig[k]: v for k, v in column_map.items() if k in headers_lower_to_orig
     }
 
     if not effective_column_map:
@@ -366,9 +367,7 @@ async def import_sap_csv(
             for row_data in rows_to_upsert:
                 stmt = pg_insert(SAPClient).values(**row_data)
 
-                update_dict = {
-                    k: v for k, v in row_data.items() if k != "customer_code"
-                }
+                update_dict = {k: v for k, v in row_data.items() if k != "customer_code"}
                 update_dict["last_imported_at"] = datetime.now()
                 update_dict["updated_at"] = datetime.now()
 
@@ -382,9 +381,7 @@ async def import_sap_csv(
             await session.commit()
 
             count_result = await session.execute(
-                select(func.count(SAPClient.id)).where(
-                    SAPClient.import_batch == batch_id
-                )
+                select(func.count(SAPClient.id)).where(SAPClient.import_batch == batch_id)
             )
             new_count = count_result.scalar() or 0
 

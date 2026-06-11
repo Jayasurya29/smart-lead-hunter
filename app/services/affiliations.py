@@ -126,7 +126,17 @@ async def _person_identity(
             (
                 await session.execute(
                     text(
-                        "SELECT name, email, title, organization, is_saved FROM lead_contacts WHERE id = :id"
+                        "SELECT lc.name, lc.email, lc.title, lc.organization, "
+                        "lc.person_id AS pgroup, "
+                        "(lc.is_saved OR EXISTS ("
+                        "  SELECT 1 FROM lead_contacts s "
+                        "  WHERE s.is_saved = TRUE AND s.id <> lc.id AND ("
+                        "    (lc.person_id IS NOT NULL AND s.person_id = lc.person_id) "
+                        "    OR (lc.email IS NOT NULL AND lc.email <> '' "
+                        "        AND lower(s.email) = lower(lc.email))"
+                        "  )"
+                        ")) AS is_saved "
+                        "FROM lead_contacts lc WHERE lc.id = :id"
                     ),
                     {"id": person_id},
                 )
@@ -139,6 +149,7 @@ async def _person_identity(
         return {
             "person_type": "lead_contact",
             "person_id": person_id,
+            "_pgroup": r["pgroup"],
             "name": r["name"],
             "title": r["title"],
             "organization": r["organization"],
@@ -280,6 +291,17 @@ async def get_affiliations_for_person(
     }
 
 
+def _rep_rank(p: dict) -> tuple:
+    """Pick the richest row as a person's single coverage representative."""
+    return (
+        1 if (p.get("email") or "").strip() else 0,
+        1 if (p.get("title") or "").strip() else 0,
+        1 if p.get("is_saved") else 0,
+        1 if p.get("is_decision_maker") else 0,
+        -(p.get("person_id") or 0),
+    )
+
+
 async def get_coverage_for_account(
     session: AsyncSession, account_type: str, account_id: int
 ) -> dict[str, Any]:
@@ -331,11 +353,62 @@ async def get_coverage_for_account(
                 {"via": "management_company", "relationship": "covers", "scope": "portfolio"},
             )
 
+    # People already in THIS account's own direct contact list — the hotel
+    # page renders them separately, so coverage must not duplicate them (matches
+    # the card's "distinct from directly-linked contacts" contract). Match by
+    # email and by resolved person_id group.
+    _direct_col = "existing_hotel_id" if account_type == "existing_hotel" else "lead_id"
+    _direct_rows = (
+        (
+            await session.execute(
+                text(
+                    f"SELECT lower(email) AS email, person_id, "
+                    f"lower(trim(name)) AS name "
+                    f"FROM lead_contacts WHERE {_direct_col} = :aid"
+                ),
+                {"aid": account_id},
+            )
+        )
+        .mappings()
+        .all()
+    )
+    _direct_emails = {r["email"] for r in _direct_rows if r["email"]}
+    _direct_groups = {r["person_id"] for r in _direct_rows if r["person_id"] is not None}
+    _direct_names = {r["name"] for r in _direct_rows if r["name"]}
+
     resolved: list[dict] = []
     for (pt, pid), meta in people.items():
         info = await _person_identity(session, pt, pid)
-        if info:
-            resolved.append({**info, **meta})
+        if not info:
+            continue
+        _pg = info.get("_pgroup")
+        _em = (info.get("email") or "").lower()
+        _nm = (info.get("name") or "").strip().lower()
+        if _em and _em in _direct_emails:
+            continue
+        if _pg is not None and _pg in _direct_groups:
+            continue
+        # last-resort: same person split across unmerged rows (different email,
+        # no shared id) — safe here because it's scoped to ONE hotel's contacts.
+        if _nm and _nm in _direct_names:
+            continue
+        resolved.append({**info, **meta})
+
+    # Collapse rows that are the SAME person (shared person_id grouping key from
+    # the dedup pass) into ONE coverage row, keeping the richest representative.
+    # Inbox contacts have no grouping key, so they're unaffected.
+    _best: dict[tuple, dict] = {}
+    for p in resolved:
+        if p.get("person_type") == "lead_contact":
+            key = ("lead_contact", p.get("_pgroup") or p.get("person_id"))
+        else:
+            key = (p.get("person_type"), p.get("person_id"))
+        cur = _best.get(key)
+        if cur is None or _rep_rank(p) > _rep_rank(cur):
+            _best[key] = p
+    resolved = list(_best.values())
+    for p in resolved:
+        p.pop("_pgroup", None)
 
     # decision-makers and portfolio (mgmt-co) buyers surface first
     resolved.sort(
