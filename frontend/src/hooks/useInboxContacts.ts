@@ -42,7 +42,7 @@ export function useAllInboxContacts(orderBy = 'priority_score') {
     queryFn: async () => {
       const per_page = 500
       const first = await fetchInboxContacts({ page: 1, per_page, order_by: orderBy })
-      const pages = Math.min(first.pages || 1, 40) // safety cap ~20k
+      const pages = Math.min(first.pages || 1, 80) // safety cap ~40k (post-2025 backfill)
       const items = [...first.items]
       if (pages > 1) {
         const rest = await Promise.all(
@@ -71,7 +71,7 @@ export function useAllLeadContacts() {
     queryFn: async () => {
       const per_page = 500
       const first = await fetchLeadContacts(1, per_page)
-      const pages = Math.min(first.pages || 1, 40) // safety cap ~20k
+      const pages = Math.min(first.pages || 1, 80) // safety cap ~40k (lead rows)
       const items = [...first.items]
       if (pages > 1) {
         const rest = await Promise.all(

@@ -93,6 +93,31 @@ async def backfill_one(mailbox: str, days: int) -> dict:
     return stats
 
 
+async def _filter_done(mailboxes: list, hours: float) -> list:
+    """Resume helper: drop mailboxes whose last sync succeeded within the
+    window AND actually scanned messages — so a crashed --all run can be
+    re-launched with the same flags and continue where it stopped."""
+    from sqlalchemy import text
+
+    sql = text(
+        "SELECT mailbox FROM mailbox_sync_state "
+        "WHERE last_run_status = 'success' "
+        "AND last_synced_at >= NOW() - (:h * INTERVAL '1 hour') "
+        "AND COALESCE(last_run_messages_scanned, 0) > 0"
+    )
+    async with async_session() as session:
+        rows = (await session.execute(sql, {"h": float(hours)})).scalars().all()
+    done = {(r or "").lower() for r in rows}
+    kept = [m for m in mailboxes if m.lower() not in done]
+    skipped = len(mailboxes) - len(kept)
+    if skipped:
+        logger.info(
+            f"Resume: skipping {skipped} mailbox(es) already synced "
+            f"successfully within the last {hours:g}h"
+        )
+    return kept
+
+
 async def main():
     parser = argparse.ArgumentParser(
         description="Backfill Gmail contacts from JA Uniforms mailboxes"
@@ -124,6 +149,38 @@ async def main():
         action="store_true",
         help="Skip confirmation prompt for --all",
     )
+    parser.add_argument(
+        "--only",
+        type=str,
+        default="",
+        help="Comma-separated mailboxes to include (with --all)",
+    )
+    parser.add_argument(
+        "--exclude",
+        type=str,
+        default="",
+        help="Comma-separated mailboxes to skip (with --all)",
+    )
+    parser.add_argument(
+        "--skip-done-hours",
+        type=float,
+        default=0,
+        help=(
+            "Resume mode (with --all): skip mailboxes whose last sync "
+            "succeeded within this many hours and scanned >0 messages. "
+            "Re-launch a crashed run with the same value to continue "
+            "where it stopped."
+        ),
+    )
+    parser.add_argument(
+        "--classify",
+        action="store_true",
+        help=(
+            "After the backfill, run tier-1 classification over still-"
+            "uncategorized contacts (the Celery sync->classify chain only "
+            "fires on scheduled syncs, not on this manual script)"
+        ),
+    )
 
     args = parser.parse_args()
 
@@ -151,6 +208,17 @@ async def main():
     # ── All mailboxes ──
     if args.all:
         mailboxes = list_active_mailboxes()
+        only = {m.strip().lower() for m in args.only.split(",") if m.strip()}
+        excl = {m.strip().lower() for m in args.exclude.split(",") if m.strip()}
+        if only:
+            mailboxes = [m for m in mailboxes if m.lower() in only]
+        if excl:
+            mailboxes = [m for m in mailboxes if m.lower() not in excl]
+        if args.skip_done_hours and args.skip_done_hours > 0:
+            mailboxes = await _filter_done(mailboxes, args.skip_done_hours)
+        if not mailboxes:
+            print("\nNothing to do — every mailbox is filtered out or already synced.")
+            return
         print(f"\nWill backfill {len(mailboxes)} mailboxes, {args.days} days each:")
         for mb in mailboxes:
             print(f"  {mb}")
@@ -197,6 +265,17 @@ async def main():
         print(f"   New contacts:     {totals['new_contacts']}")
         print(f"   Updated:          {totals['updated_contacts']}")
         print(f"   Errors:           {totals['errors']}")
+
+        if args.classify:
+            print("\nClassifying newly ingested contacts (tier-1, only-unknown)...")
+            from app.services.contact_tier1_enrichment import run_tier1
+
+            summary = await run_tier1(only_unknown=True)
+            print(
+                f"   Classification: scanned={summary.get('scanned', 0)} "
+                f"enriched={summary.get('enriched', 0)} "
+                f"{summary.get('by_category', summary.get('note', ''))}"
+            )
 
 
 if __name__ == "__main__":

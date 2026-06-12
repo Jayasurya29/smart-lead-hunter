@@ -286,33 +286,6 @@ function LeadFindEmailBtn({ contact }: { contact: UnifiedContact }) {
     </button>
   )
 }
-
-/** Kick tier-1 classification over still-uncategorized contacts (2026-06-11).
- *  Shown only while the Uncategorized facet is active — closes the loop after
- *  a big backfill instead of just exposing the backlog. Fire-and-forget: the
- *  Celery task runs in the background and the stats refresh on the normal
- *  30s poll, so counts drain visibly. */
-function ClassifyNowBtn({ count }: { count?: number }) {
-  const [state, setState] = useState<'idle' | 'busy' | 'done' | 'err'>('idle')
-  async function run() {
-    if (state === 'busy' || state === 'done') return
-    setState('busy')
-    try {
-      const r = await fetch('/api/inbox-contacts/classify', {
-        method: 'POST',
-        headers: { 'X-Requested-With': 'XMLHttpRequest' },
-      })
-      setState(r.ok ? 'done' : 'err')
-    } catch { setState('err') }
-  }
-  return (
-    <button onClick={run} disabled={state === 'busy' || state === 'done'}
-      className="inline-flex items-center gap-1.5 h-7 px-2.5 rounded-lg text-[12px] font-semibold bg-navy-600 text-white hover:bg-navy-700 disabled:opacity-60 transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-navy-500">
-      {state === 'busy' ? <Loader2 className="w-3 h-3 animate-spin" /> : <Sparkles className="w-3 h-3" />}
-      {state === 'done' ? 'Classifying in background…' : state === 'err' ? 'Failed — retry' : `Classify ${count ? count.toLocaleString() : 'these'} now`}
-    </button>
-  )
-}
 /** Backend stores confidence as 0–1; surface a 0–100 integer. */
 function confidencePct(c: InboxContact): number {
   const v = c.confidence ?? c.enrichment_confidence ?? 0
@@ -434,12 +407,11 @@ function CategoryBadge({ category }: { category: string | null }) {
 
 function Avatar({ contact, size = 40, showPip = true }: { contact: InboxContact; size?: number; showPip?: boolean }) {
   return (
-    <div role="img" aria-label={contact.contact_category ? `${fullName(contact)} — ${contact.contact_category}` : fullName(contact)}
-      className="relative flex-shrink-0 rounded-full flex items-center justify-center text-white font-bold select-none"
+    <div className="relative flex-shrink-0 rounded-full flex items-center justify-center text-white font-bold select-none"
       style={{ width: size, height: size, fontSize: size * 0.36, background: avatarGradient(contact.contact_category), boxShadow: '0 2px 6px rgba(15,29,50,.18), inset 0 1px 0 rgba(255,255,255,.25)' }}>
-      <span aria-hidden="true">{initials(contact)}</span>
+      {initials(contact)}
       {showPip && contact.is_decision_maker && (
-        <span role="img" aria-label="Likely decision-maker" title="Likely decision-maker" className="absolute -bottom-0.5 -right-0.5 w-[18px] h-[18px] rounded-full bg-gold-400 ring-2 ring-white flex items-center justify-center">
+        <span title="Likely decision-maker" className="absolute -bottom-0.5 -right-0.5 w-[18px] h-[18px] rounded-full bg-gold-400 ring-2 ring-white flex items-center justify-center">
           <Star className="w-2.5 h-2.5 text-white" fill="white" strokeWidth={0} />
         </span>
       )}
@@ -484,52 +456,28 @@ function Facet({ icon: Ic, label, value, options, onChange, align }: {
   align?: 'right'
 }) {
   const [open, setOpen] = useState(false)
-  // a11y (2026-06-11): Esc closes and returns focus to the trigger; Arrow
-  // keys cycle the options; proper popup semantics for screen readers.
-  const btnRef = useRef<HTMLButtonElement | null>(null)
-  const menuRef = useRef<HTMLDivElement | null>(null)
   const cur = options.find((o) => o.v === value) || options[0]
   const isAll = value == null || value === 'all' || value === ''
-  function close(refocus = true) {
-    setOpen(false)
-    if (refocus) btnRef.current?.focus()
-  }
   return (
     <div className="relative">
-      <button ref={btnRef} aria-haspopup="listbox" aria-expanded={open}
-        onClick={() => setOpen((o) => !o)}
-        onKeyDown={(e) => { if (e.key === 'Escape' && open) { e.stopPropagation(); close() } }}
+      <button onClick={() => setOpen((o) => !o)}
         className={cn('inline-flex items-center gap-1.5 h-9 px-3 rounded-lg text-[13px] font-medium transition-colors',
-          'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-navy-500',
           isAll ? 'text-stone-500 hover:bg-stone-100' : 'text-navy-800 bg-navy-50 ring-1 ring-navy-100 font-semibold')}>
         {Ic && <Ic className={cn('w-3.5 h-3.5', isAll ? 'text-stone-400' : 'text-navy-500')} />}
         <span>{isAll ? label : cur.label}</span>
-        <ChevronDown aria-hidden="true" className="w-3.5 h-3.5 opacity-40" />
+        <ChevronDown className="w-3.5 h-3.5 opacity-40" />
       </button>
       {open && (
         <>
-          <div className="fixed inset-0 z-40" onClick={() => close(false)} />
-          <div ref={menuRef} role="listbox" aria-label={label}
-            onKeyDown={(e) => {
-              if (e.key === 'Escape') { e.stopPropagation(); close(); return }
-              if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return
-              e.preventDefault()
-              const opts = Array.from(menuRef.current?.querySelectorAll<HTMLButtonElement>('button[data-opt]') || [])
-              if (!opts.length) return
-              const i = opts.indexOf(document.activeElement as HTMLButtonElement)
-              const next = e.key === 'ArrowDown' ? opts[(i + 1) % opts.length] : opts[(i - 1 + opts.length) % opts.length]
-              next?.focus()
-            }}
-            className={cn('absolute z-50 mt-1.5 min-w-[200px] bg-white rounded-xl shadow-lift ring-1 ring-stone-200/80 p-1.5', align === 'right' ? 'right-0' : 'left-0')}>
+          <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
+          <div className={cn('absolute z-50 mt-1.5 min-w-[200px] bg-white rounded-xl shadow-lift ring-1 ring-stone-200/80 p-1.5', align === 'right' ? 'right-0' : 'left-0')}>
             {options.map((o) => (
-              <button key={o.v} data-opt role="option" aria-selected={o.v === value}
-                onClick={() => { onChange(o.v); close() }}
+              <button key={o.v} onClick={() => { onChange(o.v); setOpen(false) }}
                 className={cn('w-full flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-[13px] text-left transition-colors',
-                  'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-navy-500',
                   o.v === value ? 'bg-stone-50 font-semibold text-navy-900' : 'text-stone-600 hover:bg-stone-50')}>
                 {o.icon ? <o.icon className="w-4 h-4 text-stone-400 flex-shrink-0" /> : o.dot ? <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: o.dot }} /> : null}
                 <span className="flex-1">{o.label}</span>
-                {o.count != null && <span className="text-[11px] tabular-nums text-stone-500">{o.count}</span>}
+                {o.count != null && <span className="text-[11px] tabular-nums text-stone-400">{o.count}</span>}
                 {o.v === value && <Check className="w-4 h-4" style={{ color: 'var(--accent, #2e4a6e)' }} />}
               </button>
             ))}
@@ -554,39 +502,6 @@ function Facet({ icon: Ic, label, value, options, onChange, align }: {
 const COMPANY_ALIASES: Record<string, string> = {
   'blue diamond resorts': 'Royalton Hotels & Resorts',
 }
-
-// Decoration that should NOT split one real account into several groups.
-// Leading article, trailing legal/suffix words, and "& Co"-style tails are
-// stripped for the GROUPING KEY only -- the displayed name keeps its original
-// spelling. Deliberately conservative: removes boilerplate, never reorders
-// words or fuzzy-matches, so "Hotel California" and "California Hotel" stay
-// distinct (different word order = different account).
-const _LEADING_THE = /^the\s+/i
-const _ACCOUNT_SUFFIX = new RegExp(
-  '\\s+(?:&\\s*co|and\\s+co|co|company|inc|incorporated|llc|l\\.l\\.c|ltd|limited|' +
-  'corp|corporation|group|holdings|management|mgmt|hospitality|properties|' +
-  'enterprises|international|intl)\\.?$',
-  'i',
-)
-
-/** Aggressively-normalized grouping key (never shown to the user). */
-function accountKey<T extends string | null | undefined>(name: T): string {
-  if (!name) return 'No organization'
-  let s = String(name).trim().toLowerCase()
-  s = COMPANY_ALIASES[s] ? COMPANY_ALIASES[s].toLowerCase() : s
-  s = s.replace(_LEADING_THE, '')
-  let prev = ''
-  while (prev !== s) {
-    prev = s
-    s = s.replace(_ACCOUNT_SUFFIX, '').trim()
-  }
-  s = s.replace(/\s+(?:&|and)\s+(?:resorts?|suites?|spa|spas|villas?|residences?|hotels?|clubs?)$/i, '').trim()
-  s = s.replace(/[.,'"&]+/g, ' ').replace(/\s+/g, ' ').trim()
-  s = s.replace(/\b(hotels|resorts|suites|inns|villas|clubs)\b/g, (m) => m.slice(0, -1))
-  return s || 'No organization'
-}
-
-/** Display name: alias-mapped original spelling (keeps "The", "Hotels", case). */
 function canonCompany<T extends string | null | undefined>(name: T): T | string {
   if (!name) return name
   return COMPANY_ALIASES[name.trim().toLowerCase()] || name
@@ -629,19 +544,14 @@ function DirRow({
 }) {
   const isLead = sourceOf(contact) === 'lead_generator'
   return (
-    <div onClick={onOpen} role="button" tabIndex={0}
-      aria-label={`Open ${fullName(contact)}`}
-      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onOpen() } }}
+    <div onClick={onOpen}
       className={cn('group flex items-center gap-3 pl-3 pr-4 py-2.5 rounded-xl cursor-pointer transition-colors',
-        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-navy-500',
         selected ? 'bg-white shadow-card ring-1 ring-navy-100' : 'hover:bg-white')}>
       {isLead ? (
         <span className="w-4 flex-shrink-0" />
       ) : (
         <button onClick={(e) => { e.stopPropagation(); onToggleCheck() }}
-          role="checkbox" aria-checked={checked} aria-label={`Select ${fullName(contact)}`}
-          className={cn('flex-shrink-0 transition-opacity', checked || selectMode ? 'opacity-100' : 'opacity-0 group-hover:opacity-100',
-            'focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-navy-500 rounded')}>
+          className={cn('flex-shrink-0 transition-opacity', checked || selectMode ? 'opacity-100' : 'opacity-0 group-hover:opacity-100')}>
           {checked ? <CheckSquare className="w-4 h-4 text-navy-600" /> : <Square className="w-4 h-4 text-stone-300" />}
         </button>
       )}
@@ -666,7 +576,7 @@ function DirRow({
       <div className="min-w-0 flex-1 hidden md:block">
         {contact.email
           ? <a href={`mailto:${contact.email}`} onClick={(e) => e.stopPropagation()} className="truncate block text-[13px] text-navy-600 hover:text-navy-800 hover:underline font-medium">{contact.email}</a>
-          : <span className="text-[12px] text-stone-500 italic">no email yet</span>}
+          : <span className="text-[12px] text-stone-400 italic">no email yet</span>}
       </div>
       {/* quick actions — appear on hover, act without opening the drawer */}
       <div className="hidden lg:flex items-center gap-1 flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
@@ -680,12 +590,6 @@ function DirRow({
           ? <button onClick={(e) => { e.stopPropagation(); onOpenOrg?.(contact.organization!) }} title={`See everyone at ${contact.organization}`}
               className="hidden sm:block w-[200px] text-right truncate text-[12px] font-semibold text-navy-700 hover:text-navy-900 hover:underline">{contact.organization}</button>
           : <span className="hidden sm:block w-[200px]" />}
-        {!isLead && contact.interaction_count > 0 && (
-          <span className="hidden lg:inline-flex items-center gap-1 text-[11px] tabular-nums text-stone-500 whitespace-nowrap"
-            title={`${contact.interaction_count} email${contact.interaction_count > 1 ? 's' : ''} exchanged — relationship warmth`}>
-            <Activity className="w-3 h-3 text-stone-400" aria-hidden="true" />{contact.interaction_count}
-          </span>
-        )}
         <span className="w-12 text-right text-[11px] text-stone-500 whitespace-nowrap hidden xl:block">{isLead && contact.interaction_count === 0 ? 'new' : relativeDate(contact.last_seen)}</span>
         <ChevronRight className="w-4 h-4 text-stone-300 group-hover:text-navy-400 transition-colors" />
       </div>
@@ -726,10 +630,7 @@ function DirGroup({
   const isVendor = !!intel?.vendor
   return (
     <div className="mb-2" data-org={org}>
-      <div onClick={onToggle} role="button" tabIndex={0} aria-expanded={expanded}
-        aria-label={`${expanded ? 'Collapse' : 'Expand'} ${org}`}
-        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onToggle() } }}
-        className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl hover:bg-white transition-colors cursor-pointer sticky top-0 z-10 bg-stone-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-navy-500">
+      <div onClick={onToggle} className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl hover:bg-white transition-colors cursor-pointer">
         <ChevronRight className="w-3.5 h-3.5 text-stone-300 flex-shrink-0" style={{ transform: expanded ? 'rotate(90deg)' : 'none', transition: 'transform .18s ease' }} />
         <button
           onClick={(e) => { if (!canIntel) return; e.stopPropagation(); onOpenAccount!(org) }}
@@ -1353,12 +1254,6 @@ export default function ContactsPage() {
   const [focused, setFocused] = useState(false)
   const [view, setView] = useState<'accounts' | 'people'>('accounts')
   const [collapsedOrgs, setCollapsedOrgs] = useState<Set<string>>(new Set())
-  // Secondary filters (Source / Account / Stage / Status) live behind a
-  // "More filters" toggle (2026-06-11) — keeps the primary row calm at
-  // four daily lenses. Auto-opens whenever one of them is active (incl.
-  // via back/forward navigation) so an applied filter is never invisible.
-  const [moreOpen, setMoreOpen] = useState<boolean>(() => !!(source || account || lifecycle || status))
-  useEffect(() => { if (source || account || lifecycle || status) setMoreOpen(true) }, [source, account, lifecycle, status])
 
   // search box is debounced — typing updates `draft` instantly, the actual
   // filter (URL `q`) follows 180ms after the user pauses. Keeps keystrokes
@@ -1449,44 +1344,14 @@ export default function ContactsPage() {
     const leads = leadRaw
       .filter((c) => !c.email || !matchedEmails.has(c.email.toLowerCase()))
       .map((c) => ({ ...c, id: c.id + LEAD_ID_OFFSET }))
-    // Canonicalize known rebrands AND spelling/suffix variants so the old/new
-    // operator name and "The X" / "X Inc" / "X Hotels" vs "X Hotel" all group
-    // under one account header. Pick ONE display name per normalized account
-    // key (most common spelling wins), then rewrite every row's org to it.
-    // Display/grouping only -- never stored data.
-    const _raw = [...inbox, ...leads]
-    const _pickDisplay = (field: 'organization' | 'management_company' | 'parent_company') => {
-      const byKey = new Map<string, Map<string, number>>()
-      for (const c of _raw) {
-        const v = c[field]
-        if (!v) continue
-        const k = accountKey(canonCompany(v) as string)
-        if (k === 'No organization') continue
-        if (!byKey.has(k)) byKey.set(k, new Map())
-        const cnt = byKey.get(k)!
-        const disp = canonCompany(v) as string
-        cnt.set(disp, (cnt.get(disp) || 0) + 1)
-      }
-      const chosen = new Map<string, string>()
-      for (const [k, cnts] of byKey) {
-        const best = [...cnts.entries()].sort((a, b) =>
-          b[1] - a[1] || a[0].length - b[0].length || a[0].localeCompare(b[0]))[0][0]
-        chosen.set(k, best)
-      }
-      return (v: string | null | undefined) => {
-        if (!v) return v as string | null | undefined
-        const k = accountKey(canonCompany(v) as string)
-        return chosen.get(k) || (canonCompany(v) as string)
-      }
-    }
-    const _canonOrg = _pickDisplay('organization')
-    const _canonMgmt = _pickDisplay('management_company')
-    const _canonParent = _pickDisplay('parent_company')
-    const merged = _raw.map((c) => ({
+    // Canonicalize known company rebrands (display-only) so the old and new
+    // operator name group under one account header. Touches the name fields
+    // that drive grouping / family-nesting / display — not stored data.
+    const merged = [...inbox, ...leads].map((c) => ({
       ...c,
-      organization: _canonOrg(c.organization),
-      management_company: _canonMgmt(c.management_company),
-      parent_company: _canonParent(c.parent_company),
+      organization: canonCompany(c.organization),
+      management_company: canonCompany(c.management_company),
+      parent_company: canonCompany(c.parent_company),
     }))
     // Junk costs ZERO everywhere (2026-06-04): excluded from header counts,
     // account groups, warmth math and search. Rows stay in the DB only for
@@ -1719,7 +1584,6 @@ export default function ContactsPage() {
   const hotelGroups = groups.filter(([, m]) => accountTypeOf(m[0]) === 'hotel').length
   const mgmtGroups = groups.filter(([, m]) => accountTypeOf(m[0]) === 'management_company').length
   const anyFilter = !!source || !!account || !!lifecycle || !!category || dmOnly || !!status || !!vertical || !!priority
-  const moreActive = [source, account, lifecycle, status].filter(Boolean).length
   function resetAll() { patch({ source: null, account: null, stage: null, category: null, dm: null, status: null, vertical: null, priority: null }) }
 
   const activeContact = items.find((c) => c.id === selectedId) || null
@@ -1749,20 +1613,6 @@ export default function ContactsPage() {
 
   // drawer shows EITHER a contact profile OR an account's triangulation panel
   const [accountOrg, setAccountOrg] = useState<string | null>(null)
-  // a11y (2026-06-11): remember what had focus before the drawer opened,
-  // move focus to its Close button, and give focus back on close — keyboard
-  // users were stranded in the list when the drawer slid in.
-  const lastFocusRef = useRef<HTMLElement | null>(null)
-  const drawerCloseRef = useRef<HTMLButtonElement | null>(null)
-  useEffect(() => {
-    if (drawerOpen) {
-      lastFocusRef.current = document.activeElement as HTMLElement | null
-      window.setTimeout(() => drawerCloseRef.current?.focus(), 50)
-    } else if (lastFocusRef.current) {
-      lastFocusRef.current.focus?.()
-      lastFocusRef.current = null
-    }
-  }, [drawerOpen])
   function openContact(id: number) { setAccountOrg(null); patch({ selected: String(id) }); setDrawerOpen(true) }
   function openAccount(org: string) { patch({ selected: null }); setAccountOrg(org); setDrawerOpen(true) }
   function closeDrawer() { setDrawerOpen(false); setAccountOrg(null) }
@@ -1874,6 +1724,21 @@ export default function ContactsPage() {
 
         {/* ONE filter row — every control is the same quiet facet */}
         <div className="flex-shrink-0 px-8 pb-3 flex items-center gap-1 flex-wrap">
+          <Facet icon={Layers} label="Source" value={source || 'all'} onChange={(v) => patch({ source: v === 'all' ? null : v })} options={[
+            { v: 'all', label: 'All sources' },
+            { v: 'email_scrape', label: 'Email scraped', icon: Inbox, count: scope.emailScrape },
+            { v: 'lead_generator', label: 'Lead generator', icon: Radar, count: scope.leadGen },
+          ]} />
+          <Facet icon={Building2} label="Account" value={account || 'all'} onChange={(v) => patch({ account: v === 'all' ? null : v })} options={[
+            { v: 'all', label: 'All accounts' },
+            { v: 'hotel', label: 'Hotels', icon: Building2, count: scope.hotels },
+            { v: 'management_company', label: 'Management companies', icon: Briefcase, count: scope.mgmtCos },
+          ]} />
+          <Facet label="Stage" value={lifecycle || 'all'} onChange={(v) => patch({ stage: v === 'all' ? null : v })} options={[
+            { v: 'all', label: 'Any stage' },
+            { v: 'potential', label: 'Potential', dot: '#c49a3c', count: scope.potential },
+            { v: 'existing', label: 'Existing', dot: '#1a7a55', count: scope.existing },
+          ]} />
           <Facet label="Category" value={category || 'all'} onChange={(v) => patch({ category: v === 'all' ? null : v, dm: null })} options={[
             { v: 'all', label: 'Any category' },
             { v: 'buyer', label: 'Buyers', dot: '#1a7a55', count: stats?.buyer },
@@ -1901,21 +1766,19 @@ export default function ContactsPage() {
             { v: 'P4', label: 'P4', count: stats?.p4 },
             { v: 'P_unknown', label: 'No priority yet', count: stats?.p_unknown },
           ]} />
-          <button onClick={() => patch({ dm: dmOnly ? null : '1' })} aria-pressed={dmOnly}
+          <Facet label="Status" value={status || 'all'} onChange={(v) => patch({ status: v === 'all' ? null : v })} options={[
+            { v: 'all', label: 'Any status' },
+            { v: 'pending', label: 'Pending' },
+            { v: 'approved', label: 'Approved' },
+            { v: 'pushed_to_insightly', label: 'In CRM' },
+          ]} />
+          <button onClick={() => patch({ dm: dmOnly ? null : '1' })}
             className={cn('inline-flex items-center gap-1.5 h-9 px-3 rounded-lg text-[13px] font-medium transition-colors',
-              'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-navy-500',
               dmOnly ? 'text-gold-700 bg-gold-50 ring-1 ring-gold-200 font-semibold' : 'text-stone-500 hover:bg-stone-100')}>
-            <span aria-hidden="true" className={dmOnly ? 'text-gold-500' : 'text-stone-400'}>★</span> Decision-makers
-          </button>
-          <button onClick={() => setMoreOpen((o) => !o)} aria-expanded={moreOpen}
-            className={cn('inline-flex items-center gap-1.5 h-9 px-3 rounded-lg text-[13px] font-medium transition-colors',
-              'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-navy-500',
-              moreOpen || moreActive > 0 ? 'text-navy-800 bg-navy-50 ring-1 ring-navy-100 font-semibold' : 'text-stone-500 hover:bg-stone-100')}>
-            <ChevronDown aria-hidden="true" className={cn('w-3.5 h-3.5 transition-transform', moreOpen && 'rotate-180')} />
-            More filters{moreActive > 0 ? ` · ${moreActive}` : ''}
+            <span className={dmOnly ? 'text-gold-500' : 'text-stone-400'}>★</span> Decision-makers
           </button>
           {anyFilter && (
-            <button onClick={resetAll} className="inline-flex items-center gap-1 h-9 px-2.5 rounded-lg text-[12px] font-medium text-stone-500 hover:text-coral-500 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-navy-500">
+            <button onClick={resetAll} className="inline-flex items-center gap-1 h-9 px-2.5 rounded-lg text-[12px] font-medium text-stone-400 hover:text-coral-500 transition-colors">
               <X className="w-3.5 h-3.5" /> Clear
             </button>
           )}
@@ -1937,33 +1800,6 @@ export default function ContactsPage() {
           ]} />
         </div>
 
-        {/* secondary filters — Source / Account / Stage / Status behind "More filters" */}
-        {moreOpen && (
-          <div className="flex-shrink-0 px-8 pb-3 -mt-1 flex items-center gap-1 flex-wrap" role="group" aria-label="More filters">
-            <Facet icon={Layers} label="Source" value={source || 'all'} onChange={(v) => patch({ source: v === 'all' ? null : v })} options={[
-              { v: 'all', label: 'All sources' },
-              { v: 'email_scrape', label: 'Email scraped', icon: Inbox, count: scope.emailScrape },
-              { v: 'lead_generator', label: 'Lead generator', icon: Radar, count: scope.leadGen },
-            ]} />
-            <Facet icon={Building2} label="Account" value={account || 'all'} onChange={(v) => patch({ account: v === 'all' ? null : v })} options={[
-              { v: 'all', label: 'All accounts' },
-              { v: 'hotel', label: 'Hotels', icon: Building2, count: scope.hotels },
-              { v: 'management_company', label: 'Management companies', icon: Briefcase, count: scope.mgmtCos },
-            ]} />
-            <Facet label="Stage" value={lifecycle || 'all'} onChange={(v) => patch({ stage: v === 'all' ? null : v })} options={[
-              { v: 'all', label: 'Any stage' },
-              { v: 'potential', label: 'Potential', dot: '#c49a3c', count: scope.potential },
-              { v: 'existing', label: 'Existing', dot: '#1a7a55', count: scope.existing },
-            ]} />
-            <Facet label="Status" value={status || 'all'} onChange={(v) => patch({ status: v === 'all' ? null : v })} options={[
-              { v: 'all', label: 'Any status' },
-              { v: 'pending', label: 'Pending' },
-              { v: 'approved', label: 'Approved' },
-              { v: 'pushed_to_insightly', label: 'In CRM' },
-            ]} />
-          </div>
-        )}
-
         {/* subtle result line */}
         <div className="flex-shrink-0 px-8 pb-2 text-[12px] text-stone-500">
           {smartActive ? (
@@ -1971,19 +1807,12 @@ export default function ContactsPage() {
           ) : (
             <span>{view === 'accounts' ? `${hotelGroups} hotels · ${mgmtGroups} companies · ${peopleList.length} people` : `${peopleList.length} people`}</span>
           )}
-          {category === 'uncategorized' && (stats?.uncategorized || 0) > 0 && (
-            <span className="ml-3 inline-flex align-middle"><ClassifyNowBtn count={stats?.uncategorized} /></span>
-          )}
         </div>
 
         {/* body */}
         <div className="flex-1 overflow-y-auto px-6 pb-24">
           {listQ.isLoading || leadQ.isLoading ? (
-            <div className="space-y-2 px-1 pt-1 max-w-[1320px] mx-auto" role="status" aria-live="polite">
-              <div className="flex items-center gap-2 px-1 pb-1 text-[12px] text-stone-500">
-                <Loader2 className="w-3.5 h-3.5 animate-spin text-navy-500" aria-hidden="true" />
-                Loading {stats?.total ? `${stats.total.toLocaleString()} contacts` : 'contacts'} — large inboxes can take a few seconds
-              </div>
+            <div className="space-y-2 px-1 pt-1 max-w-[1320px] mx-auto">
               {Array.from({ length: 10 }).map((_, i) => <div key={i} className="h-[60px] rounded-xl bg-stone-100 animate-pulse" />)}
             </div>
           ) : filtered.length === 0 ? (
@@ -1999,7 +1828,7 @@ export default function ContactsPage() {
                   onOpen={() => openContact(c.id)} onToggleCheck={() => toggleCheck(c.id)} onOpenOrg={openOrg} />
               ))}
               {peopleList.length > visiblePeople && (
-                <div ref={moreRef} className="py-4 text-center text-[12px] text-stone-500">
+                <div ref={moreRef} className="py-4 text-center text-[12px] text-stone-400">
                   Showing {visiblePeople.toLocaleString()} of {peopleList.length.toLocaleString()} — scroll for more
                 </div>
               )}
@@ -2056,7 +1885,7 @@ export default function ContactsPage() {
                 return out
               })()}
               {groups.length > visibleGroups && (
-                <div ref={moreRef} className="py-4 text-center text-[12px] text-stone-500">
+                <div ref={moreRef} className="py-4 text-center text-[12px] text-stone-400">
                   Showing {visibleGroups.toLocaleString()} of {groups.length.toLocaleString()} accounts — scroll for more
                 </div>
               )}
@@ -2081,8 +1910,7 @@ export default function ContactsPage() {
       </div>
 
       {/* ════ SLIDE-OVER DRAWER (pushes in beside list; no scrim — list stays usable) ════ */}
-      <div role="complementary" aria-label="Details panel" aria-hidden={!drawerOpen}
-        className={cn('overflow-hidden bg-stone-100', drawerOpen && 'border-l border-stone-200')}>
+      <div className={cn('overflow-hidden bg-stone-100', drawerOpen && 'border-l border-stone-200')}>
         <div className="h-full flex flex-col" style={{ width: 600 }}>
           <div className="flex-shrink-0 h-12 px-2.5 bg-white border-b border-stone-200 flex items-center justify-between">
             <div className="flex items-center gap-0.5 min-w-0">
@@ -2098,8 +1926,7 @@ export default function ContactsPage() {
                 ? <span className="text-[11px] text-stone-400 ml-1.5 font-semibold inline-flex items-center gap-1 truncate"><Building2 className="w-3 h-3 flex-shrink-0" /> Account intelligence</span>
                 : (idx >= 0 && <span className="text-[11px] text-stone-400 ml-1.5 tabular-nums font-semibold">{idx + 1} of {filtered.length}</span>)}
             </div>
-            <button ref={drawerCloseRef} onClick={closeDrawer} aria-label="Close details panel"
-              className="inline-flex items-center gap-1.5 h-8 px-3 rounded-lg text-[12px] font-semibold text-stone-500 hover:bg-stone-100 transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-navy-500">
+            <button onClick={closeDrawer} className="inline-flex items-center gap-1.5 h-8 px-3 rounded-lg text-[12px] font-semibold text-stone-500 hover:bg-stone-100 transition">
               <X className="w-[15px] h-[15px]" /> Close
             </button>
           </div>

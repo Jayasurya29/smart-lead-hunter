@@ -462,6 +462,11 @@ BACKFILL_WINDOW_DAYS = 30
 MAX_EMAILS_PER_WINDOW = 10000
 PHONE_DEFAULT_REGION = "US"
 
+# Capture-completeness knobs (2026-06-11)
+MAX_BODY_MENTIONS_PER_MSG = 15  # cap body-text address harvest per message
+_FETCH_WORKERS = 8  # parallel messages.get threads (~40 quota units/s of 250)
+_FETCH_CHUNK = 200  # prefetch window — bounds memory during big backfills
+
 # Parallel Gemini limits
 _SIG_PARSE_SEMAPHORE = 20  # concurrent sig-parse calls
 _ORG_SPLIT_SEMAPHORE = 10  # concurrent org-split calls
@@ -815,7 +820,33 @@ def _passes_hard_filters(email: str, own_mailbox: str) -> tuple[bool, str]:
     # Cold-outreach spam farms rotate throwaway TLDs — no hotel or operator
     # has ever mailed JA from .info/.help/.click (Phase-3 evidence:
     # composely*.info ×4, tcpr*.info ×3, *.help ×4...).
-    if d.endswith((".info", ".help", ".click")):
+    # Cold-outreach spam farms rotate throwaway TLDs -- no hotel or operator
+    # has ever mailed JA from these. Original evidence was .info/.help/.click;
+    # extended 2026-06-12 after .cfd/.sbs/.xyz/.online/.shop/.live/.site cold-
+    # outreach agencies (meeteoccrew.cfd, *.info lead-gen farms) slipped through.
+    if d.endswith(
+        (
+            ".info",
+            ".help",
+            ".click",
+            ".cfd",
+            ".sbs",
+            ".xyz",
+            ".online",
+            ".shop",
+            ".store",
+            ".site",
+            ".live",
+            ".icu",
+            ".buzz",
+            ".rest",
+            ".monster",
+            ".quest",
+            ".bond",
+            ".cyou",
+            ".top",
+        )
+    ):
         return False, "spam_tld"
     if any(p in local for p in NOREPLY_PATTERNS):
         return False, "noreply"
@@ -1254,6 +1285,170 @@ def _fetch_message(gmail, msg_id: str) -> Optional[dict]:
         return None
 
 
+def _fetch_messages_parallel(
+    mailbox: str,
+    message_ids: list[str],
+    workers: int = None,
+) -> list[Optional[dict]]:
+    """messages.get on a small thread pool — one Gmail client per worker
+    (googleapiclient/httplib2 objects are not thread-safe to share). Order is
+    preserved; failures come back as None, matching _fetch_message. 8 workers
+    is ~40 quota units/s against the 250/s per-user ceiling, so it cannot
+    starve the rest of the pipeline."""
+    if not message_ids:
+        return []
+    import concurrent.futures
+    import threading
+
+    workers = workers or _FETCH_WORKERS
+    tl = threading.local()
+
+    def _svc():
+        svc = getattr(tl, "gmail", None)
+        if svc is None:
+            svc = _gmail(mailbox)
+            tl.gmail = svc
+        return svc
+
+    def _one(mid: str) -> Optional[dict]:
+        try:
+            return _svc().users().messages().get(userId="me", id=mid, format="full").execute()
+        except Exception:
+            return None
+
+    out: list[Optional[dict]] = [None] * len(message_ids)
+    with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as ex:
+        futures = {ex.submit(_one, mid): i for i, mid in enumerate(message_ids)}
+        for fut in concurrent.futures.as_completed(futures):
+            out[futures[fut]] = fut.result()
+    return out
+
+
+# ── vCard (.vcf) attachment parsing (2026-06-11) ─────────────────────────
+
+_VCF_MIMES = {"text/vcard", "text/x-vcard", "text/directory"}
+_VCF_LINE_RE = re.compile(r"^(?P<key>[^:;]+)(?P<params>(?:;[^:]*)?):(?P<val>.*)$")
+
+
+def _iter_attachment_parts(payload: dict):
+    """Yield (filename, mimeType, body) for every part carrying a filename,
+    walking nested multiparts."""
+    stack = [payload]
+    while stack:
+        part = stack.pop()
+        for child in part.get("parts") or []:
+            stack.append(child)
+        fn = part.get("filename") or ""
+        if fn:
+            yield fn, (part.get("mimeType") or "").lower(), part.get("body") or {}
+
+
+def _is_vcf_part(filename: str, mime: str) -> bool:
+    return filename.lower().endswith(".vcf") or mime in _VCF_MIMES
+
+
+def _fetch_attachment_b64(gmail, msg_id: str, attachment_id: str) -> str:
+    try:
+        att = (
+            gmail.users()
+            .messages()
+            .attachments()
+            .get(userId="me", messageId=msg_id, id=attachment_id)
+            .execute()
+        )
+        return att.get("data") or ""
+    except HttpError:
+        return ""
+
+
+def _unfold_vcf(text_in: str) -> list[str]:
+    """RFC 6350 line unfolding — a line starting with space/tab continues the
+    previous line."""
+    out: list[str] = []
+    for raw in (text_in or "").replace("\r\n", "\n").replace("\r", "\n").split("\n"):
+        if raw[:1] in (" ", "\t") and out:
+            out[-1] += raw[1:]
+        else:
+            out.append(raw)
+    return out
+
+
+def _parse_vcards(text_in: str) -> list[dict]:
+    """Minimal vCard 2.1/3.0/4.0 parser → contact dicts. No extra deps; only
+    cards with an email survive (email is the contacts dedup key)."""
+    cards: list[dict] = []
+    cur: Optional[dict] = None
+    for line in _unfold_vcf(text_in):
+        s = line.strip()
+        if not s:
+            continue
+        up = s.upper()
+        if up.startswith("BEGIN:VCARD"):
+            cur = {}
+            continue
+        if up.startswith("END:VCARD"):
+            if cur:
+                cards.append(cur)
+            cur = None
+            continue
+        if cur is None:
+            continue
+        m = _VCF_LINE_RE.match(s)
+        if not m:
+            continue
+        key = m.group("key").strip().upper()
+        params = (m.group("params") or "").upper()
+        val = m.group("val").strip()
+        if "QUOTED-PRINTABLE" in params and val:
+            try:
+                import quopri
+
+                val = quopri.decodestring(val).decode("utf-8", errors="replace").strip()
+            except Exception:
+                pass
+        if not val:
+            continue
+        if key == "FN":
+            cur.setdefault("_fn", val)
+        elif key == "N":
+            parts = val.split(";")
+            last = parts[0].strip() if parts else ""
+            first = parts[1].strip() if len(parts) > 1 else ""
+            if first:
+                cur.setdefault("first_name", first)
+            if last:
+                cur.setdefault("last_name", last)
+        elif key == "ORG":
+            cur.setdefault("organization", val.split(";")[0].strip())
+        elif key == "TITLE":
+            cur.setdefault("title", val)
+        elif key == "EMAIL" and "@" in val:
+            cur.setdefault("email", val.lower())
+        elif key == "TEL":
+            if "CELL" in params or "MOBILE" in params:
+                cur.setdefault("mobile", val)
+            else:
+                cur.setdefault("phone", val)
+        elif key == "ADR":
+            adr = ", ".join(p.strip() for p in val.split(";") if p.strip())
+            if adr:
+                cur.setdefault("address", adr)
+        elif key == "URL" and "linkedin.com" in val.lower():
+            cur.setdefault("linkedin_url", val)
+    out: list[dict] = []
+    for c in cards:
+        if not c.get("email"):
+            continue
+        if not c.get("first_name") and c.get("_fn"):
+            p = str(c["_fn"]).split(None, 1)
+            c["first_name"] = p[0]
+            if len(p) > 1:
+                c["last_name"] = p[1]
+        c.pop("_fn", None)
+        out.append(c)
+    return out
+
+
 # ──────────────────────────────────────────────────────────────────────────
 # Hospitality enrichment
 # ──────────────────────────────────────────────────────────────────────────
@@ -1602,6 +1797,7 @@ async def sync_mailbox(
         sig_cache: dict[str, dict] = {}
         gmail_contacts: dict[str, dict] = {}
         seen_in_headers: dict[str, dict] = {}
+        vcard_contacts: dict[str, dict] = {}
 
         # ── Single shared HTTP client for all Gemini calls in this run ──
         async with httpx.AsyncClient(timeout=120.0) as http_client:
@@ -1616,12 +1812,22 @@ async def sync_mailbox(
             #   work_items    → (sig_hash, sig_owner, header_name) per segment
             pending_sigs: dict[str, str] = {}  # sig_hash → sig_block
             work_items: list[tuple] = []  # (sig_hash, sig_owner, header_name)
+            _prefetched: dict[int, Optional[dict]] = {}
 
             for idx, msg_id in enumerate(message_ids):
                 if idx % 200 == 0 and idx > 0:
                     logger.debug(f"inbox_sync: {mailbox} — phase1 {idx}/{len(message_ids)}")
 
-                msg = _fetch_message(gmail, msg_id)
+                # Parallel prefetch (2026-06-11): sequential messages.get
+                # (~7 msg/s) was the wall that made a since-2025 pull take
+                # days. Fetch the next _FETCH_CHUNK ids on a thread pool —
+                # order preserved, memory bounded to one chunk.
+                if idx not in _prefetched:
+                    _prefetched.clear()
+                    _chunk_ids = message_ids[idx : idx + _FETCH_CHUNK]
+                    for _off, _m in enumerate(_fetch_messages_parallel(mailbox, _chunk_ids)):
+                        _prefetched[idx + _off] = _m
+                msg = _prefetched.pop(idx, None)
                 if not msg:
                     continue
 
@@ -1629,6 +1835,12 @@ async def sync_mailbox(
                     h["name"]: h.get("value", "")
                     for h in (msg.get("payload", {}).get("headers") or [])
                 }
+
+                # One interaction per person per MESSAGE (2026-06-11): the
+                # same address in From+Reply-To (or To+Cc) used to count twice
+                # and inflate account warmth. interaction_count now means
+                # "messages this person appeared on".
+                _msg_counted: set[str] = set()
 
                 for hdr in ("From", "Reply-To", "To", "Cc", "Bcc"):
                     val = headers.get(hdr, "")
@@ -1663,9 +1875,34 @@ async def sync_mailbox(
                                 "interaction_count": 0,
                             },
                         )
-                        entry["interaction_count"] += 1
+                        if email not in _msg_counted:
+                            _msg_counted.add(email)
+                            entry["interaction_count"] += 1
                         if display and not entry["display_name"]:
                             entry["display_name"] = display
+
+                # ── vCard attachments (2026-06-11) ──
+                # Business-card .vcf files carry name/title/org/phone/email —
+                # exactly what the sig parse hunts for — and were dropped
+                # entirely. Parsed locally (no Gemini), merged just below
+                # signature precedence.
+                for _fn, _mime, _abody in _iter_attachment_parts(msg.get("payload", {})):
+                    if not _is_vcf_part(_fn, _mime):
+                        continue
+                    _adata = _abody.get("data") or ""
+                    if not _adata and _abody.get("attachmentId"):
+                        _adata = _fetch_attachment_b64(gmail, msg_id, _abody["attachmentId"])
+                    if not _adata:
+                        continue
+                    for _vc in _parse_vcards(_b64(_adata)):
+                        _ve = _vc.get("email") or ""
+                        if not _ve or _ve == mailbox or _domain(_ve) in OWN_DOMAINS:
+                            continue
+                        for _pf in ("phone", "mobile"):
+                            if _vc.get(_pf):
+                                _vc[_pf] = _validate_phone(_vc[_pf])
+                        _vc["confidence"] = 0.9
+                        vcard_contacts.setdefault(_ve, _vc)
 
                 body = _extract_plain(msg.get("payload", {}))
                 if not body:
@@ -1673,12 +1910,37 @@ async def sync_mailbox(
 
                 body = _preprocess(body)
                 segments = _split_segments(body)
+                _mentions_left = MAX_BODY_MENTIONS_PER_MSG
                 top_sender = next(iter(_extract_emails(headers.get("From", ""))), None)
                 top_sender_name = _display_name(headers.get("From", ""))
 
                 for seg_idx, seg in enumerate(segments):
                     sig_owner = top_sender if seg_idx == 0 else _seg_email(seg)
                     header_name = top_sender_name if seg_idx == 0 else _seg_name(seg)
+
+                    # ── Body-mentioned addresses (2026-06-11) ──
+                    # "Reach our purchasing director at jane@hotel.com" —
+                    # referral emails in prose hit no header and no sig and
+                    # were invisible. Ride the same merge + hard-filter
+                    # pipeline, capped per message so a pasted distribution
+                    # list can't flood the run. A mention creates the contact
+                    # but does not inflate interaction_count.
+                    if _mentions_left > 0:
+                        for _bm in _extract_emails(seg):
+                            if _mentions_left <= 0:
+                                break
+                            if _bm == mailbox or _domain(_bm) in OWN_DOMAINS:
+                                continue
+                            if _bm in seen_in_headers:
+                                continue
+                            if not _passes_hard_filters(_bm, mailbox)[0]:
+                                continue
+                            seen_in_headers[_bm] = {
+                                "email": _bm,
+                                "display_name": "",
+                                "interaction_count": 1,
+                            }
+                            _mentions_left -= 1
 
                     # ── Embedded To:/Cc: participants (2026-06-04) ──
                     # People named on forwarded threads who never emailed us
@@ -1697,7 +1959,9 @@ async def sync_mailbox(
                                     "interaction_count": 0,
                                 },
                             )
-                            entry["interaction_count"] += 1
+                            if p_email not in _msg_counted:
+                                _msg_counted.add(p_email)
+                                entry["interaction_count"] += 1
                             if p_name and not entry["display_name"]:
                                 entry["display_name"] = p_name
 
@@ -1721,7 +1985,9 @@ async def sync_mailbox(
                                 "interaction_count": 0,
                             },
                         )
-                        entry["interaction_count"] += 1
+                        if sig_owner not in _msg_counted:
+                            _msg_counted.add(sig_owner)
+                            entry["interaction_count"] += 1
                         if _hn and not entry["display_name"]:
                             entry["display_name"] = _hn
 
@@ -1853,7 +2119,10 @@ async def sync_mailbox(
 
         # ── Merge all sources ─────────────────────────────────────────
         all_emails = (
-            set(seen_in_headers.keys()) | set(saved_contacts.keys()) | set(gmail_contacts.keys())
+            set(seen_in_headers.keys())
+            | set(saved_contacts.keys())
+            | set(gmail_contacts.keys())
+            | set(vcard_contacts.keys())
         )
 
         merged_contacts: list[dict] = []
@@ -1864,6 +2133,7 @@ async def sync_mailbox(
                 continue
 
             sig = gmail_contacts.get(email) or {}
+            vcf = vcard_contacts.get(email) or {}
             saved = saved_contacts.get(email) or {}
             other = other_contacts.get(email) or {}
             header = seen_in_headers.get(email) or {}
@@ -1887,10 +2157,12 @@ async def sync_mailbox(
                     _header_fn = _parts[0]
             _header_name_dict = {"first_name": _header_fn, "last_name": _header_ln}
 
-            org = pick((sig, "organization"), (saved, "organization"))
+            org = pick((sig, "organization"), (vcf, "organization"), (saved, "organization"))
             org_source = (
                 "signature"
                 if sig.get("organization")
+                else "vcard"
+                if vcf.get("organization")
                 else "saved_contacts"
                 if saved.get("organization")
                 else None
@@ -1908,26 +2180,34 @@ async def sync_mailbox(
                 "email": email,
                 "first_name": pick(
                     (sig, "first_name"),
+                    (vcf, "first_name"),
                     (saved, "first_name"),
                     (_header_name_dict, "first_name"),
                 ),
                 "last_name": pick(
                     (sig, "last_name"),
+                    (vcf, "last_name"),
                     (saved, "last_name"),
                     (_header_name_dict, "last_name"),
                 ),
                 "display_name": (_header_dn or saved.get("display_name") or None),
-                "title": pick((sig, "title"), (saved, "title")),
+                "title": pick((sig, "title"), (vcf, "title"), (saved, "title")),
                 "organization": org,
                 "org_source": org_source,
                 "phone": (
-                    pick((sig, "phone"), (sig, "mobile"), (saved, "phone"))
+                    pick(
+                        (sig, "phone"),
+                        (sig, "mobile"),
+                        (vcf, "phone"),
+                        (vcf, "mobile"),
+                        (saved, "phone"),
+                    )
                     or _validate_phone(other.get("phone"))
                 ),
-                "address": pick((sig, "address"), (saved, "address")),
-                "linkedin_url": sig.get("linkedin_url"),
+                "address": pick((sig, "address"), (vcf, "address"), (saved, "address")),
+                "linkedin_url": sig.get("linkedin_url") or vcf.get("linkedin_url"),
                 "has_signature": bool(sig),
-                "confidence": sig.get("confidence"),
+                "confidence": sig.get("confidence") or vcf.get("confidence"),
                 "interaction_count": header.get("interaction_count", 0),
                 "source_mailbox": mailbox,
             }

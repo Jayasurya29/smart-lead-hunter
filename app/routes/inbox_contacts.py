@@ -286,6 +286,38 @@ async def inbox_contact_match_hotel(
     return _serialize_contact(result)
 
 
+@router.post("/api/inbox-contacts/classify")
+async def inbox_contacts_manual_classify(
+    _csrf=Depends(require_ajax),
+):
+    """Manually trigger tier-1 classification over still-uncategorized
+    contacts — the "Classify now" button on the Contacts page's
+    Uncategorized facet.
+
+    Returns immediately; the task runs in the background on the SAME
+    "maintenance" queue the scheduled sync->classify chain uses (a bare
+    .delay() would land on the default queue the worker doesn't consume).
+    """
+    try:
+        from app.tasks.autonomous_tasks import classify_pending_contacts
+
+        task = classify_pending_contacts.apply_async(queue="maintenance")
+        return {
+            "status": "queued",
+            "task_id": task.id,
+            "message": "Classification queued. Counts refresh as it runs.",
+        }
+    except Exception as e:
+        logger.error(f"Failed to queue classification: {e}", exc_info=True)
+        return JSONResponse(
+            status_code=502,
+            content={
+                "status": "error",
+                "message": f"Failed to queue task: {str(e)[:200]}",
+            },
+        )
+
+
 @router.post("/api/inbox-contacts/sync")
 async def inbox_contacts_manual_sync(
     _csrf=Depends(require_ajax),

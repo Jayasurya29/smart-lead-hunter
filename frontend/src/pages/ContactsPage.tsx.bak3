@@ -554,39 +554,6 @@ function Facet({ icon: Ic, label, value, options, onChange, align }: {
 const COMPANY_ALIASES: Record<string, string> = {
   'blue diamond resorts': 'Royalton Hotels & Resorts',
 }
-
-// Decoration that should NOT split one real account into several groups.
-// Leading article, trailing legal/suffix words, and "& Co"-style tails are
-// stripped for the GROUPING KEY only -- the displayed name keeps its original
-// spelling. Deliberately conservative: removes boilerplate, never reorders
-// words or fuzzy-matches, so "Hotel California" and "California Hotel" stay
-// distinct (different word order = different account).
-const _LEADING_THE = /^the\s+/i
-const _ACCOUNT_SUFFIX = new RegExp(
-  '\\s+(?:&\\s*co|and\\s+co|co|company|inc|incorporated|llc|l\\.l\\.c|ltd|limited|' +
-  'corp|corporation|group|holdings|management|mgmt|hospitality|properties|' +
-  'enterprises|international|intl)\\.?$',
-  'i',
-)
-
-/** Aggressively-normalized grouping key (never shown to the user). */
-function accountKey<T extends string | null | undefined>(name: T): string {
-  if (!name) return 'No organization'
-  let s = String(name).trim().toLowerCase()
-  s = COMPANY_ALIASES[s] ? COMPANY_ALIASES[s].toLowerCase() : s
-  s = s.replace(_LEADING_THE, '')
-  let prev = ''
-  while (prev !== s) {
-    prev = s
-    s = s.replace(_ACCOUNT_SUFFIX, '').trim()
-  }
-  s = s.replace(/\s+(?:&|and)\s+(?:resorts?|suites?|spa|spas|villas?|residences?|hotels?|clubs?)$/i, '').trim()
-  s = s.replace(/[.,'"&]+/g, ' ').replace(/\s+/g, ' ').trim()
-  s = s.replace(/\b(hotels|resorts|suites|inns|villas|clubs)\b/g, (m) => m.slice(0, -1))
-  return s || 'No organization'
-}
-
-/** Display name: alias-mapped original spelling (keeps "The", "Hotels", case). */
 function canonCompany<T extends string | null | undefined>(name: T): T | string {
   if (!name) return name
   return COMPANY_ALIASES[name.trim().toLowerCase()] || name
@@ -1449,44 +1416,14 @@ export default function ContactsPage() {
     const leads = leadRaw
       .filter((c) => !c.email || !matchedEmails.has(c.email.toLowerCase()))
       .map((c) => ({ ...c, id: c.id + LEAD_ID_OFFSET }))
-    // Canonicalize known rebrands AND spelling/suffix variants so the old/new
-    // operator name and "The X" / "X Inc" / "X Hotels" vs "X Hotel" all group
-    // under one account header. Pick ONE display name per normalized account
-    // key (most common spelling wins), then rewrite every row's org to it.
-    // Display/grouping only -- never stored data.
-    const _raw = [...inbox, ...leads]
-    const _pickDisplay = (field: 'organization' | 'management_company' | 'parent_company') => {
-      const byKey = new Map<string, Map<string, number>>()
-      for (const c of _raw) {
-        const v = c[field]
-        if (!v) continue
-        const k = accountKey(canonCompany(v) as string)
-        if (k === 'No organization') continue
-        if (!byKey.has(k)) byKey.set(k, new Map())
-        const cnt = byKey.get(k)!
-        const disp = canonCompany(v) as string
-        cnt.set(disp, (cnt.get(disp) || 0) + 1)
-      }
-      const chosen = new Map<string, string>()
-      for (const [k, cnts] of byKey) {
-        const best = [...cnts.entries()].sort((a, b) =>
-          b[1] - a[1] || a[0].length - b[0].length || a[0].localeCompare(b[0]))[0][0]
-        chosen.set(k, best)
-      }
-      return (v: string | null | undefined) => {
-        if (!v) return v as string | null | undefined
-        const k = accountKey(canonCompany(v) as string)
-        return chosen.get(k) || (canonCompany(v) as string)
-      }
-    }
-    const _canonOrg = _pickDisplay('organization')
-    const _canonMgmt = _pickDisplay('management_company')
-    const _canonParent = _pickDisplay('parent_company')
-    const merged = _raw.map((c) => ({
+    // Canonicalize known company rebrands (display-only) so the old and new
+    // operator name group under one account header. Touches the name fields
+    // that drive grouping / family-nesting / display — not stored data.
+    const merged = [...inbox, ...leads].map((c) => ({
       ...c,
-      organization: _canonOrg(c.organization),
-      management_company: _canonMgmt(c.management_company),
-      parent_company: _canonParent(c.parent_company),
+      organization: canonCompany(c.organization),
+      management_company: canonCompany(c.management_company),
+      parent_company: canonCompany(c.parent_company),
     }))
     // Junk costs ZERO everywhere (2026-06-04): excluded from header counts,
     // account groups, warmth math and search. Rows stay in the DB only for
