@@ -178,6 +178,67 @@ async def inbox_contact_detail(
 # ──────────────────────────────────────────────────────────────────────
 
 
+class ContactUpdateBody(BaseModel):
+    first_name: Optional[str] = None
+    last_name: Optional[str] = None
+    display_name: Optional[str] = None
+    title: Optional[str] = None
+    organization: Optional[str] = None
+    email: Optional[str] = None
+    phone: Optional[str] = None
+    linkedin_url: Optional[str] = None
+
+
+@router.patch("/api/inbox-contacts/{contact_id}")
+async def inbox_contact_update(
+    contact_id: int,
+    body: ContactUpdateBody,
+    db: AsyncSession = Depends(get_db),
+    _csrf=Depends(require_ajax),
+):
+    """Edit a contact's basic fields from the UI. Only fields present in the
+    body are changed; pass "" to clear one. Names/orgs/emails/phones/LinkedIn
+    were previously uneditable -- enrichment mistakes were permanent."""
+    from sqlalchemy import text as _sql
+
+    allowed = {
+        "first_name",
+        "last_name",
+        "display_name",
+        "title",
+        "organization",
+        "email",
+        "phone",
+        "linkedin_url",
+    }
+    changes = {
+        k: (v.strip() if isinstance(v, str) else v)
+        for k, v in body.model_dump(exclude_unset=True).items()
+        if k in allowed
+    }
+    if not changes:
+        raise HTTPException(status_code=400, detail="no editable fields provided")
+    if "email" in changes and changes["email"] and "@" not in changes["email"]:
+        raise HTTPException(status_code=422, detail="email must contain @")
+    if (
+        "linkedin_url" in changes
+        and changes["linkedin_url"]
+        and "linkedin.com" not in changes["linkedin_url"].lower()
+    ):
+        raise HTTPException(status_code=422, detail="linkedin_url must be a linkedin.com URL")
+
+    sets = ", ".join(f"{k} = :{k}" for k in changes)
+    res = await db.execute(
+        _sql(f"UPDATE contacts SET {sets}, updated_at = NOW() WHERE id = :id RETURNING id"),
+        {**{k: (v or None) for k, v in changes.items()}, "id": contact_id},
+    )
+    if res.first() is None:
+        raise HTTPException(status_code=404, detail="Contact not found")
+    await db.commit()
+    row = await get_contact_by_id(db, contact_id)
+    return _serialize_contact(row)
+
+
 @router.post("/api/inbox-contacts/{contact_id}/approve")
 async def inbox_contact_approve(
     contact_id: int,

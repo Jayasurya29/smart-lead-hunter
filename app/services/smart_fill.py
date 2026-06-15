@@ -79,34 +79,110 @@ def _norm_linkedin(url_or_text: str) -> Optional[str]:
     return f"https://www.linkedin.com/in/{slug}"
 
 
+def _serper_linkedin_raw(query: str) -> list[str]:
+    """Direct Serper call that returns 'title :: snippet :: link' for EVERY
+    organic result -- including LinkedIn profiles whose snippet is empty (Google
+    hides LinkedIn snippets, and the normal smart_search drops snippet-less
+    results, which is why LinkedIn lookups were silently finding nothing)."""
+    try:
+        import httpx as _httpx
+        from app.services.outreach.researcher import SERPER_API_KEY
+    except Exception:
+        return []
+    if not SERPER_API_KEY:
+        return []
+    try:
+        resp = _httpx.post(
+            "https://google.serper.dev/search",
+            headers={"X-API-KEY": SERPER_API_KEY, "Content-Type": "application/json"},
+            json={"q": query, "num": 10},
+            timeout=10,
+        )
+        data = resp.json()
+        out = []
+        for item in (data.get("organic", []) or [])[:10]:
+            title = item.get("title", "")
+            snippet = item.get("snippet", "")
+            link = item.get("link", "")
+            out.append(f"{title} :: {snippet} :: {link}")
+        return out
+    except Exception as e:
+        logger.warning(f"smart_fill: serper linkedin search failed {query!r}: {e}")
+        return []
+
+
 def find_linkedin_url(name: str, org: str, email: str = "") -> Optional[str]:
     """The one resolver that didn't exist anywhere: locate a MISSING LinkedIn
-    profile for a named contact. 1–2 Serper queries; a candidate URL is only
+    profile for a named contact. 1-2 Serper queries; a candidate URL is only
     accepted when the person's last-name token appears in the same result
-    (or in the profile slug) — guards against pinning the wrong person.
+    (or in the profile slug) -- guards against pinning the wrong person.
     """
     name = (name or "").strip()
     if not name:
         return None
-    try:
-        from app.services.outreach.researcher import smart_search
-    except Exception as e:  # pragma: no cover — researcher unavailable
-        logger.warning(f"smart_fill: researcher import failed: {e}")
-        return None
 
     org = (org or "").strip()
+    local = (email or "").split("@")[0] if "@" in (email or "") else ""
     domain_word = (email or "").split("@")[-1].split(".")[0] if "@" in (email or "") else ""
     anchor = org or domain_word
+
+    # Several query shapes -- people list nicknames vs. formal names ("Tony"
+    # vs "Anthony"), and a profile's CURRENT employer may differ from our org,
+    # so we don't over-constrain. Quoted name first (precise), then unquoted,
+    # then the email localpart (often firstname.lastname).
+    parts = name.split()
+    first, last = parts[0], parts[-1]
     queries = [f'"{name}" {anchor} site:linkedin.com/in'.strip()]
     if anchor:
         queries.append(f'"{name}" {anchor} linkedin')
+        queries.append(f"{first} {last} {anchor} linkedin")  # unquoted -> nickname tolerant
+    if local and "." in local:
+        queries.append(f'{local.replace(".", " ")} {anchor} linkedin')
 
-    last = name.split()[-1].lower()
-    evidence = last if len(last) >= 3 else name.split()[0].lower()
+    last_l = last.lower()
+    first_l = first.lower()
+    anchor_l = anchor.lower()
+
+    def accept(result_text: str, slug: str) -> bool:
+        """Accept a candidate only with corroborating evidence. The strongest
+        signal is the LAST name appearing in the result or slug. But LinkedIn
+        often ABBREVIATES surnames -- "Ruby Ozretic" shows as "Ruby O." with
+        slug "rubyozr". So we also accept when the slug encodes first-name +
+        a PREFIX of the last name (>=3 chars), which together with the org
+        anchor is decisive. Still rejects a different 'J. Baylor'."""
+        rl = result_text.lower()
+        slug_compact = slug.replace("-", "").replace("_", "")
+        last_full = len(last_l) >= 3 and (last_l in rl or last_l in slug)
+        # firstname + last-name-prefix encoded in the slug (rubyozr, johnsmi...)
+        last_prefix = (
+            len(first_l) >= 2 and len(last_l) >= 3 and (first_l + last_l[:3]) in slug_compact
+        )
+        last_ok = last_full or last_prefix
+        if not last_ok:
+            return False
+        first_ok = (
+            first_l in rl
+            or first_l in slug
+            or (
+                len(first_l) >= 3
+                and any(
+                    w.startswith(first_l[:3]) or first_l.startswith(w[:3])
+                    for w in rl.split()
+                    if w.isalpha() and len(w) >= 3
+                )
+            )
+        )
+        anchor_ok = bool(anchor_l) and anchor_l in rl
+        # a slug-prefix match already implies the first name, so anchor alone is
+        # enough corroboration there; a full-lastname match still wants first
+        # name OR anchor.
+        if last_prefix:
+            return True
+        return last_ok and (first_ok or anchor_ok)
 
     for q in queries:
         try:
-            results = smart_search(q) or []
+            results = _serper_linkedin_raw(q) or []
         except Exception as e:
             logger.debug(f"smart_fill: search failed {q!r}: {e}")
             continue
@@ -115,9 +191,58 @@ def find_linkedin_url(name: str, org: str, email: str = "") -> Optional[str]:
             if not url:
                 continue
             slug = url.rsplit("/", 1)[-1].lower()
-            if evidence in r.lower() or evidence in slug:
+            if accept(r, slug):
                 return url
     return None
+
+
+def find_linkedin_debug(name: str, org: str, email: str = "") -> dict:
+    """Same search as find_linkedin_url(), but returns the full picture for the
+    UI activity log: the accepted URL (if any) plus every linkedin.com/in
+    candidate the search surfaced, so 'not found' is explainable -- you can see
+    whether the search returned the right profile and the guard rejected it, or
+    whether the profile never showed up at all.
+
+    Returns {url: str|None, candidates: [str], queries: int}.
+    """
+    name = (name or "").strip()
+    if not name:
+        return {"url": None, "candidates": [], "queries": 0}
+    try:
+        from app.services.outreach.researcher import SERPER_API_KEY
+
+        if not SERPER_API_KEY:
+            return {"url": None, "candidates": [], "queries": 0}
+    except Exception:
+        return {"url": None, "candidates": [], "queries": 0}
+
+    org_s = (org or "").strip()
+    local = (email or "").split("@")[0] if "@" in (email or "") else ""
+    domain_word = (email or "").split("@")[-1].split(".")[0] if "@" in (email or "") else ""
+    anchor = org_s or domain_word
+    parts = name.split()
+    first, last = parts[0], parts[-1]
+    queries = [f'"{name}" {anchor} site:linkedin.com/in'.strip()]
+    if anchor:
+        queries.append(f'"{name}" {anchor} linkedin')
+        queries.append(f"{first} {last} {anchor} linkedin")
+    if local and "." in local:
+        queries.append(f'{local.replace(".", " ")} {anchor} linkedin')
+
+    accepted = find_linkedin_url(name, org, email)
+    seen: list[str] = []
+    for q in queries:
+        try:
+            results = _serper_linkedin_raw(q) or []
+        except Exception:
+            continue
+        for r in results:
+            url = _norm_linkedin(r)
+            if url and url not in seen:
+                seen.append(url)
+        if accepted:
+            break  # we already have the answer; one query of candidates is plenty
+    return {"url": accepted, "candidates": seen[:5], "queries": len(queries)}
 
 
 # ── census ──────────────────────────────────────────────────────────────────
@@ -237,11 +362,12 @@ async def run_smart_fill(
                             {"u": url, "id": r.id},
                         )
                         found += 1
+                        progress(f"  [{n}/{len(rows)}] {name or '#'+str(r.id)} -> {url}")
                     else:
                         miss += 1
+                        progress(f"  [{n}/{len(rows)}] {name or '#'+str(r.id)} -> no match")
                     if n % 25 == 0:
                         await session.commit()
-                        progress(f"  linkedin {n}/{len(rows)}  found={found}")
                     await asyncio.sleep(0.4)  # be polite to Serper
                 await session.commit()
             summary["linkedin"] = {"processed": len(rows), "found": found, "not_found": miss}

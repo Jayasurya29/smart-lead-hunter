@@ -185,6 +185,19 @@ export interface DeepEnrichResult {
   sources_used: number
 }
 
+export interface FindLinkedinResult {
+  found: boolean
+  linkedin_url: string | null
+  note?: string
+}
+
+export async function findContactLinkedin(id: number): Promise<FindLinkedinResult> {
+  const { data } = await api.post<FindLinkedinResult>(
+    `/api/contacts/${id}/find-linkedin`,
+  )
+  return data
+}
+
 export async function deepEnrichContact(
   id: number,
   findEmail = false,
@@ -192,5 +205,24 @@ export async function deepEnrichContact(
   const { data } = await api.post<DeepEnrichResult>(
     `/api/contacts/${id}/enrich-deep?find_email=${findEmail}`,
   )
+  return data
+}
+
+export interface ContactEditFields {
+  first_name?: string
+  last_name?: string
+  display_name?: string
+  title?: string
+  organization?: string
+  email?: string
+  phone?: string
+  linkedin_url?: string
+}
+
+export async function updateInboxContact(
+  id: number,
+  fields: ContactEditFields,
+): Promise<InboxContact> {
+  const { data } = await api.patch<InboxContact>(`/api/inbox-contacts/${id}`, fields)
   return data
 }

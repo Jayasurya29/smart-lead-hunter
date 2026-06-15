@@ -8,6 +8,8 @@ import {
   deleteInboxContact,
   triggerInboxSync,
   deepEnrichContact,
+  findContactLinkedin,
+  updateInboxContact,
   type InboxContactFilters,
 } from '@/api/inboxContacts'
 
@@ -129,6 +131,23 @@ export function useTriggerInboxSync() {
       // Delay refetch slightly — task is async
       setTimeout(() => invalidateInboxContacts(qc), 2000)
     },
+  })
+}
+
+export function useFindLinkedin() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (id: number) => findContactLinkedin(id),
+    onSuccess: () => invalidateInboxContacts(qc),
+  })
+}
+
+export function useUpdateInboxContact() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ id, fields }: { id: number; fields: import('../api/inboxContacts').ContactEditFields }) =>
+      updateInboxContact(id, fields),
+    onSuccess: () => invalidateInboxContacts(qc),
   })
 }
 

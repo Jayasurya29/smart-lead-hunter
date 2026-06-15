@@ -170,8 +170,22 @@ async def enrich_contact_deep(contact_id: int, find_email: bool = False) -> dict
     org = row.organization or ""
     domain = _domain(row.email or "")
 
-    # 1) Web research
-    snippets = await _web_research(name, org, domain, row.email or "")
+    # Email-only fallback (2026-06-12): when we have no org, infer one from the
+    # email domain so the search + synthesis have something to anchor on
+    # (rosenplaza.com -> "Rosen Plaza"). This inferred org is used ONLY to help
+    # recover the name/role; it is NOT written to the DB as fact unless the
+    # model independently confirms it.
+    inferred_org = org
+    if not inferred_org:
+        try:
+            from app.services.inbox_sync import _infer_org
+
+            inferred_org = _infer_org(domain) or ""
+        except Exception:
+            inferred_org = ""
+
+    # 1) Web research (use the inferred org so email-only rows still get hits)
+    snippets = await _web_research(name, inferred_org, domain, row.email or "")
 
     # 2) Wiza — only if asked and we lack a usable email
     found_email = None
@@ -185,7 +199,8 @@ async def enrich_contact_deep(contact_id: int, find_email: bool = False) -> dict
         {
             "name": name,
             "email": row.email,
-            "organization": org,
+            "organization": org
+            or (f"(likely {inferred_org}, inferred from email domain)" if inferred_org else ""),
             "current_title": row.title,
         },
         ensure_ascii=False,
@@ -238,6 +253,36 @@ async def enrich_contact_deep(contact_id: int, find_email: bool = False) -> dict
     if do_name_fill:
         logger.info(f"tier2: resolved name for contact {contact_id} " f"({row.email}): {_nf} {_nl}")
 
+    # Grounded backup (2026-06-12): raw Serper can't surface LinkedIn profile
+    # URLs and often misses role. If we still lack a role or a LinkedIn URL,
+    # ask grounded Gemini (googleSearch) -- the same engine the lead-generator
+    # uses -- which reasons over live results and reconstructs them. Citation-
+    # gated inside grounded_fill, so it won't write hallucinated facts.
+    grounded_li = None
+    need_role = not (dossier.get("role") or "").strip()
+    need_li = not (row.linkedin_url or "").strip()
+    if need_role or need_li:
+        try:
+            from app.services.grounded_contact_fill import grounded_fill
+
+            g = await grounded_fill(
+                name=(f"{_nf} {_nl}".strip() or name),
+                org=inferred_org or org,
+                email=row.email or "",
+                want_linkedin=need_li,
+                want_role=need_role,
+            )
+            if g.get("grounded"):
+                if need_role and g.get("role"):
+                    dossier["role"] = g["role"]
+                    if not (dossier.get("background") or "").strip() and g.get("evidence"):
+                        dossier["background"] = g["evidence"]
+                if need_li and g.get("linkedin_url"):
+                    grounded_li = g["linkedin_url"]
+                conf = max(conf, GROUNDED_CONFIDENCE_FLOOR)
+        except Exception as e:
+            logger.warning(f"tier2: grounded backup failed for {contact_id}: {e}")
+
     # 4) Write back (grounded source; only fill email if Wiza found one)
     async with async_session() as session:
         await session.execute(
@@ -249,6 +294,11 @@ async def enrich_contact_deep(contact_id: int, find_email: bool = False) -> dict
                 "is_decision_maker = :dm, background = NULLIF(:bg,''), "
                 "enrichment_source = 'grounded', enrichment_confidence = :conf, "
                 "enriched_at = :now, enrichment_model = :model "
+                + (
+                    ", linkedin_url = COALESCE(NULLIF(linkedin_url,''), :grounded_li)"
+                    if grounded_li
+                    else ""
+                )
                 + (", email = COALESCE(email, :found_email)" if found_email else "")
                 + (
                     ", first_name = :nf, last_name = :nl, "
@@ -270,6 +320,7 @@ async def enrich_contact_deep(contact_id: int, find_email: bool = False) -> dict
                 "model": MODEL,
                 "id": contact_id,
                 **({"found_email": found_email} if found_email else {}),
+                **({"grounded_li": grounded_li} if grounded_li else {}),
                 **({"nf": _nf, "nl": _nl, "nd": f"{_nf} {_nl}"} if do_name_fill else {}),
             },
         )
@@ -284,14 +335,36 @@ async def enrich_contact_deep(contact_id: int, find_email: bool = False) -> dict
         "is_decision_maker": dossier.get("is_decision_maker"),
         "background": dossier.get("background"),
         "found_email": found_email,
+        "linkedin_url": grounded_li,
         "confidence": conf,
         "sources_used": len(snippets),
     }
 
 
 async def enrich_batch_deep(contact_ids: list[int], find_email: bool = False) -> list[dict]:
-    """Deep-enrich a chosen set (e.g. one company's contacts, or all DMs)."""
+    """Deep-enrich a chosen set (e.g. one company's contacts, or all DMs).
+
+    Logs live per-contact progress so long CLI / uvicorn runs show their work
+    instead of sitting silent ("[42/200] #1731 Ruby Ozretic -> role + linkedin").
+    """
     out = []
-    for cid in contact_ids:
-        out.append(await enrich_contact_deep(cid, find_email=find_email))
+    total = len(contact_ids)
+    for i, cid in enumerate(contact_ids, 1):
+        try:
+            r = await enrich_contact_deep(cid, find_email=find_email)
+        except Exception as e:
+            logger.warning(f"[{i}/{total}] #{cid} enrich FAILED: {e}")
+            out.append({"contact_id": cid, "error": str(e)})
+            continue
+        got = []
+        if r.get("role"):
+            got.append(f"role={r['role']}")
+        if r.get("linkedin_url"):
+            got.append("linkedin")
+        if r.get("found_email"):
+            got.append("email")
+        nm = (r.get("name") or "").strip() or "(no name)"
+        summary = ", ".join(got) if got else "no new fields"
+        logger.info(f"[{i}/{total}] #{cid} {nm} -> {summary}")
+        out.append(r)
     return out

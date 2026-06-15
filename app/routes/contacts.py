@@ -1463,6 +1463,92 @@ async def enrich_lead_status(lead_id: int):
 # ════════════════════════════════════════════════════════════════════════
 
 
+@router.post("/api/contacts/{contact_id}/find-linkedin", tags=["Contacts"])
+async def find_contact_linkedin_endpoint(
+    contact_id: int,
+    _csrf=Depends(require_ajax),
+):
+    """Find a missing LinkedIn URL for ONE contact (Serper-backed).
+
+    Uses the contact's name + organization to locate the profile, with the
+    smart_fill wrong-person guard (the person's last name must appear with the
+    URL or in the slug). Writes linkedin_url back ONLY when it's currently
+    empty -- never overwrites an existing value. Costs 1-2 Serper queries,
+    zero Wiza credits.
+
+    Returns {found: bool, linkedin_url: str|None}.
+    """
+    from sqlalchemy import text as _sql
+
+    async with async_session() as session:
+        row = (
+            await session.execute(
+                _sql(
+                    "SELECT first_name, last_name, display_name, organization, "
+                    "email, linkedin_url FROM contacts WHERE id = :id"
+                ),
+                {"id": contact_id},
+            )
+        ).first()
+    if not row:
+        raise HTTPException(status_code=404, detail="contact not found")
+    if row.linkedin_url:
+        return {
+            "found": True,
+            "linkedin_url": row.linkedin_url,
+            "note": "already had a LinkedIn URL",
+        }
+
+    name = (
+        f"{row.first_name or ''} {row.last_name or ''}".strip() or (row.display_name or "").strip()
+    )
+    if not name or "@" in name:
+        return {"found": False, "linkedin_url": None, "note": "no usable name"}
+
+    # Serper FIRST (2026-06-12): cheap + fast (~2s). Grounded Gemini is the
+    # BACKUP -- only fired when Serper finds nothing (it's slow ~15-30s and
+    # costs more, so we don't pay that on every lookup).
+    url = None
+    try:
+        from app.services.smart_fill import find_linkedin_url
+
+        url = find_linkedin_url(name, row.organization or "", row.email or "")
+    except Exception as e:
+        logger.exception(f"find-linkedin failed for contact {contact_id}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+    # Backup: grounded Gemini (natural-language ask -> real search + citations).
+    if not url:
+        try:
+            from app.services.grounded_contact_fill import grounded_fill
+
+            g = await grounded_fill(
+                name=name,
+                org=row.organization or "",
+                email=row.email or "",
+                want_linkedin=True,
+                want_role=False,
+            )
+            if g.get("grounded") and g.get("linkedin_url"):
+                url = g["linkedin_url"]
+        except Exception:
+            logger.warning(f"find-linkedin grounded backup failed for {contact_id}")
+
+    if not url:
+        return {"found": False, "linkedin_url": None}
+
+    async with async_session() as session:
+        await session.execute(
+            _sql(
+                "UPDATE contacts SET linkedin_url = :u, updated_at = NOW() "
+                "WHERE id = :id AND COALESCE(linkedin_url,'') = ''"
+            ),
+            {"u": url, "id": contact_id},
+        )
+        await session.commit()
+    return {"found": True, "linkedin_url": url}
+
+
 @router.post("/api/contacts/{contact_id}/enrich-deep", tags=["Contacts"])
 async def enrich_contact_deep_endpoint(
     contact_id: int,

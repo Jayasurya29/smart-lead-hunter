@@ -56,6 +56,30 @@ from app.config.procurement_intelligence import (
     gateway_for_brand,
 )
 from app.services.contact_dedup import bulk_upsert_contacts
+from app.services.name_validation import name_fits_email
+
+
+def _apply_name_gate(contact: dict) -> None:
+    """Validate a contact's scraped name against its email before persistence.
+    Mutates `contact` in place. See name_validation.name_fits_email for rules:
+    role inboxes lose the structured personal identity; clear mismatches are
+    blanked for later re-resolution; plausible names are kept untouched."""
+    fn = contact.get("first_name") or ""
+    ln = contact.get("last_name") or ""
+    dn = contact.get("display_name") or ""
+    if not (fn or ln):
+        return
+    verdict = name_fits_email(fn, ln, dn, contact.get("email") or "")
+    if verdict.code == "ROLE":
+        contact["first_name"] = None
+        contact["last_name"] = None
+        if verdict.nonpersonal:
+            contact["display_name"] = None
+    elif verdict.code == "MISMATCH":
+        contact["first_name"] = None
+        contact["last_name"] = None
+        contact["display_name"] = None
+
 
 logger = logging.getLogger(__name__)
 
@@ -863,6 +887,167 @@ def _passes_hard_filters(email: str, own_mailbox: str) -> tuple[bool, str]:
     return True, "ok"
 
 
+_ORG_LEAD = sorted(
+    [
+        "the",
+        "silver",
+        "coral",
+        "sun",
+        "blue",
+        "gold",
+        "royal",
+        "grand",
+        "ocean",
+        "beach",
+        "palm",
+        "bay",
+        "abaco",
+        "kaiya",
+        "savannah",
+    ],
+    key=len,
+    reverse=True,
+)
+
+_ORG_SUFFIXES = sorted(
+    [
+        "hotels",
+        "hotel",
+        "resorts",
+        "resort",
+        "suites",
+        "inn",
+        "parking",
+        "monogram",
+        "mills",
+        "textile",
+        "textiles",
+        "apparel",
+        "uniforms",
+        "uniform",
+        "supply",
+        "supplies",
+        "packaging",
+        "packing",
+        "package",
+        "promos",
+        "promo",
+        "promotional",
+        "embroidery",
+        "printing",
+        "graphics",
+        "group",
+        "hospitality",
+        "management",
+        "properties",
+        "realty",
+        "residential",
+        "marina",
+        "club",
+        "spa",
+        "industries",
+        "manufacturing",
+        "manufacture",
+        "solutions",
+        "services",
+        "systems",
+        "logistics",
+        "capital",
+        "ventures",
+        "partners",
+        "holdings",
+        "brands",
+        "company",
+        "corp",
+        "wholesale",
+        "distributors",
+        "distribution",
+        "collective",
+        "agency",
+        "consulting",
+        "design",
+        "designs",
+        "creative",
+        "marketing",
+        "media",
+        "technologies",
+        "global",
+        "international",
+        "enterprises",
+        "trading",
+    ],
+    key=len,
+    reverse=True,
+)
+
+_ORG_MID = sorted(
+    [
+        "sands",
+        "beach",
+        "bay",
+        "island",
+        "grenada",
+        "bahamas",
+        "cove",
+        "harbour",
+        "harbor",
+        "shores",
+        "springs",
+        "planters",
+        "park",
+        "point",
+        "club",
+        "gables",
+        "gate",
+    ],
+    key=len,
+    reverse=True,
+)
+
+
+def _org_titlecase(s: str) -> str:
+    small = {"of", "the", "at", "by", "and", "on", "for"}
+    out = []
+    for i, w in enumerate(s.split()):
+        lw = w.lower()
+        if lw in small and i > 0:
+            out.append(w)
+        elif 2 <= len(w) <= 3 and w.isalpha() and not re.search(r"[aeiou]", lw):
+            out.append(w.upper())
+        else:
+            out.append(w.capitalize())
+    return " ".join(out)
+
+
+def _prettify_org_stem(stem: str) -> Optional[str]:
+    """Insert confident spaces into a run-together domain stem. Returns a nicer
+    multi-word name, or None when no confident split exists (caller keeps the
+    plain title-cased stem). Mirrors fix_inferred_org_names.py."""
+    s = (stem or "").lower()
+    if len(s) < 6:
+        return None
+    lead = ""
+    for ld in _ORG_LEAD:
+        if s.startswith(ld) and len(s) - len(ld) >= 3:
+            lead, s = ld, s[len(ld) :]
+            break
+    matched_suf = None
+    for suf in _ORG_SUFFIXES:
+        if s.endswith(suf) and len(s) - len(suf) >= 3:
+            matched_suf, s = suf, s[: -len(suf)]
+            break
+    if matched_suf is None and not lead:
+        return None
+    for mid in _ORG_MID:
+        if s.endswith(mid) and len(s) - len(mid) >= 3:
+            s = f"{s[:-len(mid)]} {mid}"
+            break
+    parts = [p for p in [lead, s, matched_suf] if p]
+    if not parts or all(len(p) < 2 for p in parts):
+        return None
+    return _org_titlecase(" ".join(parts))
+
+
 def _infer_org(domain: str) -> Optional[str]:
     if not domain or domain in PERSONAL_DOMAINS | OWN_DOMAINS | GENERIC_DOMAINS_NO_ORG:
         return None
@@ -893,16 +1078,108 @@ def _infer_org(domain: str) -> Optional[str]:
         result = _DOMAIN_ORG_OVERRIDES[stem_lower]
         return result  # None means "skip this domain" (e.g. med.miami.edu)
 
-    # Try BrandRegistry (covers hotel brands like Four Seasons, Ritz-Carlton)
+    # Try BrandRegistry (covers hotel brands like Four Seasons, Ritz-Carlton).
+    # Return the BRAND label, not parent chain (2026-06-12): returning
+    # parent_company filed every sub-brand domain under its chain
+    # (conradhotels.com -> "Hilton", andaz.com -> "Hyatt"), splitting one real
+    # account. We resolve which registry KEY the stem matched, then title-case
+    # it for display.
+
+    from app.config.brand_registry import BRAND_REGISTRY as _BR
+
+    def _brand_display(k: str) -> str:
+        out = []
+        for i, w in enumerate(k.split()):
+            if "-" in w:
+                out.append("-".join(p.capitalize() for p in w.split("-")))
+            elif w in {"of", "at", "by", "and", "on"} and i > 0:
+                out.append(w)
+            else:
+                out.append(w.capitalize())
+        return " ".join(out)
+
+    _BRAND_SUFFIXES = (
+        "hotels",
+        "hotel",
+        "resorts",
+        "resort",
+        "suites",
+        "inn",
+        "inns",
+        "miami",
+        "miamiairport",
+        "miamibeach",
+        "southbeach",
+        "beach",
+        "stpete",
+        "cayman",
+        "orlando",
+        "spa",
+        "club",
+        "collection",
+        "group",
+    )
+
+    def _brand_at_word_boundary(brand_key: str, cand: str) -> bool:
+        """word-boundary brand match. Accept when the stem IS the brand, or the
+        brand is followed by a known hotel/location suffix (moxy+stpete,
+        delano+hotels, sheraton+miamiairport), or preceded/followed by a
+        non-letter. REJECT a brand that is merely the prefix of a longer real
+        word ('element' in 'elementsmassage', where what follows is just more
+        letters forming 'elements...')."""
+        bk = brand_key.replace("-", "").replace(" ", "")
+        c = re.sub(r"[^a-z0-9]", "", cand.lower())
+        if not bk or not c:
+            return False
+        if c == bk:
+            return True
+        multiword = len(brand_key.split()) >= 2
+        if c.startswith(bk):
+            rest = c[len(bk) :]
+            if (
+                multiword
+                or not rest[:1].isalpha()
+                or rest in _BRAND_SUFFIXES
+                or any(rest.startswith(sfx) for sfx in _BRAND_SUFFIXES)
+            ):
+                return True
+        if c.endswith(bk):
+            prev = c[-len(bk) - 1 : -len(bk)] if len(c) > len(bk) else ""
+            if multiword or not prev.isalpha():
+                return True
+        return False
+
+    def _resolve_brand(cand: str):
+        k = (cand or "").lower().strip()
+        if not k:
+            return None
+        # exact key or alias -> trust fully
+        if k in _BR and k != "unknown":
+            return k
+        a = BrandRegistry.ALIASES.get(k)
+        if a and a in _BR:
+            return a
+        # partial: accept ONLY at a word boundary, and prefer the longest brand
+        cands = [bk for bk in _BR if bk != "unknown" and _brand_at_word_boundary(bk, k)]
+        if cands:
+            return max(cands, key=len)
+        return None
+
     for candidate in (
         stem,
         stem.replace("-", " "),
         re.sub(r"([a-z])([A-Z])", r"\1 \2", stem),
     ):
-        brand_info = BrandRegistry.lookup(candidate)
-        if brand_info.parent_company != "Unknown":
-            return brand_info.parent_company
+        mk = _resolve_brand(candidate)
+        if mk:
+            return _brand_display(mk)
 
+    # Run-together stem -> try a confident prettified split first
+    # (apexmills -> Apex Mills); else fall back to the old hyphen/underscore
+    # split + title-case (never worse than before).
+    pretty = _prettify_org_stem(stem)
+    if pretty:
+        return pretty
     chunks = stem.replace("_", "-").split("-")
     words = [c.upper() if 2 <= len(c) <= 3 and c.isalpha() else c.capitalize() for c in chunks if c]
     name = " ".join(words).strip()
@@ -2213,6 +2490,7 @@ async def sync_mailbox(
             }
 
             contact = _enrich(contact)
+            _apply_name_gate(contact)
             merged_contacts.append(contact)
 
         stats["contacts_found"] = len(merged_contacts)

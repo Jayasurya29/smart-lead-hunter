@@ -1,0 +1,291 @@
+"""grounded_contact_fill.py -- Google-grounded backup for missing contact fields.
+
+Raw Serper search cannot surface LinkedIn profile URLs for low-profile people
+(LinkedIn blocks them from the index), and often misses role/org too. But a
+GROUNDED Gemini call -- the same googleSearch tool the lead-generator already
+uses -- reasons over the live results and reconstructs the profile URL, role,
+and org even when they're buried (it found linkedin.com/in/rubyozr that raw
+Serper never returned).
+
+This is the per-contact backup: given a name + org + email, ask grounded Gemini
+for ONLY the fields that are missing, REQUIRE citations (groundingChunks), and
+return what it verifiably found. Used by contact_tier2_enrichment as a fallback
+when Serper snippets come up empty.
+
+Pure-additive: new file, mirrors the proven _ground_property_level_rescue
+payload/citation pattern in contact_enrichment.py.
+"""
+
+import logging
+import re
+from typing import Optional
+
+logger = logging.getLogger("grounded_contact_fill")
+
+_LI_RE = re.compile(r"linkedin\.com/in/([^/?&#\s)\"']+)", re.IGNORECASE)
+
+
+def _norm_li(url: str) -> Optional[str]:
+    if not url:
+        return None
+    m = _LI_RE.search(url)
+    if not m:
+        return None
+    slug = m.group(1).strip().rstrip(".,;/`*)\"'")
+    # Reject placeholder / junk slugs: Gemini sometimes writes an EXAMPLE like
+    # "linkedin.com/in/..." or "linkedin.com/in/<slug>" or "/in/username" in
+    # prose. A real slug is alphanumeric (with hyphens), has a letter or digit,
+    # and isn't a generic placeholder word.
+    if not slug or len(slug) < 3:
+        return None
+    if not re.search(r"[a-z0-9]", slug, re.IGNORECASE):
+        return None
+    if not re.fullmatch(r"[A-Za-z0-9\-_%]+", slug):
+        return None
+    if slug.lower() in {"username", "slug", "profile", "yourname", "name", "in", "example"}:
+        return None
+    return f"https://www.linkedin.com/in/{slug}"
+
+
+_ROLE_RE = re.compile(
+    r"\b(?:is|as|serves as|works as|holds the (?:role|position) of|title is|"
+    r"currently the|the)\s+(?:the\s+)?"
+    r"((?:[A-Z][A-Za-z&/'\-]+\s+){0,3}?"
+    r"(?:Director|Manager|President|Chief|Coordinator|Supervisor|Officer|"
+    r"Executive|Controller|Buyer|Head|GM|VP|Superintendent)"
+    r"(?:\s+of\s+(?:[A-Z][A-Za-z&'\-]+(?:\s+(?:and|&)\s+[A-Z][A-Za-z&'\-]+)?))?)"
+    r"\b",
+)
+
+
+def _clean_title(s: str) -> str:
+    s = re.sub(r"\s+", " ", s).strip().rstrip(",.;").strip()
+    # cut trailing location/company fragments the regex sometimes catches
+    s = re.split(r"\s+(?:at|for|with|in)\s+", s)[0].strip()
+    return s[:60]
+
+
+def _extract_role(text: str, name: str) -> str:
+    """Pull a job title from prose. Conservative -- returns '' if unclear so
+    the deep-enrich synthesis (which is better at this) can handle it."""
+    if not text:
+        return ""
+    m = _ROLE_RE.search(text)
+    if m:
+        cand = _clean_title(m.group(1))
+        if 3 <= len(cand) <= 60:
+            return cand
+    return ""
+
+
+async def grounded_fill(
+    name: str,
+    org: str = "",
+    email: str = "",
+    want_linkedin: bool = True,
+    want_role: bool = True,
+) -> dict:
+    """Grounded Gemini lookup for ONE contact's missing fields.
+
+    Returns {linkedin_url, role, organization, citations: [..], grounded: bool}.
+    Only fields the model VERIFIABLY found (with citations) are populated; if
+    groundingChunks is empty the model answered from memory and we return a
+    grounded=False, empty result rather than trust a hallucination.
+    """
+    name = (name or "").strip()
+    if not name:
+        return {
+            "grounded": False,
+            "linkedin_url": None,
+            "role": "",
+            "organization": "",
+            "citations": [],
+        }
+
+    try:
+        import httpx
+        from app.services.contact_enrichment import (
+            _build_grounding_url,
+            _CONTACT_GROUNDING_TIMEOUT_S,
+        )
+        from app.services.gemini_client import get_gemini_headers
+        from app.services.ai_client import _get_config, _ensure_init
+
+        _ensure_init()
+        config = _get_config()
+        project = config["vertex_project_id"]
+        model = config["model"]
+        url, _ = _build_grounding_url(project, model)
+        headers = get_gemini_headers()
+    except Exception as e:
+        logger.warning(f"grounded_fill: cannot build URL/headers: {e}")
+        return {
+            "grounded": False,
+            "linkedin_url": None,
+            "role": "",
+            "organization": "",
+            "citations": [],
+        }
+
+    domain = email.split("@")[-1] if "@" in email else ""
+    org_bit = (
+        f" who works at {org}" if org else (f" whose work email is at {domain}" if domain else "")
+    )
+    email_bit = f" Their email address is {email}." if email else ""
+
+    asks = []
+    if want_role:
+        asks.append("What is their current job title and which company do they work for?")
+    if want_linkedin:
+        asks.append(
+            "What is the exact URL of their personal LinkedIn profile page "
+            "(the linkedin.com/in/... page for this specific person)?"
+        )
+    asks_txt = " ".join(asks)
+
+    # NATURAL-LANGUAGE prompt -- NOT a JSON instruction. A JSON-format demand
+    # makes Gemini answer from memory (0 citations, no real search). A plain
+    # conversational ask makes it actually run Google Search and cite sources.
+    # (Documented lesson from the lead-gen grounding path.) We parse the URL +
+    # role out of the prose afterward.
+    prompt = (
+        f"I'm trying to find information about a specific person: {name}{org_bit}.{email_bit} "
+        f"Please search the web and tell me about this exact person -- the one connected to "
+        f"{org or domain or 'this contact'}, not a different individual who happens to share the name. "
+        f"{asks_txt} "
+        f"If you find their LinkedIn profile, please include the full linkedin.com/in/ URL in your answer. "
+        f"If you genuinely cannot find this specific person, just say so."
+    )
+
+    payload = {
+        "contents": [{"role": "user", "parts": [{"text": prompt}]}],
+        "tools": [{"googleSearch": {}}],
+        "generationConfig": {
+            "temperature": 1.0,  # required for grounding per Vertex docs
+            "maxOutputTokens": 2048,
+            "thinkingConfig": {"thinkingBudget": 0},
+        },
+    }
+
+    logger.info(f"grounded_fill[{name}]: calling Gemini grounding (org={org!r} email={email!r})")
+    try:
+        async with httpx.AsyncClient(timeout=_CONTACT_GROUNDING_TIMEOUT_S) as gc:
+            resp = await gc.post(url, headers=headers, json=payload)
+        resp.raise_for_status()
+        data = resp.json()
+    except Exception as e:
+        logger.warning(f"grounded_fill ERROR for {name!r}: {e}")
+        return {
+            "grounded": False,
+            "linkedin_url": None,
+            "role": "",
+            "organization": "",
+            "citations": [],
+        }
+
+    try:
+        candidate = data["candidates"][0]
+        parts = (candidate.get("content") or {}).get("parts") or []
+        text = ((parts[0].get("text") if parts else "") or "").strip()
+    except (KeyError, IndexError):
+        logger.info(f"grounded_fill[{name}]: bad response shape (no candidate/text)")
+        return {
+            "grounded": False,
+            "linkedin_url": None,
+            "role": "",
+            "organization": "",
+            "citations": [],
+        }
+
+    # strip markdown emphasis (**bold**, *italic*, backticks) so regex extraction
+    # of role/URL works on the plain words.
+    text = re.sub(r"[*`]+", "", text)
+
+    # citation gate: no groundingChunks => answered from memory => don't trust
+    meta = candidate.get("groundingMetadata", {}) or {}
+    citations = []
+    for chunk in (meta.get("groundingChunks", []) or [])[:5]:
+        web = chunk.get("web", {}) or {}
+        if web.get("uri"):
+            citations.append(web.get("uri"))
+    grounded = len(citations) > 0
+
+    # What did Gemini actually SEARCH? (visibility into whether search fired)
+    searched = meta.get("webSearchQueries", []) or meta.get("searchQueries", []) or []
+    logger.info(
+        f"grounded_fill[{name}]: searched={searched} | "
+        f"found {len(citations)} citation URLs: {citations}"
+    )
+
+    # Prose response now (natural-language ask). Extract the LinkedIn URL from
+    # the answer text OR the citation URLs, and the role from the prose.
+    logger.info(f"grounded_fill[{name}]: answer={text[:280]!r}")
+
+    # 1) LinkedIn URL: prefer one found in the answer text; else scan citations.
+    li = None
+    if want_linkedin:
+        li = _norm_li(text)
+        if not li:
+            for c in citations:
+                li = _norm_li(c)
+                if li:
+                    break
+
+    # 2) Role: pull from the prose. Look for a title near common phrasing.
+    role = ""
+    organization = ""
+    if want_role and text:
+        role = _extract_role(text, name)
+
+    # The model was asked to say so if it couldn't find the person. Treat an
+    # explicit "could not find / no information" as a non-match.
+    tl = text.lower()
+    not_found = (
+        any(
+            p in tl
+            for p in (
+                "cannot find",
+                "could not find",
+                "couldn't find",
+                "no information",
+                "unable to find",
+                "i don't have",
+                "i do not have",
+                "no specific",
+            )
+        )
+        and not li
+        and not role
+    )
+
+    if not_found:
+        logger.info(f"grounded_fill[{name}]: model reports not found")
+        return {
+            "grounded": grounded,
+            "linkedin_url": None,
+            "role": "",
+            "organization": "",
+            "confidence": "low",
+            "citations": citations,
+        }
+
+    # Trust requires real grounding (citations). Without them the model spoke
+    # from memory -- keep nothing.
+    if not grounded:
+        logger.info(f"grounded_fill[{name}]: DROPPED -- no citations (answered from memory)")
+        li, role, organization = None, "", ""
+
+    logger.info(
+        f"grounded_fill[{name}]: RESULT grounded={grounded} ({len(citations)} cites) "
+        f"li={li!r} role={role!r}"
+    )
+
+    return {
+        "grounded": grounded,
+        "linkedin_url": li,
+        "role": role,
+        "organization": organization,
+        "confidence": "high" if (grounded and li) else ("medium" if grounded else "low"),
+        "citations": citations,
+        "evidence": text[:300],
+    }

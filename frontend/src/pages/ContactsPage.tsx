@@ -23,7 +23,7 @@ import {
   Sparkles, Wand2, X, RefreshCw, Inbox, Star, ChevronRight, ChevronDown,
   Mail, Phone, Linkedin, ExternalLink, MapPin, Building2, Shield, Hash,
   Eye, Users, Activity, Send, Check, Loader2, Trash2, CheckSquare, Square,
-  Radar, Briefcase, Layers, Flame, Target, Package,
+  Radar, Briefcase, Layers, Flame, Target, Package, Copy, Pencil,
 } from 'lucide-react'
 import { cn, formatDate, relativeDate, getTierLabel } from '@/lib/utils'
 import type { InboxContact, InboxContactStats } from '@/api/inboxContacts'
@@ -34,9 +34,11 @@ import {
   useInboxContactStats,
   useTriggerInboxSync,
   useDeepEnrichContact,
+  useFindLinkedin,
   useApproveInboxContact,
   useBulkApproveInboxContacts,
   useDeleteInboxContact,
+  useUpdateInboxContact,
 } from '@/hooks/useInboxContacts'
 
 /* ════════════════════════════════════════════════════════════════════
@@ -264,7 +266,10 @@ function LeadFindEmailBtn({ contact }: { contact: UnifiedContact }) {
     if (!url || state === 'busy') return
     setState('busy')
     try {
-      const r = await fetch(url, { method: 'POST' })
+      const r = await fetch(url, {
+        method: 'POST',
+        headers: { 'X-Requested-With': 'XMLHttpRequest', 'Content-Type': 'application/json' },
+      })
       const j = await r.json().catch(() => ({} as any))
       const em = j?.email || j?.contact?.email || null
       if (r.ok && em) { setFound(em); setState('done') } else setState('err')
@@ -798,12 +803,38 @@ const ENRICH_STEPS = [
 
 function AIBand({ contact }: { contact: InboxContact }) {
   const deepMut = useDeepEnrichContact()
+  const liMut = useFindLinkedin()
+  const [liResult, setLiResult] = useState<string | null>(null)
   const isLead = sourceOf(contact) === 'lead_generator'
   const [step, setStep] = useState(0)
   const [result, setResult] = useState<string | null>(null)
+  const [log, setLog] = useState<{ t: string; ok?: boolean }[]>([])
   const timer = useRef<number | null>(null)
 
-  useEffect(() => { setResult(null); setStep(0) }, [contact.id])
+  const pushLog = (t: string, ok?: boolean) => setLog((L) => [...L, { t, ok }])
+  const who = (`${contact.first_name || ''} ${contact.last_name || ''}`.trim()
+    || contact.display_name || contact.email || 'this contact')
+  const orgLabel = contact.organization || (contact.email ? `@${contact.email.split('@')[1] || ''}` : '')
+
+  useEffect(() => { setResult(null); setStep(0); setLiResult(null); setLog([]) }, [contact.id])
+
+  async function runFindLinkedin() {
+    setLiResult(null)
+    pushLog(`Searching LinkedIn for ${who}${orgLabel ? ` - ${orgLabel}` : ''}...`)
+    try {
+      const r = await liMut.mutateAsync(contact.id)
+      if (r.found && r.linkedin_url) {
+        pushLog(`LinkedIn matched: ${r.linkedin_url}`, true)
+        setLiResult(`Found: ${r.linkedin_url}`)
+      } else {
+        pushLog('No LinkedIn profile matched the name + company.', false)
+        setLiResult('No LinkedIn profile found.')
+      }
+    } catch {
+      pushLog('LinkedIn lookup failed (Serper key / network).', false)
+      setLiResult('LinkedIn lookup failed -- check Serper key or try again.')
+    }
+  }
 
   useEffect(() => {
     if (deepMut.isPending) {
@@ -817,8 +848,12 @@ function AIBand({ contact }: { contact: InboxContact }) {
 
   async function runEnrich(findEmail = false) {
     setResult(null)
+    pushLog(`Deep enrich for ${who}: searching web${findEmail ? ' + Wiza email' : ''}...`)
     try {
       const r = await deepMut.mutateAsync({ id: contact.id, findEmail })
+      if (r.role) pushLog(`Role found: ${r.role}`, true)
+      if (r.found_email) pushLog(`Email found: ${r.found_email}`, true)
+      if (!r.role && !r.found_email) pushLog('No new fields recovered from the web.', false)
       const bits = [
         r.role && `Role: ${r.role}`,
         r.background || undefined,
@@ -827,8 +862,26 @@ function AIBand({ contact }: { contact: InboxContact }) {
       ].filter(Boolean)
       setResult(bits.join(' · ') || 'No new info found.')
     } catch {
+      pushLog('Deep enrich failed (Serper/Wiza key or network).', false)
       setResult('Enrichment failed — check Serper/Wiza keys or try again.')
     }
+  }
+
+  // One click fills EVERYTHING missing: deep-enrich (name/role/background) and
+  // the LinkedIn finder run together, so you never have to enrich the role and
+  // THEN come back for LinkedIn. Each reports its own result line.
+  async function runEnrichAll() {
+    // PATCH deep-enrich-fix: web dossier always runs
+    // The web-search dossier (runEnrich) ALWAYS runs -- previously it was
+    // skipped when LinkedIn was the only gap, so a name+role contact missing
+    // only LinkedIn never got real web research. The LinkedIn finder runs
+    // alongside it whenever LinkedIn is missing.
+    const liMissing = !contact.linkedin_url
+    setResult(null)
+    setLiResult(null)
+    const jobs: Promise<unknown>[] = [runEnrich(false)]
+    if (liMissing) jobs.push(runFindLinkedin())
+    await Promise.allSettled(jobs)
   }
 
   const signals = deriveSignals(contact)
@@ -849,25 +902,62 @@ function AIBand({ contact }: { contact: InboxContact }) {
               <button onClick={() => runEnrich(true)} title="Uses Wiza credits"
                 className="inline-flex items-center h-7 px-3 rounded-lg text-[11px] font-bold text-white/90 ring-1 ring-white/25 hover:bg-white/10 transition-all">Find Email</button>
             )}
-            {!isLead && !deepMut.isPending && (
-              <button onClick={() => runEnrich(false)}
-                className="inline-flex items-center gap-1.5 h-7 px-3 rounded-lg text-[11px] font-bold text-navy-900 bg-gold-300 hover:bg-gold-200 transition-all active:scale-95">
-                <Wand2 className="w-3 h-3" />{result ? 'Re-run' : 'Deep Enrich'}
-              </button>
+            {!isLead && (deepMut.isPending || liMut.isPending) && (
+              <span className="inline-flex items-center gap-1.5 h-7 px-3 text-[11px] font-bold text-white/70">
+                <Loader2 className="w-3 h-3 animate-spin" />{liMut.isPending && !deepMut.isPending ? 'Searching LinkedIn...' : 'Enriching...'}
+              </span>
             )}
+            {!isLead && !deepMut.isPending && !liMut.isPending && (() => {
+              const nameMissing = !contact.first_name && !contact.last_name
+              const roleMissing = !contact.title && !contact.inferred_role
+              const liMissing = !contact.linkedin_url
+              const gaps: string[] = []
+              if (nameMissing) gaps.push('name')
+              if (roleMissing) gaps.push('role')
+              if (liMissing) gaps.push('LinkedIn')
+              const gapLabel = gaps.length === 1
+                ? (gaps[0] === 'LinkedIn' ? 'Find LinkedIn' : `Find ${gaps[0]}`)
+                : 'Enrich all missing'
+              return (
+                <>
+                  {/* Gap-filler: only when something's missing. Runs the web
+                      dossier AND the LinkedIn finder together. */}
+                  {gaps.length > 0 && (
+                    <button onClick={runEnrichAll}
+                      title={`Find ${gaps.join(' + ')} (web search + LinkedIn) for this person`}
+                      className="inline-flex items-center gap-1.5 h-7 px-3 rounded-lg text-[11px] font-bold text-white/90 ring-1 ring-white/25 hover:bg-white/10 transition-all">
+                      <Sparkles className="w-3 h-3" />{gapLabel}
+                    </button>
+                  )}
+                  {/* Deep Enrich: ALWAYS visible, ALWAYS runs the full
+                      web-search dossier (Serper + Gemini) on this person. */}
+                  <button onClick={() => runEnrich(false)}
+                    title="Full AI dossier: role, seniority, decision-maker, background (web search + Gemini)"
+                    className="inline-flex items-center gap-1.5 h-7 px-3 rounded-lg text-[11px] font-bold text-navy-900 bg-gold-300 hover:bg-gold-200 transition-all active:scale-95">
+                    <Wand2 className="w-3 h-3" />{result ? 'Re-run Deep Enrich' : 'Deep Enrich'}
+                  </button>
+                </>
+              )
+            })()}
           </div>
         </div>
 
-        {deepMut.isPending ? (
-          <div className="py-2 space-y-2">
-            {ENRICH_STEPS.map((s, i) => (
-              <div key={i} className="flex items-center gap-2.5 text-[13px] transition-all duration-300" style={{ opacity: i <= step ? 1 : 0.35 }}>
-                {i < step ? <Check className="w-3.5 h-3.5 text-emerald-300" />
-                  : i === step ? <Loader2 className="w-3.5 h-3.5 text-gold-300 animate-spin" />
-                  : <span className="w-3.5 h-3.5 rounded-full ring-1 ring-white/20" />}
-                <span className={i <= step ? 'text-white' : 'text-white/50'}>{s}</span>
+        {(deepMut.isPending || liMut.isPending || log.length > 0) ? (
+          <div className="py-1.5 space-y-1.5">
+            {log.map((entry, i) => (
+              <div key={i} className="flex items-start gap-2 text-[12.5px] leading-snug">
+                {entry.ok === true ? <Check className="w-3.5 h-3.5 mt-0.5 text-emerald-300 shrink-0" />
+                  : entry.ok === false ? <span className="w-3.5 h-3.5 mt-0.5 shrink-0 text-rose-300 font-bold text-center leading-none">!</span>
+                  : <Check className="w-3.5 h-3.5 mt-0.5 text-white/40 shrink-0" />}
+                <span className={entry.ok === false ? 'text-rose-200 break-all' : 'text-white/90 break-all'}>{entry.t}</span>
               </div>
             ))}
+            {(deepMut.isPending || liMut.isPending) && (
+              <div className="flex items-center gap-2 text-[12.5px] text-gold-200">
+                <Loader2 className="w-3.5 h-3.5 animate-spin shrink-0" />
+                <span>{liMut.isPending && !deepMut.isPending ? 'Searching LinkedIn...' : 'Working...'}</span>
+              </div>
+            )}
           </div>
         ) : (
           <p className="text-[13.5px] leading-relaxed text-white/85 max-w-[80ch]">{deriveSummary(contact)}</p>
@@ -875,6 +965,10 @@ function AIBand({ contact }: { contact: InboxContact }) {
 
         {result && !deepMut.isPending && (
           <p className="mt-2.5 text-[12.5px] leading-relaxed text-navy-900 bg-gold-200/90 rounded-lg px-3 py-2">{result}</p>
+        )}
+
+        {liResult && !liMut.isPending && (
+          <p className="mt-2 text-[12px] leading-relaxed text-white/90 bg-white/10 rounded-lg px-3 py-2 break-all">{liResult}</p>
         )}
 
         {!deepMut.isPending && signals.length > 0 && (
@@ -907,19 +1001,81 @@ function SectionCard({ title, icon, children }: { title: string; icon: React.Rea
   )
 }
 
-function InfoRow({ icon, label, value, mono, href }: { icon: React.ReactNode; label: string; value: string | null | undefined; mono?: boolean; href?: string }) {
-  if (!value) return null
+function InfoRow({ icon, label, value, mono, href, editField, contactId, placeholder }: {
+  icon: React.ReactNode; label: string; value: string | null | undefined; mono?: boolean; href?: string
+  editField?: string  // contacts column to edit; '__name__' edits first+last+display together
+  contactId?: number  // omit (lead-gen offset ids) to make the row copy-only
+  placeholder?: string
+}) {
+  const updMut = useUpdateInboxContact()
+  const [editing, setEditing] = useState(false)
+  const [draft, setDraft] = useState('')
+  const [copied, setCopied] = useState(false)
+  const canEdit = !!editField && !!contactId
+  // editable rows render even when empty (so you can ADD a value); read-only
+  // rows keep the old hide-when-empty behaviour.
+  if (!value && !canEdit) return null
+
+  const linkVal = href && value === 'View profile' ? href : (value || '')
+
+  async function doCopy(e: React.MouseEvent) {
+    e.stopPropagation()
+    try {
+      await navigator.clipboard.writeText(linkVal)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 1200)
+    } catch { /* clipboard unavailable */ }
+  }
+  function startEdit(e: React.MouseEvent) {
+    e.stopPropagation()
+    setDraft(linkVal)
+    setEditing(true)
+  }
+  async function save() {
+    setEditing(false)
+    const newVal = draft.trim()
+    if (newVal === (linkVal || '')) return
+    const fields = editField === '__name__'
+      ? (() => { const p = newVal.split(/\s+/); return { first_name: p[0] || '', last_name: p.slice(1).join(' ') || '', display_name: newVal } })()
+      : { [editField!]: newVal }
+    try { await updMut.mutateAsync({ id: contactId!, fields: fields as any }) }
+    catch { /* error surfaced by the api interceptor; field reverts on refetch */ }
+  }
+
   return (
-    <div className="flex items-start gap-2.5 py-1.5">
+    <div className="group flex items-start gap-2.5 py-1.5">
       <span className="text-stone-400 mt-0.5 flex-shrink-0">{icon}</span>
       <div className="min-w-0 flex-1">
         <div className="text-[10px] uppercase tracking-wide font-bold text-stone-400">{label}</div>
-        {href ? (
+        {editing ? (
+          <input autoFocus value={draft} onChange={(e) => setDraft(e.target.value)}
+            onBlur={save}
+            onKeyDown={(e) => { if (e.key === 'Enter') save(); if (e.key === 'Escape') setEditing(false) }}
+            onClick={(e) => e.stopPropagation()}
+            placeholder={placeholder || label}
+            className={cn('w-full text-[13px] font-medium text-navy-800 bg-amber-50 ring-1 ring-amber-300 rounded px-1.5 py-0.5 outline-none', mono && 'font-mono text-xs')} />
+        ) : href && value ? (
           <a href={href} target="_blank" rel="noopener noreferrer" className="text-[13px] font-medium text-navy-600 hover:underline truncate block">
             {value} <ExternalLink className="inline w-3 h-3 ml-0.5 -mt-0.5" />
           </a>
         ) : (
-          <div className={cn('text-[13px] font-medium text-navy-800 truncate', mono && 'font-mono text-xs')}>{value}</div>
+          <div className={cn('text-[13px] font-medium truncate', value ? 'text-navy-800' : 'text-stone-300 italic', mono && value && 'font-mono text-xs')}>
+            {value || (canEdit ? `Add ${label.toLowerCase()}...` : '')}
+          </div>
+        )}
+      </div>
+      <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0">
+        {value && (
+          <button onClick={doCopy} title={copied ? 'Copied!' : 'Copy'}
+            className="w-6 h-6 rounded hover:bg-stone-100 flex items-center justify-center text-stone-400 hover:text-stone-600">
+            {copied ? <Check className="w-3 h-3 text-emerald-500" /> : <Copy className="w-3 h-3" />}
+          </button>
+        )}
+        {canEdit && !editing && (
+          <button onClick={startEdit} title="Edit"
+            className="w-6 h-6 rounded hover:bg-stone-100 flex items-center justify-center text-stone-400 hover:text-stone-600">
+            <Pencil className="w-3 h-3" />
+          </button>
         )}
       </div>
     </div>
@@ -1115,16 +1271,22 @@ function ProfilePanel({ contact, onDeleted }: { contact: UnifiedContact | null; 
 
         <div className="grid gap-4 items-start" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))' }}>
           <SectionCard title="Contact" icon={<Users className="w-3.5 h-3.5" />}>
-            <InfoRow icon={<Mail className="w-3.5 h-3.5" />} label="Email" value={contact.email} mono />
-            <InfoRow icon={<Phone className="w-3.5 h-3.5" />} label="Phone" value={contact.phone} />
+            <InfoRow icon={<Users className="w-3.5 h-3.5" />} label="Name" value={fullName(contact)}
+              editField="__name__" contactId={sourceOf(contact) !== 'lead_generator' ? contact.id : undefined} />
+            <InfoRow icon={<Mail className="w-3.5 h-3.5" />} label="Email" value={contact.email} mono
+              editField="email" contactId={sourceOf(contact) !== 'lead_generator' ? contact.id : undefined} />
+            <InfoRow icon={<Phone className="w-3.5 h-3.5" />} label="Phone" value={contact.phone}
+              editField="phone" contactId={sourceOf(contact) !== 'lead_generator' ? contact.id : undefined} />
             <InfoRow icon={<MapPin className="w-3.5 h-3.5" />} label="Address" value={contact.address} />
-            <InfoRow icon={<Linkedin className="w-3.5 h-3.5" />} label="LinkedIn" value={contact.linkedin_url ? 'View profile' : null} href={contact.linkedin_url || undefined} />
+            <InfoRow icon={<Linkedin className="w-3.5 h-3.5" />} label="LinkedIn" value={contact.linkedin_url ? 'View profile' : null} href={contact.linkedin_url || undefined}
+              editField="linkedin_url" contactId={sourceOf(contact) !== 'lead_generator' ? contact.id : undefined} placeholder="https://www.linkedin.com/in/..." />
             <InfoRow icon={<Hash className="w-3.5 h-3.5" />} label="Department" value={contact.department} />
             <InfoRow icon={<Eye className="w-3.5 h-3.5" />} label="Seniority" value={contact.seniority} />
           </SectionCard>
 
           <SectionCard title="Hospitality intel" icon={<Building2 className="w-3.5 h-3.5" />}>
-            <InfoRow icon={<Building2 className="w-3.5 h-3.5" />} label="Organization" value={contact.organization} />
+            <InfoRow icon={<Building2 className="w-3.5 h-3.5" />} label="Organization" value={contact.organization}
+              editField="organization" contactId={sourceOf(contact) !== 'lead_generator' ? contact.id : undefined} />
             <InfoRow icon={<Shield className="w-3.5 h-3.5" />} label="Parent company" value={contact.parent_company} />
             <InfoRow icon={<Sparkles className="w-3.5 h-3.5" />} label="Brand tier" value={contact.brand_tier ? getTierLabel(contact.brand_tier) : null} />
             <InfoRow icon={<Hash className="w-3.5 h-3.5" />} label="Management co." value={contact.management_company} />
