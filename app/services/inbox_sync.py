@@ -2562,6 +2562,7 @@ async def sync_mailbox(
                             "deal": _ts.deal_size,
                             "label": _rel.get("label"),
                             "team": _rel.get("team") or [],
+                            "products": _rel.get("products") or [],
                         }
                 _bse_now = datetime.now(timezone.utc)
                 for _bemail, _hit in _bse_best.items():
@@ -2587,6 +2588,7 @@ async def sync_mailbox(
                             "buying_signal_deal = :d, "
                             "buying_signal_label = :lb, "
                             "buying_signal_team = CAST(:tm AS jsonb), "
+                            "buying_signal_products = :pr, "
                             "buying_signal_at = :t "
                             "WHERE lower(email) = :em"
                         ),
@@ -2597,6 +2599,7 @@ async def sync_mailbox(
                             "d": _hit["deal"],
                             "lb": _hit.get("label"),
                             "tm": _json.dumps(_hit.get("team") or []),
+                            "pr": ", ".join(_hit.get("products") or []) or None,
                             "t": _bse_now,
                             "em": _bemail,
                         },

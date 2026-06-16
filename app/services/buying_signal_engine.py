@@ -220,6 +220,38 @@ _SUBSTANCE = [
 ]
 
 
+_PRODUCTS = [
+    ("apron", r"\baprons?\b|\bdelantal(?:es)?\b"),
+    ("polo", r"\bpolos?\b"),
+    ("dress", r"\bdress(?:es)?\b|\bvestidos?\b"),
+    ("vest", r"\bvests?\b"),
+    ("jacket", r"\bjackets?\b|\bchaquetas?\b|\bblazers?\b|\bwindbreakers?\b"),
+    ("shirt", r"\bshirts?\b|\bblouses?\b|\bcamisas?\b"),
+    ("pants", r"\bpants?\b|\btrousers?\b"),
+    ("skirt", r"\bskirts?\b"),
+    ("scrub", r"\bscrubs?\b"),
+    ("chef coat", r"\bchef\s*coats?\b"),
+    ("tunic", r"\btunics?\b"),
+    ("coverall", r"\bcoveralls?\b"),
+    ("smock", r"\bsmocks?\b"),
+    ("tie", r"\bneck\s*ties?\b"),
+    ("cap", r"\bcaps?\b|\bhats?\b"),
+    ("FOH uniform program", r"\bfoh\s+uniforms?\b"),
+    ("uniform program", r"\buniform program\b|\bcore program\b"),
+    ("uniforms", r"\buniforms?\b|\buniformes?\b"),
+]
+
+
+def extract_products(text: str) -> list[str]:
+    """Product nouns named in the thread (specific garments first), deduped."""
+    text = text or ""
+    hits = [label for label, pat in _PRODUCTS if re.search(pat, text, re.I)]
+    specific = [h for h in hits if h not in ("uniforms", "uniform program")]
+    if specific:
+        hits = specific + [h for h in hits if h == "uniform program"][:1]
+    return hits[:4]
+
+
 def substance_score(internal_text: str) -> tuple[int, list[str]]:
     """How much real product/spec/production work is in the internal thread.
     Returns (0-15 bump, matched markers). More distinct substance = more real."""
@@ -641,6 +673,7 @@ def classify_relationship(
         ],
         "stage": res.stage,
         "evidence": evidence,
+        "products": extract_products("\n".join(m.get("body") or "" for m in messages)),
     }
 
 

@@ -19,6 +19,7 @@
  */
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useSearchParams } from 'react-router-dom'
+import Fuse from 'fuse.js'
 import {
   Sparkles, Wand2, X, RefreshCw, Inbox, Star, ChevronRight, ChevronDown,
   Mail, Phone, Linkedin, ExternalLink, MapPin, Building2, Shield, Hash,
@@ -364,18 +365,32 @@ const CATEGORY_BADGE: Record<string, string> = {
 function deriveSignals(c: InboxContact): string[] {
   const out: string[] = []
   if (c.is_decision_maker) out.push('Decision-maker')
-  if (isHighOpportunity(c)) out.push('High opportunity')
+  // Only show the heuristic 'High opportunity' chip when there is no real
+  // content-based buying signal -- otherwise the Buying Signal card wins.
+  if (isHighOpportunity(c) && !c.buying_signal_label) out.push('High opportunity')
   if (c.gpo) out.push(`${c.gpo} GPO`)
   if (c.seniority && /exec|director|chief|vp|head/i.test(c.seniority)) out.push(c.seniority)
   if (c.brand_tier && /tier1|tier2|luxury/i.test(c.brand_tier)) out.push(getTierLabel(c.brand_tier))
   if (c.phone) out.push('Direct dial on file')
-  if (c.interaction_count >= 8) out.push(`${c.interaction_count} emails`)
+  // Raw email volume is shown in the Engagement card; it is not a buying
+  // signal, so it no longer appears as an AI chip.
   return out.slice(0, 4)
 }
 
 /** AI summary text: real enriched background, else a composed fallback. */
 function deriveSummary(c: InboxContact): string {
   if (c.background) return c.background
+  // Prefer real content-based buying evidence over the speculative
+  // role/volume fallback (avoids 'appears to be unknown ...').
+  if (c.buying_signal_label === 'buyer_evidence' || c.buying_signal_label === 'active_contact') {
+    const org = c.organization ? ` at ${c.organization}` : ''
+    const stg = c.buying_signal_stage && c.buying_signal_stage !== 'noise' && c.buying_signal_stage !== 'internal'
+      ? ` Current stage: ${c.buying_signal_stage}.` : ''
+    const prod = c.buying_signal_products ? ` of ${c.buying_signal_products}` : ''
+    const verb = c.buying_signal_label === 'buyer_evidence'
+      ? `is an active buyer${prod}` : `is in an active buying conversation${prod ? ` about${prod.replace(' of', '')}` : ''}`
+    return `${fullName(c)}${org} ${verb}.${stg} See the buying signal below for details.`
+  }
   const role = (c.seniority || roleText(c) || 'a contact').toString().toLowerCase()
   const dept = c.department ? ` in ${c.department.toLowerCase()}` : ''
   const org = c.organization ? ` at ${c.organization}` : ''
@@ -401,9 +416,10 @@ function buildHaystack(c: UnifiedContact): string {
   ].filter(Boolean).join(' ').toLowerCase()
 }
 
-/** Map natural-language queries to a predicate over a contact.
- *  `t` must already be lowercased+trimmed; `hay` comes from buildHaystack. */
-function smartMatch(c: UnifiedContact, hay: string, t: string): boolean {
+/** Natural-language SHORTCUTS. Returns a boolean when the query is one of the
+ *  known intent phrases (decision makers / luxury / buyers / ...), or `null`
+ *  when it is free text -- in which case the caller runs fuzzy search instead. */
+function shortcutMatch(c: UnifiedContact, t: string): boolean | null {
   if (!t) return true
   if (/decision|maker|\bdm\b/.test(t)) return !!c.is_decision_maker
   if (/high opp|opportun|hot lead/.test(t)) return isHighOpportunity(c)
@@ -417,6 +433,18 @@ function smartMatch(c: UnifiedContact, hay: string, t: string): boolean {
   if (/seller|gpo/.test(t)) return c.contact_category === 'seller'
   if (/competitor/.test(t)) return c.contact_category === 'competitor'
   if (/phone|call|dial/.test(t)) return !!c.phone
+  return null // free text -> fuzzy search
+}
+
+/** True when the query is a known shortcut phrase (so we skip fuzzy search). */
+function isShortcutQuery(t: string): boolean {
+  return /decision|maker|\bdm\b|high opp|opportun|hot lead|management compan|mgmt|operator|lead gen|scraped|discover|prospect|existing|customer|current client|potential|new lead|repl|recent|engaged|active|luxury|premium|upscale|high.?end|buyer|seller|gpo|competitor|phone|call|dial/.test(t)
+}
+
+/** Legacy exact-substring matcher, kept as a fuzzy-search FALLBACK guard. */
+function smartMatch(c: UnifiedContact, hay: string, t: string): boolean {
+  const sc = shortcutMatch(c, t)
+  if (sc !== null) return sc
   return t.split(/\s+/).every((w) => hay.includes(w))
 }
 
@@ -1270,6 +1298,54 @@ function ProfilePanel({ contact, onDeleted }: { contact: UnifiedContact | null; 
         <AIBand contact={contact} />
 
         <div className="grid gap-4 items-start" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))' }}>
+          {contact.buying_signal_label && (
+            <SectionCard title="Buying signal" icon={<Target className="w-3.5 h-3.5" />}>
+              <div className="flex items-center gap-2 mb-2 flex-wrap">
+                {(() => {
+                  const lbl = contact.buying_signal_label
+                  const map: Record<string, { t: string; cls: string }> = {
+                    buyer_evidence: { t: 'Buyer', cls: 'bg-emerald-50 text-emerald-700 ring-emerald-200' },
+                    active_contact: { t: 'Engaged', cls: 'bg-amber-50 text-amber-700 ring-amber-200' },
+                    contact: { t: 'Contact', cls: 'bg-stone-50 text-stone-600 ring-stone-200' },
+                    vendor_or_noise: { t: 'Vendor / noise', cls: 'bg-stone-100 text-stone-500 ring-stone-200' },
+                    internal: { t: 'Internal', cls: 'bg-stone-100 text-stone-500 ring-stone-200' },
+                  }
+                  const m = map[lbl] || { t: lbl, cls: 'bg-stone-50 text-stone-600 ring-stone-200' }
+                  return <span className={cn('inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-bold ring-1', m.cls)}>{m.t}</span>
+                })()}
+                {contact.buying_signal_stage && contact.buying_signal_stage !== 'noise' && contact.buying_signal_stage !== 'internal' && (
+                  <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-medium bg-navy-50 text-navy-700 ring-1 ring-navy-100">{contact.buying_signal_stage}</span>
+                )}
+                {contact.buying_signal_deal && (
+                  <span className="inline-flex items-center gap-1 text-[11px] text-stone-500"><Package className="w-3 h-3" />{contact.buying_signal_deal}</span>
+                )}
+              </div>
+              {contact.buying_signal_products && (
+                <div className="flex items-center gap-1.5 text-[12.5px] text-navy-800 font-medium mb-2">
+                  <Package className="w-3.5 h-3.5 text-stone-400" />
+                  <span className="text-stone-400 font-normal">Interested in:</span> {contact.buying_signal_products}
+                </div>
+              )}
+              {contact.buying_signal_reason && (
+                <div className="text-[12px] text-stone-500 leading-snug mb-2">{contact.buying_signal_reason.split('  |  ')[0]}</div>
+              )}
+              {contact.buying_signal_team && contact.buying_signal_team.length > 0 && (
+                <div className="pt-2 border-t border-stone-100">
+                  <div className="text-[10px] uppercase tracking-wide font-bold text-stone-400 mb-1.5">Others in the thread</div>
+                  <div className="space-y-1">
+                    {contact.buying_signal_team.slice(0, 6).map((p, i) => (
+                      <div key={i} className="flex items-center gap-2 text-[12px]">
+                        <Users className="w-3 h-3 text-stone-300" />
+                        <span className="font-medium text-navy-800">{p.name || p.email}</span>
+                        {p.org && <span className="text-stone-400">· {p.org}</span>}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </SectionCard>
+          )}
+
           <SectionCard title="Contact" icon={<Users className="w-3.5 h-3.5" />}>
             <InfoRow icon={<Users className="w-3.5 h-3.5" />} label="Name" value={fullName(contact)}
               editField="__name__" contactId={sourceOf(contact) !== 'lead_generator' ? contact.id : undefined} />
@@ -1526,10 +1602,22 @@ export default function ContactsPage() {
   // filter (URL `q`) follows 180ms after the user pauses. Keeps keystrokes
   // snappy: filtering+sorting ~7k contacts no longer runs on every key.
   const [draft, setDraft] = useState(query)
-  useEffect(() => { setDraft(query) }, [query]) // external changes (clear, back/fwd)
+  const lastPushed = useRef(query)
+  useEffect(() => {
+    // Only adopt the URL value when it changed from OUTSIDE this component
+    // (i.e. it is not the value we just pushed via the debounce) -- otherwise
+    // our own echo would reset `draft` mid-keystroke and drop fast typing.
+    if (query !== lastPushed.current) {
+      lastPushed.current = query
+      setDraft(query)
+    }
+  }, [query])
   useEffect(() => {
     if (draft === query) return
-    const t = window.setTimeout(() => patch({ q: draft || null }), 180)
+    const t = window.setTimeout(() => {
+      lastPushed.current = draft
+      patch({ q: draft || null })
+    }, 180)
     return () => window.clearTimeout(t)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [draft])
@@ -1694,6 +1782,29 @@ export default function ContactsPage() {
   // search index — haystacks built once per data load, reused on every keystroke
   const indexed = useMemo(() => items.map((c) => ({ c, hay: buildHaystack(c) })), [items])
 
+  // Fuzzy search index (Fuse.js) -- typo tolerance + relevance ranking for free-
+  // text queries. Built once per data load. Fields are WEIGHTED so a name hit
+  // ranks above an org hit above a title/email hit. Natural-language shortcut
+  // phrases (decision makers / luxury / buyers / ...) bypass this and use the
+  // exact predicates in shortcutMatch.
+  const fuse = useMemo(() => new Fuse(items, {
+    includeScore: true,
+    threshold: 0.38,        // 0 = exact, 1 = anything; 0.38 tolerates typos
+    ignoreLocation: true,   // match anywhere in the field, not just the start
+    minMatchCharLength: 2,
+    keys: [
+      { name: 'display_name', weight: 0.9 },
+      { name: 'first_name', weight: 0.8 },
+      { name: 'last_name', weight: 0.8 },
+      { name: 'organization', weight: 0.7 },
+      { name: 'title', weight: 0.4 },
+      { name: 'inferred_role', weight: 0.3 },
+      { name: 'email', weight: 0.5 },
+      { name: 'management_company', weight: 0.3 },
+      { name: 'parent_company', weight: 0.3 },
+    ],
+  }), [items])
+
   // ── TRIANGULATION — per-account intelligence over the FULL dataset ──
   // (intentionally unfiltered: an account's warmth/gaps shouldn't change
   // when you narrow the list)
@@ -1741,7 +1852,20 @@ export default function ContactsPage() {
   // client-side refine + sort
   const filtered = useMemo(() => {
     const t = query.toLowerCase().trim()
-    let list = t ? indexed.filter(({ c, hay }) => smartMatch(c, hay, t)).map(({ c }) => c) : items
+    // When the query is free text (not a known shortcut phrase), use fuzzy
+    // search: typo-tolerant + ranked by relevance. Shortcut phrases use the
+    // exact predicates. `fuzzyRanked` preserves Fuse's relevance order so we
+    // can keep it instead of the sort dropdown for text queries.
+    let list: UnifiedContact[]
+    let fuzzyRanked = false
+    if (!t) {
+      list = items
+    } else if (isShortcutQuery(t)) {
+      list = indexed.filter(({ c, hay }) => smartMatch(c, hay, t)).map(({ c }) => c)
+    } else {
+      list = fuse.search(t).map((r) => r.item)
+      fuzzyRanked = true
+    }
     if (category === 'uncategorized') list = list.filter((c) => !c.contact_category)
     else if (category && category !== 'junk' && category !== 'operational') list = list.filter((c) => c.contact_category === category)
     if (status) list = list.filter((c) => c.approval_status === status)
@@ -1751,6 +1875,9 @@ export default function ContactsPage() {
     if (lifecycle) list = list.filter((c) => stageOf(c) === lifecycle)
     if (vertical) list = list.filter((c) => verticalOf(c) === vertical)
     if (priority) list = list.filter((c) => (priority === 'P_unknown' ? !c.procurement_priority || c.procurement_priority === 'P_unknown' : c.procurement_priority === priority))
+    // A free-text fuzzy query is already ranked best-match-first; keep that
+    // order (the sort dropdown applies to non-search browsing).
+    if (fuzzyRanked) return list
     const sorters: Record<SortKey, (a: UnifiedContact, b: UnifiedContact) => number> = {
       confidence: (a, b) => confidencePct(b) - confidencePct(a),
       opportunity: (a, b) => (b.opportunity_score ?? 0) - (a.opportunity_score ?? 0),
@@ -1764,7 +1891,7 @@ export default function ContactsPage() {
     }
     return [...list].sort(sorters[sort])
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [items, indexed, accountIntel, query, category, status, dmOnly, source, account, lifecycle, vertical, priority, sort])
+  }, [items, indexed, fuse, accountIntel, query, category, status, dmOnly, source, account, lifecycle, vertical, priority, sort])
 
   // group filtered contacts by account (hotel OR management company)
   const groups = useMemo(() => {

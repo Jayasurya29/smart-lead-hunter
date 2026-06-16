@@ -35,6 +35,13 @@ export interface InboxContact {
   enrichment_confidence: number | null
   opportunity_level: string | null
   opportunity_score: number | null
+  buying_signal_score: number | null
+  buying_signal_stage: string | null
+  buying_signal_reason: string | null
+  buying_signal_deal: string | null
+  buying_signal_label: string | null
+  buying_signal_team: Array<{ name: string | null; email: string; org: string | null }> | null
+  buying_signal_products: string | null
   management_company: string | null
   interaction_count: number
   source_mailboxes: string[]
