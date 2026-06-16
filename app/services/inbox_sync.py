@@ -56,6 +56,12 @@ from app.config.procurement_intelligence import (
     gateway_for_brand,
 )
 from app.services.contact_dedup import bulk_upsert_contacts
+import json as _json
+from app.services.buying_signal_engine import (
+    score_thread as _score_thread,
+    classify_relationship as _classify_relationship,
+    DEFAULT_OWN_DOMAINS as _BSE_OWN_DOMAINS,
+)
 from app.services.name_validation import name_fits_email
 
 
@@ -2090,6 +2096,9 @@ async def sync_mailbox(
             pending_sigs: dict[str, str] = {}  # sig_hash → sig_block
             work_items: list[tuple] = []  # (sig_hash, sig_owner, header_name)
             _prefetched: dict[int, Optional[dict]] = {}
+            # Phase-2 content score: stash one record per message, grouped
+            # by Gmail threadId, to score buying intent after the loop.
+            _bse_threads: dict[str, list[dict]] = {}
 
             for idx, msg_id in enumerate(message_ids):
                 if idx % 200 == 0 and idx > 0:
@@ -2190,6 +2199,28 @@ async def sync_mailbox(
                 _mentions_left = MAX_BODY_MENTIONS_PER_MSG
                 top_sender = next(iter(_extract_emails(headers.get("From", ""))), None)
                 top_sender_name = _display_name(headers.get("From", ""))
+
+                # Phase-2: stash this message for thread-level buying-signal
+                # scoring (read-only; does not touch contact extraction).
+                try:
+                    _tid = msg.get("threadId") or msg_id
+                    _idate = msg.get("internalDate")
+                    _days = None
+                    if _idate:
+                        import time as _time
+
+                        _days = int((_time.time() - int(_idate) / 1000) / 86400)
+                    _bse_threads.setdefault(_tid, []).append(
+                        {
+                            "from_email": (top_sender or "").lower(),
+                            "from_name": top_sender_name,
+                            "body": body,
+                            "sig_org": None,
+                            "days_since": _days,
+                        }
+                    )
+                except Exception:
+                    pass
 
                 for seg_idx, seg in enumerate(segments):
                     sig_owner = top_sender if seg_idx == 0 else _seg_email(seg)
@@ -2506,6 +2537,78 @@ async def sync_mailbox(
             stats["new_contacts"] = upsert_stats["inserted"]
             stats["updated_contacts"] = upsert_stats["updated"]
             stats["errors"] = upsert_stats["errors"]
+
+            # Phase-2 content score: contacts now exist in the DB, so score
+            # each thread and UPDATE the BUYER's row directly (the fixed-
+            # column upsert above does not carry buying_signal_*). A buyer in
+            # many threads keeps the MAX score (hottest active deal). Wholly
+            # non-fatal: any failure here never blocks the sync.
+            try:
+                _bse_best: dict[str, dict] = {}
+                for _msgs in _bse_threads.values():
+                    if not _msgs:
+                        continue
+                    _ts = _score_thread(_msgs, own_domains=_BSE_OWN_DOMAINS)
+                    if not _ts.buyer_email or not _ts.score:
+                        continue
+                    _bk = _ts.buyer_email.lower()
+                    _bp = _bse_best.get(_bk)
+                    if _bp is None or _ts.score > _bp["score"]:
+                        _rel = _classify_relationship(_msgs, own_domains=_BSE_OWN_DOMAINS)
+                        _bse_best[_bk] = {
+                            "score": _ts.score,
+                            "stage": _ts.stage,
+                            "reason": _ts.reason,
+                            "deal": _ts.deal_size,
+                            "label": _rel.get("label"),
+                            "team": _rel.get("team") or [],
+                        }
+                _bse_now = datetime.now(timezone.utc)
+                for _bemail, _hit in _bse_best.items():
+                    # Defer to a confident existing category: if the DB
+                    # already knows this contact is a seller/vendor/
+                    # competitor, do not label them a buyer (the body has
+                    # buying verbs only because WE buy from suppliers).
+                    _kc = await session.execute(
+                        text(
+                            "SELECT contact_category FROM contacts WHERE lower(email) = :em LIMIT 1"
+                        ),
+                        {"em": _bemail},
+                    )
+                    _kcv = (_kc.scalar() or "").strip().lower()
+                    if _kcv in ("seller", "vendor", "competitor"):
+                        _hit["label"] = "vendor_or_noise"
+                    await session.execute(
+                        text(
+                            "UPDATE contacts SET "
+                            "buying_signal_score = :s, "
+                            "buying_signal_stage = :st, "
+                            "buying_signal_reason = :r, "
+                            "buying_signal_deal = :d, "
+                            "buying_signal_label = :lb, "
+                            "buying_signal_team = CAST(:tm AS jsonb), "
+                            "buying_signal_at = :t "
+                            "WHERE lower(email) = :em"
+                        ),
+                        {
+                            "s": _hit["score"],
+                            "st": _hit["stage"],
+                            "r": _hit["reason"],
+                            "d": _hit["deal"],
+                            "lb": _hit.get("label"),
+                            "tm": _json.dumps(_hit.get("team") or []),
+                            "t": _bse_now,
+                            "em": _bemail,
+                        },
+                    )
+                if _bse_best:
+                    await session.commit()
+                    logger.info(
+                        f"inbox_sync: {mailbox} - buying-signal scored "
+                        f"{len(_bse_best)} buyer(s) over {len(_bse_threads)} threads"
+                    )
+            except Exception as _bse_err:
+                logger.warning(f"inbox_sync: buying-signal scoring skipped: {_bse_err}")
 
         await _upsert_sync_state(
             session,
