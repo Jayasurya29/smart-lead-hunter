@@ -30,6 +30,7 @@ from sqlalchemy import text
 from app.database import async_session
 from app.services.ai_client import ai_generate
 from app.services.contact_intelligence import assess
+from app.services.known_hotel_domains import get_known_hotel_domains
 from app.services.client_resolver import (
     ClientResolver,
     is_competitor,
@@ -204,6 +205,11 @@ async def run_tier1(
         # sets). A contact at a known client domain/name is a real relationship,
         # so resolve it deterministically before the LLM pass can mis-junk it.
         resolver = await ClientResolver().load(session)
+        # Known-hotel domains: a contact whose email domain is a confirmed hotel
+        # (from our lead/existing/SAP records) is relevant even if the property
+        # NAME lacks a hospitality word (e.g. "The Elene" = theelene.com). Fed
+        # into assess() so the classifier never junks a known hotel by name.
+        known_hotel_domains = await get_known_hotel_domains(session)
 
     if not rows:
         return {"scanned": 0, "enriched": 0, "note": "nothing to do"}
@@ -223,6 +229,7 @@ async def run_tier1(
                 "title": r.title,
                 "organization": r.organization,
             },
+            known_hotel_domains=known_hotel_domains,
         )
         category, source = None, None
         if is_competitor(r.organization, email):

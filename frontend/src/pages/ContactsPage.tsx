@@ -1750,6 +1750,11 @@ export default function ContactsPage() {
     return merged.filter((c) => c.contact_category !== 'junk' && c.contact_category !== 'operational')
   }, [listQ.data, leadQ.data, category])
   const total = items.length
+  // Distinct people after entity-resolution de-dup (same person across multiple
+  // emails/employers collapses to one). This is the honest "people" headline --
+  // `total` above is raw rows. Unfiltered, so the header stays stable as filters
+  // change (the list subline uses the filtered dedup count).
+  const totalPeople = useMemo(() => collapsePeople(items).length, [items])
   // operational inboxes are excluded from `items` (so they leave the people
   // count, account groups and warmth math) — count them from the raw inbox
   // feed for the header sub-line and the facet badge.
@@ -2131,7 +2136,7 @@ export default function ContactsPage() {
           <div>
             <h1 className="text-2xl font-bold text-navy-900 leading-none tracking-tight">Contacts</h1>
             <p className="text-[13px] text-stone-500 mt-2">
-              <span className="text-stone-600 font-semibold tabular-nums">{(total || stats?.total || 0).toLocaleString()}</span> people across{' '}
+              <span className="text-stone-600 font-semibold tabular-nums">{(totalPeople || total || stats?.total || 0).toLocaleString()}</span> people across{' '}
               <span className="text-stone-600 font-semibold tabular-nums">{scope.hotelAccounts} hotels</span> and{' '}
               <span className="text-stone-600 font-semibold tabular-nums">{scope.mgmtAccounts} management companies</span>
               {sharedInboxCount > 0 && category !== 'operational' && (
