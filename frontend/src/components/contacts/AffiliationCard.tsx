@@ -30,7 +30,7 @@ export default function AffiliationCard({
     return <div className="text-[12px] text-stone-400 py-1">Coverage unavailable.</div>
   }
 
-  const { employer, employers, is_portfolio_buyer, coverage, coverage_count, derived_portfolio_count } = data
+  const { employer, employers, is_portfolio_buyer, coverage, coverage_count, derived_portfolio_count, former_employers } = data
   if (!employer && coverage_count === 0) {
     return (
       <div className="text-[12px] text-stone-400 py-1">
@@ -113,6 +113,21 @@ export default function AffiliationCard({
           )}
         </div>
       </div>
+
+      {former_employers && former_employers.length > 0 && (
+        <div className="flex items-start gap-2 pt-0.5">
+          <Briefcase className="w-3.5 h-3.5 text-stone-300 mt-0.5 flex-shrink-0" />
+          <div className="text-[12px] leading-snug text-stone-400">
+            Previously{' '}
+            {former_employers.map((f, i) => (
+              <span key={`former-${f.name}-${i}`}>
+                {i > 0 && <span className="text-stone-300"> {'·'} </span>}
+                <span className="font-medium text-stone-500">{f.name || '—'}</span>
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   )
 }

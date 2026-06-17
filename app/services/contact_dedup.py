@@ -323,6 +323,10 @@ async def upsert_contact(
     # Interaction tracking
     source_mailbox: Optional[str] = None,
     interaction_increment: int = 1,
+    # Communication timeline (real message dates, distinct from sync time)
+    first_message_at: Optional[Any] = None,
+    last_inbound_at: Optional[Any] = None,
+    last_outbound_at: Optional[Any] = None,
     # Pipeline linkage
     matched_lead_id: Optional[int] = None,
     matched_hotel_id: Optional[int] = None,
@@ -403,6 +407,7 @@ async def upsert_contact(
                     opportunity_level, opportunity_score, management_company,
                     interaction_count, source_mailboxes,
                     first_seen, last_seen,
+                    first_message_at, last_inbound_at, last_outbound_at,
                     approval_status, matched_lead_id, matched_hotel_id,
                     sync_history, created_at, updated_at
                 ) VALUES (
@@ -414,6 +419,7 @@ async def upsert_contact(
                     :opportunity_level, :opportunity_score, :management_company,
                     :interaction_count, :source_mailboxes,
                     :now, :now,
+                    :first_message_at, :last_inbound_at, :last_outbound_at,
                     'pending', :matched_lead_id, :matched_hotel_id,
                     CAST(:sync_history AS jsonb), :now, :now
                 )
@@ -444,6 +450,9 @@ async def upsert_contact(
                 "interaction_count": interaction_increment,
                 "source_mailboxes": mailboxes,
                 "now": now,
+                "first_message_at": first_message_at,
+                "last_inbound_at": last_inbound_at,
+                "last_outbound_at": last_outbound_at,
                 "matched_lead_id": matched_lead_id,
                 "matched_hotel_id": matched_hotel_id,
                 "sync_history": json.dumps([sync_event], default=str),
@@ -505,6 +514,37 @@ async def upsert_contact(
         updates["opportunity_score"] = opportunity_score
     if management_company is not None:
         updates["management_company"] = _coerce_str(management_company)
+
+    # Communication timeline merge: first_message_at = earliest ever seen;
+    # last_inbound/last_outbound = latest ever seen. NULL-safe (a missing side
+    # just keeps whatever we already had). existing is SELECT * so these cols
+    # are present once migration 040 is applied.
+    def _earliest(a, b):
+        if a is None:
+            return b
+        if b is None:
+            return a
+        return a if a < b else b
+
+    def _latest(a, b):
+        if a is None:
+            return b
+        if b is None:
+            return a
+        return a if a > b else b
+
+    _ex_first = existing["first_message_at"] if "first_message_at" in existing.keys() else None
+    _ex_in = existing["last_inbound_at"] if "last_inbound_at" in existing.keys() else None
+    _ex_out = existing["last_outbound_at"] if "last_outbound_at" in existing.keys() else None
+    _new_first = _earliest(_ex_first, first_message_at)
+    _new_in = _latest(_ex_in, last_inbound_at)
+    _new_out = _latest(_ex_out, last_outbound_at)
+    if _new_first is not None:
+        updates["first_message_at"] = _new_first
+    if _new_in is not None:
+        updates["last_inbound_at"] = _new_in
+    if _new_out is not None:
+        updates["last_outbound_at"] = _new_out
 
     # Always update
     updates["last_seen"] = now
@@ -598,6 +638,9 @@ async def bulk_upsert_contacts(
                     management_company=c.get("management_company"),
                     source_mailbox=mailbox,
                     interaction_increment=increment,
+                    first_message_at=c.get("first_message_at"),
+                    last_inbound_at=c.get("last_inbound_at"),
+                    last_outbound_at=c.get("last_outbound_at"),
                     matched_lead_id=c.get("matched_lead_id"),
                     matched_hotel_id=c.get("matched_hotel_id"),
                 )

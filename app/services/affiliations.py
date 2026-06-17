@@ -203,11 +203,14 @@ async def get_affiliations_for_person(
 
     employers_raw: list[dict] = []
     explicit: list[dict] = []
+    former: list[dict] = []
     for e in edges:
         if e["relationship"] == "employed_by":
             employers_raw.append(dict(e))
         elif e["relationship"] in ("covers", "stationed_at"):
             explicit.append(dict(e))
+        elif e["relationship"] == "former":
+            former.append(dict(e))
 
     coverage: list[dict] = []
     seen: set = set()
@@ -288,6 +291,14 @@ async def get_affiliations_for_person(
         "coverage_count": len(coverage),
         "derived_portfolio_count": derived_count,
         "coverage": coverage[:_COVERAGE_CAP],
+        "former_employers": [
+            {
+                "name": e.get("account_name"),
+                "account_type": e.get("account_type"),
+                "account_id": e.get("account_id"),
+            }
+            for e in former
+        ],
     }
 
 

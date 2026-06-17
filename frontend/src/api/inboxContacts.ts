@@ -47,6 +47,10 @@ export interface InboxContact {
   source_mailboxes: string[]
   first_seen: string | null
   last_seen: string | null
+  first_message_at: string | null
+  last_inbound_at: string | null
+  last_outbound_at: string | null
+  secondary_email: string | null
   approval_status: string
   insightly_contact_id: string | null
   pushed_to_insightly_at: string | null

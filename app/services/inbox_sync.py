@@ -36,6 +36,7 @@ import hashlib
 import json
 import logging
 import re
+import unicodedata
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Optional
@@ -65,11 +66,252 @@ from app.services.buying_signal_engine import (
 from app.services.name_validation import name_fits_email
 
 
+_NAME_JUNK_CHARS = set('*|<>[]{}~^="\\')
+_NAME_ROLE_WORDS = {
+    "gm",
+    "hr",
+    "ceo",
+    "coo",
+    "cfo",
+    "vp",
+    "director",
+    "manager",
+    "owner",
+    "security",
+    "engineering",
+    "sales",
+    "front",
+    "desk",
+    "accounting",
+    "support",
+    "membership",
+    "main",
+    "contact",
+    "rep",
+    "account",
+    "tech",
+    "president",
+    "fb",
+    "screen",
+    "printing",
+    "other",
+    "payable",
+    "invoices",
+    "it",
+    "operations",
+    "info",
+    "coach",
+    "soccer",
+    "tennis",
+    "model",
+    "chef",
+}
+_NAME_ORGISH_WORDS = {
+    "company",
+    "corp",
+    "corporation",
+    "inc",
+    "llc",
+    "ltd",
+    "group",
+    "uniform",
+    "uniforms",
+    "apparel",
+    "sportswear",
+    "textile",
+    "textiles",
+    "fabric",
+    "fabrics",
+    "manufacturing",
+    "manufacturer",
+    "industries",
+    "international",
+    "supply",
+    "sourcing",
+    "solutions",
+    "services",
+    "systems",
+    "media",
+    "publishing",
+    "collection",
+    "hotel",
+    "hotels",
+    "resort",
+    "resorts",
+    "parking",
+    "linen",
+    "mills",
+    "jersey",
+}
+
+
+def _name_strip_wrappers(s: str) -> Optional[str]:
+    """Remove always-junk chars; keep internal apostrophes; collapse spaces."""
+    if not s:
+        return s
+    t = "".join(c for c in s if c not in _NAME_JUNK_CHARS).strip()
+    while t[:1] == "'":
+        t = t[1:]
+    while t[-1:] == "'":
+        t = t[:-1]
+    return re.sub(r"\s+", " ", t).strip() or None
+
+
+def _name_norm(s: str) -> str:
+    return re.sub(r"[^a-z0-9]", "", (s or "").lower())
+
+
+def _name_email_locals(email: str) -> set[str]:
+    if not email or "@" not in email:
+        return set()
+    local = email.split("@")[0].lower()
+    return {b for b in re.split(r"[._+\-0-9]+", local) if len(b) >= 2}
+
+
+def _name_email_confirms(seg: str, locals_: set[str]) -> bool:
+    if not locals_:
+        return False
+    for p in (re.sub(r"[^a-z]", "", w.lower()) for w in seg.split()):
+        if len(p) < 2:
+            continue
+        for e in locals_:
+            if p == e or (len(p) >= 4 and p in e) or (len(e) >= 4 and e in p):
+                return True
+            if len(e) >= 5 and (e[1:] == p or e[:-1] == p):
+                return True
+    return False
+
+
+def _name_is_orgish(seg: str) -> bool:
+    words = [w.lower().strip("().,&") for w in seg.split()]
+    return any(w in _NAME_ORGISH_WORDS for w in words)
+
+
+def _clean_ingest_name(display_name: str, org: str, email: str) -> Optional[str]:
+    """Recover a clean PERSON name from a possibly org/title-embedded display
+    name. Returns the cleaned name, or None when ambiguous (caller leaves the
+    existing name as-is for the Gemini batch org-split / name-gate to resolve)."""
+    if not display_name:
+        return display_name
+    if not any(d in display_name for d in (" - ", " | ", "[", "]", '"')):
+        return _name_strip_wrappers(display_name)
+    locals_ = _name_email_locals(email)
+    norg = _name_norm(org)
+    import re as _re
+
+    quoted = _re.findall(r'"([^"]+)"', display_name)
+    t_noq = _re.sub(r'"[^"]*"', " ", display_name)
+    raw = _re.split(r"\s*[\|\[\]]\s*|\s+-\s+", t_noq)
+    segs = [x for x in (_name_strip_wrappers(s) for s in raw if s and s.strip()) if x]
+    pool = [p for p in (segs + [_name_strip_wrappers(q) for q in quoted if q]) if p]
+    confirmed = [s for s in pool if _name_email_confirms(s, locals_) and not _name_is_orgish(s)]
+    if confirmed:
+        confirmed.sort(key=lambda x: (-len(x.split()), -len(x)))
+        return confirmed[0]
+    leftover = []
+    for s in segs:
+        ns = _name_norm(s)
+        if norg and (ns == norg or (len(ns) > 3 and (ns in norg or norg in ns))):
+            continue
+        words = [w.lower().strip("().,") for w in s.split()]
+        if words and all(w in _NAME_ROLE_WORDS for w in words):
+            continue
+        if _name_is_orgish(s):
+            continue
+        leftover.append(s)
+    persons = [s for s in leftover if len(s.split()) >= 2]
+    if len(persons) == 1:
+        return persons[0]
+    if not persons and len(leftover) == 1 and not _name_is_orgish(leftover[0]):
+        return leftover[0]
+    return None
+
+
+_SEO_SPAM_TOKENS = (
+    "rankmint",
+    "seo_matrix",
+    "seo matrix",
+    "hyper_rank",
+    "hyperrank",
+    "backlink",
+    "growth_experts",
+    "growthexperts",
+    "sunil seo",
+    "linkbuilding",
+    "link building",
+    "guestpost",
+    "guest post",
+    "seo team",
+    "growth_hack",
+)
+
+
+def _name_has_homoglyph(s: str) -> bool:
+    """True if a name mixes in Cyrillic/Greek lookalike letters (brand spoofing).
+    Real accented Latin (Marin, Munoz) and CJK names are NOT flagged."""
+    if not s:
+        return False
+    for ch in s:
+        if not ch.isalpha():
+            continue
+        try:
+            uname = unicodedata.name(ch)
+        except ValueError:
+            continue
+        if "CYRILLIC" in uname or "GREEK" in uname:
+            return True
+    return False
+
+
+def _name_is_url_blob(s: str) -> bool:
+    if not s:
+        return False
+    low = s.lower()
+    if any(t in low for t in ("http", "://", "%3a", ".com/", "thread.v2", "/0?context")):
+        return True
+    return len(s) > 60 and ("%" in s or "/" in s)
+
+
+def _name_is_seo_spam(s: str) -> bool:
+    if not s or " via " not in s.lower():
+        return False
+    tail = s.lower().split(" via ", 1)[1]
+    return any(tok in tail for tok in _SEO_SPAM_TOKENS)
+
+
+def _is_junk_name(contact: dict) -> bool:
+    """True if the contact's NAME marks it as phishing/SEO-spam/URL-blob junk
+    that the domain filters can't catch. Such contacts are dropped at ingest."""
+    blob = " ".join(
+        v
+        for v in (contact.get("display_name"), contact.get("first_name"), contact.get("last_name"))
+        if v
+    )
+    if not blob:
+        return False
+    return _name_has_homoglyph(blob) or _name_is_url_blob(blob) or _name_is_seo_spam(blob)
+
+
 def _apply_name_gate(contact: dict) -> None:
     """Validate a contact's scraped name against its email before persistence.
     Mutates `contact` in place. See name_validation.name_fits_email for rules:
     role inboxes lose the structured personal identity; clear mismatches are
     blanked for later re-resolution; plausible names are kept untouched."""
+    # Clean org/title-embedded + wrapper junk from the name BEFORE validation, so
+    # the system produces clean person names on its own (no post-hoc cleanup
+    # script). Ambiguous rows return None and are left for the Gemini batch
+    # org-split / the validation below to resolve.
+    _dn_in = contact.get("display_name") or ""
+    if _dn_in and any(_d in _dn_in for _d in (" - ", " | ", "[", "]", '"', "*")):
+        _person = _clean_ingest_name(
+            _dn_in, contact.get("organization") or "", contact.get("email") or ""
+        )
+        if _person and _person != _dn_in:
+            contact["display_name"] = _person
+            _pp = _person.split(None, 1)
+            contact["first_name"] = _pp[0]
+            contact["last_name"] = _pp[1] if len(_pp) > 1 else None
+
     fn = contact.get("first_name") or ""
     ln = contact.get("last_name") or ""
     dn = contact.get("display_name") or ""
@@ -152,7 +394,34 @@ NOREPLY_PATTERNS = [
     "insider",
     "open-source-ceo",
     "webmaster",
+    "no_reply",
+    "do_not_reply",
+    "donotreply",
+    "auto_reply",
+    "reply-",
+    "reply_",
 ]
+
+# Cold-outreach / lead-gen / fake-insight agencies (2026-06-17): clean .com
+# domains with firstname@ format that pass every sender filter but are AI
+# cold-email spam, never real hotel/operator/grocery leads. Exact-domain match
+# only (conservative -- a real company sharing a name won't be on this list).
+# Harvested from the aarencibia backfill leak-through. Extend as more surface.
+COLD_OUTREACH_DOMAINS: set[str] = {
+    "tryinboxop.com",
+    "clickwinme.com",
+    "hireagentinian.com",
+    "ascendilyyx.com",
+    "knownativeagency.com",
+    "ivyexecinsights.com",
+    "performpartnerscompany.com",
+    "xtremisdev.com",
+    "iadvancingadvisors.com",
+    "corexpand.com",
+    "thewearepulse.com",
+    "nothinbutdecks.com",
+    "primeluxuryincentives.com",
+}
 
 MASS_MAIL_PATTERNS = ["newsletter", "unsubscribe", "digest", "dmarc", "mailer-daemon"]
 
@@ -559,6 +828,32 @@ Rules:
 Entries:
 """
 
+NAME_RESOLVE_PROMPT = """\
+You are extracting the real PERSON NAME from messy contact records. Each record
+has a display_name (which may contain the company, a location, a title, and/or
+the person, jammed together), the known organization, and the email.
+
+Return the real person's name, or null if the record is NOT a person (only a
+company, department, role, or location).
+
+Return ONLY a JSON array (no markdown, no preamble), one object per record IN THE
+SAME ORDER. Each object: {"id":<int>,"person_name":<str|null>,"is_person":<bool>}
+
+Rules:
+- "Towne Park - Ken Wilner" -> person_name="Ken Wilner"
+- "Canyon Ranch \"Miami Beach\" - Elisa Mejia" -> person_name="Elisa Mejia"
+  (Miami Beach is a LOCATION, not the person)
+- "DHL Express - main contact \"Mark Minnick\"" -> person_name="Mark Minnick"
+  (the named contact is the person, even if the email belongs to someone else)
+- "Edward \"Ed\" Schissler" -> person_name="Edward Schissler" (Ed is a nickname)
+- "Simon Jersey - UK Uniform Company" -> person_name=null, is_person=false
+- "AP Invoices - FYM" / "IT | Support" -> person_name=null, is_person=false
+- Drop titles, locations, company names, extension numbers, parentheticals.
+- The email may confirm the person but is only a hint; the named person wins.
+
+Records:
+"""
+
 # ──────────────────────────────────────────────────────────────────────────
 # Regex precompiles
 # ──────────────────────────────────────────────────────────────────────────
@@ -637,6 +932,31 @@ def _strip_html(html: str) -> str:
     )
     text_out = re.sub(r"\n{3,}", "\n\n", text_out)
     return re.sub(r"[ \t]+", " ", text_out)
+
+
+def _dt_fromtimestamp_utc(epoch_seconds: float):
+    """Epoch seconds -> tz-aware UTC datetime (Gmail internalDate is ms)."""
+    from datetime import datetime, timezone
+
+    return datetime.fromtimestamp(epoch_seconds, tz=timezone.utc)
+
+
+def _track_comm_dates(entry: dict, msg_dt, inbound: bool) -> None:
+    """Fold one message's date + direction into a header contact entry.
+
+    first_message_at = earliest seen; last_inbound_at / last_outbound_at =
+    latest seen on each side. A None date is a no-op.
+    """
+    if msg_dt is None:
+        return
+    if entry.get("first_message_at") is None or msg_dt < entry["first_message_at"]:
+        entry["first_message_at"] = msg_dt
+    if inbound:
+        if entry.get("last_inbound_at") is None or msg_dt > entry["last_inbound_at"]:
+            entry["last_inbound_at"] = msg_dt
+    else:
+        if entry.get("last_outbound_at") is None or msg_dt > entry["last_outbound_at"]:
+            entry["last_outbound_at"] = msg_dt
 
 
 def _extract_plain(payload: dict) -> str:
@@ -890,6 +1210,8 @@ def _passes_hard_filters(email: str, own_mailbox: str) -> tuple[bool, str]:
         return False, "consumer"
     if _is_bulk_subdomain(d):
         return False, "bulk_subdomain"
+    if d in COLD_OUTREACH_DOMAINS:
+        return False, "cold_outreach"
     return True, "ok"
 
 
@@ -1999,6 +2321,77 @@ async def _upsert_sync_state(session: AsyncSession, mailbox: str, **kwargs) -> N
 # ──────────────────────────────────────────────────────────────────────────
 
 
+async def _resolve_messy_names(contacts: list[dict]) -> int:
+    """TIER 2 name resolution: batch the contacts whose name still looks messy
+    (org/title embedded, wrappers) through Gemini to recover the real person.
+    Mutates contacts in place. Returns the number resolved. Non-fatal: any
+    failure leaves the existing name untouched."""
+    messy = [
+        c
+        for c in contacts
+        if (c.get("display_name") or "")
+        and any(d in c["display_name"] for d in (" - ", " | ", "[", "]", '"', "*"))
+    ]
+    if not messy:
+        return 0
+    resolved = 0
+    sem = asyncio.Semaphore(_ORG_SPLIT_SEMAPHORE)
+    batches = [messy[i : i + 25] for i in range(0, len(messy), 25)]
+
+    async def _do(client, batch):
+        nonlocal resolved
+        entries = [
+            {
+                "id": i,
+                "display_name": c.get("display_name"),
+                "organization": c.get("organization"),
+                "email": c.get("email"),
+            }
+            for i, c in enumerate(batch)
+        ]
+        prompt = NAME_RESOLVE_PROMPT + _json.dumps(entries, ensure_ascii=False)
+        async with sem:
+            try:
+                raw = await ai_generate(client, prompt, model="gemini-2.5-flash-lite")
+            except Exception as exc:
+                logger.debug(f"inbox_sync: name-resolve error: {exc}")
+                return
+        if not raw:
+            return
+        raw = raw.strip()
+        if raw.startswith("```"):
+            raw = re.sub(r"^```(?:json)?\s*", "", raw)
+            raw = re.sub(r"\s*```$", "", raw)
+        try:
+            items = _json.loads(raw)
+        except (ValueError, TypeError):
+            return
+        if not isinstance(items, list):
+            return
+        for item in items:
+            idx = item.get("id")
+            if idx is None or idx >= len(batch):
+                continue
+            c = batch[idx]
+            if not item.get("is_person", False) or not item.get("person_name"):
+                continue
+            person = str(item["person_name"]).strip()
+            if not person or person == (c.get("display_name") or ""):
+                continue
+            c["display_name"] = person
+            _pp = person.split(None, 1)
+            c["first_name"] = _pp[0]
+            c["last_name"] = _pp[1] if len(_pp) > 1 else None
+            resolved += 1
+
+    try:
+        async with httpx.AsyncClient(timeout=120.0) as client:
+            await asyncio.gather(*[_do(client, b) for b in batches])
+    except Exception as exc:
+        logger.debug(f"inbox_sync: name-resolve stage error: {exc}")
+    return resolved
+
+
 async def sync_mailbox(
     mailbox: str,
     session: AsyncSession,
@@ -2122,6 +2515,26 @@ async def sync_mailbox(
                     for h in (msg.get("payload", {}).get("headers") or [])
                 }
 
+                # Communication dates (2026-06-16): the message's real send time
+                # + direction, so the contact carries the actual relationship
+                # timeline (first contact / they last replied / we last emailed),
+                # distinct from sync time. internalDate is already fetched; the
+                # From header tells us who wrote it. Direction is INBOUND when the
+                # sender is NOT a JA address (the external person wrote to us),
+                # OUTBOUND when JA wrote. Best-effort: a bad/missing date just
+                # leaves these None for the message.
+                _msg_dt = None
+                try:
+                    _id = msg.get("internalDate")
+                    if _id:
+                        _msg_dt = _dt_fromtimestamp_utc(int(_id) / 1000)
+                except Exception:
+                    _msg_dt = None
+                _from_emails = _extract_emails(headers.get("From", ""))
+                _from_e = _from_emails[0].lower() if _from_emails else ""
+                _from_domain = _from_e.split("@")[-1] if "@" in _from_e else ""
+                _msg_inbound = bool(_from_e) and _from_domain not in OWN_DOMAINS
+
                 # One interaction per person per MESSAGE (2026-06-11): the
                 # same address in From+Reply-To (or To+Cc) used to count twice
                 # and inflate account warmth. interaction_count now means
@@ -2166,6 +2579,7 @@ async def sync_mailbox(
                             entry["interaction_count"] += 1
                         if display and not entry["display_name"]:
                             entry["display_name"] = display
+                        _track_comm_dates(entry, _msg_dt, _msg_inbound)
 
                 # ── vCard attachments (2026-06-11) ──
                 # Business-card .vcf files carry name/title/org/phone/email —
@@ -2517,15 +2931,37 @@ async def sync_mailbox(
                 "has_signature": bool(sig),
                 "confidence": sig.get("confidence") or vcf.get("confidence"),
                 "interaction_count": header.get("interaction_count", 0),
+                "first_message_at": header.get("first_message_at"),
+                "last_inbound_at": header.get("last_inbound_at"),
+                "last_outbound_at": header.get("last_outbound_at"),
                 "source_mailbox": mailbox,
             }
 
             contact = _enrich(contact)
+            # Drop phishing-homoglyph / SEO-spam / URL-blob names that the
+            # domain filters can't catch (junk is in the NAME, not the domain).
+            if _is_junk_name(contact):
+                continue
             _apply_name_gate(contact)
             merged_contacts.append(contact)
 
         stats["contacts_found"] = len(merged_contacts)
         logger.info(f"inbox_sync: {mailbox} — {len(merged_contacts)} contacts after merge/filter")
+
+        # -- Name-resolution stage (TIER 2) ---------------------------
+        # TIER 1 (deterministic, in _apply_name_gate) already cleaned wrappers
+        # and org-confirmed splits inline. Any names still embedding org/title
+        # are resolved here via Gemini, IN THIS RUN -- so the pipeline always
+        # produces clean person names without a separate cleanup script.
+        if merged_contacts:
+            try:
+                _nres = await _resolve_messy_names(merged_contacts)
+                if _nres:
+                    logger.info(
+                        f"inbox_sync: {mailbox} -- name-resolved {_nres} embedded/messy names"
+                    )
+            except Exception as _nrexc:
+                logger.warning(f"inbox_sync: name-resolution stage skipped: {_nrexc}")
 
         if merged_contacts:
             upsert_stats = await bulk_upsert_contacts(

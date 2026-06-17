@@ -285,12 +285,35 @@ VENDOR_SEEDS = {
 }
 
 
+# Generated vendor seeds from VENDOR_LIST.xlsx (via import_vendor_list.py).
+# Loaded if present; falls back to the in-code VENDOR_SEEDS below otherwise.
+try:
+    from app.config.vendor_seeds import (
+        VENDOR_NAME_SEEDS as _GEN_VENDOR_NAME_SEEDS,
+        VENDOR_DOMAIN_SEEDS as _GEN_VENDOR_DOMAIN_SEEDS,
+    )
+except Exception:  # noqa: BLE001 - generated file may not exist yet
+    _GEN_VENDOR_NAME_SEEDS = set()
+    _GEN_VENDOR_DOMAIN_SEEDS = set()
+
+
 def is_vendor(organization, email):
-    """True if the contact is at one of JA's known apparel suppliers."""
-    d_root = _domain_root(_domain(email))
+    """True if the contact is at one of JA's known apparel suppliers.
+
+    Uses the generated VENDOR_LIST.xlsx seeds (domain exact-match + name
+    substring) plus the in-code VENDOR_SEEDS as a fallback so HUAFANG and the
+    rest of the real vendor master are recognized."""
+    d = _domain(email)
+    d_root = _domain_root(d)
     norm = normalize_name(organization or "")
-    if d_root and any(d_root == s.replace(" ", "") for s in VENDOR_SEEDS):
+    # 1) exact domain against generated supplier domains (full domain or root)
+    if d and (d in _GEN_VENDOR_DOMAIN_SEEDS or d_root in _GEN_VENDOR_DOMAIN_SEEDS):
         return True
-    if norm and any(s in norm for s in VENDOR_SEEDS):
+    # 2) name substring against generated name seeds + in-code fallback
+    name_seeds = _GEN_VENDOR_NAME_SEEDS or VENDOR_SEEDS
+    if norm and any(s in norm for s in name_seeds):
+        return True
+    # 3) legacy in-code domain-root match (kept for safety)
+    if d_root and any(d_root == s.replace(" ", "") for s in VENDOR_SEEDS):
         return True
     return False

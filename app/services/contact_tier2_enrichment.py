@@ -41,6 +41,7 @@ SYNTH_PROMPT = """You are building a CRM dossier for a sales team at JA Uniforms
 Given a contact and raw web snippets about them, produce ONLY this JSON:
 {"role":"","seniority":"","department":"","is_decision_maker":false,
  "person_first_name":"","person_last_name":"",
+ "current_employer":"","current_title":"","employer_changed":false,"former_employer":"",
  "background":"","relevant_to_uniforms":true,"confidence":0.0}
 
 Rules:
@@ -69,6 +70,28 @@ Rules:
   "" when not clearly established — NEVER guess a name from the email
   pattern alone.
 - relevant_to_uniforms: true if this person/company could be a JA customer.
+- current_employer: the company this person works at NOW, exactly as the snippets
+  name it. Determine this from the DATES in the snippets -- the most recent role
+  (a LinkedIn entry marked "Present", "current", or a dated role with no end date,
+  or the latest start date) is their CURRENT employer. IMPORTANT: the organization
+  shown in CONTACT is only what we have ON FILE and MAY BE STALE or a FORMER
+  employer -- do NOT assume it is current, and do NOT let the contact's email
+  domain decide this. Trust the dated evidence in the snippets over the CONTACT
+  org. "" only if the snippets don't clearly establish a current employer.
+- current_title: their job title at that current employer. "" if unclear.
+- employer_changed: true ONLY when the snippets EXPLICITLY show that the most
+  recent (current) employer is a DIFFERENT company from the organization given in
+  CONTACT (different organization, not just a reworded spelling of the same one).
+  Example: CONTACT says "The Ritz-Carlton" but the snippets show a more recent
+  role "Director at The St. Regis San Francisco (Present)" -- that is
+  employer_changed=true, current_employer="The St. Regis San Francisco",
+  former_employer="The Ritz-Carlton". Be conservative about the DIRECTION but do
+  not let the stale CONTACT org override clearly more-recent dated evidence: if
+  the only employer in the snippets matches the one on file, or there are no dates
+  to compare, set employer_changed=false. A wrong "moved" is worse than a missed
+  one -- but a stale org on file is not evidence that they still work there.
+- former_employer: when employer_changed is true, the company they LEFT (usually
+  the organization given in CONTACT). "" otherwise.
 - confidence: 0.0-1.0 based on how much the snippets actually told you.
 Do not invent facts not supported by the snippets.
 
@@ -199,9 +222,11 @@ async def enrich_contact_deep(contact_id: int, find_email: bool = False) -> dict
         {
             "name": name,
             "email": row.email,
-            "organization": org
+            "organization_on_file": org
             or (f"(likely {inferred_org}, inferred from email domain)" if inferred_org else ""),
-            "current_title": row.title,
+            "title_on_file": row.title,
+            "note": "organization_on_file/title_on_file are what we currently have stored "
+            "and MAY BE OUT OF DATE; verify against the dated snippets.",
         },
         ensure_ascii=False,
     )
@@ -225,6 +250,10 @@ async def enrich_contact_deep(contact_id: int, find_email: bool = False) -> dict
         "is_decision_maker": False,
         "person_first_name": "",
         "person_last_name": "",
+        "current_employer": "",
+        "current_title": "",
+        "employer_changed": False,
+        "former_employer": "",
         "background": "",
         "relevant_to_uniforms": True,
         "confidence": 0.0,
@@ -283,6 +312,77 @@ async def enrich_contact_deep(contact_id: int, find_email: bool = False) -> dict
         except Exception as e:
             logger.warning(f"tier2: grounded backup failed for {contact_id}: {e}")
 
+    # 3b) Job-change detection (2026-06-16): when research shows this person has
+    # moved to a DIFFERENT current employer than the org on file, re-file them to
+    # the current employer and preserve the old org as a FORMER affiliation. The
+    # email (e.g. brendan.payze@ritzcarlton.com) is NOT touched -- the inbox
+    # relationship stays; only the headline org/title reflect current truth.
+    # Conservative gate: the model must explicitly flag employer_changed, name a
+    # current_employer that differs (after light normalization) from the stored
+    # org, and clear the confidence floor. Bias to NO change.
+    new_employer = (dossier.get("current_employer") or "").strip()
+    new_title = (dossier.get("current_title") or "").strip()
+    former_org = (dossier.get("former_employer") or "").strip() or org
+
+    def _norm_org(s: str) -> str:
+        s = (s or "").lower()
+        for junk in (
+            "the ",
+            " inc",
+            " llc",
+            " ltd",
+            " corporation",
+            " corp",
+            " company",
+            " co.",
+            " hotel",
+            " hotels",
+            " resort",
+            " resorts",
+            " & ",
+            " and ",
+        ):
+            s = s.replace(junk, " ")
+        return " ".join(s.split())
+
+    job_changed = bool(
+        dossier.get("employer_changed")
+        and new_employer
+        and org  # there must be a stored org to move away from
+        and _norm_org(new_employer) != _norm_org(org)
+        and conf >= GROUNDED_CONFIDENCE_FLOOR
+    )
+    if job_changed:
+        logger.info(
+            f"tier2: contact {contact_id} ({row.email}) appears to have moved: "
+            f"{org!r} -> {new_employer!r} (title {new_title!r})"
+        )
+
+    # 3c) Find CURRENT email for a job-changer (2026-06-16): when the person has
+    # moved, the email on file is their FORMER employer's address and likely dead.
+    # If the caller asked to find an email (find_email=true) and we detected a
+    # move, look the person up AT THE NEW EMPLOYER (new org + its domain) and keep
+    # the result as a SECONDARY email -- never overwrite the primary, which anchors
+    # the thread history. Only kept if found and different from the primary.
+    secondary_email = None
+    if find_email and job_changed:
+        try:
+            _new_domain = ""
+            _li = grounded_li or (row.linkedin_url or "")
+            wiza2 = await _find_email_via_wiza(
+                (f"{_nf} {_nl}".strip() or name), new_employer, _new_domain, _li
+            )
+            if wiza2 and wiza2.get("email"):
+                _cand = wiza2["email"].strip().lower()
+                if _cand and _cand != (row.email or "").lower():
+                    secondary_email = _cand
+                    logger.info(
+                        f"tier2: found current email for moved contact {contact_id}: "
+                        f"{secondary_email} (at {new_employer!r})"
+                    )
+        except Exception as e:
+            logger.warning(f"tier2: current-email lookup failed for {contact_id}: {e}")
+
     # 4) Write back (grounded source; only fill email if Wiza found one)
     async with async_session() as session:
         await session.execute(
@@ -307,6 +407,8 @@ async def enrich_contact_deep(contact_id: int, find_email: bool = False) -> dict
                     if do_name_fill
                     else ""
                 )
+                + (", organization = :new_employer, title = :new_title" if job_changed else "")
+                + (", secondary_email = :secondary_email" if secondary_email else "")
                 + " WHERE id = :id"
             ),
             {
@@ -322,8 +424,58 @@ async def enrich_contact_deep(contact_id: int, find_email: bool = False) -> dict
                 **({"found_email": found_email} if found_email else {}),
                 **({"grounded_li": grounded_li} if grounded_li else {}),
                 **({"nf": _nf, "nl": _nl, "nd": f"{_nf} {_nl}"} if do_name_fill else {}),
+                **(
+                    {
+                        "new_employer": new_employer,
+                        "new_title": new_title or dossier.get("role") or "",
+                    }
+                    if job_changed
+                    else {}
+                ),
+                **({"secondary_email": secondary_email} if secondary_email else {}),
             },
         )
+        # Preserve the OLD org as a FORMER affiliation so the inbox relationship
+        # and history aren't lost when the headline re-files to the new employer.
+        # relationship='former' is the schema-valid value (contact_affiliations
+        # CHECK: employed_by/stationed_at/covers/former). Idempotent + non-fatal:
+        # the headline re-file is the important part; the edge is a bonus.
+        if job_changed and former_org:
+            try:
+                exists = (
+                    await session.execute(
+                        text(
+                            "SELECT 1 FROM contact_affiliations "
+                            "WHERE person_type = 'contact' AND person_id = :pid "
+                            "AND relationship = 'former' "
+                            "AND lower(COALESCE(account_name,'')) = lower(:nm) LIMIT 1"
+                        ),
+                        {"pid": contact_id, "nm": former_org},
+                    )
+                ).one_or_none()
+                if not exists:
+                    await session.execute(
+                        text(
+                            "INSERT INTO contact_affiliations "
+                            "(person_type, person_id, account_type, account_name, "
+                            "relationship, source, confidence, notes, created_at, updated_at) "
+                            "VALUES ('contact', :pid, 'management_company', :nm, "
+                            "'former', 'grounded', :conf, :notes, :now, :now)"
+                        ),
+                        {
+                            "pid": contact_id,
+                            "nm": former_org,
+                            "conf": conf,
+                            "notes": f"Moved to {new_employer} (per deep-enrich research)",
+                            "now": _now(),
+                        },
+                    )
+                    logger.info(
+                        f"tier2: recorded former affiliation {former_org!r} "
+                        f"for contact {contact_id}"
+                    )
+            except Exception as e:
+                logger.warning(f"tier2: former-affiliation write failed for {contact_id}: {e}")
         await session.commit()
 
     return {
@@ -338,6 +490,10 @@ async def enrich_contact_deep(contact_id: int, find_email: bool = False) -> dict
         "linkedin_url": grounded_li,
         "confidence": conf,
         "sources_used": len(snippets),
+        "employer_changed": job_changed,
+        "current_employer": new_employer if job_changed else None,
+        "former_employer": former_org if job_changed else None,
+        "secondary_email": secondary_email,
     }
 
 

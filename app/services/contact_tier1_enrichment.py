@@ -232,10 +232,15 @@ async def run_tier1(
             known_hotel_domains=known_hotel_domains,
         )
         category, source = None, None
-        if is_competitor(r.organization, email):
-            category, source = "competitor", "competitor_list"
-        elif is_vendor(r.organization, email):
+        # Vendor wins over competitor: a company can be both (Edwards Garment,
+        # Chef Works -- JA buys from them AND they sell uniforms to the market).
+        # Being on JA's vendor/AP list is the ground-truth relationship, and for
+        # the sales workflow both mean "don't pitch". A PURE competitor (not on
+        # the vendor list) still falls through to the competitor check below.
+        if is_vendor(r.organization, email):
             category, source = "seller", "vendor_list"
+        elif is_competitor(r.organization, email):
+            category, source = "competitor", "competitor_list"
         elif is_personal(r.organization, email):
             category, source = "personal", "personal_rule"
         elif resolver.is_client(r.organization, email):

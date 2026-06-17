@@ -368,7 +368,10 @@ function deriveSignals(c: InboxContact): string[] {
   // Only show the heuristic 'High opportunity' chip when there is no real
   // content-based buying signal -- otherwise the Buying Signal card wins.
   if (isHighOpportunity(c) && !c.buying_signal_label) out.push('High opportunity')
-  if (c.gpo) out.push(`${c.gpo} GPO`)
+  // Avendra GPO is irrelevant to a uniform sale (it's a food/beverage
+  // procurement platform) -- never surface it as a signal. Other GPOs, if any,
+  // can still show.
+  if (c.gpo && !/avendra/i.test(c.gpo)) out.push(`${c.gpo} GPO`)
   if (c.seniority && /exec|director|chief|vp|head/i.test(c.seniority)) out.push(c.seniority)
   if (c.brand_tier && /tier1|tier2|luxury/i.test(c.brand_tier)) out.push(getTierLabel(c.brand_tier))
   if (c.phone) out.push('Direct dial on file')
@@ -586,6 +589,13 @@ function Facet({ icon: Ic, label, value, options, onChange, align }: {
    never substring, to avoid catching unrelated "Blue Diamond …" entities. */
 const COMPANY_ALIASES: Record<string, string> = {
   'blue diamond resorts': 'Royalton Hotels & Resorts',
+  // The Pyrmont Curacao -- one Marriott Autograph Collection property, scraped
+  // under many names (word-order + brand-phrase variants the key can't collapse).
+  'curacao marriott and the pyrmont curacao': 'The Pyrmont Curacao',
+  'curacao marriott beach resort | the pyrmont curacao beach resort, an autograph collection all-inclusive': 'The Pyrmont Curacao',
+  'the pyrmont curacao an autograph collection hotel by marriott': 'The Pyrmont Curacao',
+  'the pyrmont curacao, an autograph collection all-inclusive resort': 'The Pyrmont Curacao',
+  'the pyrmontcuracao': 'The Pyrmont Curacao',
 }
 
 // Decoration that should NOT split one real account into several groups.
@@ -616,6 +626,11 @@ function accountKey<T extends string | null | undefined>(name: T): string {
   s = s.replace(/\s+(?:&|and)\s+(?:resorts?|suites?|spa|spas|villas?|residences?|hotels?|clubs?)$/i, '').trim()
   s = s.replace(/[.,'"&]+/g, ' ').replace(/\s+/g, ' ').trim()
   s = s.replace(/\b(hotels|resorts|suites|inns|villas|clubs)\b/g, (m) => m.slice(0, -1))
+  // Final step: collapse ALL internal spacing so cosmetic variants group as one
+  // ("Brooks Brothers"=="Brooksbrothers", "The Pyrmontcuracao"=="Pyrmont Curacao").
+  // Conservative on purpose: no word reorder, no fuzzy, no interior-word strip,
+  // so "PG"!="PGA Resort" and "Hotel California"!="California Hotel".
+  s = s.replace(/\s+/g, '')
   return s || 'No organization'
 }
 
@@ -1112,18 +1127,33 @@ function InfoRow({ icon, label, value, mono, href, editField, contactId, placeho
 
 function Timeline({ contact }: { contact: UnifiedContact }) {
   const isLead = sourceOf(contact) === 'lead_generator'
+  // Real communication dates (from the email thread), distinct from sync time.
+  // last_inbound = the last time THEY wrote (real two-way contact); last_outbound
+  // = the last time WE wrote. When outbound is newer than inbound, we reached out
+  // and they went quiet -- shown as fact, the rep judges what it means.
+  const lastIn = contact.last_inbound_at || null
+  const lastOut = contact.last_outbound_at || null
+  const firstMsg = contact.first_message_at || null
+  const wentQuiet = !!(lastOut && lastIn && new Date(lastOut) > new Date(lastIn))
   const events = [
     isLead
       ? { t: contact.first_seen, label: 'Discovered via Lead Generator', color: '#7c3aed' }
-      : { t: contact.last_seen, label: 'Last email received', color: '#2e4a6e' },
+      : lastIn
+        ? { t: lastIn, label: 'They last replied', color: '#1a7a55' }
+        : { t: contact.last_seen, label: 'Last synced', color: '#b0a99e' },
+    !isLead && lastOut ? { t: lastOut, label: 'We last emailed them', color: '#2e4a6e' } : null,
+    !isLead && firstMsg ? { t: firstMsg, label: 'First contact', color: '#b0a99e' } : null,
     isHighOpportunity(contact) ? { t: contact.last_seen, label: 'Flagged high-opportunity by AI', color: '#c49a3c' } : null,
-    isLead && contact.interaction_count > 0 ? { t: contact.last_seen, label: 'First email exchanged', color: '#2e4a6e' } : null,
-    !isLead ? { t: contact.first_seen, label: 'First seen in inbox', color: '#b0a99e' } : null,
   ].filter(Boolean) as Array<{ t: string | null; label: string; color: string }>
   const recent = (contact.sync_history || []).slice(-3).reverse()
 
   return (
     <SectionCard title="Engagement" icon={<Activity className="w-3.5 h-3.5" />}>
+      {wentQuiet && (
+        <div className="mb-3 px-2.5 py-1.5 rounded-lg bg-amber-50 ring-1 ring-amber-200 text-[12px] text-amber-800 leading-snug">
+          We emailed them {relativeDate(lastOut)}, but their last reply was {relativeDate(lastIn)}.
+        </div>
+      )}
       <div className="flex items-center gap-4 mb-3 pb-3 border-b border-stone-100">
         <div>
           <div className="text-2xl font-bold text-navy-900 tabular-nums leading-none">{contact.interaction_count}</div>
@@ -1251,7 +1281,7 @@ function ProfilePanel({ contact, onDeleted }: { contact: UnifiedContact | null; 
               {contact.address && <span className="inline-flex items-center gap-1"><MapPin className="w-3 h-3" />{contact.address}</span>}
               {sourceOf(contact) === 'lead_generator'
                 ? <span className="inline-flex items-center gap-1"><Radar className="w-3 h-3" />Found via Lead Generator · {relativeDate(contact.first_seen)}</span>
-                : <span className="inline-flex items-center gap-1"><Mail className="w-3 h-3" />From email · {relativeDate(contact.last_seen)}</span>}
+                : <span className="inline-flex items-center gap-1"><Mail className="w-3 h-3" />{contact.last_inbound_at ? <>Last reply · {relativeDate(contact.last_inbound_at)}</> : <>In inbox · {relativeDate(contact.last_seen)}</>}</span>}
               <span className="inline-flex items-center gap-1">{accountTypeOf(contact) === 'management_company' ? <Briefcase className="w-3 h-3" /> : <Building2 className="w-3 h-3" />}{accountTypeOf(contact) === 'management_company' ? 'Management co.' : 'Hotel'}</span>
               <CategoryBadge category={contact.contact_category} />
             </div>
@@ -1349,8 +1379,14 @@ function ProfilePanel({ contact, onDeleted }: { contact: UnifiedContact | null; 
           <SectionCard title="Contact" icon={<Users className="w-3.5 h-3.5" />}>
             <InfoRow icon={<Users className="w-3.5 h-3.5" />} label="Name" value={fullName(contact)}
               editField="__name__" contactId={sourceOf(contact) !== 'lead_generator' ? contact.id : undefined} />
-            <InfoRow icon={<Mail className="w-3.5 h-3.5" />} label="Email" value={contact.email} mono
+            <InfoRow icon={<Mail className="w-3.5 h-3.5" />} label={contact.secondary_email ? 'Email (former)' : 'Email'} value={contact.email} mono
               editField="email" contactId={sourceOf(contact) !== 'lead_generator' ? contact.id : undefined} />
+            {contact.secondary_email && (
+              <>
+                <div className="px-1 -mt-1 mb-1 text-[11px] text-amber-700">From a former employer &mdash; may be inactive. Current address found below.</div>
+                <InfoRow icon={<Mail className="w-3.5 h-3.5" />} label="Email (current, found)" value={contact.secondary_email} mono href={`mailto:${contact.secondary_email}`} />
+              </>
+            )}
             <InfoRow icon={<Phone className="w-3.5 h-3.5" />} label="Phone" value={contact.phone}
               editField="phone" contactId={sourceOf(contact) !== 'lead_generator' ? contact.id : undefined} />
             <InfoRow icon={<MapPin className="w-3.5 h-3.5" />} label="Address" value={contact.address} />
@@ -1366,7 +1402,7 @@ function ProfilePanel({ contact, onDeleted }: { contact: UnifiedContact | null; 
             <InfoRow icon={<Shield className="w-3.5 h-3.5" />} label="Parent company" value={contact.parent_company} />
             <InfoRow icon={<Sparkles className="w-3.5 h-3.5" />} label="Brand tier" value={contact.brand_tier ? getTierLabel(contact.brand_tier) : null} />
             <InfoRow icon={<Hash className="w-3.5 h-3.5" />} label="Management co." value={contact.management_company} />
-            <InfoRow icon={<Shield className="w-3.5 h-3.5" />} label="GPO" value={contact.gpo} />
+            <InfoRow icon={<Shield className="w-3.5 h-3.5" />} label="GPO" value={contact.gpo && !/avendra/i.test(contact.gpo) ? contact.gpo : null} />
             <InfoRow icon={<Activity className="w-3.5 h-3.5" />} label="Opportunity"
               value={contact.opportunity_level ? `${contact.opportunity_level}${contact.opportunity_score != null ? ` · ${Math.round(contact.opportunity_score)}/100` : ''}` : null} />
             <InfoRow icon={<ExternalLink className="w-3.5 h-3.5" />} label="Matched lead" value={contact.matched_lead_id ? `#${contact.matched_lead_id}` : null} />

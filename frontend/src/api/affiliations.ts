@@ -27,6 +27,7 @@ export interface PersonAffiliations {
   coverage_count: number
   derived_portfolio_count: number
   coverage: AffiliationCoverageItem[]
+  former_employers?: { name: string | null; account_type?: string; account_id?: number | null }[]
 }
 
 export interface AccountCoveragePerson {

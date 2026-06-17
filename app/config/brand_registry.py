@@ -70,9 +70,7 @@ class BrandInfo:
     tier: str  # tier1_ultra_luxury / tier2_luxury / tier3_upper_upscale / tier4_upscale / unknown
 
     # Operating model
-    operating_model: (
-        str  # managed / franchised / collection / independent / all_inclusive
-    )
+    operating_model: str  # managed / franchised / collection / independent / all_inclusive
     typical_model_note: str  # Human-readable explanation
 
     # Procurement
@@ -82,29 +80,21 @@ class BrandInfo:
     procurement_note: str  # How uniform decisions actually get made
 
     # Pre-opening contact strategy (LEGACY — see helpers below)
-    pre_opening_decision_maker: (
-        str  # Human-readable description of the primary pre-opening buyer
-    )
+    pre_opening_decision_maker: str  # Human-readable description of the primary pre-opening buyer
     pre_opening_contact_titles: (
         list  # LEGACY: titles before GM hired — derived from cluster+regional
     )
-    opening_contact_titles: (
-        list  # LEGACY: titles once open — derived from property_team
-    )
+    opening_contact_titles: list  # LEGACY: titles once open — derived from property_team
 
     # TIERED TITLES (v2 schema, production)
     # Each list is searched independently by the iterative researcher.
     # Defaults keep existing brands working without touching their entries.
-    property_team_titles: list = (
-        None  # Tier 1 — on-property (GM + dept heads). PRIMARY.
-    )
+    property_team_titles: list = None  # Tier 1 — on-property (GM + dept heads). PRIMARY.
     cluster_team_titles: list = None  # Tier 2 — cluster/area roles. FALLBACK.
     regional_team_titles: list = None  # Tier 3 — regional execs. ESCALATION.
 
     # Scoring adjustment
-    contact_score_multiplier: float = (
-        1.0  # Multiplier on contact scores (1.0 = no change)
-    )
+    contact_score_multiplier: float = 1.0  # Multiplier on contact scores (1.0 = no change)
     opportunity_level: str = "medium"  # high / medium / low
 
     def __post_init__(self):
@@ -2679,7 +2669,7 @@ BRAND_REGISTRY: dict[str, BrandInfo] = {
             "Purchasing Manager",
         ],
         contact_score_multiplier=1.3,
-        opportunity_level="high",
+        opportunity_level="medium",
     ),
 }
 
