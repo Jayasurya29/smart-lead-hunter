@@ -223,6 +223,15 @@ celery_app.conf.update(
             "schedule": crontab(hour=16, minute=0, day_of_week="1-5"),
             "options": {"queue": "scraping"},
         },
+        # Rescue Junk: 4:30 PM Mon-Fri (maintenance queue, no contention
+        # with the 4:00 enrich on the scraping queue). Second look at
+        # LLM-junked contacts that gained an org/title/LinkedIn during
+        # the day via Deep Enrich or manual edits. One-shot per row.
+        "rescue-junk-contacts": {
+            "task": "rescue_junk_contacts",
+            "schedule": crontab(hour=16, minute=30, day_of_week="1-5"),
+            "options": {"queue": "maintenance"},
+        },
     },
     # Task routing
     task_routes={

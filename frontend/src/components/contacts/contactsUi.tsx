@@ -4,7 +4,7 @@
  *
  * Pure UI / derivation only. No data fetching here.
  */
-import { Star, TrendingUp } from 'lucide-react'
+import { Star, TrendingUp, AlertTriangle } from 'lucide-react'
 import { cn, getTierLabel } from '@/lib/utils'
 import type { InboxContact } from '@/api/inboxContacts'
 
@@ -41,6 +41,37 @@ export function roleText(c: InboxContact): string | null {
 
 export function isHighOpportunity(c: InboxContact): boolean {
   return (c.opportunity_level || '').toLowerCase() === 'high'
+}
+
+/* ──────────────────────────────────────────
+   STALENESS (coverage freshness)
+   ────────────────────────────────────────── */
+
+/** Months of no INBOUND reply before a contact is flagged "may have moved".
+ *  Keyed on last_inbound_at (their last reply) — NOT last_seen, which the
+ *  backfill bumps to now on every touch. Someone who replied before but has
+ *  gone silent this long may have changed jobs. */
+export const STALE_MONTHS = 18
+
+export function isStale(c: InboxContact): boolean {
+  if (!c.last_inbound_at) return false
+  const ms = Date.now() - new Date(c.last_inbound_at).getTime()
+  return ms > STALE_MONTHS * 30.4 * 24 * 3600 * 1000
+}
+
+export function StaleBadge({ contact }: { contact: InboxContact }) {
+  if (!isStale(contact)) return null
+  const when = contact.last_inbound_at
+    ? new Date(contact.last_inbound_at).toLocaleDateString(undefined, { year: 'numeric', month: 'short' })
+    : ''
+  return (
+    <span
+      className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-amber-50 text-amber-700 ring-1 ring-amber-200"
+      title={`No reply since ${when} — may have changed jobs. Re-verify to find their current employer.`}
+    >
+      <AlertTriangle className="w-2.5 h-2.5" /> may have moved
+    </span>
+  )
 }
 
 /* ──────────────────────────────────────────

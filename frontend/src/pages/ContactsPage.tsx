@@ -334,6 +334,11 @@ function roleText(c: InboxContact): string | null {
 // the brand-inherited `opportunity_level` — nearly every hotel brand is
 // hard-coded "high" in the registry, so on its own it carries no signal.
 const BUYING_ROLE = /procure|purchas|sourc|supply chain|f\s*&\s*b|food\s*(?:and|&)\s*beverage|general manager|\bgm\b|operations|housekeep|rooms division|\bowner\b|proprietor|principal|\bpresident\b|\bchief\b|\bc[eo]o\b|\bcpo\b/i
+function isStale(c: InboxContact): boolean {
+  if (!c.last_inbound_at) return false
+  return Date.now() - new Date(c.last_inbound_at).getTime() > 18 * 30.4 * 24 * 3600 * 1000
+}
+
 function isHighOpportunity(c: InboxContact): boolean {
   const cat = c.contact_category
   if (cat === 'seller' || cat === 'competitor' || cat === 'personal' || cat === 'junk' || cat === 'operational') return false
@@ -430,6 +435,7 @@ function shortcutMatch(c: UnifiedContact, t: string): boolean | null {
   if (/lead gen|scraped|discover|prospect/.test(t)) return sourceOf(c) === 'lead_generator'
   if (/existing|customer|current client/.test(t)) return stageOf(c) === 'existing'
   if (/potential|new lead/.test(t)) return stageOf(c) === 'potential'
+  if (/stale|moved|may have moved|outdated/.test(t)) return isStale(c)
   if (/repl|recent|engaged|active/.test(t)) return c.interaction_count >= 5
   if (/luxury|premium|upscale|high.?end/.test(t)) return /luxury|upscale/i.test(getTierLabel(c.brand_tier) || '')
   if (/buyer/.test(t)) return c.contact_category === 'buyer'
@@ -1781,9 +1787,10 @@ export default function ContactsPage() {
     // frontdesk@ ...) are account infrastructure, not people — hidden the
     // same way junk is, surfaced only under the "Shared inboxes" category.
     // Buying inboxes (purchasing@/procurement@) are category 'buyer' → stay.
-    if (category === 'junk') return merged.filter((c) => c.contact_category === 'junk')
-    if (category === 'operational') return merged.filter((c) => c.contact_category === 'operational')
-    return merged.filter((c) => c.contact_category !== 'junk' && c.contact_category !== 'operational')
+    const effCat = (c: UnifiedContact) => c.manual_category || c.contact_category
+    if (category === 'junk') return merged.filter((c) => effCat(c) === 'junk')
+    if (category === 'operational') return merged.filter((c) => effCat(c) === 'operational')
+    return merged.filter((c) => effCat(c) !== 'junk' && effCat(c) !== 'operational')
   }, [listQ.data, leadQ.data, category])
   const total = items.length
   // Distinct people after entity-resolution de-dup (same person across multiple

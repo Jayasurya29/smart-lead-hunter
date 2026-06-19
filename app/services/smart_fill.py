@@ -143,6 +143,46 @@ def find_linkedin_url(name: str, org: str, email: str = "") -> Optional[str]:
     first_l = first.lower()
     anchor_l = anchor.lower()
 
+    # [patch_linkedin_corroboration] corroboration tokens: distinctive words from the org (and the
+    # email domain word), used to require that a name-matched profile ALSO
+    # references the right company/place -- rejecting same-name strangers.
+    import re as _re
+
+    _stop = {
+        "the",
+        "hotel",
+        "hotels",
+        "resort",
+        "resorts",
+        "inn",
+        "and",
+        "co",
+        "inc",
+        "llc",
+        "ltd",
+        "group",
+        "company",
+        "corp",
+        "of",
+        "at",
+        "by",
+        "club",
+        "spa",
+        "collection",
+        "grand",
+        "grande",
+        "a",
+    }
+
+    def _toks(s: str) -> set:
+        return {
+            w for w in _re.split(r"[^a-z0-9]+", (s or "").lower()) if len(w) >= 3 and w not in _stop
+        }
+
+    _org_tokens = _toks(org)
+    if domain_word and len(domain_word) >= 3:
+        _org_tokens.add(domain_word.lower())
+
     def accept(result_text: str, slug: str) -> bool:
         """Accept a candidate only with corroborating evidence. The strongest
         signal is the LAST name appearing in the result or slug. But LinkedIn
@@ -173,6 +213,15 @@ def find_linkedin_url(name: str, org: str, email: str = "") -> Optional[str]:
             )
         )
         anchor_ok = bool(anchor_l) and anchor_l in rl
+        # [patch_linkedin_corroboration] ORG/LOCATION corroboration: a name match alone is NOT enough
+        # (there are many same-name strangers). The snippet must share at least
+        # one distinctive org/location token, else we refuse rather than pin the
+        # wrong person. When we have no org tokens at all, fall back to the old
+        # behavior (can't corroborate, so don't block).
+        if _org_tokens:
+            _hit = _org_tokens & _toks(result_text)
+            if not _hit:
+                return False
         # a slug-prefix match already implies the first name, so anchor alone is
         # enough corroboration there; a full-lastname match still wants first
         # name OR anchor.

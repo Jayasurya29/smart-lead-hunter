@@ -181,7 +181,7 @@ async def enrich_contact_deep(contact_id: int, find_email: bool = False) -> dict
             await session.execute(
                 text(
                     "SELECT id, email, first_name, last_name, display_name, title, "
-                    "organization, linkedin_url FROM contacts WHERE id = :id"
+                    "organization, linkedin_url, last_inbound_at FROM contacts WHERE id = :id"
                 ),
                 {"id": contact_id},
             )
@@ -210,6 +210,31 @@ async def enrich_contact_deep(contact_id: int, find_email: bool = False) -> dict
     # 1) Web research (use the inferred org so email-only rows still get hits)
     snippets = await _web_research(name, inferred_org, domain, row.email or "")
 
+    # [patch_tier2_current_employer] resolve current employer up front for stale rows (Serper+judge,
+    # proven reliable where synthesis can invert current/former). Used to
+    # ANCHOR the bio and to drive the move verdict below.
+    ce_result = None
+    ce_is_stale = False
+    try:
+        _li0 = getattr(row, "last_inbound_at", None)
+        if _li0 is not None:
+            from datetime import datetime as _dt0, timezone as _tz0
+
+            _r0 = _li0 if _li0.tzinfo else _li0.replace(tzinfo=_tz0.utc)
+            ce_is_stale = (_dt0.now(_tz0.utc) - _r0).days > 547
+    except Exception:
+        ce_is_stale = False
+    if ce_is_stale:
+        try:
+            from app.services.current_employer import find_current_employer
+
+            ce_result = await find_current_employer(
+                name=name, org=org, linkedin=(row.linkedin_url or ""), domain=domain
+            )
+        except Exception as e:
+            logger.warning(f"tier2: current-employer lookup failed for {contact_id}: {e}")
+            ce_result = None
+
     # 2) Wiza — only if asked and we lack a usable email
     found_email = None
     if find_email and (not row.email or "@" not in (row.email or "")):
@@ -227,6 +252,20 @@ async def enrich_contact_deep(contact_id: int, find_email: bool = False) -> dict
             "title_on_file": row.title,
             "note": "organization_on_file/title_on_file are what we currently have stored "
             "and MAY BE OUT OF DATE; verify against the dated snippets.",
+            **(
+                {
+                    "CONFIRMED_current_employer": ce_result.get("current_employer"),
+                    "CONFIRMED_current_title": ce_result.get("current_title"),
+                    "confirmed_note": "CONFIRMED_* fields were verified against this "
+                    "person's LinkedIn via search; treat them as the CURRENT employer/title "
+                    "and write the background bio accordingly. The on-file org is the FORMER "
+                    "employer if it differs.",
+                }
+                if (
+                    ce_result and ce_result.get("moved") and ce_result.get("current_employer")
+                )  # [patch_tier2_current_employer]
+                else {}
+            ),
         },
         ensure_ascii=False,
     )
@@ -311,6 +350,61 @@ async def enrich_contact_deep(contact_id: int, find_email: bool = False) -> dict
                 conf = max(conf, GROUNDED_CONFIDENCE_FLOOR)
         except Exception as e:
             logger.warning(f"tier2: grounded backup failed for {contact_id}: {e}")
+
+    # Phase 2 (coverage freshness, 2026-06-19): for a STALE contact (no inbound
+    # reply in ~18 months) fetch the DATED work history. Relabel the headline to
+    # a new employer ONLY when there is a genuinely current/open ("Present") role.
+    # When the person has clearly LEFT and the current employer is UNKNOWN we do
+    # NOT guess -- the dated roles are recorded as affiliations (below) and the UI
+    # shows "current: unknown" from the absence of any open role. This supersedes
+    # the earlier single-org relabel, which could mis-stamp an ended role current.
+    _li = getattr(row, "last_inbound_at", None)
+    is_stale = False
+    if _li is not None:
+        try:
+            from datetime import datetime, timezone
+
+            _ref = _li if _li.tzinfo else _li.replace(tzinfo=timezone.utc)
+            is_stale = (datetime.now(timezone.utc) - _ref).days > 547
+        except Exception:
+            is_stale = False
+    job_history = None
+    if is_stale:
+        try:
+            from app.services.grounded_contact_fill import grounded_job_history
+
+            job_history = await grounded_job_history(
+                name=(f"{_nf} {_nl}".strip() or name),
+                org=org,
+                email=row.email or "",
+                linkedin_url=(row.linkedin_url or grounded_li or ""),
+            )
+        except Exception as e:
+            logger.warning(f"tier2: job-history lookup failed for {contact_id}: {e}")
+        # [patch_tier2_current_employer] grounded_job_history kept ONLY for its dated-roles affiliations
+        # side-effect below; it no longer overrides the headline employer
+        # (it returned grounded=False on the hard cases and inverted nothing it
+        # got right). The headline now comes from find_current_employer.
+        if job_history and job_history.get("grounded"):
+            conf = max(conf, GROUNDED_CONFIDENCE_FLOOR)
+        # apply the PROVEN current-employer verdict (Serper + same/moved judge)
+        if ce_result and ce_result.get("found"):
+            conf = max(conf, GROUNDED_CONFIDENCE_FLOOR)
+            _cur = (ce_result.get("current_employer") or "").strip()
+            if ce_result.get("moved") and _cur:
+                dossier["current_employer"] = _cur
+                dossier["current_title"] = (
+                    ce_result.get("current_title") or dossier.get("current_title") or ""
+                )
+                dossier["employer_changed"] = True
+                if not (dossier.get("former_employer") or "").strip():
+                    dossier["former_employer"] = org
+                logger.info(
+                    f"tier2: contact {contact_id} ({row.email}) moved "
+                    f"{org!r} -> {_cur!r} (via {ce_result.get('source')})"
+                )
+            elif ce_result.get("same"):
+                dossier["employer_changed"] = False
 
     # 3b) Job-change detection (2026-06-16): when research shows this person has
     # moved to a DIFFERENT current employer than the org on file, re-file them to
@@ -476,6 +570,88 @@ async def enrich_contact_deep(contact_id: int, find_email: bool = False) -> dict
                     )
             except Exception as e:
                 logger.warning(f"tier2: former-affiliation write failed for {contact_id}: {e}")
+        # Phase 2: record the DATED work history as affiliations (045 columns).
+        # relationship 'employed_by' = open/current role (end_date NULL), 'former'
+        # = ended role. The ABSENCE of any open row is what tells the UI the
+        # current employer is unknown. Idempotent on (person, name, relationship).
+        if job_history and (job_history.get("roles") or []):
+
+            def _ym(s):
+                s = (s or "").strip()
+                if len(s) >= 7 and s[4] == "-":
+                    try:
+                        from datetime import date as _date
+
+                        return _date(int(s[:4]), int(s[5:7]), 1)
+                    except Exception:
+                        return None
+                return None
+
+            for _role in job_history["roles"]:
+                _emp = (_role.get("employer") or "").strip()
+                if not _emp:
+                    continue
+                _rel = "employed_by" if _role.get("is_current") else "former"
+                try:
+                    _seen = (
+                        await session.execute(
+                            text(
+                                "SELECT id FROM contact_affiliations "
+                                "WHERE person_type = 'contact' AND person_id = :pid "
+                                "AND lower(COALESCE(account_name,'')) = lower(:nm) "
+                                "AND relationship = :rel LIMIT 1"
+                            ),
+                            {"pid": contact_id, "nm": _emp, "rel": _rel},
+                        )
+                    ).one_or_none()
+                    if _seen:
+                        await session.execute(
+                            text(
+                                "UPDATE contact_affiliations SET "
+                                "title = COALESCE(NULLIF(:title,''), title), "
+                                "start_date = COALESCE(:sd::date, start_date), "
+                                "end_date = COALESCE(:ed::date, end_date), "
+                                "updated_at = :now WHERE id = :aid"
+                            ),
+                            {
+                                "title": _role.get("title") or "",
+                                "sd": _ym(_role.get("start")),
+                                "ed": _ym(_role.get("end")),
+                                "now": _now(),
+                                "aid": _seen[0],
+                            },
+                        )
+                    else:
+                        await session.execute(
+                            text(
+                                "INSERT INTO contact_affiliations "
+                                "(person_type, person_id, account_type, account_name, "
+                                "title, relationship, source, confidence, start_date, "
+                                "end_date, notes, created_at, updated_at) VALUES "
+                                "('contact', :pid, 'management_company', :nm, :title, "
+                                ":rel, 'grounded', :conf, :sd::date, :ed::date, "
+                                ":notes, :now, :now)"
+                            ),
+                            {
+                                "pid": contact_id,
+                                "nm": _emp,
+                                "title": _role.get("title") or "",
+                                "rel": _rel,
+                                "conf": conf,
+                                "sd": _ym(_role.get("start")),
+                                "ed": _ym(_role.get("end")),
+                                "notes": "deep-enrich job history",
+                                "now": _now(),
+                            },
+                        )
+                except Exception as e:
+                    logger.warning(
+                        f"tier2: role-affiliation write failed for {contact_id} " f"({_emp!r}): {e}"
+                    )
+            logger.info(
+                f"tier2: recorded {len(job_history['roles'])} dated role(s) for "
+                f"contact {contact_id}"
+            )
         await session.commit()
 
     return {

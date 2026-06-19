@@ -720,7 +720,7 @@ async def list_contacts(
         search: ILIKE across email/name/org/title
         matched_only: True = has matched_lead_id or matched_hotel_id,
                       False = neither
-        order_by: 'priority_score' | 'last_seen' | 'first_seen' | 'name'
+        order_by: 'priority_score' | 'last_reply' | 'last_seen' | 'first_seen' | 'name'
 
     Returns: (rows, total_count) — total_count is BEFORE limit/offset.
     """
@@ -734,7 +734,7 @@ async def list_contacts(
         params["priority"] = procurement_priority
 
     if contact_category:
-        where_clauses.append("contact_category = :contact_category")
+        where_clauses.append("COALESCE(manual_category, contact_category) = :contact_category")
         params["contact_category"] = contact_category
 
     if approval_status:
@@ -766,6 +766,7 @@ async def list_contacts(
     if search:
         where_clauses.append(
             "(email ILIKE :search OR "
+            "COALESCE(secondary_email, '') ILIKE :search OR "
             "COALESCE(first_name, '') ILIKE :search OR "
             "COALESCE(last_name, '') ILIKE :search OR "
             "COALESCE(display_name, '') ILIKE :search OR "
@@ -801,8 +802,16 @@ async def list_contacts(
                     ELSE 6
                 END,
                 opportunity_score DESC NULLS LAST,
-                last_seen DESC NULLS LAST
+                COALESCE(last_inbound_at, last_outbound_at, last_seen) DESC NULLS LAST
         """
+    elif order_by == "last_reply":
+        # Real engagement recency: when they actually last replied (or
+        # we last emailed), falling back to sync time only when no
+        # message date exists.
+        order_sql = (
+            "ORDER BY COALESCE(last_inbound_at, last_outbound_at) DESC NULLS LAST, "
+            "last_seen DESC NULLS LAST"
+        )
     elif order_by == "last_seen":
         order_sql = "ORDER BY last_seen DESC NULLS LAST"
     elif order_by == "first_seen":
@@ -1025,11 +1034,11 @@ async def get_contact_stats(session: AsyncSession) -> dict:
                 COUNT(*) FILTER (WHERE first_seen >= NOW() - INTERVAL '24 hours')::int  AS new_today,
                 COUNT(*) FILTER (WHERE has_signature = TRUE)::int                       AS with_signature,
                 COUNT(*) FILTER (WHERE phone IS NOT NULL)::int                          AS with_phone,
-                COUNT(*) FILTER (WHERE contact_category = 'buyer')::int                 AS buyer,
-                COUNT(*) FILTER (WHERE contact_category = 'seller')::int                AS seller,
-                COUNT(*) FILTER (WHERE contact_category = 'competitor')::int            AS competitor,
-                COUNT(*) FILTER (WHERE contact_category = 'personal')::int              AS personal,
-                COUNT(*) FILTER (WHERE contact_category = 'junk')::int                  AS junk,
+                COUNT(*) FILTER (WHERE COALESCE(manual_category, contact_category) = 'buyer')::int                 AS buyer,
+                COUNT(*) FILTER (WHERE COALESCE(manual_category, contact_category) = 'seller')::int                AS seller,
+                COUNT(*) FILTER (WHERE COALESCE(manual_category, contact_category) = 'competitor')::int            AS competitor,
+                COUNT(*) FILTER (WHERE COALESCE(manual_category, contact_category) = 'personal')::int              AS personal,
+                COUNT(*) FILTER (WHERE COALESCE(manual_category, contact_category) = 'junk')::int                  AS junk,
                 COUNT(*) FILTER (WHERE contact_category IS NULL)::int                   AS uncategorized,
                 COUNT(*) FILTER (WHERE is_decision_maker = TRUE)::int                   AS decision_makers
             FROM contacts

@@ -2398,6 +2398,9 @@ async def sync_mailbox(
     *,
     force_full_scan: bool = False,
     scan_days_override: Optional[int] = None,
+    message_ids_override: Optional[list[str]] = None,
+    ledger=None,
+    score_buying_signal: bool = True,
 ) -> dict[str, Any]:
     """Sync one mailbox and upsert contacts into the contacts table."""
     run_start = datetime.now(timezone.utc)
@@ -2446,7 +2449,13 @@ async def sync_mailbox(
         last_history_id = (state or {}).get("last_history_id") if state else None
         new_history_id: Optional[str] = None
 
-        if force_full_scan or not last_history_id:
+        if message_ids_override is not None:
+            # Backfill driver supplies an explicit batch of ids and owns
+            # windowing/checkpointing. Preserve the daily history cursor
+            # (this run does not advance it).
+            message_ids = message_ids_override
+            new_history_id = last_history_id
+        elif force_full_scan or not last_history_id:
             logger.info(
                 f"inbox_sync: {mailbox} — full backfill "
                 f"(last {scan_days_override or SCAN_DAYS_BACK_INITIAL}d)"
@@ -2514,6 +2523,21 @@ async def sync_mailbox(
                     h["name"]: h.get("value", "")
                     for h in (msg.get("payload", {}).get("headers") or [])
                 }
+
+                # Backfill count-once gate: the RFC Message-ID is stable
+                # across mailboxes, so a message already counted (prior
+                # batch, prior run, or another mailbox) is skipped
+                # entirely — no count, no discovery. Daily sync passes no
+                # ledger, so this is a no-op there.
+                if ledger is not None:
+                    _rfc_id = (
+                        headers.get("Message-ID")
+                        or headers.get("Message-Id")
+                        or headers.get("message-id")
+                        or ""
+                    )
+                    if not await ledger.take(_rfc_id):
+                        continue
 
                 # Communication dates (2026-06-16): the message's real send time
                 # + direction, so the contact carries the actual relationship
@@ -2979,6 +3003,11 @@ async def sync_mailbox(
             # column upsert above does not carry buying_signal_*). A buyer in
             # many threads keeps the MAX score (hottest active deal). Wholly
             # non-fatal: any failure here never blocks the sync.
+            if not score_buying_signal:
+                # Backfill: skip per-batch Vertex scoring (quota 429s);
+                # buying signals are scored once, afterward, in a paced
+                # pass — and matter most for recent/active threads anyway.
+                _bse_threads = {}
             try:
                 _bse_best: dict[str, dict] = {}
                 for _msgs in _bse_threads.values():

@@ -814,6 +814,32 @@ def classify_pending_contacts(self) -> Dict[str, Any]:
     return run_async(_classify())
 
 
+@celery_app.task(bind=True, base=BaseTask, name="rescue_junk_contacts")
+def rescue_junk_contacts(self) -> Dict[str, Any]:
+    """Second-look over LLM-junked contacts that have since gained an
+    organization/title/LinkedIn (via Deep Enrich or a manual edit). A
+    real buyer that arrived nameless (CC-only, no signature) is junked
+    on the first pass; once the org is filled in, this re-decides it
+    instead of leaving it junk forever. One-shot per row: a row still
+    junk after the look is stamped 'llm_rescued' and never re-sent to
+    the LLM."""
+    from app.services.contact_tier1_enrichment import run_tier1
+
+    async def _rescue():
+        summary = await run_tier1(rescue_junk=True)
+        logger.info(
+            "rescue_junk_contacts: scanned=%s rules=%s llm=%s enriched=%s by_category=%s",
+            summary.get("scanned"),
+            summary.get("resolved_by_rules"),
+            summary.get("sent_to_llm"),
+            summary.get("enriched"),
+            summary.get("by_category"),
+        )
+        return summary
+
+    return run_async(_rescue())
+
+
 @celery_app.task(bind=True, base=BaseTask, name="recompute_timeline_labels")
 def recompute_timeline_labels(self) -> Dict[str, Any]:
     """Recompute timeline_label on every active lead based on today's date.

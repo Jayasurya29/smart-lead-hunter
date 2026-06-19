@@ -25,6 +25,7 @@ export interface InboxContact {
   procurement_priority: string
   priority_reason: string | null
   contact_category: string | null
+  manual_category: string | null
   category_source: string | null
   inferred_role: string | null
   seniority: string | null
@@ -219,6 +220,42 @@ export async function deepEnrichContact(
   return data
 }
 
+/* [patch_frontend_current_employer] */
+export interface CurrentEmployerResult {
+  found: boolean
+  relationship?: 'same' | 'moved' | 'unknown'
+  moved?: boolean
+  same?: boolean
+  current_employer?: string
+  current_title?: string
+  company_domain?: string
+  citations?: string[]
+  source?: string
+  on_file_org?: string
+  mode?: 'preview' | 'apply'
+  // apply-mode (deep-enrich) extras:
+  background?: string | null
+  role?: string | null
+  employer_changed?: boolean
+  former_employer?: string | null
+  secondary_email?: string | null
+  note?: string
+}
+
+export async function findCurrentEmployer(
+  id: number,
+  opts: { apply?: boolean; useWiza?: boolean; findEmail?: boolean } = {},
+): Promise<CurrentEmployerResult> {
+  const qs = new URLSearchParams()
+  if (opts.apply) qs.set('apply', 'true')
+  if (opts.useWiza) qs.set('use_wiza', 'true')
+  if (opts.findEmail) qs.set('find_email', 'true')
+  const { data } = await api.post<CurrentEmployerResult>(
+    `/api/contacts/${id}/find-current-employer?${qs.toString()}`,
+  )
+  return data
+}
+
 export interface ContactEditFields {
   first_name?: string
   last_name?: string
@@ -235,5 +272,53 @@ export async function updateInboxContact(
   fields: ContactEditFields,
 ): Promise<InboxContact> {
   const { data } = await api.patch<InboxContact>(`/api/inbox-contacts/${id}`, fields)
+  return data
+}
+
+/* ── learning junk system ── */
+
+export async function junkContact(id: number): Promise<void> {
+  await api.post(`/api/contacts/${id}/junk`)
+}
+
+export async function unjunkContact(id: number): Promise<void> {
+  await api.post(`/api/contacts/${id}/unjunk`)
+}
+
+export async function junkContactsBulk(ids: number[]): Promise<{ junked: number }> {
+  const { data } = await api.post('/api/contacts/junk-bulk', { ids })
+  return data
+}
+
+export async function junkDomain(
+  domain: string,
+  reason?: string,
+): Promise<{ domain: string; existing_contacts: number; flipped_to_junk: number }> {
+  const { data } = await api.post('/api/contacts/junk-domain', { domain, reason })
+  return data
+}
+
+export async function unjunkDomain(domain: string): Promise<{ domain: string; restored: number }> {
+  const { data } = await api.post('/api/contacts/unjunk-domain', { domain })
+  return data
+}
+
+export interface JunkDomainRule {
+  domain: string
+  added_at: string | null
+  added_by: string | null
+  reason: string | null
+  contacts_at_add: number
+}
+
+export async function fetchJunkDomains(): Promise<{ domains: JunkDomainRule[] }> {
+  const { data } = await api.get('/api/contacts/junk-domains')
+  return data
+}
+
+export async function fetchJunkSuggestions(
+  threshold = 3,
+): Promise<{ suggestions: Array<{ domain: string; manual_junked: number }> }> {
+  const { data } = await api.get(`/api/contacts/junk-domain-suggestions?threshold=${threshold}`)
   return data
 }

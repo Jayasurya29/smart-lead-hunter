@@ -289,3 +289,241 @@ async def grounded_fill(
         "citations": citations,
         "evidence": text[:300],
     }
+
+
+async def grounded_job_history(
+    name: str, org: str = "", email: str = "", linkedin_url: str = ""
+) -> dict:
+    """Grounded DATED work-history lookup for ONE person (coverage freshness).
+
+    Returns:
+      {
+        "grounded": bool,                # real search happened (citations present)
+        "roles": [                       # newest-first; [] if not grounded/parse-fail
+            {"employer", "title", "start", "end", "is_current"}
+        ],
+        "current_employer": str | None,  # set ONLY when an OPEN ("Present") role exists
+        "current_known": bool,           # False => current employer is UNKNOWN
+        "citations": [..],
+        "evidence": str,
+      }
+
+    Never guesses a current employer: if every found role has an end date, the
+    current employer is UNKNOWN -- this is the case where someone has left a job
+    and no current active role can be found.
+    """
+    import asyncio
+    import json
+
+    name = (name or "").strip()
+    empty = {
+        "grounded": False,
+        "roles": [],
+        "current_employer": None,
+        "current_known": False,
+        "citations": [],
+        "evidence": "",
+    }
+    if not name:
+        return empty
+
+    # --- Step 1: grounded PROSE fetch (natural language -> real Google search) -
+    try:
+        import httpx
+        from app.services.contact_enrichment import (
+            _build_grounding_url,
+            _CONTACT_GROUNDING_TIMEOUT_S,
+        )
+        from app.services.gemini_client import get_gemini_headers
+        from app.services.ai_client import _get_config, _ensure_init, ai_generate
+
+        _ensure_init()
+        config = _get_config()
+        headers = get_gemini_headers()
+    except Exception as e:
+        logger.warning(f"grounded_job_history: cannot init: {e}")
+        return empty
+
+    domain = email.split("@")[-1] if "@" in email else ""
+    li = (linkedin_url or "").strip()
+    # Disambiguators, strongest first: a LinkedIn URL pins the exact person (no
+    # name collision); email is next; the org is treated as a POSSIBLY-FORMER
+    # employer, NOT a current-employer filter. Over-anchoring on a stale org made
+    # the model hedge and return nothing for common names like "Taylor Smith".
+    li_bit = f" Their LinkedIn profile: {li}." if li else ""
+    email_bit = f" Their work email is {email}." if email else ""
+    org_bit = (
+        f" They were at one point associated with {org} (possibly a FORMER employer "
+        f"-- do NOT assume they are still there)."
+        if org
+        else (f" Their work email domain is {domain}." if domain else "")
+    )
+    # Short + direct, mirroring the phrasing that works in Gemini's AI mode. A long
+    # "read the exact profile" instruction made the model hedge about being unable to
+    # open LinkedIn; the dated history is right there in the search-result previews /
+    # rich card, so we tell it plainly to report what the results show, not refuse.
+    prompt = (
+        f"Give the full work timeline of this specific person: {name}.{li_bit}{email_bit}{org_bit} "
+        f"For each company they worked at, list the job title and the start and end dates "
+        f"(month and year), from most recent to oldest. "
+        f"Do NOT refuse or hedge about being unable to open the LinkedIn page -- the dates appear in "
+        f"search results and profile previews, so just report what the results show. "
+        f"Rank strictly by the dates. A role is CURRENT only if it is explicitly 'Present' or has no "
+        f"end date; if the most recent role has already ENDED and there is no current/Present role, say "
+        f"the current employer is UNKNOWN (do not assume a past employer is current). "
+        f"If you cannot identify this specific person at all, say so."
+    )
+    payload = {
+        "contents": [{"role": "user", "parts": [{"text": prompt}]}],
+        "tools": [{"googleSearch": {}}],
+        "generationConfig": {
+            "temperature": 1.0,
+            "maxOutputTokens": 2048,
+            "thinkingConfig": {"thinkingBudget": 0},
+        },
+    }
+    # Model fallback: primary (env, e.g. gemini-3.5-flash), then 2.5-flash,
+    # then lite -- separate quota pools, so a 429 on one often clears on the
+    # next. _build_grounding_url picks the right endpoint per model.
+    _primary = config["model"]
+    _models = [_primary]
+    for _m in ("gemini-2.5-flash", "gemini-2.5-flash-lite"):
+        if _m != _primary:
+            _models.append(_m)
+    data = None
+    _last = None
+    for _mi, _model in enumerate(_models):
+        try:
+            _url, _ = _build_grounding_url(config["vertex_project_id"], _model)
+        except Exception as e:
+            _last = e
+            continue
+        for _attempt in range(2):
+            try:
+                async with httpx.AsyncClient(timeout=_CONTACT_GROUNDING_TIMEOUT_S) as gc:
+                    resp = await gc.post(_url, headers=headers, json=payload)
+                resp.raise_for_status()
+                data = resp.json()
+                break
+            except Exception as e:
+                _last = e
+                _is429 = "429" in str(e) or "RESOURCE_EXHAUSTED" in str(e)
+                logger.warning(
+                    f"grounded_job_history[{name}]: {_model} try {_attempt + 1} "
+                    f"failed ({'429' if _is429 else 'err'}): {str(e)[:120]}"
+                )
+                if _is429:
+                    await asyncio.sleep(3 * (_attempt + 1))
+                    continue
+                break
+        if data is not None:
+            if _mi > 0:
+                logger.info(f"grounded_job_history[{name}]: ok on fallback {_model}")
+            break
+    if data is None:
+        logger.warning(f"grounded_job_history[{name}]: all models failed: {str(_last)[:160]}")
+        return empty
+    try:
+        candidate = data["candidates"][0]
+        parts = (candidate.get("content") or {}).get("parts") or []
+        prose = re.sub(r"[*`]+", "", ((parts[0].get("text") if parts else "") or "").strip())
+    except Exception as e:
+        logger.warning(f"grounded_job_history[{name}]: bad response shape: {e}")
+        return empty
+
+    meta = candidate.get("groundingMetadata", {}) or {}
+    citations = [
+        (c.get("web") or {}).get("uri")
+        for c in (meta.get("groundingChunks", []) or [])[:6]
+        if (c.get("web") or {}).get("uri")
+    ]
+    grounded = len(citations) > 0
+    logger.info(
+        f"grounded_job_history[{name}]: grounded={grounded} "
+        f"cites={len(citations)} prose={prose[:200]!r}"
+    )
+    if not grounded or not prose:
+        return {**empty, "grounded": grounded, "citations": citations, "evidence": prose[:300]}
+
+    tl = prose.lower()
+    if (
+        any(
+            p in tl
+            for p in (
+                "cannot find",
+                "could not find",
+                "couldn't find",
+                "unable to find",
+                "no information",
+            )
+        )
+        and "unknown" not in tl
+    ):
+        return {**empty, "grounded": grounded, "citations": citations, "evidence": prose[:300]}
+
+    # --- Step 2: structure the prose into JSON (ungrounded; JSON safe here) ----
+    struct_prompt = (
+        "From the research notes below, extract the person's work history as STRICT JSON and nothing "
+        "else (no markdown, no commentary). Schema:\n"
+        '{"roles":[{"employer":"","title":"","start":"YYYY-MM","end":"YYYY-MM","is_current":false}],'
+        '"current_known":false,"current_employer":""}\n'
+        "Rules: newest role first. 'start'/'end' are YYYY-MM (empty string if unknown). "
+        "Leave 'end' as an empty string ONLY for a role that is explicitly current/Present (still ongoing). "
+        "is_current=true ONLY for such an open role. If the MOST RECENT role has an end date in the past "
+        "(the person has left and no current active role is stated), set EVERY role is_current=false, "
+        "current_known=false, and current_employer to an empty string. Set current_known=true and "
+        "current_employer to the open role's employer ONLY when there is a genuinely current/Present role.\n\n"
+        f"NOTES:\n{prose}"
+    )
+    roles, current_known, current_employer = [], False, None
+    try:
+        async with httpx.AsyncClient(timeout=60) as client:
+            raw = await ai_generate(client, struct_prompt, temperature=0.0, max_tokens=1200)
+        if raw:
+            js = raw.strip()
+            if js.startswith("```"):
+                js = js.split("```")[1]
+                js = js[4:].strip() if js.lstrip().lower().startswith("json") else js.strip()
+            parsed = json.loads(js)
+            for it in parsed.get("roles") or []:
+                emp = (it.get("employer") or "").strip()
+                if not emp:
+                    continue
+                end = (it.get("end") or "").strip()
+                roles.append(
+                    {
+                        "employer": emp,
+                        "title": (it.get("title") or "").strip(),
+                        "start": (it.get("start") or "").strip(),
+                        "end": end,
+                        "is_current": bool(it.get("is_current")) or end == "",
+                    }
+                )
+            open_roles = [x for x in roles if x["is_current"]]
+            if bool(parsed.get("current_known")) and open_roles:
+                current_known = True
+                current_employer = (
+                    parsed.get("current_employer") or open_roles[0]["employer"]
+                ).strip() or None
+            else:
+                # honest default: they have left / current unknown -- no open role,
+                # so do NOT name a current employer.
+                current_known = False
+                current_employer = None
+                for x in roles:
+                    x["is_current"] = False
+    except Exception as e:
+        logger.warning(f"grounded_job_history[{name}]: structuring failed: {e}")
+
+    logger.info(
+        f"grounded_job_history[{name}]: {len(roles)} roles, "
+        f"current_known={current_known} current={current_employer!r}"
+    )
+    return {
+        "grounded": grounded,
+        "roles": roles,
+        "current_employer": current_employer,
+        "current_known": current_known,
+        "citations": citations,
+        "evidence": prose[:300],
+    }

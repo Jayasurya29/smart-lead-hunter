@@ -354,6 +354,9 @@ app.include_router(inbox_contacts_router)
 # which matched the path but not the method → 405 Method Not Allowed. Router
 # already carries prefix="/api/bulk-upload" with /parse and /confirm.
 app.include_router(bulk_upload_router)
+from app.routes.junk import router as junk_router  # noqa: E402
+
+app.include_router(junk_router)
 
 
 # -----------------------------------------------------------------------------

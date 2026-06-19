@@ -8,8 +8,12 @@ import {
   deleteInboxContact,
   triggerInboxSync,
   deepEnrichContact,
+  findCurrentEmployer,
   findContactLinkedin,
   updateInboxContact,
+  junkContact,
+  unjunkContact,
+  junkDomain,
   type InboxContactFilters,
 } from '@/api/inboxContacts'
 
@@ -156,6 +160,41 @@ export function useDeepEnrichContact() {
   return useMutation({
     mutationFn: ({ id, findEmail }: { id: number; findEmail?: boolean }) =>
       deepEnrichContact(id, findEmail),
+    onSuccess: () => invalidateInboxContacts(qc),
+  })
+}
+
+/* [patch_frontend_current_employer] */
+export function useFindCurrentEmployer() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ id, apply, useWiza, findEmail }: {
+      id: number; apply?: boolean; useWiza?: boolean; findEmail?: boolean
+    }) => findCurrentEmployer(id, { apply, useWiza, findEmail }),
+    onSuccess: (_d, vars) => { if (vars.apply) invalidateInboxContacts(qc) },
+  })
+}
+
+export function useJunkContact() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (id: number) => junkContact(id),
+    onSuccess: () => invalidateInboxContacts(qc),
+  })
+}
+
+export function useUnjunkContact() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (id: number) => unjunkContact(id),
+    onSuccess: () => invalidateInboxContacts(qc),
+  })
+}
+
+export function useJunkDomain() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ domain, reason }: { domain: string; reason?: string }) => junkDomain(domain, reason),
     onSuccess: () => invalidateInboxContacts(qc),
   })
 }

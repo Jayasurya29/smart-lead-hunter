@@ -10,7 +10,7 @@ import { cn, relativeDate } from '@/lib/utils'
 import type { InboxContact, InboxContactStats } from '@/api/inboxContacts'
 import {
   Avatar, CategoryBadge, ConfRing, HighOppTag, fullName, roleText,
-  confidencePct, isHighOpportunity,
+  confidencePct, isHighOpportunity, StaleBadge,
 } from './contactsUi'
 
 export type SortKey = 'confidence' | 'opportunity' | 'recent' | 'name'
@@ -100,6 +100,7 @@ function Row({
         </div>
         <div className="flex items-center gap-2 mt-1.5">
           <CategoryBadge category={contact.contact_category} />
+          <StaleBadge contact={contact} />
           {isHighOpportunity(contact) && <HighOppTag />}
           <span className="text-[10px] text-stone-400 ml-auto whitespace-nowrap flex-shrink-0">
             {relativeDate(contact.last_seen)}
@@ -124,6 +125,7 @@ export default function ContactList({
     ['High opportunity', () => setQuery('high opportunity')],
     ['Replied recently', () => setQuery('replied')],
     ['Luxury brands', () => setQuery('luxury')],
+    ['May have moved', () => setQuery('may have moved')],
   ]
 
   return (
@@ -205,6 +207,7 @@ export default function ContactList({
         <Chip label="Buyers" count={stats?.buyer} active={category === 'buyer'} color="#1a7a55" onClick={() => { setCategory(category === 'buyer' ? '' : 'buyer'); setDmOnly(false) }} />
         <Chip label="Sellers" count={stats?.seller} active={category === 'seller'} color="#c49a3c" onClick={() => { setCategory(category === 'seller' ? '' : 'seller'); setDmOnly(false) }} />
         <Chip label="Competitors" count={stats?.competitor} active={category === 'competitor'} color="#e85d4a" onClick={() => { setCategory(category === 'competitor' ? '' : 'competitor'); setDmOnly(false) }} />
+        <Chip label="Junk" count={stats?.junk} active={category === 'junk'} color="#8a847b" onClick={() => { setCategory(category === 'junk' ? '' : 'junk'); setDmOnly(false) }} />
       </div>
 
       {/* sort row */}

@@ -1549,6 +1549,82 @@ async def find_contact_linkedin_endpoint(
     return {"found": True, "linkedin_url": url}
 
 
+@router.post(
+    "/api/contacts/{contact_id}/find-current-employer", tags=["Contacts"]
+)  # [patch_endpoint_current_employer]
+async def find_current_employer_endpoint(
+    contact_id: int,
+    apply: bool = False,
+    use_wiza: bool = False,
+    find_email: bool = False,
+    _csrf=Depends(require_ajax),
+):
+    """Find where a (stale) contact works NOW -- "follow the person".
+
+    PREVIEW (default): Serper + same/moved judge only. NO writes. Returns
+    {found, relationship, current_employer, current_title, citations, source}.
+    Pass use_wiza=true to also run the 1-credit Wiza profile reveal.
+
+    APPLY (apply=true): runs deep enrichment, which anchors the bio to the
+    confirmed employer and -- on a confident MOVE -- re-files the headline org
+    (old org kept as a FORMER affiliation; primary email untouched). Pass
+    find_email=true to also look up a verified email at the new employer.
+    """
+    from sqlalchemy import text as _sql
+
+    async with async_session() as session:
+        row = (
+            await session.execute(
+                _sql(
+                    "SELECT first_name, last_name, display_name, organization, "
+                    "email, linkedin_url FROM contacts WHERE id = :id"
+                ),
+                {"id": contact_id},
+            )
+        ).first()
+    if not row:
+        raise HTTPException(status_code=404, detail="contact not found")
+
+    name = (
+        f"{row.first_name or ''} {row.last_name or ''}".strip() or (row.display_name or "").strip()
+    )
+    if not name or "@" in name:
+        return {"found": False, "note": "no usable name"}
+    domain = (row.email or "").split("@")[-1] if "@" in (row.email or "") else ""
+
+    if apply:
+        # full flow (anchored bio + confidence-gated relabel + former affiliation)
+        from app.services.contact_tier2_enrichment import enrich_contact_deep
+
+        try:
+            result = await enrich_contact_deep(contact_id, find_email=(find_email or use_wiza))
+        except Exception as e:
+            logger.exception(f"find-current-employer apply failed for {contact_id}")
+            raise HTTPException(status_code=500, detail=str(e))
+        if result.get("error"):
+            raise HTTPException(status_code=404, detail=result["error"])
+        result["mode"] = "apply"
+        return result
+
+    # preview only -- no writes
+    from app.services.current_employer import find_current_employer
+
+    try:
+        ce = await find_current_employer(
+            name=name,
+            org=row.organization or "",
+            linkedin=row.linkedin_url or "",
+            domain=domain,
+            use_wiza=use_wiza,
+        )
+    except Exception as e:
+        logger.exception(f"find-current-employer preview failed for {contact_id}")
+        raise HTTPException(status_code=500, detail=str(e))
+    ce["mode"] = "preview"
+    ce["on_file_org"] = row.organization or ""
+    return ce
+
+
 @router.post("/api/contacts/{contact_id}/enrich-deep", tags=["Contacts"])
 async def enrich_contact_deep_endpoint(
     contact_id: int,

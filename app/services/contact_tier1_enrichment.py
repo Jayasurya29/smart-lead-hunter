@@ -179,16 +179,29 @@ async def run_tier1(
     force: bool = False,
     only_unknown: bool = False,
     recategorize_junk: bool = False,
+    rescue_junk: bool = False,
 ) -> dict:
     """Categorize + enrich pending contacts. Returns a summary dict."""
     async with async_session() as session:
         clauses = ["approval_status = 'pending'"]
-        if not force:
+        if not force and not rescue_junk:
             clauses.append("(enriched_at IS NULL OR enriched_at < :cutoff)")
         if only_unknown:
             clauses.append("(contact_category IS NULL OR contact_category = 'unknown')")
         if recategorize_junk:
             clauses.append("contact_category = 'junk'")
+        if rescue_junk:
+            # Second-look: LLM-junked rows that have SINCE gained an
+            # org/title/LinkedIn (via Deep Enrich or a manual edit). A
+            # real buyer that arrived nameless gets junked on the first
+            # pass; once the org is filled in, re-decide it. One-shot --
+            # still-junk rows are stamped 'llm_rescued' below so they are
+            # never re-sent to the LLM (rescue selects source 'llm' only).
+            clauses.append(
+                "contact_category = 'junk' AND category_source = 'llm' "
+                "AND (organization IS NOT NULL OR title IS NOT NULL "
+                "OR linkedin_url IS NOT NULL)"
+            )
         where = " AND ".join(clauses)
         params = {}
         if not force:
@@ -205,6 +218,11 @@ async def run_tier1(
         # sets). A contact at a known client domain/name is a real relationship,
         # so resolve it deterministically before the LLM pass can mis-junk it.
         resolver = await ClientResolver().load(session)
+        # Rep-curated junk domains: a contact from one of these is junk
+        # deterministically (no LLM) — the learning junk system.
+        from app.services.junk_rules import load_junk_domains, is_junk_domain
+
+        _junk_domains = await load_junk_domains(session)
         # Known-hotel domains: a contact whose email domain is a confirmed hotel
         # (from our lead/existing/SAP records) is relevant even if the property
         # NAME lacks a hospitality word (e.g. "The Elene" = theelene.com). Fed
@@ -237,7 +255,9 @@ async def run_tier1(
         # Being on JA's vendor/AP list is the ground-truth relationship, and for
         # the sales workflow both mean "don't pitch". A PURE competitor (not on
         # the vendor list) still falls through to the competitor check below.
-        if is_vendor(r.organization, email):
+        if is_junk_domain(email, _junk_domains):
+            category, source = "junk", "junk_domain"
+        elif is_vendor(r.organization, email):
             category, source = "seller", "vendor_list"
         elif is_competitor(r.organization, email):
             category, source = "competitor", "competitor_list"
@@ -308,15 +328,29 @@ async def run_tier1(
                 SIGNALS_CONFIDENCE_CAP,
             )
             # Deterministic categories are certain.
-            if source in ("competitor_list", "vendor_list", "personal_rule", "sap_client"):
+            if source in (
+                "competitor_list",
+                "vendor_list",
+                "personal_rule",
+                "sap_client",
+                "junk_domain",
+            ):
                 conf = 1.0
 
             # Protect a richer grounded (Tier-2 Deep Enrich) profile from being
             # overwritten by this cheap signals pass. Signals rows always
             # re-stamp, so a forced re-run applies the latest category/DM rules
             # deterministically instead of being blocked by confidence jitter.
-            if w["old_source"] == "grounded" and conf < w["old_conf"]:
+            # Rescue mode is the deliberate exception to the grounded
+            # guard: the whole point is to re-decide a junk row now that
+            # grounded enrich added the org.
+            if not rescue_junk and w["old_source"] == "grounded" and conf < w["old_conf"]:
                 continue
+            # One-shot marker: a rescued row STILL junk gets a terminal
+            # source so the next rescue pass skips it. Rows that flip to
+            # buyer/seller leave the junk bucket on their own.
+            if rescue_junk and category == "junk":
+                source = "llm_rescued"
 
             await session.execute(
                 text(

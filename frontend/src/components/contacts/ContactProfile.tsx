@@ -7,12 +7,13 @@ import { useEffect, useRef, useState } from 'react'
 import {
   Sparkles, Wand2, Check, Send, Mail, Phone, Linkedin, ExternalLink,
   MapPin, Building2, Shield, Hash, Eye, Users, Activity, Star, Loader2,
+  Ban, RotateCcw,
 } from 'lucide-react'
 import { cn, formatDate, relativeDate, getTierLabel } from '@/lib/utils'
 import type { InboxContact } from '@/api/inboxContacts'
-import { useDeepEnrichContact, useApproveInboxContact } from '@/hooks/useInboxContacts'
+import { useDeepEnrichContact, useFindCurrentEmployer, useApproveInboxContact, useJunkContact, useUnjunkContact, useJunkDomain } from '@/hooks/useInboxContacts'
 import {
-  Avatar, CategoryBadge, fullName, roleText, confidencePct, isHighOpportunity,
+  Avatar, CategoryBadge, fullName, roleText, confidencePct, isHighOpportunity, StaleBadge,
   deriveSignals, deriveNextSteps, deriveSummary,
 } from './contactsUi'
 
@@ -111,12 +112,18 @@ function AIBand({ contact }: { contact: InboxContact }) {
   const deepMut = useDeepEnrichContact()
   const [step, setStep] = useState(0)
   const [result, setResult] = useState<string | null>(null)
+  /* [patch_frontend_current_employer] */
+  const ceMut = useFindCurrentEmployer()
+  const [ceMsg, setCeMsg] = useState<string | null>(null)
+  const [ceMoved, setCeMoved] = useState<{ employer: string; title?: string } | null>(null)
   const timer = useRef<number | null>(null)
 
   // reset when switching contacts
   useEffect(() => {
     setResult(null)
     setStep(0)
+    setCeMsg(null)
+    setCeMoved(null)
   }, [contact.id])
 
   // advance the step animation while the mutation is pending
@@ -148,6 +155,27 @@ function AIBand({ contact }: { contact: InboxContact }) {
       setResult(bits.join(' · ') || 'No new info found.')
     } catch {
       setResult('Enrichment failed — check Serper/Wiza keys or try again.')
+    }
+  }
+
+  async function runFindEmployer(apply = false, useWiza = false) {
+    setCeMsg(null)
+    try {
+      const r = await ceMut.mutateAsync({ id: contact.id, apply, useWiza, findEmail: useWiza })
+      if (apply) {
+        setCeMoved(r.current_employer ? { employer: r.current_employer, title: r.current_title } : null)
+        setCeMsg(r.employer_changed ? `Re-filed to ${r.current_employer}. Bio refreshed.` : 'Coverage confirmed current.')
+        return
+      }
+      if (!r.found) { setCeMsg('Could not confirm a current employer (no clear profile match).'); return }
+      if (r.moved && r.current_employer) {
+        setCeMoved({ employer: r.current_employer, title: r.current_title })
+        setCeMsg(`Looks like they moved to ${r.current_employer}${r.current_title ? ` (${r.current_title})` : ''}. Apply to re-file + refresh bio.`)
+      } else {
+        setCeMsg(`Still at ${r.current_employer || r.on_file_org} — coverage current.`)
+      }
+    } catch {
+      setCeMsg('Lookup failed — check Serper key or try again.')
     }
   }
 
@@ -191,8 +219,35 @@ function AIBand({ contact }: { contact: InboxContact }) {
                 {result ? 'Re-run' : 'Deep Enrich'}
               </button>
             )}
+            {!deepMut.isPending && !ceMut.isPending && (
+              <button
+                onClick={() => runFindEmployer(false)}
+                className="inline-flex items-center gap-1.5 h-7 px-3 rounded-lg text-[11px] font-bold text-white/90 ring-1 ring-white/25 hover:bg-white/10 transition-all"
+                title="Find where this contact works now (Serper, free)"
+              >
+                Where now?
+              </button>
+            )}
           </div>
         </div>
+
+        {(ceMut.isPending || ceMsg) && (
+          <div className="mb-2 rounded-lg bg-white/10 ring-1 ring-white/15 px-3 py-2 text-[12px] text-white/90">
+            {ceMut.isPending ? 'Checking where they work now…' : (
+              <div className="flex items-center justify-between gap-2">
+                <span>{ceMsg}</span>
+                {ceMoved && (
+                  <span className="flex items-center gap-1.5 shrink-0">
+                    <button onClick={() => runFindEmployer(true, false)}
+                      className="h-6 px-2 rounded-md text-[11px] font-bold text-navy-900 bg-gold-300 hover:bg-gold-200">Apply</button>
+                    <button onClick={() => runFindEmployer(true, true)} title="Verify + find new email (1 Wiza credit)"
+                      className="h-6 px-2 rounded-md text-[11px] font-bold text-white/90 ring-1 ring-white/25 hover:bg-white/10">Confirm w/ Wiza</button>
+                  </span>
+                )}
+              </div>
+            )}
+          </div>
+        )}
 
         {deepMut.isPending ? (
           <div className="py-2 space-y-2">
@@ -341,6 +396,10 @@ function Timeline({ contact }: { contact: InboxContact }) {
 
 export default function ContactProfile({ contact }: { contact: InboxContact | null }) {
   const approveMut = useApproveInboxContact()
+  const junkMut = useJunkContact()
+  const unjunkMut = useUnjunkContact()
+  const junkDomainMut = useJunkDomain()
+  const [showJunkMenu, setShowJunkMenu] = useState(false)
 
   if (!contact) {
     return (
@@ -353,6 +412,8 @@ export default function ContactProfile({ contact }: { contact: InboxContact | nu
   }
 
   const inCrm = !!contact.insightly_contact_id || !!contact.pushed_to_insightly_at || contact.approval_status === 'approved'
+  const isJunked = contact.manual_category === 'junk'
+  const junkDomainName = (contact.email || '').split('@')[1] || ''
 
   return (
     <div key={contact.id} className="flex-1 overflow-y-auto bg-stone-100/50">
@@ -381,6 +442,7 @@ export default function ContactProfile({ contact }: { contact: InboxContact | nu
               )}
               <span className="inline-flex items-center gap-1"><Mail className="w-3 h-3" />In inbox {relativeDate(contact.last_seen)}</span>
               <CategoryBadge category={contact.contact_category} />
+              <StaleBadge contact={contact} />
             </div>
           </div>
         </div>
@@ -392,6 +454,45 @@ export default function ContactProfile({ contact }: { contact: InboxContact | nu
           {contact.phone && <ActionBtn icon={<Phone className="w-4 h-4" />} label="Call" onClick={() => { window.location.href = `tel:${contact.phone}` }} />}
           {contact.linkedin_url && <ActionBtn icon={<Linkedin className="w-4 h-4" />} label="LinkedIn" onClick={() => window.open(contact.linkedin_url!, '_blank')} />}
           <div className="flex-1" />
+          {isJunked ? (
+            <button
+              onClick={() => unjunkMut.mutate(contact.id)}
+              disabled={unjunkMut.isPending}
+              className="inline-flex items-center gap-2 h-9 px-3.5 rounded-lg text-[13px] font-semibold text-white/90 ring-1 ring-white/25 hover:bg-white/10 transition-all active:scale-[.97] disabled:opacity-60"
+            >
+              <RotateCcw className="w-4 h-4" /> Restore
+            </button>
+          ) : (
+            <div className="relative">
+              <button
+                onClick={() => setShowJunkMenu((v) => !v)}
+                className="inline-flex items-center gap-2 h-9 px-3.5 rounded-lg text-[13px] font-semibold text-white/80 ring-1 ring-white/25 hover:bg-white/10 transition-all active:scale-[.97]"
+              >
+                <Ban className="w-4 h-4" /> Junk
+              </button>
+              {showJunkMenu && (
+                <div className="absolute right-0 top-11 z-30 w-64 rounded-xl bg-white shadow-lift ring-1 ring-stone-200 overflow-hidden text-left">
+                  <button
+                    onClick={() => { junkMut.mutate(contact.id); setShowJunkMenu(false) }}
+                    className="w-full text-left px-4 py-2.5 text-[13px] font-medium text-navy-800 hover:bg-stone-50"
+                  >
+                    Junk just this contact
+                  </button>
+                  {junkDomainName && (
+                    <button
+                      onClick={() => { junkDomainMut.mutate({ domain: junkDomainName }); setShowJunkMenu(false) }}
+                      className="w-full text-left px-4 py-2.5 text-[13px] font-medium text-red-600 hover:bg-red-50 border-t border-stone-100"
+                    >
+                      Junk all of @{junkDomainName}
+                      <span className="block text-[11px] font-normal text-stone-400 mt-0.5">
+                        Auto-junks every contact from this domain — now and in future syncs
+                      </span>
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
           <ActionBtn
             done={inCrm}
             primary={!inCrm}
