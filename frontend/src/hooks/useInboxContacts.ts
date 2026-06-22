@@ -9,8 +9,10 @@ import {
   triggerInboxSync,
   deepEnrichContact,
   findCurrentEmployer,
+  findSuccessor,
   findContactLinkedin,
   updateInboxContact,
+  updateLeadContact,
   junkContact,
   unjunkContact,
   junkDomain,
@@ -146,6 +148,16 @@ export function useFindLinkedin() {
   })
 }
 
+// patch_frontend_leadcontact_edit
+export function useUpdateLeadContact() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ realId, fields }: { realId: number; fields: import('../api/inboxContacts').LeadContactEditFields }) =>
+      updateLeadContact(realId, fields),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['lead-contacts', 'all'] }) },
+  })
+}
+
 export function useUpdateInboxContact() {
   const qc = useQueryClient()
   return useMutation({
@@ -171,6 +183,16 @@ export function useFindCurrentEmployer() {
     mutationFn: ({ id, apply, useWiza, findEmail }: {
       id: number; apply?: boolean; useWiza?: boolean; findEmail?: boolean
     }) => findCurrentEmployer(id, { apply, useWiza, findEmail }),
+    onSuccess: (_d, vars) => { if (vars.apply) invalidateInboxContacts(qc) },
+  })
+}
+
+// /* [patch_frontend_find_successor] */
+export function useFindSuccessor() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ id, apply }: { id: number; apply?: boolean }) =>
+      findSuccessor(id, { apply }),
     onSuccess: (_d, vars) => { if (vars.apply) invalidateInboxContacts(qc) },
   })
 }

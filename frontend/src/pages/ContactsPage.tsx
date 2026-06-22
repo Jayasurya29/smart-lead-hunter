@@ -36,10 +36,13 @@ import {
   useTriggerInboxSync,
   useDeepEnrichContact,
   useFindLinkedin,
+  useFindCurrentEmployer,
+  useFindSuccessor,
   useApproveInboxContact,
   useBulkApproveInboxContacts,
   useDeleteInboxContact,
   useUpdateInboxContact,
+  useUpdateLeadContact,
 } from '@/hooks/useInboxContacts'
 
 /* ════════════════════════════════════════════════════════════════════
@@ -853,6 +856,14 @@ const ENRICH_STEPS = [
 function AIBand({ contact }: { contact: InboxContact }) {
   const deepMut = useDeepEnrichContact()
   const liMut = useFindLinkedin()
+  /* [patch_frontend_ce_contactspage] */
+  const ceMut = useFindCurrentEmployer()
+  const [ceMsg, setCeMsg] = useState<string | null>(null)
+  const [ceMoved, setCeMoved] = useState<boolean>(false)
+  /* [patch_frontend_find_successor] */
+  const succMut = useFindSuccessor()
+  const [succMsg, setSuccMsg] = useState<string | null>(null)
+  const [succFound, setSuccFound] = useState<boolean>(false)
   const [liResult, setLiResult] = useState<string | null>(null)
   const isLead = sourceOf(contact) === 'lead_generator'
   const [step, setStep] = useState(0)
@@ -865,7 +876,7 @@ function AIBand({ contact }: { contact: InboxContact }) {
     || contact.display_name || contact.email || 'this contact')
   const orgLabel = contact.organization || (contact.email ? `@${contact.email.split('@')[1] || ''}` : '')
 
-  useEffect(() => { setResult(null); setStep(0); setLiResult(null); setLog([]) }, [contact.id])
+  useEffect(() => { setResult(null); setStep(0); setLiResult(null); setLog([]); setCeMsg(null); setCeMoved(false); setSuccMsg(null); setSuccFound(false) }, [contact.id])
 
   async function runFindLinkedin() {
     setLiResult(null)
@@ -882,6 +893,59 @@ function AIBand({ contact }: { contact: InboxContact }) {
     } catch {
       pushLog('LinkedIn lookup failed (Serper key / network).', false)
       setLiResult('LinkedIn lookup failed -- check Serper key or try again.')
+    }
+  }
+
+  async function runFindSuccessor(apply = false) {
+    setSuccMsg(null)
+    pushLog(apply ? 'Filing the successor...' : `Finding who holds ${who}'s old seat now...`)
+    try {
+      const r = await succMut.mutateAsync({ id: contact.id, apply })
+      if (apply) {
+        setSuccFound(false)
+        const made = r.action === 'created_stub' ? ' Added as a new lead.'
+          : r.action === 'merged_stub' ? ' Linked to existing contact.'
+          : r.action === 'linked_note_only' ? ' Noted (property not tracked).' : ''
+        setSuccMsg(`Recorded ${r.successor_name || 'successor'}.${made}`)
+        pushLog(`Successor filed: ${r.successor_name || ''} (${r.action})`, true)
+        return
+      }
+      if (!r.found) { setSuccMsg('No clear successor found for that seat yet.'); pushLog('No successor found', false); return }
+      setSuccFound(true)
+      setSuccMsg(`${r.successor_name}${r.successor_title ? ` (${r.successor_title})` : ''} appears to hold the ${r.seat_title || 'role'} at ${r.former_org} now. File it?`)
+      pushLog(`Possible successor: ${r.successor_name}`, true)
+    } catch {
+      setSuccMsg('Successor lookup failed - check Serper key or try again.')
+      pushLog('Successor lookup failed', false)
+    }
+  }
+
+  async function runFindEmployer(apply = false, useWiza = false) {
+    setCeMsg(null)
+    pushLog(`Checking where ${who} works now${useWiza ? ' (Wiza)' : ''}...`)
+    try {
+      const r = await ceMut.mutateAsync({ id: contact.id, apply, useWiza, findEmail: useWiza })
+      if (apply) {
+        setCeMoved(false)
+        setCeMsg(r.employer_changed ? `Re-filed to ${r.current_employer}. Now finding who took their seat...` : 'Coverage confirmed current.')
+        pushLog(r.employer_changed ? `Moved -> ${r.current_employer}` : 'Still current', true)
+        // [patch_frontend_merge_status] */ a confirmed move vacates a seat -> auto-find the successor
+        if (r.employer_changed) { await runFindSuccessor(false) }
+        return
+      }
+      if (!r.found) { setCeMsg('Could not confirm a current employer (no clear profile match).'); pushLog('No clear match', false); return }
+      if (r.moved && r.current_employer) {
+        setCeMoved(true)
+        setCeMsg(`Looks like they moved to ${r.current_employer}${r.current_title ? ` (${r.current_title})` : ''}. Apply to re-file + refresh bio.`)
+        pushLog(`Possible move: ${r.current_employer}`, true)
+      } else {
+        setCeMoved(false)
+        setCeMsg(`Still at ${r.current_employer || r.on_file_org || contact.organization || 'current employer'} - coverage current.`)
+        pushLog('Confirmed current', true)
+      }
+    } catch {
+      setCeMsg('Lookup failed - check Serper key or try again.')
+      pushLog('Where-now lookup failed', false)
     }
   }
 
@@ -985,6 +1049,14 @@ function AIBand({ contact }: { contact: InboxContact }) {
                     className="inline-flex items-center gap-1.5 h-7 px-3 rounded-lg text-[11px] font-bold text-navy-900 bg-gold-300 hover:bg-gold-200 transition-all active:scale-95">
                     <Wand2 className="w-3 h-3" />{result ? 'Re-run Deep Enrich' : 'Deep Enrich'}
                   </button>
+                  {/* unified status button [patch_frontend_merge_status] */}
+                  {!ceMut.isPending && !succMut.isPending && (
+                    <button onClick={() => runFindEmployer(false)}
+                      title="Check if this contact moved on, and who fills their seat now (Serper)"
+                      className="inline-flex items-center gap-1.5 h-7 px-3 rounded-lg text-[11px] font-bold text-white/90 ring-1 ring-white/25 hover:bg-white/10 transition-all">
+                      <Radar className="w-3 h-3" />Check status
+                    </button>
+                  )}
                 </>
               )
             })()}
@@ -1020,6 +1092,40 @@ function AIBand({ contact }: { contact: InboxContact }) {
           <p className="mt-2 text-[12px] leading-relaxed text-white/90 bg-white/10 rounded-lg px-3 py-2 break-all">{liResult}</p>
         )}
 
+        {/* where-now result + apply [patch_frontend_ce_contactspage] */}
+        {(ceMut.isPending || ceMsg) && (
+          <div className="mt-2 rounded-lg bg-white/10 ring-1 ring-white/15 px-3 py-2 text-[12px] text-white/90">
+            {ceMut.isPending ? 'Checking where they work now...' : (
+              <div className="flex items-center justify-between gap-2">
+                <span className="break-words">{ceMsg}</span>
+                {ceMoved && (
+                  <span className="flex items-center gap-1.5 shrink-0">
+                    <button onClick={() => runFindEmployer(true, false)}
+                      className="h-6 px-2 rounded-md text-[11px] font-bold text-navy-900 bg-gold-300 hover:bg-gold-200">Apply</button>
+                    <button onClick={() => runFindEmployer(true, true)} title="Verify + find new email (1 Wiza credit)"
+                      className="h-6 px-2 rounded-md text-[11px] font-bold text-white/90 ring-1 ring-white/25 hover:bg-white/10">Confirm w/ Wiza</button>
+                  </span>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* who-is-there-now result + file [patch_frontend_find_successor] */}
+        {(succMut.isPending || succMsg) && (
+          <div className="mt-2 rounded-lg bg-white/10 ring-1 ring-white/15 px-3 py-2 text-[12px] text-white/90">
+            {succMut.isPending ? 'Working on the successor...' : (
+              <div className="flex items-center justify-between gap-2">
+                <span className="break-words">{succMsg}</span>
+                {succFound && (
+                  <button onClick={() => runFindSuccessor(true)}
+                    className="h-6 px-2 rounded-md text-[11px] font-bold text-navy-900 bg-gold-300 hover:bg-gold-200 shrink-0">File it</button>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+
         {!deepMut.isPending && signals.length > 0 && (
           <div className="flex flex-wrap gap-1.5 mt-3.5">
             {signals.map((s, i) => (
@@ -1050,17 +1156,19 @@ function SectionCard({ title, icon, children }: { title: string; icon: React.Rea
   )
 }
 
-function InfoRow({ icon, label, value, mono, href, editField, contactId, placeholder }: {
+function InfoRow({ icon, label, value, mono, href, editField, contactId, leadId, placeholder }: {
   icon: React.ReactNode; label: string; value: string | null | undefined; mono?: boolean; href?: string
   editField?: string  // contacts column to edit; '__name__' edits first+last+display together
-  contactId?: number  // omit (lead-gen offset ids) to make the row copy-only
+  contactId?: number  // inbox-contact id -> edits via /api/inbox-contacts
+  leadId?: number     // patch_frontend_leadcontact_edit: real lead_contact id -> edits via /api/lead-contacts
   placeholder?: string
 }) {
   const updMut = useUpdateInboxContact()
+  const leadMut = useUpdateLeadContact()
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState('')
   const [copied, setCopied] = useState(false)
-  const canEdit = !!editField && !!contactId
+  const canEdit = !!editField && (!!contactId || !!leadId)
   // editable rows render even when empty (so you can ADD a value); read-only
   // rows keep the old hide-when-empty behaviour.
   if (!value && !canEdit) return null
@@ -1084,6 +1192,15 @@ function InfoRow({ icon, label, value, mono, href, editField, contactId, placeho
     setEditing(false)
     const newVal = draft.trim()
     if (newVal === (linkVal || '')) return
+    // patch_frontend_leadcontact_edit: lead-gen rows -> lead endpoint, mapping to the lead schema
+    if (leadId) {
+      const lf: any = editField === '__name__' ? { name: newVal }
+        : editField === 'linkedin_url' ? { linkedin: newVal }
+        : { [editField!]: newVal }
+      try { await leadMut.mutateAsync({ realId: leadId, fields: lf }) }
+      catch { /* surfaced by interceptor; reverts on refetch */ }
+      return
+    }
     const fields = editField === '__name__'
       ? (() => { const p = newVal.split(/\s+/); return { first_name: p[0] || '', last_name: p.slice(1).join(' ') || '', display_name: newVal } })()
       : { [editField!]: newVal }
@@ -1384,9 +1501,11 @@ function ProfilePanel({ contact, onDeleted }: { contact: UnifiedContact | null; 
 
           <SectionCard title="Contact" icon={<Users className="w-3.5 h-3.5" />}>
             <InfoRow icon={<Users className="w-3.5 h-3.5" />} label="Name" value={fullName(contact)}
-              editField="__name__" contactId={sourceOf(contact) !== 'lead_generator' ? contact.id : undefined} />
+              editField="__name__" contactId={sourceOf(contact) !== 'lead_generator' ? contact.id : undefined}
+              leadId={sourceOf(contact) === 'lead_generator' || contact.id >= LEAD_ID_OFFSET ? (contact.id >= LEAD_ID_OFFSET ? contact.id - LEAD_ID_OFFSET : contact.id) : undefined} />
             <InfoRow icon={<Mail className="w-3.5 h-3.5" />} label={contact.secondary_email ? 'Email (former)' : 'Email'} value={contact.email} mono
-              editField="email" contactId={sourceOf(contact) !== 'lead_generator' ? contact.id : undefined} />
+              editField="email" contactId={sourceOf(contact) !== 'lead_generator' ? contact.id : undefined}
+              leadId={sourceOf(contact) === 'lead_generator' || contact.id >= LEAD_ID_OFFSET ? (contact.id >= LEAD_ID_OFFSET ? contact.id - LEAD_ID_OFFSET : contact.id) : undefined} />
             {contact.secondary_email && (
               <>
                 <div className="px-1 -mt-1 mb-1 text-[11px] text-amber-700">From a former employer &mdash; may be inactive. Current address found below.</div>
@@ -1394,17 +1513,20 @@ function ProfilePanel({ contact, onDeleted }: { contact: UnifiedContact | null; 
               </>
             )}
             <InfoRow icon={<Phone className="w-3.5 h-3.5" />} label="Phone" value={contact.phone}
-              editField="phone" contactId={sourceOf(contact) !== 'lead_generator' ? contact.id : undefined} />
+              editField="phone" contactId={sourceOf(contact) !== 'lead_generator' ? contact.id : undefined}
+              leadId={sourceOf(contact) === 'lead_generator' || contact.id >= LEAD_ID_OFFSET ? (contact.id >= LEAD_ID_OFFSET ? contact.id - LEAD_ID_OFFSET : contact.id) : undefined} />
             <InfoRow icon={<MapPin className="w-3.5 h-3.5" />} label="Address" value={contact.address} />
             <InfoRow icon={<Linkedin className="w-3.5 h-3.5" />} label="LinkedIn" value={contact.linkedin_url ? 'View profile' : null} href={contact.linkedin_url || undefined}
-              editField="linkedin_url" contactId={sourceOf(contact) !== 'lead_generator' ? contact.id : undefined} placeholder="https://www.linkedin.com/in/..." />
+              editField="linkedin_url" contactId={sourceOf(contact) !== 'lead_generator' ? contact.id : undefined}
+              leadId={sourceOf(contact) === 'lead_generator' || contact.id >= LEAD_ID_OFFSET ? (contact.id >= LEAD_ID_OFFSET ? contact.id - LEAD_ID_OFFSET : contact.id) : undefined} placeholder="https://www.linkedin.com/in/..." />
             <InfoRow icon={<Hash className="w-3.5 h-3.5" />} label="Department" value={contact.department} />
             <InfoRow icon={<Eye className="w-3.5 h-3.5" />} label="Seniority" value={contact.seniority} />
           </SectionCard>
 
           <SectionCard title="Hospitality intel" icon={<Building2 className="w-3.5 h-3.5" />}>
             <InfoRow icon={<Building2 className="w-3.5 h-3.5" />} label="Organization" value={contact.organization}
-              editField="organization" contactId={sourceOf(contact) !== 'lead_generator' ? contact.id : undefined} />
+              editField="organization" contactId={sourceOf(contact) !== 'lead_generator' ? contact.id : undefined}
+              leadId={sourceOf(contact) === 'lead_generator' || contact.id >= LEAD_ID_OFFSET ? (contact.id >= LEAD_ID_OFFSET ? contact.id - LEAD_ID_OFFSET : contact.id) : undefined} />
             <InfoRow icon={<Shield className="w-3.5 h-3.5" />} label="Parent company" value={contact.parent_company} />
             <InfoRow icon={<Sparkles className="w-3.5 h-3.5" />} label="Brand tier" value={contact.brand_tier ? getTierLabel(contact.brand_tier) : null} />
             <InfoRow icon={<Hash className="w-3.5 h-3.5" />} label="Management co." value={contact.management_company} />

@@ -94,25 +94,51 @@ class Settings(BaseSettings):
         """Allowed CORS origins — single source of truth for main.py, shared.py, middleware."""
         if self.environment == "production":
             return ["https://leads.jauniforms.com"]
-        return [
+        # [patch_cors_dynamic_lan] auto-include this machine's current LAN IP(s) so a DHCP
+        # change (e.g. .151 -> .152 after a router reboot) never silently
+        # breaks CORS again. Dev only; production above is untouched.
+        _dev_ports = (8000, 3000, 5173)
+        _origins = [
             "http://localhost:8000",
             "http://localhost:3000",
             "http://localhost:5173",
             "http://127.0.0.1:8000",
             "http://127.0.0.1:3000",
             "http://127.0.0.1:5173",
+            # kept for back-compat (harmless if the IP is no longer ours):
             "http://192.168.30.59:8000",
             "http://192.168.30.59:3000",
             "http://192.168.1.151:8000",
             "http://192.168.1.151:3000",
         ]
+        _lan_ips: set = set()
+        try:
+            import socket
+
+            _host = socket.gethostname()
+            for _info in socket.getaddrinfo(_host, None, socket.AF_INET):
+                _ip = _info[4][0]
+                if _ip.startswith(("192.168.", "10.", "172.")):
+                    _lan_ips.add(_ip)
+            # also the primary outbound interface IP (covers multi-NIC)
+            _s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            try:
+                _s.connect(("8.8.8.8", 80))
+                _lan_ips.add(_s.getsockname()[0])
+            finally:
+                _s.close()
+        except Exception:
+            pass
+        for _ip in _lan_ips:
+            for _p in _dev_ports:
+                _origins.append(f"http://{_ip}:{_p}")
+        # de-dup, preserve order
+        return list(dict.fromkeys(_origins))
 
     # -------------------------------------------------------------------------
     # PYDANTIC CONFIG
     # -------------------------------------------------------------------------
-    model_config = SettingsConfigDict(
-        env_file=".env", env_file_encoding="utf-8", extra="ignore"
-    )
+    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
     # -------------------------------------------------------------------------
     # HELPER METHODS
@@ -126,10 +152,7 @@ class Settings(BaseSettings):
     @property
     def has_insightly(self) -> bool:
         """Check if Insightly is configured"""
-        return bool(
-            self.insightly_api_key
-            and self.insightly_api_key != "your-insightly-api-key"
-        )
+        return bool(self.insightly_api_key and self.insightly_api_key != "your-insightly-api-key")
 
     def get_ai_status(self) -> dict:
         """Get status of AI providers (sync version for CLI/startup only)"""
@@ -251,9 +274,7 @@ def print_config_status():
 
     print("\n📤 CRM")
     insightly_icon = "✅" if s.has_insightly else "⚠️"
-    print(
-        f"   {insightly_icon} Insightly: {'Configured' if s.has_insightly else 'Not configured'}"
-    )
+    print(f"   {insightly_icon} Insightly: {'Configured' if s.has_insightly else 'Not configured'}")
 
     print("\n💰 TOTAL AI COST: $0/month")
     print("=" * 60 + "\n")

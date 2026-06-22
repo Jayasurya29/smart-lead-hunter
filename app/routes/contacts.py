@@ -1625,6 +1625,84 @@ async def find_current_employer_endpoint(
     return ce
 
 
+@router.post(
+    "/api/contacts/{contact_id}/find-successor", tags=["Contacts"]
+)  # [patch_endpoint_find_successor]
+async def find_successor_endpoint(
+    contact_id: int,
+    apply: bool = False,
+    _csrf=Depends(require_ajax),
+):
+    """Phase 3 "fill the seat": for a confirmed mover (a contact that has a
+    FORMER affiliation from Where-now Apply), find who holds the vacated
+    role at the old property now.
+
+    PREVIEW (default): Serper + Gemini only, NO writes. Returns
+    {found, successor_name, successor_title, former_org, citations}.
+
+    APPLY (apply=true): writes a 'successor' link on the mover and -- when
+    the former property is a known hotel/lead -- a deduped, unverified
+    lead_contact stub for the successor (else note-only). Never fabricates
+    an email; never auto-promotes priority.
+    """
+    from sqlalchemy import text as _sql
+
+    if apply:
+        from app.services.current_employer import apply_seat_successor
+
+        async with async_session() as session:
+            try:
+                result = await apply_seat_successor(session, contact_id)
+                await session.commit()
+            except Exception as e:
+                await session.rollback()
+                logger.exception(f"find-successor apply failed for {contact_id}")
+                raise HTTPException(status_code=500, detail=str(e))
+        result["mode"] = "apply"
+        return result
+
+    # preview only -- no writes
+    from app.services.current_employer import find_seat_successor
+
+    async with async_session() as session:
+        row = (
+            await session.execute(
+                _sql(
+                    "SELECT c.title, "
+                    "  COALESCE(NULLIF(TRIM(CONCAT_WS(' ', c.first_name, c.last_name)), ''), "
+                    "           c.display_name, '') AS holder, "
+                    "  a.account_name AS former_org "
+                    "FROM contacts c "
+                    "JOIN contact_affiliations a "
+                    "  ON a.person_id = c.id AND a.person_type='contact' "
+                    "   AND a.relationship='former' "
+                    "WHERE c.id = :id "
+                    "ORDER BY a.created_at DESC NULLS LAST LIMIT 1"
+                ),
+                {"id": contact_id},
+            )
+        ).first()
+    if not row:
+        return {"found": False, "mode": "preview", "note": "not a confirmed mover"}
+
+    title = (row.title or "").strip()
+    former_org = (row.former_org or "").strip()
+    holder = (row.holder or "").strip()
+    if not title or not former_org:
+        return {"found": False, "mode": "preview", "note": "no vacated seat on file"}
+
+    try:
+        res = await find_seat_successor(org=former_org, title=title, former_holder=holder)
+    except Exception as e:
+        logger.exception(f"find-successor preview failed for {contact_id}")
+        raise HTTPException(status_code=500, detail=str(e))
+    res["mode"] = "preview"
+    res["former_org"] = former_org
+    res["former_holder"] = holder
+    res["seat_title"] = title
+    return res
+
+
 @router.post("/api/contacts/{contact_id}/enrich-deep", tags=["Contacts"])
 async def enrich_contact_deep_endpoint(
     contact_id: int,
@@ -1857,3 +1935,64 @@ async def list_lead_contacts(
     pages = max(1, (total + per_page - 1) // per_page)
 
     return {"items": items, "total": total, "page": page, "per_page": per_page, "pages": pages}
+
+
+@router.patch("/api/lead-contacts/{contact_id}")  # [patch_endpoint_leadcontact_edit]
+async def update_lead_contact_any(
+    contact_id: int,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    _csrf=Depends(require_ajax),
+):
+    """Edit a lead-generator contact by its id, regardless of parent
+    (works for both lead_id and existing_hotel_id rows). Mirrors the
+    allowed fields + rescore of the lead-scoped update_contact, so
+    successor stubs and existing-hotel contacts are editable too.
+    """
+    body = await request.json()
+    contact = (
+        await db.execute(select(LeadContact).where(LeadContact.id == contact_id))
+    ).scalar_one_or_none()
+    if not contact:
+        raise HTTPException(status_code=404, detail="Contact not found")
+    allowed = {
+        "name",
+        "title",
+        "email",
+        "secondary_email",
+        "phone",
+        "linkedin",
+        "organization",
+        "evidence_url",
+    }
+    for fld, value in body.items():
+        if fld in allowed:
+            setattr(contact, fld, value)
+    # keep the parent lead's headline contact in sync when primary
+    if contact.is_primary and contact.lead_id:
+        lead = (
+            await db.execute(select(PotentialLead).where(PotentialLead.id == contact.lead_id))
+        ).scalar_one_or_none()
+        if lead:
+            lead.contact_name = contact.name
+            lead.contact_title = contact.title
+            lead.contact_email = contact.email
+            lead.contact_phone = contact.phone
+            lead.updated_at = local_now()
+    from app.services.contact_scoring import apply_score_to_contact
+
+    apply_score_to_contact(
+        contact,
+        title=contact.title,
+        scope=contact.scope,
+        strategist_priority=contact.strategist_priority,
+    )
+    contact.updated_at = local_now()
+    await db.flush()
+    if contact.lead_id:
+        try:
+            await rescore_lead(contact.lead_id, db)
+        except Exception:
+            pass
+    await db.commit()
+    return {"status": "updated", "contact_id": contact_id, "score": contact.score}

@@ -256,6 +256,35 @@ export async function findCurrentEmployer(
   return data
 }
 
+// /* [patch_frontend_find_successor] */
+export interface SuccessorResult {
+  found: boolean
+  successor_name?: string
+  successor_title?: string
+  former_org?: string
+  former_holder?: string
+  seat_title?: string
+  citations?: string[]
+  mode?: 'preview' | 'apply'
+  action?: string
+  stub_id?: number | null
+  property_kind?: string | null
+  property_id?: number | null
+  note?: string
+}
+
+export async function findSuccessor(
+  id: number,
+  opts: { apply?: boolean } = {},
+): Promise<SuccessorResult> {
+  const qs = new URLSearchParams()
+  if (opts.apply) qs.set('apply', 'true')
+  const { data } = await api.post<SuccessorResult>(
+    `/api/contacts/${id}/find-successor?${qs.toString()}`,
+  )
+  return data
+}
+
 export interface ContactEditFields {
   first_name?: string
   last_name?: string
@@ -272,6 +301,24 @@ export async function updateInboxContact(
   fields: ContactEditFields,
 ): Promise<InboxContact> {
   const { data } = await api.patch<InboxContact>(`/api/inbox-contacts/${id}`, fields)
+  return data
+}
+
+// patch_frontend_leadcontact_edit: lead-gen contacts use the lead schema (name / linkedin)
+export interface LeadContactEditFields {
+  name?: string
+  title?: string
+  organization?: string
+  email?: string
+  secondary_email?: string
+  phone?: string
+  linkedin?: string
+}
+export async function updateLeadContact(
+  realId: number,
+  fields: LeadContactEditFields,
+): Promise<unknown> {
+  const { data } = await api.patch(`/api/lead-contacts/${realId}`, fields)
   return data
 }
 

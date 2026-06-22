@@ -31,7 +31,9 @@ export default function AffiliationCard({
   }
 
   const { employer, employers, is_portfolio_buyer, coverage, coverage_count, derived_portfolio_count, former_employers } = data
-  if (!employer && coverage_count === 0) {
+  /* [patch_affiliation_card_former] */
+  const hasFormer = !!(former_employers && former_employers.length)
+  if (!employer && coverage_count === 0 && !hasFormer) {
     return (
       <div className="text-[12px] text-stone-400 py-1">
         No affiliation edges yet for this contact.

@@ -283,3 +283,322 @@ async def find_current_employer(
     result["moved"] = rel == "moved"
     result["same"] = rel == "same"
     return result
+
+
+# [phase3_fill_the_seat]
+async def find_seat_successor(org: str, title: str, former_holder: str = "") -> dict:
+    """Phase 3 -- 'fill the seat'. Given a property/company and the role that was
+    just vacated (the former_holder moved on), find who CURRENTLY holds that
+    title now. Reuses the proven title-currency approach from the lead-gen
+    researcher, but standalone (Serper + ai_generate, no researcher `state`).
+
+    STRICT: only returns a name explicitly supported by appointment/news
+    snippets. Absence of a mention is NOT a successor -- returns found=False.
+    Never fabricates an email or a name.
+
+    Returns:
+      {found, successor_name, successor_title, evidence, citations, source}
+    """
+    out = {
+        "found": False,
+        "successor_name": "",
+        "successor_title": title or "",
+        "evidence": "",
+        "citations": [],
+        "source": "serper",
+    }
+    org = (org or "").strip()
+    title = (title or "").strip()
+    if not org or not title:
+        return out
+
+    try:
+        from app.services.contact_enrichment import _search_serper
+        from app.services.ai_client import ai_generate
+        import httpx
+    except Exception as e:
+        logger.warning(f"seat_successor: import failed: {e}")
+        return out
+
+    # Appointment-news queries: cover "<Name> appointed <Title>" and
+    # "<Title> named/announced" phrasings. Two cheap Serper passes.
+    queries = [
+        f'"{org}" "{title}" appointed OR named OR "new" OR announces 2025 OR 2026',
+        f'"{org}" {title} current 2026',
+    ]
+    snippets: list[str] = []
+    cites: list[str] = []
+    for q in queries:
+        try:
+            results = await _search_serper(q, max_results=6)
+        except Exception as e:
+            logger.warning(f"seat_successor: serper failed for {q!r}: {e}")
+            results = []
+        for r in results:
+            t, sn, ln = r.get("title", ""), r.get("snippet", ""), r.get("url", "")
+            snippets.append(f"{t} -- {sn} ({ln})")
+            if ln:
+                cites.append(ln)
+
+    blob = "\n".join(f"- {s}" for s in snippets if s.strip())[:6000]
+    if not blob:
+        return out
+
+    fh = (
+        f"\nThe previous holder of this role was {former_holder}. {former_holder} HAS LEFT "
+        f"this role -- DO NOT return {former_holder} as the answer under any circumstances. "
+        f"You are looking for the DIFFERENT person who holds the role now.\n"
+        if former_holder
+        else ""
+    )
+    prompt = (
+        "You are identifying who CURRENTLY holds a specific role (or the closest "
+        "equivalent senior role in the same department) at a specific organization, "
+        "as of 2025-2026, using ONLY the real Google snippets below.\n"
+        f"ORGANIZATION: {org}\n"
+        f"ROLE / TITLE: {title}\n"
+        f"{fh}\n"
+        "RULES:\n"
+        "1. Return the person who holds this role NOW. If the exact title isn't named "
+        "but a clear senior holder of the SAME department is (e.g. 'Director of Human "
+        "Resources' when the seat is 'Human Resources Manager'), return that person.\n"
+        "2. Prefer the MOST RECENT dated mention. A name attached to an OLD date range "
+        "(e.g. '2022-2024') is a PAST holder -- do not return them.\n"
+        "3. A job-board / careers / salary page (Indeed, SimplyHired, ZipRecruiter, "
+        "Glassdoor) that merely lists a posting is NOT proof of who holds the role. "
+        "Weight appointment announcements, staff/leadership pages, and dated news higher.\n"
+        "4. Never return the previous holder named above.\n"
+        "5. If no snippet clearly names a CURRENT holder, say unknown. Absence is not a guess.\n\n"
+        "Answer in EXACTLY one line:\n"
+        "SUCCESSOR: <full name> | <their exact title>\n"
+        "or exactly: SUCCESSOR: unknown\n\n"
+        f"SNIPPETS:\n{blob}"
+    )
+    try:
+        async with httpx.AsyncClient(timeout=60) as c:
+            ans = await ai_generate(c, prompt, temperature=0.0, max_tokens=120)
+    except Exception as e:
+        logger.warning(f"seat_successor: llm read failed for {org}/{title}: {e}")
+        ans = ""
+
+    line = (ans or "").strip()
+    body = ""
+    for ln in line.splitlines():
+        if ln.strip().upper().startswith("SUCCESSOR:"):
+            body = ln.split(":", 1)[1].strip()
+            break
+    if not body or body.lower() == "unknown":
+        out["evidence"] = line[:200]
+        out["citations"] = cites[:6]
+        return out
+
+    if "|" in body:
+        nm, ti = body.split("|", 1)
+        successor_name = nm.strip()
+        successor_title = ti.strip() or title
+    else:
+        successor_name = body.strip()
+        successor_title = title
+
+    # Guard: never return the person who just left as their own successor.
+    # Catches exact match, substring either direction, and shared first+last name
+    # (handles 'Taylor Smith' vs 'Taylor Smith, SHRM-CP' etc).
+    if former_holder:
+        fn = former_holder.strip().lower()
+        sn = successor_name.strip().lower()
+        fset = set(fn.split())
+        sset = set(sn.split())
+        same_person = (
+            sn == fn
+            or (sn and fn and (sn in fn or fn in sn))
+            or (len(fset) >= 2 and fset <= sset)
+            or (len(sset) >= 2 and sset <= fset)
+        )
+        if same_person:
+            out["evidence"] = f"(rejected former holder: {line[:160]})"
+            out["citations"] = cites[:6]
+            return out
+
+    out["found"] = bool(successor_name)
+    out["successor_name"] = successor_name
+    out["successor_title"] = successor_title
+    out["evidence"] = line[:200]
+    out["citations"] = cites[:6]
+    return out
+
+
+# [phase3_fill_the_seat_apply]
+def _norm_person_name(s: str) -> str:
+    """Lightweight person-name normalization for successor dedup (suffix-tolerant)."""
+    s = (s or "").lower().strip()
+    for ch in (",", ".", "'", '"'):
+        s = s.replace(ch, " ")
+    drop = {"jr", "sr", "ii", "iii", "shrm", "cp", "mba", "phd", "cpa"}
+    return " ".join(t for t in s.split() if t not in drop)
+
+
+async def apply_seat_successor(session, contact_id: int) -> dict:
+    """Phase 3 APPLY. For a confirmed mover (contact with a 'former' affiliation),
+    find who holds the vacated seat now and persist the finding:
+
+      - ALWAYS: write a 'successor' affiliation edge on the ORIGINAL contact
+        (the warm-path link: "<successor> now holds <title> at <org>,
+        replaced <mover>"). Idempotent on (person, account_name, relationship).
+      - IF the former property resolves to a known existing_hotel / potential_lead:
+        find-or-create a lead_contact stub for the successor there (deduped by
+        normalized name; fill-empty on match), marked unverified
+        (found_via='successor_discovery', confidence='low').
+      - ELSE: note-only (the link above); no orphan stub (lead_id XOR
+        existing_hotel_id forbids it).
+
+    Returns a dict describing what happened. Caller commits.
+    Never fabricates an email. Never auto-promotes priority.
+    """
+    from sqlalchemy import text
+
+    out = {
+        "found": False,
+        "successor_name": "",
+        "successor_title": "",
+        "former_org": "",
+        "former_holder": "",
+        "action": "none",
+        "stub_id": None,
+        "property_kind": None,
+        "property_id": None,
+        "citations": [],
+    }
+
+    row = (
+        await session.execute(
+            text(
+                "SELECT c.title, c.organization AS new_org, "
+                "  COALESCE(NULLIF(TRIM(CONCAT_WS(' ', c.first_name, c.last_name)), ''), "
+                "           c.display_name, '') AS holder, "
+                "  a.account_name AS former_org "
+                "FROM contacts c "
+                "JOIN contact_affiliations a "
+                "  ON a.person_id = c.id AND a.person_type='contact' AND a.relationship='former' "
+                "WHERE c.id = :id "
+                "ORDER BY a.created_at DESC NULLS LAST LIMIT 1"
+            ),
+            {"id": contact_id},
+        )
+    ).first()
+    if not row:
+        out["action"] = "not_a_mover"
+        return out
+
+    title = (row.title or "").strip()
+    former_org = (row.former_org or "").strip()
+    holder = (row.holder or "").strip()
+    out["former_org"] = former_org
+    out["former_holder"] = holder
+    if not title or not former_org:
+        out["action"] = "insufficient_seat"
+        return out
+
+    res = await find_seat_successor(org=former_org, title=title, former_holder=holder)
+    if not res.get("found"):
+        out["action"] = "no_successor"
+        out["citations"] = res.get("citations", [])
+        return out
+
+    succ = res["successor_name"]
+    succ_title = res.get("successor_title") or title
+    src = res["citations"][0] if res.get("citations") else "seat_successor"
+    out.update(
+        found=True,
+        successor_name=succ,
+        successor_title=succ_title,
+        citations=res.get("citations", []),
+    )
+
+    # NOTE: contact_affiliations cannot hold a 'successor' edge -- its CHECK
+    # constraints restrict relationship to {employed_by, stationed_at, covers,
+    # former} and account_type to {existing_hotel, potential_lead,
+    # management_company}. So we do NOT write a successor affiliation row.
+    # The warm-path link ("X replaced Taylor") is carried on the created stub's
+    # source_detail (below) and returned to the UI. No schema change needed.
+    note = f"{succ} now holds {title} at {former_org}" + (f" (replaced {holder})" if holder else "")
+    out["link_note"] = note
+
+    # 2) resolve the former property; stub only if it's a known hotel/lead.
+    hid = (
+        await session.execute(
+            text("SELECT id FROM existing_hotels WHERE lower(name)=lower(:o) LIMIT 1"),
+            {"o": former_org},
+        )
+    ).scalar()
+    lid = None
+    if not hid:
+        lid = (
+            await session.execute(
+                text("SELECT id FROM potential_leads WHERE lower(hotel_name)=lower(:o) LIMIT 1"),
+                {"o": former_org},
+            )
+        ).scalar()
+
+    if not hid and not lid:
+        out["action"] = "linked_note_only"
+        return out
+
+    kind = "existing_hotel" if hid else "lead"
+    pid = hid or lid
+    col = "existing_hotel_id" if hid else "lead_id"
+    out["property_kind"] = kind
+    out["property_id"] = pid
+
+    # dedup by normalized name among that property's contacts
+    rows = await session.execute(
+        text(f"SELECT id, name FROM lead_contacts WHERE {col} = :pid"), {"pid": pid}
+    )
+    target = _norm_person_name(succ)
+    match_id = None
+    for r in rows:
+        if _norm_person_name(r.name) == target:
+            match_id = r.id
+            break
+
+    if match_id:
+        # fill-empty merge (don't clobber, don't fabricate)
+        await session.execute(
+            text(
+                "UPDATE lead_contacts SET "
+                "  title = COALESCE(NULLIF(title,''), :ti), "
+                "  organization = COALESCE(NULLIF(organization,''), :org), "
+                "  source_detail = COALESCE(NULLIF(source_detail,''), :sd), "
+                "  updated_at = NOW() "
+                "WHERE id = :id"
+            ),
+            {
+                "id": match_id,
+                "ti": succ_title,
+                "org": former_org,
+                "sd": f"Replaced {holder or 'prior contact'}; via {src}",
+            },
+        )
+        out["action"] = "merged_stub"
+        out["stub_id"] = match_id
+        return out
+
+    ins = await session.execute(
+        text(
+            f"INSERT INTO lead_contacts "
+            f"(name, title, organization, {col}, scope, confidence, is_saved, "
+            f" found_via, source_detail, evidence_url, created_at, updated_at) "
+            f"VALUES (:nm, :ti, :org, :pid, 'hotel_specific', 'low', TRUE, "
+            f" 'successor_discovery', :sd, :url, NOW(), NOW()) RETURNING id"
+        ),
+        {
+            "nm": succ,
+            "ti": succ_title,
+            "org": former_org,
+            "pid": pid,
+            "sd": f"Replaced {holder or 'prior contact'} (who moved on); via {src}",
+            "url": src if src.startswith("http") else None,
+        },
+    )
+    out["action"] = "created_stub"
+    out["stub_id"] = ins.scalar()
+    return out
