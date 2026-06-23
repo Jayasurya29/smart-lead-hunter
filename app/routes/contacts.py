@@ -1478,30 +1478,23 @@ async def find_contact_linkedin_endpoint(
 
     Returns {found: bool, linkedin_url: str|None}.
     """
-    from sqlalchemy import text as _sql
+    from app.services.contact_resolver import (
+        resolve_contact,
+        write_contact_field,
+    )  # [patch_findlinkedin_resolver]
 
     async with async_session() as session:
-        row = (
-            await session.execute(
-                _sql(
-                    "SELECT first_name, last_name, display_name, organization, "
-                    "email, linkedin_url FROM contacts WHERE id = :id"
-                ),
-                {"id": contact_id},
-            )
-        ).first()
-    if not row:
+        c = await resolve_contact(session, contact_id)
+    if not c:
         raise HTTPException(status_code=404, detail="contact not found")
-    if row.linkedin_url:
+    if c["linkedin"]:
         return {
             "found": True,
-            "linkedin_url": row.linkedin_url,
+            "linkedin_url": c["linkedin"],
             "note": "already had a LinkedIn URL",
         }
 
-    name = (
-        f"{row.first_name or ''} {row.last_name or ''}".strip() or (row.display_name or "").strip()
-    )
+    name = c["name"]
     if not name or "@" in name:
         return {"found": False, "linkedin_url": None, "note": "no usable name"}
 
@@ -1512,7 +1505,7 @@ async def find_contact_linkedin_endpoint(
     try:
         from app.services.smart_fill import find_linkedin_url
 
-        url = find_linkedin_url(name, row.organization or "", row.email or "")
+        url = find_linkedin_url(name, c["org"], c["email"])
     except Exception as e:
         logger.exception(f"find-linkedin failed for contact {contact_id}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -1524,8 +1517,8 @@ async def find_contact_linkedin_endpoint(
 
             g = await grounded_fill(
                 name=name,
-                org=row.organization or "",
-                email=row.email or "",
+                org=c["org"],
+                email=c["email"],
                 want_linkedin=True,
                 want_role=False,
             )
@@ -1538,13 +1531,7 @@ async def find_contact_linkedin_endpoint(
         return {"found": False, "linkedin_url": None}
 
     async with async_session() as session:
-        await session.execute(
-            _sql(
-                "UPDATE contacts SET linkedin_url = :u, updated_at = NOW() "
-                "WHERE id = :id AND COALESCE(linkedin_url,'') = ''"
-            ),
-            {"u": url, "id": contact_id},
-        )
+        await write_contact_field(session, contact_id, "linkedin", url)
         await session.commit()
     return {"found": True, "linkedin_url": url}
 
@@ -1582,6 +1569,28 @@ async def find_current_employer_endpoint(
                 {"id": contact_id},
             )
         ).first()
+    # [patch_findce_resolver] resolve lead-gen contacts (offset ids) for the PREVIEW too
+    from app.services.contact_resolver import (
+        resolve_contact as _resolve_ce,
+        is_lead_id as _is_lead_ce,
+    )
+
+    if not row:
+        async with async_session() as _s2:
+            _c = await _resolve_ce(_s2, contact_id)
+        if not _c:
+            raise HTTPException(status_code=404, detail="contact not found")
+
+        class _R:
+            pass
+
+        row = _R()
+        row.first_name = _c["name"]
+        row.last_name = ""
+        row.display_name = _c["name"]
+        row.organization = _c["org"]
+        row.email = _c["email"]
+        row.linkedin_url = _c["linkedin"]
     if not row:
         raise HTTPException(status_code=404, detail="contact not found")
 
@@ -1593,6 +1602,12 @@ async def find_current_employer_endpoint(
     domain = (row.email or "").split("@")[-1] if "@" in (row.email or "") else ""
 
     if apply:
+        if _is_lead_ce(contact_id):
+            return {
+                "mode": "apply",
+                "found": False,
+                "note": "Apply is available for inbox contacts; edit the lead directly to update its employer.",
+            }
         # full flow (anchored bio + confidence-gated relabel + former affiliation)
         from app.services.contact_tier2_enrichment import enrich_contact_deep
 

@@ -105,6 +105,10 @@ async def serper_current_employer(name: str, org: str = "", linkedin: str = "") 
         + (f" (on file at {org})" if org else "")
         + ". Using ONLY these snippets, identify THIS specific person's MOST RECENT "
         "employer and job title (prefer the newest dated/most-recent mention). "
+        "IMPORTANT: a LinkedIn headline (the 'Name - <Title> at <Company>' line, or "
+        "'<Title> at <Company>' shown right under the name) is the person's CURRENT "
+        "role and OUTRANKS any older role mentioned in the body text or with an older "
+        "date range. If a snippet shows a current headline, use THAT employer/title. "
         "Answer in EXACTLY one line:\n"
         "CURRENT: <employer> | <title>\n"
         "If the snippets don't clearly identify this specific person's current/recent "
@@ -321,11 +325,33 @@ async def find_seat_successor(org: str, title: str, former_holder: str = "") -> 
         return out
 
     # Appointment-news queries: cover "<Name> appointed <Title>" and
-    # "<Title> named/announced" phrasings. Two cheap Serper passes.
-    queries = [
-        f'"{org}" "{title}" appointed OR named OR "new" OR announces 2025 OR 2026',
-        f'"{org}" {title} current 2026',
-    ]
+    # Plain "<org> <role title>" queries across same-department title variants.
+    # LinkedIn surfaces the current holder for these far better than
+    # appointment-news phrasing.
+    _t = title.lower()
+    if any(k in _t for k in ("f&b", "food", "beverage", "culinary", "restaurant", "outlet")):
+        _titles = [
+            "Food and Beverage Director",
+            "Director of Food and Beverage",
+            "Director of Outlets",
+            "Assistant Director of Outlets",
+            "F&B Manager",
+            "Food and Beverage Manager",
+        ]
+    elif any(k in _t for k in ("human res", "hr", "people", "talent")):
+        _titles = [
+            "Director of Human Resources",
+            "Human Resources Manager",
+            "Director of People and Culture",
+            "HR Director",
+        ]
+    elif any(k in _t for k in ("sales", "revenue", "commercial")):
+        _titles = ["Director of Sales", "Director of Sales and Marketing", "Revenue Manager"]
+    elif "general manager" in _t or "gm" in _t:
+        _titles = ["General Manager", "Hotel Manager"]
+    else:
+        _titles = [title, f"Director of {title}"]
+    queries = [f"{org} {t}" for t in _titles]
     snippets: list[str] = []
     cites: list[str] = []
     for q in queries:
@@ -601,4 +627,116 @@ async def apply_seat_successor(session, contact_id: int) -> dict:
     )
     out["action"] = "created_stub"
     out["stub_id"] = ins.scalar()
+    return out
+
+
+# [phase3_grounded_successor]
+async def grounded_seat_successor(org: str, title: str, former_holder: str = "") -> dict:
+    """Ask grounded Gemini (Google Search) who CURRENTLY holds <title> at <org>.
+    Org+role question -> no namesake risk. Citation-gated. Returns same shape as
+    find_seat_successor.
+    """
+    out = {
+        "found": False,
+        "successor_name": "",
+        "successor_title": title or "",
+        "evidence": "",
+        "citations": [],
+        "source": "grounded",
+    }
+    org, title = (org or "").strip(), (title or "").strip()
+    if not org or not title:
+        return out
+    try:
+        import httpx
+        from app.services.contact_enrichment import (
+            _build_grounding_url,
+            _CONTACT_GROUNDING_TIMEOUT_S,
+        )
+        from app.services.gemini_client import get_gemini_headers
+        from app.services.ai_client import _get_config, _ensure_init
+
+        _ensure_init()
+        cfg = _get_config()
+        url, _ = _build_grounding_url(cfg["vertex_project_id"], cfg["model"])
+        headers = get_gemini_headers()
+    except Exception as e:
+        logger.warning(f"grounded_successor: setup failed: {e}")
+        return out
+
+    fh = (
+        f" The previous holder, {former_holder}, has left -- do NOT name them."
+        if former_holder
+        else ""
+    )
+    prompt = (
+        f"Search the web for the CURRENT leadership of the food & beverage department "
+        f"at {org}. Who currently holds the role of {title} (or the equivalent senior "
+        f"F&B/outlets leader) there right now, in 2025-2026?{fh} "
+        f"Give me their full name and exact title. If you cannot find a clearly current "
+        f"person, say you don't know."
+    )
+    payload = {
+        "contents": [{"role": "user", "parts": [{"text": prompt}]}],
+        "tools": [{"googleSearch": {}}],
+        "generationConfig": {
+            "temperature": 1.0,
+            "maxOutputTokens": 1024,
+            "thinkingConfig": {"thinkingBudget": 0},
+        },
+    }
+    try:
+        async with httpx.AsyncClient(timeout=_CONTACT_GROUNDING_TIMEOUT_S) as gc:
+            resp = await gc.post(url, headers=headers, json=payload)
+        resp.raise_for_status()
+        data = resp.json()
+        cand = data["candidates"][0]
+        parts = (cand.get("content") or {}).get("parts") or []
+        text = re.sub(r"[*`]+", "", ((parts[0].get("text") if parts else "") or "").strip())
+        meta = cand.get("groundingMetadata", {}) or {}
+        cites = [
+            c.get("web", {}).get("uri")
+            for c in (meta.get("groundingChunks", []) or [])[:5]
+            if c.get("web", {}).get("uri")
+        ]
+    except Exception as e:
+        logger.warning(f"grounded_successor ERROR {org}/{title}: {e}")
+        return out
+    if not cites or not text:
+        out["evidence"] = "(no grounding)"
+        return out
+
+    # ask the cheap LLM to extract name|title from the grounded prose
+    try:
+        from app.services.ai_client import ai_generate
+
+        async with httpx.AsyncClient(timeout=40) as c:
+            ext = await ai_generate(
+                c,
+                "From this text, output ONE line 'NAME | TITLE' naming the person who "
+                f"currently holds the {title} (or senior F&B/outlets) role at {org}, or "
+                f"exactly 'unknown'. Never name {former_holder or '---'}.\n\n{text[:3000]}",
+                temperature=0.0,
+                max_tokens=60,
+            )
+    except Exception:
+        ext = ""
+    body = (ext or "").strip().splitlines()[0] if ext else ""
+    if not body or body.lower() == "unknown":
+        out["evidence"] = text[:200]
+        out["citations"] = cites
+        return out
+    nm, _, ti = body.partition("|")
+    nm, ti = nm.strip(), ti.strip()
+    if former_holder and nm.lower() == former_holder.strip().lower():
+        out["evidence"] = "(rejected former holder)"
+        out["citations"] = cites
+        return out
+    out.update(
+        found=bool(nm),
+        successor_name=nm,
+        successor_title=ti or title,
+        evidence=text[:200],
+        citations=cites,
+    )
     return out

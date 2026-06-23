@@ -927,10 +927,12 @@ function AIBand({ contact }: { contact: InboxContact }) {
       const r = await ceMut.mutateAsync({ id: contact.id, apply, useWiza, findEmail: useWiza })
       if (apply) {
         setCeMoved(false)
-        setCeMsg(r.employer_changed ? `Re-filed to ${r.current_employer}. Now finding who took their seat...` : 'Coverage confirmed current.')
-        pushLog(r.employer_changed ? `Moved -> ${r.current_employer}` : 'Still current', true)
-        // [patch_frontend_merge_status] */ a confirmed move vacates a seat -> auto-find the successor
-        if (r.employer_changed) { await runFindSuccessor(false) }
+        const moved = r.employer_changed || r.left_industry
+        setCeMsg(r.employer_changed ? `Re-filed to ${r.current_employer}. Finding who took their seat...`
+          : r.left_industry ? `Left ${r.former_employer || 'the industry'} (now ${r.current_employer}). Finding who took their seat...`
+          : 'Coverage confirmed current.')
+        pushLog(moved ? `Moved -> ${r.current_employer}` : 'Still current', true)
+        if (moved) { await runFindSuccessor(false) }
         return
       }
       if (!r.found) { setCeMsg('Could not confirm a current employer (no clear profile match).'); pushLog('No clear match', false); return }
@@ -1060,6 +1062,23 @@ function AIBand({ contact }: { contact: InboxContact }) {
                 </>
               )
             })()}
+            {/* lead-gen tools [patch_lead_tools]: LinkedIn + Check status work for leads */}
+            {isLead && !ceMut.isPending && !succMut.isPending && !liMut.isPending && (
+              <>
+                {!contact.linkedin_url && (
+                  <button onClick={runFindLinkedin}
+                    title="Find this contact's LinkedIn (Serper)"
+                    className="inline-flex items-center gap-1.5 h-7 px-3 rounded-lg text-[11px] font-bold text-white/90 ring-1 ring-white/25 hover:bg-white/10 transition-all">
+                    <Linkedin className="w-3 h-3" />Find LinkedIn
+                  </button>
+                )}
+                <button onClick={() => runFindEmployer(false)}
+                  title="Check if this contact moved on (Serper)"
+                  className="inline-flex items-center gap-1.5 h-7 px-3 rounded-lg text-[11px] font-bold text-white/90 ring-1 ring-white/25 hover:bg-white/10 transition-all">
+                  <Radar className="w-3 h-3" />Check status
+                </button>
+              </>
+            )}
           </div>
         </div>
 

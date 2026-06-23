@@ -237,6 +237,7 @@ export interface CurrentEmployerResult {
   background?: string | null
   role?: string | null
   employer_changed?: boolean
+  left_industry?: boolean
   former_employer?: string | null
   secondary_email?: string | null
   note?: string

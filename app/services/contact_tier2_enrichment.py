@@ -446,6 +446,38 @@ async def enrich_contact_deep(contact_id: int, find_email: bool = False) -> dict
         and _norm_org(new_employer) != _norm_org(org)
         and conf >= GROUNDED_CONFIDENCE_FLOOR
     )
+    # [departed_out_of_industry] If the new employer is clearly NOT hospitality
+    # (realtor, insurance, tech, etc.), the person LEFT the industry: they are no
+    # longer a sellable contact. Keep the FORMER affiliation (history + successor
+    # path) but do NOT relabel their org to the non-hotel employer.
+    _ne = (new_employer or "").lower()
+    _nt = (new_title or "").lower()
+    _NON_HOSPITALITY = (
+        "realty",
+        "realtor",
+        "real estate",
+        "keller williams",
+        "compass",
+        "insurance",
+        "allstate",
+        "state farm",
+        "law",
+        "attorney",
+        "consulting",
+        "recruit",
+        "staffing",
+        "bank",
+        "mortgage",
+        "automotive",
+        "dealership",
+    )
+    left_industry = job_changed and any(k in _ne or k in _nt for k in _NON_HOSPITALITY)
+    if left_industry:
+        job_changed = False  # don't re-file under the non-hotel employer
+        logger.info(
+            f"tier2: contact {contact_id} ({row.email}) LEFT hospitality "
+            f"-> {new_employer!r}; keeping former affiliation only, not re-filing org."
+        )
     if job_changed:
         logger.info(
             f"tier2: contact {contact_id} ({row.email}) appears to have moved: "
@@ -501,7 +533,14 @@ async def enrich_contact_deep(contact_id: int, find_email: bool = False) -> dict
                     if do_name_fill
                     else ""
                 )
-                + (", organization = :new_employer, title = :new_title" if job_changed else "")
+                + (
+                    ", organization = :new_employer, title = :new_title"
+                    ", parent_company = NULL, brand_tier = NULL"
+                    ", management_company = NULL, matched_hotel_id = NULL"
+                    ", matched_lead_id = NULL"
+                    if job_changed
+                    else ""
+                )
                 + (", secondary_email = :secondary_email" if secondary_email else "")
                 + " WHERE id = :id"
             ),
@@ -534,7 +573,7 @@ async def enrich_contact_deep(contact_id: int, find_email: bool = False) -> dict
         # relationship='former' is the schema-valid value (contact_affiliations
         # CHECK: employed_by/stationed_at/covers/former). Idempotent + non-fatal:
         # the headline re-file is the important part; the edge is a bonus.
-        if job_changed and former_org:
+        if (job_changed or left_industry) and former_org:
             try:
                 exists = (
                     await session.execute(
@@ -609,8 +648,8 @@ async def enrich_contact_deep(contact_id: int, find_email: bool = False) -> dict
                             text(
                                 "UPDATE contact_affiliations SET "
                                 "title = COALESCE(NULLIF(:title,''), title), "
-                                "start_date = COALESCE(:sd::date, start_date), "
-                                "end_date = COALESCE(:ed::date, end_date), "
+                                "start_date = COALESCE(CAST(:sd AS date), start_date), "
+                                "end_date = COALESCE(CAST(:ed AS date), end_date), "
                                 "updated_at = :now WHERE id = :aid"
                             ),
                             {
@@ -629,7 +668,7 @@ async def enrich_contact_deep(contact_id: int, find_email: bool = False) -> dict
                                 "title, relationship, source, confidence, start_date, "
                                 "end_date, notes, created_at, updated_at) VALUES "
                                 "('contact', :pid, 'management_company', :nm, :title, "
-                                ":rel, 'grounded', :conf, :sd::date, :ed::date, "
+                                ":rel, 'grounded', :conf, CAST(:sd AS date), CAST(:ed AS date), "
                                 ":notes, :now, :now)"
                             ),
                             {
@@ -667,8 +706,11 @@ async def enrich_contact_deep(contact_id: int, find_email: bool = False) -> dict
         "confidence": conf,
         "sources_used": len(snippets),
         "employer_changed": job_changed,
-        "current_employer": new_employer if job_changed else None,
-        "former_employer": former_org if job_changed else None,
+        "left_industry": left_industry,
+        "current_employer": new_employer
+        if job_changed
+        else (new_employer if left_industry else None),
+        "former_employer": former_org if (job_changed or left_industry) else None,
         "secondary_email": secondary_email,
     }
 
