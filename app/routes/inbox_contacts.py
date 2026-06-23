@@ -227,6 +227,25 @@ async def inbox_contact_update(
     ):
         raise HTTPException(status_code=422, detail="linkedin_url must be a linkedin.com URL")
 
+    # [patch_inbox_edit_dup_email] An email edit that collides with another
+    # contact's UNIQUE email would raise a raw UniqueViolation -> ugly 500.
+    # Pre-check (case-insensitive) and return a clean 409 naming the holder.
+    if changes.get("email"):
+        dup = (
+            await db.execute(
+                _sql(
+                    "SELECT id, COALESCE(NULLIF(TRIM(display_name), ''), email) AS who "
+                    "FROM contacts WHERE lower(email) = lower(:e) AND id <> :id LIMIT 1"
+                ),
+                {"e": changes["email"], "id": contact_id},
+            )
+        ).first()
+        if dup is not None:
+            raise HTTPException(
+                status_code=409,
+                detail=f"Another contact ({dup.who}) already uses {changes['email']}.",
+            )
+
     sets = ", ".join(f"{k} = :{k}" for k in changes)
     res = await db.execute(
         _sql(f"UPDATE contacts SET {sets}, updated_at = NOW() WHERE id = :id RETURNING id"),
@@ -317,6 +336,46 @@ async def inbox_contact_push_to_insightly(
     return _serialize_contact(result)
 
 
+async def _write_coverage_edge(db, contact_id, account_type, account_id):
+    """Mirror an inbox-contact <-> property match into a 'covers' affiliation
+    so the coverage card fills in (parity with lead-gen). Scoped to
+    source='matched': re-matching replaces only the matched edge, leaving
+    enrichment/portfolio coverage intact. account_id None -> clear it.
+    [patch_inbox_coverage_edge]"""
+    from sqlalchemy import text as _sql
+
+    await db.execute(
+        _sql(
+            "DELETE FROM contact_affiliations WHERE person_type='contact' "
+            "AND person_id=:pid AND relationship='covers' "
+            "AND account_type=:at AND source='matched'"
+        ),
+        {"pid": contact_id, "at": account_type},
+    )
+    if not account_id:
+        return
+    table = "existing_hotels" if account_type == "existing_hotel" else "potential_leads"
+    nm = (
+        await db.execute(_sql(f"SELECT hotel_name FROM {table} WHERE id=:id"), {"id": account_id})
+    ).scalar()
+    if not nm:
+        return
+    await db.execute(  # [patch_coverage_edge_accountid]
+        _sql(
+            "INSERT INTO contact_affiliations (person_type, person_id, account_type, account_id, "
+            "account_name, relationship, source, confidence, notes, created_at, updated_at) "
+            "VALUES ('contact', :pid, :at, :aid, :nm, 'covers', 'matched', 0.9, :notes, NOW(), NOW())"
+        ),
+        {
+            "pid": contact_id,
+            "at": account_type,
+            "aid": account_id,
+            "nm": nm,
+            "notes": "Coverage from contact-to-property match",
+        },
+    )
+
+
 @router.post("/api/inbox-contacts/{contact_id}/match-lead")
 async def inbox_contact_match_lead(
     contact_id: int,
@@ -328,6 +387,9 @@ async def inbox_contact_match_lead(
     result = await link_to_lead(db, contact_id, body.lead_id)
     if not result:
         raise HTTPException(status_code=404, detail="Contact not found")
+    await _write_coverage_edge(
+        db, contact_id, "potential_lead", body.lead_id
+    )  # [patch_inbox_coverage_edge]
     await db.commit()
     return _serialize_contact(result)
 
@@ -343,8 +405,109 @@ async def inbox_contact_match_hotel(
     result = await link_to_hotel(db, contact_id, body.hotel_id)
     if not result:
         raise HTTPException(status_code=404, detail="Contact not found")
+    await _write_coverage_edge(
+        db, contact_id, "existing_hotel", body.hotel_id
+    )  # [patch_inbox_coverage_edge]
     await db.commit()
     return _serialize_contact(result)
+
+
+_AUTOLINK_SKIP_DOMAINS = {
+    "gmail.com",
+    "yahoo.com",
+    "outlook.com",
+    "hotmail.com",
+    "aol.com",
+    "icloud.com",
+    "me.com",
+    "live.com",
+    "msn.com",
+    "comcast.net",
+    "bellsouth.net",
+    "att.net",
+    "marriott.com",
+    "hilton.com",
+    "hyatt.com",
+    "ihg.com",
+    "wyndham.com",
+    "accor.com",
+}
+
+
+async def _auto_resolve_property(db, domain, org):
+    """Resolve an inbox contact to ONE hotel/lead by domain then exact name.
+    Returns (account_type, account_id, account_name, method) or None.
+    [patch_inbox_autolink]"""
+    from sqlalchemy import text as _sql
+    from app.services.org_normalize import normalize_organization
+
+    async def _single(q, params):
+        rows = (await db.execute(_sql(q), params)).all()
+        return rows[0] if len(rows) == 1 else None
+
+    domain = (domain or "").strip().lower()
+    if domain and domain not in _AUTOLINK_SKIP_DOMAINS:
+        pat = f"%{domain}%"
+        r = await _single(
+            "SELECT id, hotel_name FROM existing_hotels WHERE hotel_website ILIKE :p", {"p": pat}
+        )
+        if r:
+            return ("existing_hotel", r.id, r.hotel_name, "domain")
+        r = await _single(
+            "SELECT id, hotel_name FROM potential_leads WHERE hotel_website ILIKE :p AND status <> 'rejected'",
+            {"p": pat},
+        )
+        if r:
+            return ("potential_lead", r.id, r.hotel_name, "domain")
+
+    nrm = normalize_organization(org or "")
+    if nrm:
+        r = await _single(
+            "SELECT id, hotel_name FROM existing_hotels WHERE hotel_name_normalized = :n",
+            {"n": nrm},
+        )
+        if r:
+            return ("existing_hotel", r.id, r.hotel_name, "name")
+        r = await _single(
+            "SELECT id, hotel_name FROM potential_leads WHERE hotel_name_normalized = :n AND status <> 'rejected'",
+            {"n": nrm},
+        )
+        if r:
+            return ("potential_lead", r.id, r.hotel_name, "name")
+    return None
+
+
+@router.post("/api/contacts/{contact_id}/auto-link")
+async def inbox_contact_auto_link(
+    contact_id: int,
+    db: AsyncSession = Depends(get_db),
+    _csrf=Depends(require_ajax),
+):
+    """Auto-resolve an inbox contact's org/domain to a hotel/lead and link it
+    (matched FK + coverage edge). No confident single match -> no change.
+    [patch_inbox_autolink]"""
+    c = await get_contact_by_id(db, contact_id)
+    if not c:
+        raise HTTPException(status_code=404, detail="Contact not found")
+    email = c.get("email") or ""
+    domain = email.split("@")[-1] if "@" in email else ""
+    hit = await _auto_resolve_property(db, domain, c.get("organization") or "")
+    if not hit:
+        return {"linked": False, "note": "no confident single match"}
+    account_type, account_id, account_name, method = hit
+    if account_type == "existing_hotel":
+        await link_to_hotel(db, contact_id, account_id)
+    else:
+        await link_to_lead(db, contact_id, account_id)
+    await _write_coverage_edge(db, contact_id, account_type, account_id)
+    await db.commit()
+    return {
+        "linked": True,
+        "account_type": account_type,
+        "account_id": account_id,
+        "account_name": account_name,
+        "method": method,
+    }
 
 
 @router.post("/api/inbox-contacts/classify")

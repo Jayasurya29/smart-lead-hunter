@@ -609,6 +609,13 @@ async def enrich_contact_deep(contact_id: int, find_email: bool = False) -> dict
                     )
             except Exception as e:
                 logger.warning(f"tier2: former-affiliation write failed for {contact_id}: {e}")
+        if job_changed:  # [patch_move_coverage_transition] coverage follows the person
+            try:
+                from app.services.contact_autolink import retire_and_relink
+
+                await retire_and_relink(session, "contact", contact_id, new_employer)
+            except Exception as _e:
+                logger.warning(f"tier2: coverage transition failed for {contact_id}: {_e}")
         # Phase 2: record the DATED work history as affiliations (045 columns).
         # relationship 'employed_by' = open/current role (end_date NULL), 'former'
         # = ended role. The ABSENCE of any open row is what tells the UI the

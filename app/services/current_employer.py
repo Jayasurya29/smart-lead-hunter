@@ -495,6 +495,11 @@ async def apply_seat_successor(session, contact_id: int) -> dict:
         "citations": [],
     }
 
+    from app.services.contact_resolver import (
+        is_lead_id as _is_lead,
+        real_id as _real_id,
+    )  # [patch_leadgen_successor]
+
     row = (
         await session.execute(
             text(
@@ -511,6 +516,21 @@ async def apply_seat_successor(session, contact_id: int) -> dict:
             {"id": contact_id},
         )
     ).first()
+    if row is None and _is_lead(contact_id):  # [patch_leadgen_successor] lead-gen mover
+        row = (
+            await session.execute(
+                text(
+                    "SELECT lc.title, lc.organization AS new_org, lc.name AS holder, "
+                    "  a.account_name AS former_org "
+                    "FROM lead_contacts lc "
+                    "JOIN contact_affiliations a "
+                    "  ON a.person_id = lc.id AND a.person_type='lead_contact' AND a.relationship='former' "
+                    "WHERE lc.id = :id "
+                    "ORDER BY a.created_at DESC NULLS LAST LIMIT 1"
+                ),
+                {"id": _real_id(contact_id)},
+            )
+        ).first()
     if not row:
         out["action"] = "not_a_mover"
         return out

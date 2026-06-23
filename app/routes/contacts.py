@@ -1536,6 +1536,127 @@ async def find_contact_linkedin_endpoint(
     return {"found": True, "linkedin_url": url}
 
 
+async def _apply_lead_contact_move(contact_id: int) -> dict:
+    """Lead-gen equivalent of the inbox 'moved' apply. [patch_leadgen_move_apply]
+    Confirms a current employer and, on a confident move, re-files the lead
+    contact's org/title, records a FORMER affiliation, and syncs the parent
+    lead/hotel so all three pages stay consistent."""
+    from sqlalchemy import text as _sql
+    from app.services.contact_resolver import real_id
+    from app.services.current_employer import find_current_employer
+
+    rid = real_id(contact_id)
+    _NON_HOSP = (
+        "realty",
+        "realtor",
+        "real estate",
+        "insurance",
+        "law",
+        "attorney",
+        "consulting",
+        "recruit",
+        "staffing",
+        "bank",
+        "mortgage",
+        "automotive",
+        "dealership",
+        "colliers",
+        "cbre",
+        "jll",
+    )
+    async with async_session() as session:
+        contact = (
+            await session.execute(select(LeadContact).where(LeadContact.id == rid))
+        ).scalar_one_or_none()
+        if not contact:
+            return {"mode": "apply", "found": False, "note": "lead contact not found"}
+        name = (contact.name or "").strip()
+        if not name or "@" in name:
+            return {"mode": "apply", "found": False, "note": "no usable name"}
+        org = (contact.organization or "").strip()
+        domain = (contact.email or "").split("@")[-1] if "@" in (contact.email or "") else ""
+        try:
+            ce = await find_current_employer(
+                name=name,
+                org=org,
+                linkedin=contact.linkedin or "",
+                domain=domain,
+                use_wiza=False,
+            )
+        except Exception as e:
+            return {"mode": "apply", "found": False, "note": f"lookup failed: {e}"}
+
+        new_emp = (ce.get("current_employer") or "").strip()
+        moved = bool(ce.get("moved")) and bool(new_emp) and new_emp.lower() != org.lower()
+        if not moved:
+            return {
+                "mode": "apply",
+                "found": bool(ce.get("found")),
+                "employer_changed": False,
+                "left_industry": False,
+                "current_employer": new_emp or org,
+                "former_employer": None,
+                "note": "coverage current",
+            }
+
+        new_title = (ce.get("current_title") or "").strip()
+        left_industry = any(k in new_emp.lower() or k in new_title.lower() for k in _NON_HOSP)
+        former_org = org or new_emp
+
+        if not left_industry:
+            contact.organization = new_emp
+            if new_title:
+                contact.title = new_title
+        contact.last_enriched_at = local_now()
+        contact.updated_at = local_now()
+
+        if former_org:
+            exists = (
+                await session.execute(
+                    _sql(
+                        "SELECT 1 FROM contact_affiliations WHERE person_type='lead_contact' "
+                        "AND person_id=:pid AND relationship='former' "
+                        "AND lower(COALESCE(account_name,''))=lower(:nm) LIMIT 1"
+                    ),
+                    {"pid": rid, "nm": former_org},
+                )
+            ).first()
+            if not exists:
+                await session.execute(
+                    _sql(
+                        "INSERT INTO contact_affiliations (person_type, person_id, account_type, "
+                        "account_name, relationship, source, confidence, notes, created_at, updated_at) "
+                        "VALUES ('lead_contact', :pid, 'management_company', :nm, 'former', 'grounded', "
+                        ":conf, :notes, NOW(), NOW())"
+                    ),
+                    {
+                        "pid": rid,
+                        "nm": former_org,
+                        "conf": 0.7,
+                        "notes": f"Moved to {new_emp} (per current-employer lookup)",
+                    },
+                )
+
+        if not left_industry:  # [patch_move_coverage_transition] coverage follows the person
+            try:
+                from app.services.contact_autolink import retire_and_relink
+
+                await retire_and_relink(session, "lead_contact", rid, new_emp)
+            except Exception as _e:
+                logger.warning(f"lead move: coverage transition failed for {rid}: {_e}")
+        await _sync_lead_contact_parents(session, contact)
+        await session.commit()
+
+    return {
+        "mode": "apply",
+        "found": True,
+        "employer_changed": (not left_industry),
+        "left_industry": left_industry,
+        "current_employer": new_emp,
+        "former_employer": former_org,
+    }
+
+
 @router.post(
     "/api/contacts/{contact_id}/find-current-employer", tags=["Contacts"]
 )  # [patch_endpoint_current_employer]
@@ -1603,11 +1724,7 @@ async def find_current_employer_endpoint(
 
     if apply:
         if _is_lead_ce(contact_id):
-            return {
-                "mode": "apply",
-                "found": False,
-                "note": "Apply is available for inbox contacts; edit the lead directly to update its employer.",
-            }
+            return await _apply_lead_contact_move(contact_id)  # [patch_leadgen_move_apply]
         # full flow (anchored bio + confidence-gated relabel + former affiliation)
         from app.services.contact_tier2_enrichment import enrich_contact_deep
 
@@ -1678,6 +1795,10 @@ async def find_successor_endpoint(
 
     # preview only -- no writes
     from app.services.current_employer import find_seat_successor
+    from app.services.contact_resolver import (
+        is_lead_id as _is_lead,
+        real_id as _real_id,
+    )  # [patch_leadgen_successor]
 
     async with async_session() as session:
         row = (
@@ -1697,6 +1818,21 @@ async def find_successor_endpoint(
                 {"id": contact_id},
             )
         ).first()
+        if row is None and _is_lead(contact_id):  # [patch_leadgen_successor] lead-gen mover
+            row = (
+                await session.execute(
+                    _sql(
+                        "SELECT lc.title, lc.name AS holder, a.account_name AS former_org "
+                        "FROM lead_contacts lc "
+                        "JOIN contact_affiliations a "
+                        "  ON a.person_id = lc.id AND a.person_type='lead_contact' "
+                        "   AND a.relationship='former' "
+                        "WHERE lc.id = :id "
+                        "ORDER BY a.created_at DESC NULLS LAST LIMIT 1"
+                    ),
+                    {"id": _real_id(contact_id)},
+                )
+            ).first()
     if not row:
         return {"found": False, "mode": "preview", "note": "not a confirmed mover"}
 
@@ -1952,6 +2088,38 @@ async def list_lead_contacts(
     return {"items": items, "total": total, "page": page, "per_page": per_page, "pages": pages}
 
 
+async def _sync_lead_contact_parents(db, contact) -> None:
+    """Push a primary lead-gen contact's headline to BOTH possible parents
+    -- the potential_lead AND the existing_hotel -- so the Leads page and the
+    Existing Hotels page never show stale contact info after a Contacts-page
+    change. The existing-hotel side was previously missing -> desync.
+    [patch_leadcontact_parent_sync]"""
+    if not getattr(contact, "is_primary", False):
+        return
+    if contact.lead_id:
+        lead = (
+            await db.execute(select(PotentialLead).where(PotentialLead.id == contact.lead_id))
+        ).scalar_one_or_none()
+        if lead:
+            lead.contact_name = contact.name
+            lead.contact_title = contact.title
+            lead.contact_email = contact.email
+            lead.contact_phone = contact.phone
+            lead.updated_at = local_now()
+    if contact.existing_hotel_id:
+        from app.models.existing_hotel import ExistingHotel as _EH
+
+        hotel = (
+            await db.execute(select(_EH).where(_EH.id == contact.existing_hotel_id))
+        ).scalar_one_or_none()
+        if hotel:
+            hotel.contact_name = contact.name
+            hotel.contact_title = contact.title
+            hotel.contact_email = contact.email
+            hotel.contact_phone = contact.phone
+            hotel.updated_at = local_now()
+
+
 @router.patch("/api/lead-contacts/{contact_id}")  # [patch_endpoint_leadcontact_edit]
 async def update_lead_contact_any(
     contact_id: int,
@@ -1983,17 +2151,8 @@ async def update_lead_contact_any(
     for fld, value in body.items():
         if fld in allowed:
             setattr(contact, fld, value)
-    # keep the parent lead's headline contact in sync when primary
-    if contact.is_primary and contact.lead_id:
-        lead = (
-            await db.execute(select(PotentialLead).where(PotentialLead.id == contact.lead_id))
-        ).scalar_one_or_none()
-        if lead:
-            lead.contact_name = contact.name
-            lead.contact_title = contact.title
-            lead.contact_email = contact.email
-            lead.contact_phone = contact.phone
-            lead.updated_at = local_now()
+    # keep BOTH parents (lead + existing-hotel) in sync [patch_leadcontact_parent_sync]
+    await _sync_lead_contact_parents(db, contact)
     from app.services.contact_scoring import apply_score_to_contact
 
     apply_score_to_contact(

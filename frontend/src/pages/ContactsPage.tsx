@@ -621,10 +621,13 @@ const _ACCOUNT_SUFFIX = new RegExp(
   'i',
 )
 
+// [patch_accountkey_diacritics] fold accents so "Curaçao" == "Curacao" (one bucket)
+const _fold = (s: string): string => s.normalize('NFKD').replace(/[\u0300-\u036f]/g, '')
+
 /** Aggressively-normalized grouping key (never shown to the user). */
 function accountKey<T extends string | null | undefined>(name: T): string {
   if (!name) return 'No organization'
-  let s = String(name).trim().toLowerCase()
+  let s = _fold(String(name).trim().toLowerCase())
   s = COMPANY_ALIASES[s] ? COMPANY_ALIASES[s].toLowerCase() : s
   s = s.replace(_LEADING_THE, '')
   let prev = ''
@@ -646,7 +649,7 @@ function accountKey<T extends string | null | undefined>(name: T): string {
 /** Display name: alias-mapped original spelling (keeps "The", "Hotels", case). */
 function canonCompany<T extends string | null | undefined>(name: T): T | string {
   if (!name) return name
-  return COMPANY_ALIASES[name.trim().toLowerCase()] || name
+  return COMPANY_ALIASES[_fold(name.trim().toLowerCase())] || name
 }
 
 function collapsePeople(list: UnifiedContact[]): UnifiedContact[] {
@@ -1175,6 +1178,13 @@ function SectionCard({ title, icon, children }: { title: string; icon: React.Rea
   )
 }
 
+// [patch_inforow_edit_err] pull a human message out of an axios error
+function errDetail(e: unknown): string {
+  const d = (e as { response?: { data?: { detail?: unknown } } })?.response?.data?.detail
+  if (typeof d === 'string') return d
+  return 'Could not save — try again.'
+}
+
 function InfoRow({ icon, label, value, mono, href, editField, contactId, leadId, placeholder }: {
   icon: React.ReactNode; label: string; value: string | null | undefined; mono?: boolean; href?: string
   editField?: string  // contacts column to edit; '__name__' edits first+last+display together
@@ -1187,6 +1197,7 @@ function InfoRow({ icon, label, value, mono, href, editField, contactId, leadId,
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState('')
   const [copied, setCopied] = useState(false)
+  const [editErr, setEditErr] = useState<string | null>(null)  // [patch_inforow_edit_err]
   const canEdit = !!editField && (!!contactId || !!leadId)
   // editable rows render even when empty (so you can ADD a value); read-only
   // rows keep the old hide-when-empty behaviour.
@@ -1205,6 +1216,7 @@ function InfoRow({ icon, label, value, mono, href, editField, contactId, leadId,
   function startEdit(e: React.MouseEvent) {
     e.stopPropagation()
     setDraft(linkVal)
+    setEditErr(null)  // [patch_inforow_edit_err]
     setEditing(true)
   }
   async function save() {
@@ -1216,15 +1228,15 @@ function InfoRow({ icon, label, value, mono, href, editField, contactId, leadId,
       const lf: any = editField === '__name__' ? { name: newVal }
         : editField === 'linkedin_url' ? { linkedin: newVal }
         : { [editField!]: newVal }
-      try { await leadMut.mutateAsync({ realId: leadId, fields: lf }) }
-      catch { /* surfaced by interceptor; reverts on refetch */ }
+      try { setEditErr(null); await leadMut.mutateAsync({ realId: leadId, fields: lf }) }
+      catch (e) { setEditErr(errDetail(e)) }  // [patch_inforow_edit_err]
       return
     }
     const fields = editField === '__name__'
       ? (() => { const p = newVal.split(/\s+/); return { first_name: p[0] || '', last_name: p.slice(1).join(' ') || '', display_name: newVal } })()
       : { [editField!]: newVal }
-    try { await updMut.mutateAsync({ id: contactId!, fields: fields as any }) }
-    catch { /* error surfaced by the api interceptor; field reverts on refetch */ }
+    try { setEditErr(null); await updMut.mutateAsync({ id: contactId!, fields: fields as any }) }
+    catch (e) { setEditErr(errDetail(e)) }  // [patch_inforow_edit_err]
   }
 
   return (
@@ -1248,6 +1260,7 @@ function InfoRow({ icon, label, value, mono, href, editField, contactId, leadId,
             {value || (canEdit ? `Add ${label.toLowerCase()}...` : '')}
           </div>
         )}
+        {editErr && <div className="text-[11px] font-medium text-red-600 mt-1">{editErr}</div>}
       </div>
       <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0">
         {value && (
