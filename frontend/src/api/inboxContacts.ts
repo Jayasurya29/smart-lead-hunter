@@ -52,6 +52,8 @@ export interface InboxContact {
   last_inbound_at: string | null
   last_outbound_at: string | null
   secondary_email: string | null
+  has_former_employer?: boolean  // [patch_former_email] true once a 'former' affiliation exists
+  email_is_former?: boolean  // [patch_email_model] true only when the email DOMAIN matches a former employer (genuinely stale)
   approval_status: string
   insightly_contact_id: string | null
   pushed_to_insightly_at: string | null
@@ -210,6 +212,16 @@ export async function findContactLinkedin(id: number): Promise<FindLinkedinResul
   return data
 }
 
+export async function findContactEmail(id: number) {
+  // [find_email_only] email-ONLY lookup (Wiza); no deep-enrich/move/bio.
+  const r = await fetch(`/api/contacts/${id}/find-email`, {
+    method: 'POST', headers: { 'X-Requested-With': 'XMLHttpRequest' },
+    credentials: 'include',
+  })
+  if (!r.ok) throw new Error((await r.json().catch(() => ({}))).detail || 'find-email failed')
+  return r.json()
+}
+
 export async function deepEnrichContact(
   id: number,
   findEmail = false,
@@ -232,6 +244,9 @@ export interface CurrentEmployerResult {
   citations?: string[]
   source?: string
   on_file_org?: string
+  has_unresolved_seat?: boolean
+  unresolved_seat_org?: string
+  unresolved_seat_title?: string
   mode?: 'preview' | 'apply'
   // apply-mode (deep-enrich) extras:
   background?: string | null
@@ -276,10 +291,12 @@ export interface SuccessorResult {
 
 export async function findSuccessor(
   id: number,
-  opts: { apply?: boolean } = {},
+  opts: { apply?: boolean; previewSeatOrg?: string; previewSeatTitle?: string } = {},
 ): Promise<SuccessorResult> {
   const qs = new URLSearchParams()
   if (opts.apply) qs.set('apply', 'true')
+  if (opts.previewSeatOrg) qs.set('preview_seat_org', opts.previewSeatOrg)
+  if (opts.previewSeatTitle) qs.set('preview_seat_title', opts.previewSeatTitle)
   const { data } = await api.post<SuccessorResult>(
     `/api/contacts/${id}/find-successor?${qs.toString()}`,
   )

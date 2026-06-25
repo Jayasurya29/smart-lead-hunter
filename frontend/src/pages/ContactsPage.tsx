@@ -17,7 +17,7 @@
  * Client-side (over the loaded page, per_page 200): smart-search, DM focus, sort.
  * For very large inboxes, push `search` to the server (marked below).
  */
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { useDeferredValue, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import Fuse from 'fuse.js'
 import {
@@ -35,6 +35,7 @@ import {
   useInboxContactStats,
   useTriggerInboxSync,
   useDeepEnrichContact,
+  useFindContactEmail,
   useFindLinkedin,
   useFindCurrentEmployer,
   useFindSuccessor,
@@ -415,6 +416,25 @@ function deriveSummary(c: InboxContact): string {
 /** Build a contact's search haystack ONCE (precomputed in `indexed` below) —
  *  previously this 20-field join+lowercase ran for every contact on every
  *  keystroke, which is exactly what made typing drag at ~7k contacts. */
+// [search_name_rank] score how well a query matches a person's NAME, so an
+// exact name hit ranks above fuzzy email/org fragment matches.
+function nameMatchTier(c: UnifiedContact, q: string): number {
+  const name = `${c.first_name || ''} ${c.last_name || ''}`.trim().toLowerCase()
+  const disp = (c.display_name || '').trim().toLowerCase()
+  const full = name || disp
+  if (!full) return 0
+  const ql = q.trim().toLowerCase()
+  if (!ql) return 0
+  const rev = name.split(/\s+/).reverse().join(' ')
+  if (full === ql || disp === ql || rev === ql) return 3
+  const words = ql.split(/\s+/).filter(Boolean)
+  const hay = `${full} ${disp}`
+  const hit = words.filter((w) => hay.includes(w)).length
+  if (words.length && hit === words.length) return 2
+  if (hit > 0) return 1
+  return 0
+}
+
 function buildHaystack(c: UnifiedContact): string {
   const acctLabel = accountTypeOf(c) === 'management_company' ? 'management company mgmt co operator' : 'hotel'
   const srcLabel = sourceOf(c) === 'lead_generator' ? 'lead generator scraped discovery prospect' : 'email inbox'
@@ -722,15 +742,17 @@ function DirRow({
         </div>
         <div className="truncate text-stone-500 text-[13px] mt-0.5">{roleText(contact) || 'role unknown'}</div>
       </div>
-      {/* email — the field reps need most */}
+      {/* email — the field reps need most. [listrow_former_email] a former/
+          stale email is treated as "no current email" (it lives in history),
+          so the list never shows or links a dead address. */}
       <div className="min-w-0 flex-1 hidden md:block">
-        {contact.email
+        {contact.email && !contact.email_is_former
           ? <a href={`mailto:${contact.email}`} onClick={(e) => e.stopPropagation()} className="truncate block text-[13px] text-navy-600 hover:text-navy-800 hover:underline font-medium">{contact.email}</a>
-          : <span className="text-[12px] text-stone-500 italic">no email yet</span>}
+          : <span className="text-[12px] text-stone-500 italic">{contact.email_is_former ? 'no current email' : 'no email yet'}</span>}
       </div>
       {/* quick actions — appear on hover, act without opening the drawer */}
       <div className="hidden lg:flex items-center gap-1 flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
-        {contact.email && <a href={`mailto:${contact.email}`} onClick={(e) => e.stopPropagation()} title="Email" className="w-7 h-7 rounded-lg hover:bg-stone-100 flex items-center justify-center text-stone-500"><Mail className="w-4 h-4" /></a>}
+        {contact.email && !contact.email_is_former && <a href={`mailto:${contact.email}`} onClick={(e) => e.stopPropagation()} title="Email" className="w-7 h-7 rounded-lg hover:bg-stone-100 flex items-center justify-center text-stone-500"><Mail className="w-4 h-4" /></a>}
         {contact.phone && <a href={`tel:${contact.phone}`} onClick={(e) => e.stopPropagation()} title="Call" className="w-7 h-7 rounded-lg hover:bg-stone-100 flex items-center justify-center text-stone-500"><Phone className="w-4 h-4" /></a>}
       </div>
       {/* org + meta (status pills removed — org name is more useful here). Org is a link → jumps to that company. */}
@@ -858,6 +880,8 @@ const ENRICH_STEPS = [
 
 function AIBand({ contact }: { contact: InboxContact }) {
   const deepMut = useDeepEnrichContact()
+  // [find_email_button] email-ONLY lookup (no deep enrich / no move / no bio).
+  const emailMut = useFindContactEmail()
   const liMut = useFindLinkedin()
   /* [patch_frontend_ce_contactspage] */
   const ceMut = useFindCurrentEmployer()
@@ -899,11 +923,11 @@ function AIBand({ contact }: { contact: InboxContact }) {
     }
   }
 
-  async function runFindSuccessor(apply = false) {
+  async function runFindSuccessor(apply = false, seat?: { org?: string; title?: string }) {
     setSuccMsg(null)
     pushLog(apply ? 'Filing the successor...' : `Finding who holds ${who}'s old seat now...`)
     try {
-      const r = await succMut.mutateAsync({ id: contact.id, apply })
+      const r = await succMut.mutateAsync({ id: contact.id, apply, previewSeatOrg: seat?.org, previewSeatTitle: seat?.title })
       if (apply) {
         setSuccFound(false)
         const made = r.action === 'created_stub' ? ' Added as a new lead.'
@@ -931,22 +955,31 @@ function AIBand({ contact }: { contact: InboxContact }) {
       if (apply) {
         setCeMoved(false)
         const moved = r.employer_changed || r.left_industry
-        setCeMsg(r.employer_changed ? `Re-filed to ${r.current_employer}. Finding who took their seat...`
-          : r.left_industry ? `Left ${r.former_employer || 'the industry'} (now ${r.current_employer}). Finding who took their seat...`
+        setCeMsg(r.employer_changed ? `Re-filed to ${r.current_employer}. Filing who took their seat...`
+          : r.left_industry ? `Left ${r.former_employer || 'the industry'} (now ${r.current_employer}). Filing who took their seat...`
           : 'Coverage confirmed current.')
         pushLog(moved ? `Moved -> ${r.current_employer}` : 'Still current', true)
-        if (moved) { await runFindSuccessor(false) }
+        if (moved) { await runFindSuccessor(true) }
         return
       }
       if (!r.found) { setCeMsg('Could not confirm a current employer (no clear profile match).'); pushLog('No clear match', false); return }
       if (r.moved && r.current_employer) {
         setCeMoved(true)
-        setCeMsg(`Looks like they moved to ${r.current_employer}${r.current_title ? ` (${r.current_title})` : ''}. Apply to re-file + refresh bio.`)
+        setCeMsg(`Looks like they moved to ${r.current_employer}${r.current_title ? ` (${r.current_title})` : ''}. Apply to re-file + file successor.`)
         pushLog(`Possible move: ${r.current_employer}`, true)
+        // [one-click] preview Phase 3 now, using the contact's CURRENT (about-to-be-former)
+        // seat -- no 'former' row exists pre-Apply, so pass it explicitly.
+        await runFindSuccessor(false, { org: contact.organization || r.on_file_org || '', title: contact.title || '' })
       } else {
         setCeMoved(false)
         setCeMsg(`Still at ${r.current_employer || r.on_file_org || contact.organization || 'current employer'} - coverage current.`)
         pushLog('Confirmed current', true)
+        // [phase3_unresolved_seat] Even when still current, a previously-recorded
+        // former seat may never have been filled. Run Phase 3 on it now.
+        if (r.has_unresolved_seat && r.unresolved_seat_org) {
+          pushLog(`Unfilled former seat: ${r.unresolved_seat_title || 'role'} @ ${r.unresolved_seat_org} — finding who holds it now...`, true)
+          await runFindSuccessor(false, { org: r.unresolved_seat_org, title: r.unresolved_seat_title || '' })
+        }
       }
     } catch {
       setCeMsg('Lookup failed - check Serper key or try again.')
@@ -1003,7 +1036,8 @@ function AIBand({ contact }: { contact: InboxContact }) {
   }
 
   const signals = deriveSignals(contact)
-  const emailMissing = !contact.email || !contact.email.includes('@')
+  // [email_actions_former] a former/stale email is NOT a usable current email
+  const emailMissing = !contact.email || !contact.email.includes('@') || !!contact.email_is_former
 
   return (
     <div className="relative overflow-hidden rounded-2xl text-white shadow-lift" style={{ background: 'linear-gradient(135deg,#0f1d32 0%,#1a2d4a 55%,#253d5e 100%)' }}>
@@ -1017,8 +1051,16 @@ function AIBand({ contact }: { contact: InboxContact }) {
           </div>
           <div className="flex items-center gap-2">
             {!isLead && emailMissing && !deepMut.isPending && (
-              <button onClick={() => runEnrich(true)} title="Uses Wiza credits"
-                className="inline-flex items-center h-7 px-3 rounded-lg text-[11px] font-bold text-white/90 ring-1 ring-white/25 hover:bg-white/10 transition-all">Find Email</button>
+              <button onClick={async () => {
+                  // [find_email_button] email-only; pushLog mirrors deep-enrich UX
+                  pushLog(`Finding email for ${who} (Wiza)...`)
+                  try {
+                    const r: any = await emailMut.mutateAsync(contact.id)
+                    if (r?.email) { pushLog(`Email found: ${r.email}`, true); setResult(`Found email: ${r.email}`) }
+                    else { pushLog('No email found via Wiza.', false); setResult('No email found.') }
+                  } catch { pushLog('Find email failed (Wiza key/network).', false); setResult('Find email failed.') }
+                }} disabled={emailMut.isPending} title="Find email only (Wiza credits) — no deep enrich"
+                className="inline-flex items-center h-7 px-3 rounded-lg text-[11px] font-bold text-white/90 ring-1 ring-white/25 hover:bg-white/10 transition-all disabled:opacity-50">{emailMut.isPending ? 'Finding...' : 'Find Email'}</button>
             )}
             {!isLead && (deepMut.isPending || liMut.isPending) && (
               <span className="inline-flex items-center gap-1.5 h-7 px-3 text-[11px] font-bold text-white/70">
@@ -1198,6 +1240,7 @@ function InfoRow({ icon, label, value, mono, href, editField, contactId, leadId,
   const [draft, setDraft] = useState('')
   const [copied, setCopied] = useState(false)
   const [editErr, setEditErr] = useState<string | null>(null)  // [patch_inforow_edit_err]
+  const savingRef = useRef(false)  // [inforow_save_race] guard vs Enter+blur double-fire
   const canEdit = !!editField && (!!contactId || !!leadId)
   // editable rows render even when empty (so you can ADD a value); read-only
   // rows keep the old hide-when-empty behaviour.
@@ -1220,23 +1263,32 @@ function InfoRow({ icon, label, value, mono, href, editField, contactId, leadId,
     setEditing(true)
   }
   async function save() {
-    setEditing(false)
+    // [inforow_save_race] run once per edit: Enter calls save() then the input
+    // unmounts and fires onBlur -> a second save() with a stale draft would
+    // blank the value. The guard blocks the re-entry.
+    if (savingRef.current) return
     const newVal = draft.trim()
-    if (newVal === (linkVal || '')) return
-    // patch_frontend_leadcontact_edit: lead-gen rows -> lead endpoint, mapping to the lead schema
-    if (leadId) {
-      const lf: any = editField === '__name__' ? { name: newVal }
-        : editField === 'linkedin_url' ? { linkedin: newVal }
-        : { [editField!]: newVal }
-      try { setEditErr(null); await leadMut.mutateAsync({ realId: leadId, fields: lf }) }
-      catch (e) { setEditErr(errDetail(e)) }  // [patch_inforow_edit_err]
-      return
+    if (newVal === (linkVal || '')) { setEditing(false); return }
+    savingRef.current = true
+    setEditErr(null)
+    try {
+      if (leadId) {
+        const lf: any = editField === '__name__' ? { name: newVal }
+          : editField === 'linkedin_url' ? { linkedin: newVal }
+          : { [editField!]: newVal }
+        await leadMut.mutateAsync({ realId: leadId, fields: lf })
+      } else {
+        const fields = editField === '__name__'
+          ? (() => { const p = newVal.split(/\s+/); return { first_name: p[0] || '', last_name: p.slice(1).join(' ') || '', display_name: newVal } })()
+          : { [editField!]: newVal }
+        await updMut.mutateAsync({ id: contactId!, fields: fields as any })
+      }
+      setEditing(false)  // close only AFTER the save lands
+    } catch (e) {
+      setEditErr(errDetail(e))  // keep editor open, show the error
+    } finally {
+      savingRef.current = false
     }
-    const fields = editField === '__name__'
-      ? (() => { const p = newVal.split(/\s+/); return { first_name: p[0] || '', last_name: p.slice(1).join(' ') || '', display_name: newVal } })()
-      : { [editField!]: newVal }
-    try { setEditErr(null); await updMut.mutateAsync({ id: contactId!, fields: fields as any }) }
-    catch (e) { setEditErr(errDetail(e)) }  // [patch_inforow_edit_err]
   }
 
   return (
@@ -1377,7 +1429,19 @@ function ActionBtn({ icon, label, primary, done, tone, onClick, disabled }: {
 function ProfilePanel({ contact, onDeleted }: { contact: UnifiedContact | null; onDeleted: () => void }) {
   const approveMut = useApproveInboxContact()
   const deleteMut = useDeleteInboxContact()
+  const ceMut = useFindCurrentEmployer()
   const [confirmDelete, setConfirmDelete] = useState(false)
+  const [findingEmail, setFindingEmail] = useState(false)
+
+  // [email_findemail_scope] Find the contact's CURRENT email (apply + Wiza).
+  async function findCurrentEmail() {
+    if (!contact || findingEmail) return
+    setFindingEmail(true)
+    try {
+      await ceMut.mutateAsync({ id: contact.id, apply: true, useWiza: true, findEmail: true })
+    } catch { /* surfaced by mutation state */ }
+    finally { setFindingEmail(false) }
+  }
 
   useEffect(() => setConfirmDelete(false), [contact?.id])
 
@@ -1394,6 +1458,9 @@ function ProfilePanel({ contact, onDeleted }: { contact: UnifiedContact | null; 
   const crm = inCrm(contact)
   const approved = contact.approval_status === 'approved' || crm
   const isLead = sourceOf(contact) === 'lead_generator'
+  // [email_actions_former] the only emailable address is a CURRENT one; a
+  // former/stale email is treated as absent everywhere actions are offered.
+  const currentEmail = contact.email_is_former ? '' : (contact.email || '')
 
   function handleDelete() {
     if (!confirmDelete) { setConfirmDelete(true); return }
@@ -1446,8 +1513,8 @@ function ProfilePanel({ contact, onDeleted }: { contact: UnifiedContact | null; 
         {/* actions */}
         <div className="relative flex flex-wrap items-center gap-2 mt-5">
           <ActionBtn primary tone="#c49a3c" icon={<Send className="w-4 h-4" />} label="Draft outreach"
-            onClick={() => contact.email && (window.location.href = `mailto:${contact.email}`)} />
-          {contact.email && <ActionBtn icon={<Mail className="w-4 h-4" />} label="Email" onClick={() => (window.location.href = `mailto:${contact.email}`)} />}
+            onClick={() => currentEmail && (window.location.href = `mailto:${currentEmail}`)} />
+          {currentEmail && <ActionBtn icon={<Mail className="w-4 h-4" />} label="Email" onClick={() => (window.location.href = `mailto:${currentEmail}`)} />}
           {contact.phone && <ActionBtn icon={<Phone className="w-4 h-4" />} label="Call" onClick={() => (window.location.href = `tel:${contact.phone}`)} />}
           {contact.linkedin_url && <ActionBtn icon={<Linkedin className="w-4 h-4" />} label="LinkedIn" onClick={() => window.open(contact.linkedin_url!, '_blank')} />}
           <div className="flex-1" />
@@ -1455,7 +1522,7 @@ function ProfilePanel({ contact, onDeleted }: { contact: UnifiedContact | null; 
             /* Lead-gen contacts live in the lead pipeline — approve/reject
                here would hit the inbox-contacts table with a wrong ID. */
             <div className="flex items-center gap-2">
-              {!contact.email && <LeadFindEmailBtn contact={contact} />}
+              {!currentEmail && <LeadFindEmailBtn contact={contact} />}
               <span className="inline-flex items-center gap-1.5 h-9 px-3.5 rounded-lg text-[12px] font-semibold bg-white/10 text-white/70 ring-1 ring-white/15">
                 <Radar className="w-3.5 h-3.5" /> Lead Generator contact
               </span>
@@ -1535,15 +1602,26 @@ function ProfilePanel({ contact, onDeleted }: { contact: UnifiedContact | null; 
             <InfoRow icon={<Users className="w-3.5 h-3.5" />} label="Name" value={fullName(contact)}
               editField="__name__" contactId={sourceOf(contact) !== 'lead_generator' ? contact.id : undefined}
               leadId={sourceOf(contact) === 'lead_generator' || contact.id >= LEAD_ID_OFFSET ? (contact.id >= LEAD_ID_OFFSET ? contact.id - LEAD_ID_OFFSET : contact.id) : undefined} />
-            <InfoRow icon={<Mail className="w-3.5 h-3.5" />} label={contact.secondary_email ? 'Email (former)' : 'Email'} value={contact.email} mono
-              editField="email" contactId={sourceOf(contact) !== 'lead_generator' ? contact.id : undefined}
-              leadId={sourceOf(contact) === 'lead_generator' || contact.id >= LEAD_ID_OFFSET ? (contact.id >= LEAD_ID_OFFSET ? contact.id - LEAD_ID_OFFSET : contact.id) : undefined} />
-            {contact.secondary_email && (
-              <>
-                <div className="px-1 -mt-1 mb-1 text-[11px] text-amber-700">From a former employer &mdash; may be inactive. Current address found below.</div>
-                <InfoRow icon={<Mail className="w-3.5 h-3.5" />} label="Email (current, found)" value={contact.secondary_email} mono href={`mailto:${contact.secondary_email}`} />
-              </>
-            )}
+            {(() => {
+              // [email_current_model] The Email field always shows the CURRENT address.
+              // When the on-file email is former/stale and no current one is known yet,
+              // the headline shows empty with a "Find email" action, and the old address
+              // is shown below as a muted "Former" reference (also preserved in DB history).
+              const fieldEmail = contact.email_is_former ? (contact.secondary_email || '') : (contact.email || '')
+              const _cid = sourceOf(contact) !== 'lead_generator' ? contact.id : undefined
+              const _lid = sourceOf(contact) === 'lead_generator' || contact.id >= LEAD_ID_OFFSET ? (contact.id >= LEAD_ID_OFFSET ? contact.id - LEAD_ID_OFFSET : contact.id) : undefined
+              return (
+                <>
+                  <InfoRow icon={<Mail className="w-3.5 h-3.5" />} label="Email" value={fieldEmail || null} mono
+                    editField="email" contactId={_cid} leadId={_lid} />
+                  {/* [email_former_match] one Find-email control only (AI header).
+                      Here we just note the empty state; no duplicate button. */}
+                  {contact.email_is_former && !contact.secondary_email && (
+                    <div className="px-1 -mt-1 mb-1 text-[11px] text-amber-700">No current email yet.</div>
+                  )}
+                </>
+              )
+            })()}
             <InfoRow icon={<Phone className="w-3.5 h-3.5" />} label="Phone" value={contact.phone}
               editField="phone" contactId={sourceOf(contact) !== 'lead_generator' ? contact.id : undefined}
               leadId={sourceOf(contact) === 'lead_generator' || contact.id >= LEAD_ID_OFFSET ? (contact.id >= LEAD_ID_OFFSET ? contact.id - LEAD_ID_OFFSET : contact.id) : undefined} />
@@ -1765,11 +1843,60 @@ const STATUS_OPTIONS: Array<[string, string]> = [
 ]
 void STATUS_OPTIONS // status now lives in the <Facet> options inline
 
+// [search_isolated_input] Owns the fast `draft` + focus state and the debounce
+// in ISOLATION, so holding backspace re-renders only this ~10-line box -- not
+// the whole ContactsPage. Commits the debounced value to the parent (which
+// drives results off the URL `q`).
+function SearchBox({ initialQuery, onCommit }: {
+  initialQuery: string
+  onCommit: (q: string | null) => void
+}) {
+  const [draft, setDraft] = useState(initialQuery)
+  const [focused, setFocused] = useState(false)
+  const lastPushed = useRef(initialQuery)
+  // adopt external changes to the query (e.g. cleared elsewhere) without
+  // clobbering in-flight typing.
+  useEffect(() => {
+    if (initialQuery !== lastPushed.current) {
+      lastPushed.current = initialQuery
+      setDraft(initialQuery)
+    }
+  }, [initialQuery])
+  useEffect(() => {
+    if (draft === lastPushed.current) return
+    const t = window.setTimeout(() => {
+      lastPushed.current = draft
+      onCommit(draft || null)
+    }, 180)
+    return () => window.clearTimeout(t)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [draft])
+  return (
+    <div className="flex-shrink-0 px-8 pb-3">
+      <div className={cn('relative rounded-2xl bg-white transition-all', focused ? 'ring-2 ring-navy-500 shadow-lift' : 'ring-1 ring-stone-200')}
+        style={focused ? { boxShadow: '0 0 0 4px rgba(46,74,110,.07)' } : undefined}>
+        <div className="flex items-center gap-3 px-4 h-12">
+          <Sparkles className="w-[18px] h-[18px] flex-shrink-0 text-navy-600" />
+          <input value={draft} onChange={(e) => setDraft(e.target.value)}
+            onFocus={() => setFocused(true)} onBlur={() => setFocused(false)}
+            placeholder='Search anyone — a name, a hotel, a company, or a role like "director of procurement"'
+            className="flex-1 bg-transparent outline-none text-[15px] text-navy-900 placeholder:text-stone-400" />
+          {draft && <button onClick={() => { setDraft(''); lastPushed.current = ''; onCommit(null) }} className="text-stone-400 hover:text-stone-600"><X className="w-[17px] h-[17px]" /></button>}
+        </div>
+      </div>
+    </div>
+  )
+}
+
 export default function ContactsPage() {
   const [params, setParams] = useSearchParams()
 
   // URL-synced state
   const query = params.get('q') || ''
+  // [search_deferred] the heavy filter/group memo reads the DEFERRED query so
+  // React keeps typing responsive and recomputes the 43k-row result at lower
+  // priority (no main-thread jank while searching).
+  const deferredQuery = useDeferredValue(query)
   const category = params.get('category') || ''
   const status = params.get('status') || ''
   const source = (params.get('source') as Source | '') || ''     // '' = all
@@ -1784,7 +1911,6 @@ export default function ContactsPage() {
   // local state
   const [selected, setSelected] = useState<Set<number>>(new Set())
   const [drawerOpen, setDrawerOpen] = useState<boolean>(() => !!params.get('selected'))
-  const [focused, setFocused] = useState(false)
   const [view, setView] = useState<'accounts' | 'people'>('accounts')
   const [collapsedOrgs, setCollapsedOrgs] = useState<Set<string>>(new Set())
   // Secondary filters (Source / Account / Stage / Status) live behind a
@@ -1794,29 +1920,9 @@ export default function ContactsPage() {
   const [moreOpen, setMoreOpen] = useState<boolean>(() => !!(source || account || lifecycle || status))
   useEffect(() => { if (source || account || lifecycle || status) setMoreOpen(true) }, [source, account, lifecycle, status])
 
-  // search box is debounced — typing updates `draft` instantly, the actual
-  // filter (URL `q`) follows 180ms after the user pauses. Keeps keystrokes
-  // snappy: filtering+sorting ~7k contacts no longer runs on every key.
-  const [draft, setDraft] = useState(query)
-  const lastPushed = useRef(query)
-  useEffect(() => {
-    // Only adopt the URL value when it changed from OUTSIDE this component
-    // (i.e. it is not the value we just pushed via the debounce) -- otherwise
-    // our own echo would reset `draft` mid-keystroke and drop fast typing.
-    if (query !== lastPushed.current) {
-      lastPushed.current = query
-      setDraft(query)
-    }
-  }, [query])
-  useEffect(() => {
-    if (draft === query) return
-    const t = window.setTimeout(() => {
-      lastPushed.current = draft
-      patch({ q: draft || null })
-    }, 180)
-    return () => window.clearTimeout(t)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [draft])
+  // [search_isolated_input] the search input is its own component now; the
+  // debounced value commits here via onCommit (keeps the page off the
+  // per-keystroke render path).
 
   // render windows — only this many rows/groups hit the DOM; an invisible
   // sentinel at the bottom grows the window as you scroll. This is what
@@ -1989,21 +2095,24 @@ export default function ContactsPage() {
   // ranks above an org hit above a title/email hit. Natural-language shortcut
   // phrases (decision makers / luxury / buyers / ...) bypass this and use the
   // exact predicates in shortcutMatch.
+  // [search_tighten_fuzz] tighter matching so fragment noise (email/org bits)
+  // stops polluting results. Name + org lead; email is demoted (it was the
+  // main source of junk like 'jasonh@' / 'jamesmedical' for a name query).
   const fuse = useMemo(() => new Fuse(items, {
     includeScore: true,
-    threshold: 0.38,        // 0 = exact, 1 = anything; 0.38 tolerates typos
-    ignoreLocation: true,   // match anywhere in the field, not just the start
-    minMatchCharLength: 2,
+    threshold: 0.3,         // tighter than 0.38; still tolerates real typos
+    ignoreLocation: true,   // match anywhere (e.g. 'rodriguez' in a 3-part name)
+    minMatchCharLength: 3,  // a 2-char fragment was too aggressive
     keys: [
-      { name: 'display_name', weight: 0.9 },
-      { name: 'first_name', weight: 0.8 },
-      { name: 'last_name', weight: 0.8 },
-      { name: 'organization', weight: 0.7 },
-      { name: 'title', weight: 0.4 },
-      { name: 'inferred_role', weight: 0.3 },
-      { name: 'email', weight: 0.5 },
-      { name: 'management_company', weight: 0.3 },
-      { name: 'parent_company', weight: 0.3 },
+      { name: 'display_name', weight: 1.0 },
+      { name: 'first_name', weight: 0.9 },
+      { name: 'last_name', weight: 0.9 },
+      { name: 'organization', weight: 0.6 },
+      { name: 'title', weight: 0.3 },
+      { name: 'inferred_role', weight: 0.2 },
+      { name: 'email', weight: 0.2 },
+      { name: 'management_company', weight: 0.2 },
+      { name: 'parent_company', weight: 0.2 },
     ],
   }), [items])
 
@@ -2053,7 +2162,7 @@ export default function ContactsPage() {
 
   // client-side refine + sort
   const filtered = useMemo(() => {
-    const t = query.toLowerCase().trim()
+    const t = deferredQuery.toLowerCase().trim()
     // When the query is free text (not a known shortcut phrase), use fuzzy
     // search: typo-tolerant + ranked by relevance. Shortcut phrases use the
     // exact predicates. `fuzzyRanked` preserves Fuse's relevance order so we
@@ -2066,6 +2175,12 @@ export default function ContactsPage() {
       list = indexed.filter(({ c, hay }) => smartMatch(c, hay, t)).map(({ c }) => c)
     } else {
       list = fuse.search(t).map((r) => r.item)
+      // [search_name_rank] stable re-rank: real name matches above fragment
+      // hits, preserving Fuse's order within each tier.
+      list = list
+        .map((c, i) => ({ c, i, tier: nameMatchTier(c, t) }))
+        .sort((a, b) => (b.tier - a.tier) || (a.i - b.i))
+        .map((x) => x.c)
       fuzzyRanked = true
     }
     if (category === 'uncategorized') list = list.filter((c) => !c.contact_category)
@@ -2093,7 +2208,7 @@ export default function ContactsPage() {
     }
     return [...list].sort(sorters[sort])
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [items, indexed, fuse, accountIntel, query, category, status, dmOnly, source, account, lifecycle, vertical, priority, sort])
+  }, [items, indexed, fuse, accountIntel, deferredQuery, category, status, dmOnly, source, account, lifecycle, vertical, priority, sort])
 
   // group filtered contacts by account (hotel OR management company)
   const groups = useMemo(() => {
@@ -2348,20 +2463,8 @@ export default function ContactsPage() {
           </button>
         </div>
 
-        {/* search — the one hero control */}
-        <div className="flex-shrink-0 px-8 pb-3">
-          <div className={cn('relative rounded-2xl bg-white transition-all', focused ? 'ring-2 ring-navy-500 shadow-lift' : 'ring-1 ring-stone-200')}
-            style={focused ? { boxShadow: '0 0 0 4px rgba(46,74,110,.07)' } : undefined}>
-            <div className="flex items-center gap-3 px-4 h-12">
-              <Sparkles className="w-[18px] h-[18px] flex-shrink-0 text-navy-600" />
-              <input value={draft} onChange={(e) => setDraft(e.target.value)}
-                onFocus={() => setFocused(true)} onBlur={() => setFocused(false)}
-                placeholder='Search anyone — a name, a hotel, a company, or a role like "director of procurement"'
-                className="flex-1 bg-transparent outline-none text-[15px] text-navy-900 placeholder:text-stone-400" />
-              {draft && <button onClick={() => { setDraft(''); patch({ q: null }) }} className="text-stone-400 hover:text-stone-600"><X className="w-[17px] h-[17px]" /></button>}
-            </div>
-          </div>
-        </div>
+        {/* search — the one hero control (isolated; see SearchBox) */}
+        <SearchBox initialQuery={query} onCommit={(q) => patch({ q })} />
 
         {/* ONE filter row — every control is the same quiet facet */}
         <div className="flex-shrink-0 px-8 pb-3 flex items-center gap-1 flex-wrap">

@@ -168,6 +168,9 @@ async def get_affiliations_for_person(
     resolved (lead_contacts.person_id grouping key), gathers edges from ALL their
     rows, so a chain / career person shows every affiliation — incl. multiple
     companies (job changes) — from one drawer."""
+    # [former_row_email_only] a former-org row shows ONLY the email the person
+    # had AT THAT org (its own preserved former_email). The current on-file
+    # email is never used here -- that belongs at the top, as the current email.
     # expand to every row resolved to the same human
     row_ids = [person_id]
     if person_type == "lead_contact":
@@ -190,7 +193,7 @@ async def get_affiliations_for_person(
         (
             await session.execute(
                 text(
-                    "SELECT account_type, account_id, account_name, relationship, scope "
+                    "SELECT account_type, account_id, account_name, relationship, scope, notes "
                     "FROM contact_affiliations "
                     "WHERE person_type = :pt AND person_id = ANY(:ids)"
                 ),
@@ -296,10 +299,25 @@ async def get_affiliations_for_person(
                 "name": e.get("account_name"),
                 "account_type": e.get("account_type"),
                 "account_id": e.get("account_id"),
+                # [former_email_history] old email preserved in notes as
+                # "former_email=..."; fall back to the on-file email (which IS
+                # the former-employer email when a former affiliation exists).
+                "email": _parse_former_email(e.get("notes")),
             }
             for e in former
         ],
     }
+
+
+def _parse_former_email(notes) -> str:
+    """Pull the preserved old email out of a former affiliation's notes
+    (stored as "... | former_email=addr@domain")."""
+    s = notes or ""
+    if "former_email=" not in s:
+        return ""
+    val = s.split("former_email=", 1)[1].strip()
+    val = val.split()[0].split("|")[0].strip() if val else ""
+    return val if "@" in val else ""
 
 
 def _rep_rank(p: dict) -> tuple:

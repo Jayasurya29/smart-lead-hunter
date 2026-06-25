@@ -216,6 +216,11 @@ async def inbox_contact_update(
         for k, v in body.model_dump(exclude_unset=True).items()
         if k in allowed
     }
+    # [no_null_email] never null the NOT NULL email column via an inline edit.
+    # An empty email in the PATCH is dropped (no-op) rather than written as NULL
+    # (which raised NotNullViolationError and 500'd the drawer).
+    if "email" in changes and not (changes["email"] or "").strip():
+        changes.pop("email", None)
     if not changes:
         raise HTTPException(status_code=400, detail="no editable fields provided")
     if "email" in changes and changes["email"] and "@" not in changes["email"]:

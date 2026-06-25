@@ -181,7 +181,10 @@ async def enrich_contact_deep(contact_id: int, find_email: bool = False) -> dict
             await session.execute(
                 text(
                     "SELECT id, email, first_name, last_name, display_name, title, "
-                    "organization, linkedin_url, last_inbound_at FROM contacts WHERE id = :id"
+                    "organization, linkedin_url, last_inbound_at, "
+                    "EXISTS(SELECT 1 FROM contact_affiliations a WHERE a.person_type='contact' "
+                    "AND a.person_id = contacts.id AND a.relationship='former') AS has_former_employer "
+                    "FROM contacts WHERE id = :id"
                 ),
                 {"id": contact_id},
             )
@@ -235,9 +238,15 @@ async def enrich_contact_deep(contact_id: int, find_email: bool = False) -> dict
             logger.warning(f"tier2: current-employer lookup failed for {contact_id}: {e}")
             ce_result = None
 
-    # 2) Wiza — only if asked and we lack a usable email
+    # 2) Wiza — only when we lack a USABLE email. 'Usable' = present AND not
+    # known-former. A moved contact's on-file email is just a reference, so we
+    # look up the current one. We never call Wiza when a good current email
+    # already exists (no reason to spend a credit). [patch_wiza_primary]
     found_email = None
-    if find_email and (not row.email or "@" not in (row.email or "")):
+    _has_email = bool(row.email and "@" in (row.email or ""))
+    _email_is_former = bool(getattr(row, "has_former_employer", False))
+    _need_email = (not _has_email) or _email_is_former
+    if find_email and _need_email:
         wiza = await _find_email_via_wiza(name, org, domain, row.linkedin_url)
         if wiza and wiza.get("email"):
             found_email = wiza["email"]
@@ -345,6 +354,16 @@ async def enrich_contact_deep(contact_id: int, find_email: bool = False) -> dict
                     dossier["role"] = g["role"]
                     if not (dossier.get("background") or "").strip() and g.get("evidence"):
                         dossier["background"] = g["evidence"]
+                # [capture_basics] store the SPECIFIC org + location grounding found,
+                # so Phase 2/3 get 'InterContinental, New York' instead of 'IHG'/''.
+                _g_org = (g.get("organization") or "").strip()
+                if _g_org:
+                    dossier["grounded_org"] = _g_org
+                _g_city = (g.get("city") or "").strip()
+                _g_state = (g.get("state") or "").strip()
+                if _g_city or _g_state:
+                    dossier["grounded_city"] = _g_city
+                    dossier["grounded_state"] = _g_state
                 if need_li and g.get("linkedin_url"):
                     grounded_li = g["linkedin_url"]
                 conf = max(conf, GROUNDED_CONFIDENCE_FLOOR)
@@ -414,9 +433,38 @@ async def enrich_contact_deep(contact_id: int, find_email: bool = False) -> dict
     # Conservative gate: the model must explicitly flag employer_changed, name a
     # current_employer that differs (after light normalization) from the stored
     # org, and clear the confidence floor. Bias to NO change.
-    new_employer = (dossier.get("current_employer") or "").strip()
-    new_title = (dossier.get("current_title") or "").strip()
+    # [move_verified_employer] the move decision obeys the VERIFIED current
+    # employer (ce_result from Serper/Wiza), NOT the synthesis LLM's dossier
+    # field (which can hallucinate a company, e.g. 'Sheraton Orlando North').
+    # The dossier value is only a fallback when there is no verified result.
+    _ce_emp = (ce_result.get("current_employer") or "").strip() if ce_result else ""
+    _ce_found = bool(ce_result and ce_result.get("found") and _ce_emp)
+    if _ce_found:
+        new_employer = _ce_emp
+        new_title = (ce_result.get("current_title") or dossier.get("current_title") or "").strip()
+    else:
+        new_employer = (dossier.get("current_employer") or "").strip()
+        new_title = (dossier.get("current_title") or "").strip()
     former_org = (dossier.get("former_employer") or "").strip() or org
+
+    # [persist_specific_seat] If the former_org is a vague parent/domain (IHG,
+    # marriott.com) but grounding captured the SPECIFIC property the person
+    # actually worked at (InterContinental New York Times Square), record the
+    # specific property as the seat -- that is what Phase 3 can search. We only
+    # override vagueness; a specific former_org is left untouched.
+    _g_org = (dossier.get("grounded_org") or "").strip()
+    if _g_org and _g_org.lower() != former_org.lower():
+        try:
+            from app.services.current_employer import _is_vague_property
+
+            if _is_vague_property(former_org) and not _is_vague_property(_g_org):
+                logger.info(
+                    f"[persist_specific_seat] seat {former_org!r} -> {_g_org!r} "
+                    f"(captured specific property) for contact {contact_id}"
+                )
+                former_org = _g_org
+        except Exception as _e:
+            logger.warning(f"persist_specific_seat check failed: {_e}")
 
     def _norm_org(s: str) -> str:
         s = (s or "").lower()
@@ -439,13 +487,24 @@ async def enrich_contact_deep(contact_id: int, find_email: bool = False) -> dict
             s = s.replace(junk, " ")
         return " ".join(s.split())
 
-    job_changed = bool(
-        dossier.get("employer_changed")
-        and new_employer
-        and org  # there must be a stored org to move away from
-        and _norm_org(new_employer) != _norm_org(org)
-        and conf >= GROUNDED_CONFIDENCE_FLOOR
-    )
+    if _ce_found:
+        # [move_verified_employer] verified lookup decides the move; its
+        # 'moved' verdict already compared the verified employer to the
+        # on-file org via _judge_relationship.
+        job_changed = bool(
+            ce_result.get("moved")
+            and new_employer
+            and org
+            and _norm_org(new_employer) != _norm_org(org)
+        )
+    else:
+        job_changed = bool(
+            dossier.get("employer_changed")
+            and new_employer
+            and org  # there must be a stored org to move away from
+            and _norm_org(new_employer) != _norm_org(org)
+            and conf >= GROUNDED_CONFIDENCE_FLOOR
+        )
     # [departed_out_of_industry] If the new employer is clearly NOT hospitality
     # (realtor, insurance, tech, etc.), the person LEFT the industry: they are no
     # longer a sellable contact. Keep the FORMER affiliation (history + successor
@@ -501,10 +560,14 @@ async def enrich_contact_deep(contact_id: int, find_email: bool = False) -> dict
             if wiza2 and wiza2.get("email"):
                 _cand = wiza2["email"].strip().lower()
                 if _cand and _cand != (row.email or "").lower():
-                    secondary_email = _cand
+                    # [moved_email_primary] a moved contact's NEW email is the
+                    # PRIMARY (the old one is preserved as former_email in the
+                    # former-affiliation notes). Promote it to the primary email
+                    # field instead of parking it in secondary_email.
+                    found_email = _cand
                     logger.info(
                         f"tier2: found current email for moved contact {contact_id}: "
-                        f"{secondary_email} (at {new_employer!r})"
+                        f"{_cand} (at {new_employer!r}) -> primary"
                     )
         except Exception as e:
             logger.warning(f"tier2: current-email lookup failed for {contact_id}: {e}")
@@ -525,7 +588,10 @@ async def enrich_contact_deep(contact_id: int, find_email: bool = False) -> dict
                     if grounded_li
                     else ""
                 )
-                + (", email = COALESCE(email, :found_email)" if found_email else "")
+                # [patch_wiza_primary] Wiza only runs when we have no usable
+                # email, so its result is the PRIMARY. When the old email is
+                # empty or former/stale, REPLACE it (COALESCE would refuse).
+                + (", email = :found_email" if found_email else "")
                 + (
                     ", first_name = :nf, last_name = :nl, "
                     "display_name = CASE WHEN COALESCE(display_name,'') = '' "
@@ -591,15 +657,25 @@ async def enrich_contact_deep(contact_id: int, find_email: bool = False) -> dict
                         text(
                             "INSERT INTO contact_affiliations "
                             "(person_type, person_id, account_type, account_name, "
-                            "relationship, source, confidence, notes, created_at, updated_at) "
+                            "relationship, source, confidence, notes, title, created_at, updated_at) "
                             "VALUES ('contact', :pid, 'management_company', :nm, "
-                            "'former', 'grounded', :conf, :notes, :now, :now)"
+                            "'former', 'grounded', :conf, :notes, :ftitle, :now, :now)"
                         ),
                         {
                             "pid": contact_id,
                             "nm": former_org,
                             "conf": conf,
-                            "notes": f"Moved to {new_employer} (per deep-enrich research)",
+                            "ftitle": (row.title or "").strip(),
+                            # [preserve_old_email] keep the stale address in history
+                            # (row.email is still the original on-file email here).
+                            "notes": (
+                                f"Moved to {new_employer} (per deep-enrich research)"
+                                + (
+                                    f" | former_email={row.email}"
+                                    if (row.email and "@" in (row.email or ""))
+                                    else ""
+                                )
+                            ),
                             "now": _now(),
                         },
                     )

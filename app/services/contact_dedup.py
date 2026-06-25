@@ -670,7 +670,9 @@ async def get_contact_by_id(
 ) -> Optional[dict]:
     """Fetch one contact row by id. Returns dict or None."""
     result = await session.execute(
-        text("SELECT * FROM contacts WHERE id = :id"),
+        text(
+            "SELECT *, EXISTS(SELECT 1 FROM contact_affiliations a WHERE a.person_type='contact' AND a.person_id = contacts.id AND a.relationship='former') AS has_former_employer, EXISTS(SELECT 1 FROM contact_affiliations a3 WHERE a3.person_type='contact' AND a3.person_id = contacts.id AND a3.relationship='former' AND contacts.email IS NOT NULL AND position('@' in contacts.email) > 0 AND position('former_email=' || lower(contacts.email) in lower(coalesce(a3.notes,''))) > 0) AS email_is_former FROM contacts WHERE id = :id"
+        ),
         {"id": contact_id},
     )
     row = result.mappings().first()
@@ -825,7 +827,9 @@ async def list_contacts(
     params["offset"] = offset
 
     rows_result = await session.execute(
-        text(f"SELECT * FROM contacts{where_sql} {order_sql} LIMIT :limit OFFSET :offset"),
+        text(
+            f"SELECT *, EXISTS(SELECT 1 FROM contact_affiliations a WHERE a.person_type='contact' AND a.person_id = contacts.id AND a.relationship='former') AS has_former_employer, EXISTS(SELECT 1 FROM contact_affiliations a3 WHERE a3.person_type='contact' AND a3.person_id = contacts.id AND a3.relationship='former' AND contacts.email IS NOT NULL AND position('@' in contacts.email) > 0 AND position('former_email=' || lower(contacts.email) in lower(coalesce(a3.notes,''))) > 0) AS email_is_former FROM contacts{where_sql} {order_sql} LIMIT :limit OFFSET :offset"
+        ),
         params,
     )
     rows = [dict(r) for r in rows_result.mappings().all()]

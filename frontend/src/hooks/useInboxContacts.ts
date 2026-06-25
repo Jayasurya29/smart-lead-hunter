@@ -8,6 +8,7 @@ import {
   deleteInboxContact,
   triggerInboxSync,
   deepEnrichContact,
+  findContactEmail,
   findCurrentEmployer,
   findSuccessor,
   findContactLinkedin,
@@ -50,7 +51,11 @@ export function useAllInboxContacts(orderBy = 'priority_score') {
     queryFn: async () => {
       const per_page = 500
       const first = await fetchInboxContacts({ page: 1, per_page, order_by: orderBy })
-      const pages = Math.min(first.pages || 1, 80) // safety cap ~40k (post-2025 backfill)
+      // [contacts_load_cap] cover the ACTUAL total (table grew past the old
+      // 40k cap, hiding scraped buyers from client-side search). Ceiling kept
+      // bounded so a runaway table can't try to load everything into the
+      // browser. Durable fix = server-side search (backend supports `search`).
+      const pages = Math.min(first.pages || 1, 200) // ~100k headroom
       const items = [...first.items]
       if (pages > 1) {
         const rest = await Promise.all(
@@ -79,7 +84,8 @@ export function useAllLeadContacts() {
     queryFn: async () => {
       const per_page = 500
       const first = await fetchLeadContacts(1, per_page)
-      const pages = Math.min(first.pages || 1, 80) // safety cap ~40k (lead rows)
+      // [contacts_load_cap] same headroom as the inbox list (see above).
+      const pages = Math.min(first.pages || 1, 200) // ~100k headroom (lead rows)
       const items = [...first.items]
       if (pages > 1) {
         const rest = await Promise.all(
@@ -176,6 +182,15 @@ export function useDeepEnrichContact() {
   })
 }
 
+// [find_email_only] email-ONLY lookup; refreshes the list so the new email shows.
+export function useFindContactEmail() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (id: number) => findContactEmail(id),
+    onSuccess: () => invalidateInboxContacts(qc),
+  })
+}
+
 /* [patch_frontend_current_employer] */
 export function useFindCurrentEmployer() {
   const qc = useQueryClient()
@@ -191,8 +206,9 @@ export function useFindCurrentEmployer() {
 export function useFindSuccessor() {
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: ({ id, apply }: { id: number; apply?: boolean }) =>
-      findSuccessor(id, { apply }),
+    mutationFn: ({ id, apply, previewSeatOrg, previewSeatTitle }:
+      { id: number; apply?: boolean; previewSeatOrg?: string; previewSeatTitle?: string }) =>
+      findSuccessor(id, { apply, previewSeatOrg, previewSeatTitle }),
     onSuccess: (_d, vars) => { if (vars.apply) invalidateInboxContacts(qc) },
   })
 }

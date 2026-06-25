@@ -19,6 +19,7 @@ from sqlalchemy import text
 
 from app.database import async_session
 from app.services.org_normalize import normalize_organization
+from app.services.org_classifier import classify_org_type_offline
 
 SKIP_HOSTS = {
     "gmail.com",
@@ -280,9 +281,30 @@ async def retire_and_relink(s, person_type, person_id, new_org):
     by exact name. Name-based, NOT domain -- the email often stays on the old
     employer's domain. Returns the new account_type linked, or None.
     [coverage follows the person on a move]"""
+    # [patch_move_flip_former] Old 'covers' edges become PAST, not deleted.
+    # Flip covers->former so coverage history survives the move. Where a
+    # 'former' row for that same account already exists (unique-index
+    # collision), drop the now-redundant 'covers' row instead. No end_date:
+    # we don't know when they actually left, so we never invent it.
     await s.execute(
         text(
-            "DELETE FROM contact_affiliations WHERE person_type=:pt AND person_id=:pid "
+            "DELETE FROM contact_affiliations cov "
+            "WHERE cov.person_type=:pt AND cov.person_id=:pid "
+            "AND cov.relationship='covers' AND cov.source='matched' "
+            "AND EXISTS (SELECT 1 FROM contact_affiliations f "
+            "WHERE f.person_type=cov.person_type AND f.person_id=cov.person_id "
+            "AND f.account_type=cov.account_type "
+            "AND COALESCE(f.account_id,-1)=COALESCE(cov.account_id,-1) "
+            "AND COALESCE(lower(f.account_name),'')=COALESCE(lower(cov.account_name),'') "
+            "AND f.relationship='former')"
+        ),
+        {"pt": person_type, "pid": person_id},
+    )
+    await s.execute(
+        text(
+            "UPDATE contact_affiliations SET relationship='former', "
+            "notes=COALESCE(notes,'') || ' [retired on move]', updated_at=NOW() "
+            "WHERE person_type=:pt AND person_id=:pid "
             "AND relationship='covers' AND source='matched'"
         ),
         {"pt": person_type, "pid": person_id},
@@ -297,6 +319,13 @@ async def retire_and_relink(s, person_type, person_id, new_org):
     nrm = normalize_organization(new_org)
     if not nrm:
         return None
+    # [patch_move_flip_former] Moved to a management company / operator?
+    # Offline check only (no API on the click path). Attach a portfolio-scope
+    # management_company edge and stop -- operators are never a hotel lead.
+    # 'unknown' falls through to the hotel matcher below (today's behavior).
+    if classify_org_type_offline(new_org) == "operator":
+        await _cover_edge(s, person_id, "management_company", None, new_org, "move")
+        return "management_company"
     for atype, table, extra in (
         ("existing_hotel", "existing_hotels", ""),
         ("potential_lead", "potential_leads", " AND status <> 'rejected'"),
@@ -316,4 +345,46 @@ async def retire_and_relink(s, person_type, person_id, new_org):
                 )
             await _cover_edge(s, person_id, atype, cand[0].id, cand[0].hotel_name, "move")
             return atype
-    return None
+
+    # [patch_move_create_lead] No existing hotel/lead matches the new employer.
+    # Don't orphan the contact (covers nothing, matched to nothing) and lose the
+    # property -- create a lightweight potential_lead stub so the person has a
+    # home and the hotel enters the pipeline. It flows through the SAME path as
+    # any discovered lead (status='new'): Smart Fill / enrichment classifies it
+    # and rejects/transfers it if it's a residence, sub-tier, or out-of-geo.
+    # Deduped by normalized name; reuses a live stub instead of duplicating.
+    existing_stub = (
+        await s.execute(
+            text(
+                "SELECT id FROM potential_leads "
+                "WHERE hotel_name_normalized = :n AND status <> 'rejected' LIMIT 1"
+            ),
+            {"n": nrm},
+        )
+    ).first()
+    if existing_stub:
+        new_lead_id = existing_stub.id
+    else:
+        new_lead_id = (
+            await s.execute(
+                text(
+                    "INSERT INTO potential_leads "
+                    "(hotel_name, hotel_name_normalized, status, data_source, notes, "
+                    " created_at, updated_at) "
+                    "VALUES (:hn, :n, 'new', 'contact_move', :notes, NOW(), NOW()) "
+                    "RETURNING id"
+                ),
+                {
+                    "hn": new_org,
+                    "n": nrm,
+                    "notes": "Auto-created: a known contact moved here (needs qualification).",
+                },
+            )
+        ).scalar()
+    if person_type == "contact":
+        await s.execute(
+            text("UPDATE contacts SET matched_lead_id = :aid, updated_at = NOW() WHERE id = :id"),
+            {"aid": new_lead_id, "id": person_id},
+        )
+    await _cover_edge(s, person_id, "potential_lead", new_lead_id, new_org, "move")
+    return "potential_lead"

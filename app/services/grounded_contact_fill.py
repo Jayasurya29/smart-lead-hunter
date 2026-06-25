@@ -231,10 +231,43 @@ async def grounded_fill(
                 if li:
                     break
 
-    # 2) Role: pull from the prose. Look for a title near common phrasing.
+    # 2) Role/org/location: extract the structured BASICS from the grounded
+    # prose we already paid for. A cheap JSON call turns the answer (which
+    # names the specific employer + city) into stored fields -- instead of
+    # dropping them like the old regex-only path did.
     role = ""
     organization = ""
-    if want_role and text:
+    city = ""
+    state = ""
+    if text and grounded:
+        try:
+            import json as _json
+            import httpx as _httpx
+            from app.services.ai_client import ai_generate as _ai
+
+            async with _httpx.AsyncClient(timeout=40) as _c:
+                _raw = await _ai(
+                    _c,
+                    "From the text below about " + name + ", extract their CURRENT "
+                    "job. Output ONLY compact JSON, no prose, with keys: "
+                    "organization (the SPECIFIC hotel/property or company -- NOT a "
+                    'parent brand like "IHG" if a specific property is named), '
+                    'title, city, state. Use "" for anything not clearly stated.\n\n' + text[:2500],
+                    temperature=0.0,
+                    max_tokens=160,
+                )
+            _s = (_raw or "").strip()
+            if _s.startswith("```"):
+                _s = _s.strip("`").split("\n", 1)[-1]
+            _s = _s[_s.find("{") : _s.rfind("}") + 1] if "{" in _s else ""
+            _d = _json.loads(_s) if _s else {}
+            organization = (_d.get("organization") or "").strip()
+            role = (_d.get("title") or "").strip()
+            city = (_d.get("city") or "").strip()
+            state = (_d.get("state") or "").strip()
+        except Exception as _e:
+            logger.warning(f"grounded_fill[{name}]: basics extract failed: {_e}")
+    if want_role and not role and text:
         role = _extract_role(text, name)
 
     # The model was asked to say so if it couldn't find the person. Treat an
@@ -265,6 +298,8 @@ async def grounded_fill(
             "linkedin_url": None,
             "role": "",
             "organization": "",
+            "city": "",
+            "state": "",
             "confidence": "low",
             "citations": citations,
         }
@@ -273,11 +308,11 @@ async def grounded_fill(
     # from memory -- keep nothing.
     if not grounded:
         logger.info(f"grounded_fill[{name}]: DROPPED -- no citations (answered from memory)")
-        li, role, organization = None, "", ""
+        li, role, organization, city, state = None, "", "", "", ""
 
     logger.info(
         f"grounded_fill[{name}]: RESULT grounded={grounded} ({len(citations)} cites) "
-        f"li={li!r} role={role!r}"
+        f"li={li!r} role={role!r} org={organization!r} loc={(city + ' ' + state).strip()!r}"
     )
 
     return {
@@ -285,6 +320,8 @@ async def grounded_fill(
         "linkedin_url": li,
         "role": role,
         "organization": organization,
+        "city": city,
+        "state": state,
         "confidence": "high" if (grounded and li) else ("medium" if grounded else "low"),
         "citations": citations,
         "evidence": text[:300],

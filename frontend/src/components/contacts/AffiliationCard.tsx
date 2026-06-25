@@ -125,6 +125,7 @@ export default function AffiliationCard({
               <span key={`former-${f.name}-${i}`}>
                 {i > 0 && <span className="text-stone-300"> {'·'} </span>}
                 <span className="font-medium text-stone-500">{f.name || '—'}</span>
+                {f.email && <span className="text-stone-400"> {'·'} <span className="font-mono">{f.email}</span></span>}
               </span>
             ))}
           </div>

@@ -1602,6 +1602,7 @@ async def _apply_lead_contact_move(contact_id: int) -> dict:
         new_title = (ce.get("current_title") or "").strip()
         left_industry = any(k in new_emp.lower() or k in new_title.lower() for k in _NON_HOSP)
         former_org = org or new_emp
+        former_title = (contact.title or "").strip()  # [patch_seat_title] before re-file
 
         if not left_industry:
             contact.organization = new_emp
@@ -1625,13 +1626,14 @@ async def _apply_lead_contact_move(contact_id: int) -> dict:
                 await session.execute(
                     _sql(
                         "INSERT INTO contact_affiliations (person_type, person_id, account_type, "
-                        "account_name, relationship, source, confidence, notes, created_at, updated_at) "
+                        "account_name, relationship, source, confidence, notes, title, created_at, updated_at) "
                         "VALUES ('lead_contact', :pid, 'management_company', :nm, 'former', 'grounded', "
-                        ":conf, :notes, NOW(), NOW())"
+                        ":conf, :notes, :ftitle, NOW(), NOW())"
                     ),
                     {
                         "pid": rid,
                         "nm": former_org,
+                        "ftitle": former_title,
                         "conf": 0.7,
                         "notes": f"Moved to {new_emp} (per current-employer lookup)",
                     },
@@ -1694,6 +1696,7 @@ async def find_current_employer_endpoint(
     from app.services.contact_resolver import (
         resolve_contact as _resolve_ce,
         is_lead_id as _is_lead_ce,
+        real_id as _resolve_ce_id,
     )
 
     if not row:
@@ -1754,6 +1757,34 @@ async def find_current_employer_endpoint(
         raise HTTPException(status_code=500, detail=str(e))
     ce["mode"] = "preview"
     ce["on_file_org"] = row.organization or ""
+
+    # [phase3_unresolved_seat] Surface an already-recorded former seat that was
+    # never filled, so Check status can run Phase 3 on it even when there is no
+    # NEW move this click (the Antonio Rotolo loophole). seat_status comes from
+    # migration 046; NULL = never searched, 'searched_unknown' = worth a retry.
+    _pt = "lead_contact" if _is_lead_ce(contact_id) else "contact"
+    _pid = _resolve_ce_id(contact_id) if _is_lead_ce(contact_id) else contact_id
+    try:
+        async with async_session() as _s3:
+            _seat = (
+                await _s3.execute(
+                    _sql(
+                        "SELECT account_name, COALESCE(NULLIF(title,''),'') AS title "
+                        "FROM contact_affiliations "
+                        "WHERE person_type=:pt AND person_id=:pid AND relationship='former' "
+                        "AND (seat_status IS NULL OR seat_status='searched_unknown') "
+                        "AND COALESCE(account_name,'')<>'' "
+                        "ORDER BY created_at DESC NULLS LAST LIMIT 1"
+                    ),
+                    {"pt": _pt, "pid": _pid},
+                )
+            ).first()
+    except Exception:
+        _seat = None
+    ce["has_unresolved_seat"] = bool(_seat)
+    if _seat:
+        ce["unresolved_seat_org"] = _seat.account_name
+        ce["unresolved_seat_title"] = _seat.title
     return ce
 
 
@@ -1763,6 +1794,8 @@ async def find_current_employer_endpoint(
 async def find_successor_endpoint(
     contact_id: int,
     apply: bool = False,
+    preview_seat_org: str = "",
+    preview_seat_title: str = "",
     _csrf=Depends(require_ajax),
 ):
     """Phase 3 "fill the seat": for a confirmed mover (a contact that has a
@@ -1804,7 +1837,7 @@ async def find_successor_endpoint(
         row = (
             await session.execute(
                 _sql(
-                    "SELECT c.title, "
+                    "SELECT COALESCE(NULLIF(a.title,''), c.title) AS title, "
                     "  COALESCE(NULLIF(TRIM(CONCAT_WS(' ', c.first_name, c.last_name)), ''), "
                     "           c.display_name, '') AS holder, "
                     "  a.account_name AS former_org "
@@ -1822,7 +1855,7 @@ async def find_successor_endpoint(
             row = (
                 await session.execute(
                     _sql(
-                        "SELECT lc.title, lc.name AS holder, a.account_name AS former_org "
+                        "SELECT COALESCE(NULLIF(a.title,''), lc.title) AS title, lc.name AS holder, a.account_name AS former_org "
                         "FROM lead_contacts lc "
                         "JOIN contact_affiliations a "
                         "  ON a.person_id = lc.id AND a.person_type='lead_contact' "
@@ -1833,17 +1866,75 @@ async def find_successor_endpoint(
                     {"id": _real_id(contact_id)},
                 )
             ).first()
+    # [patch_successor_preview_preapply] Pre-Apply there is no 'former' row
+    # yet. Fall back to the contact's CURRENT on-file org/title as the
+    # vacated seat so click-1 can preview the successor without writing.
     if not row:
-        return {"found": False, "mode": "preview", "note": "not a confirmed mover"}
+        async with async_session() as session:
+            if _is_lead(contact_id):
+                cur = (
+                    await session.execute(
+                        _sql(
+                            "SELECT title, organization AS org, name AS holder FROM lead_contacts WHERE id = :id"
+                        ),
+                        {"id": _real_id(contact_id)},
+                    )
+                ).first()
+            else:
+                cur = (
+                    await session.execute(
+                        _sql(
+                            "SELECT title, organization AS org, "
+                            "COALESCE(NULLIF(TRIM(CONCAT_WS(' ', first_name, last_name)), ''), display_name, '') AS holder "
+                            "FROM contacts WHERE id = :id"
+                        ),
+                        {"id": contact_id},
+                    )
+                ).first()
+        if cur:
+            row = cur
 
-    title = (row.title or "").strip()
-    former_org = (row.former_org or "").strip()
-    holder = (row.holder or "").strip()
+    title = (preview_seat_title or (row.title if row else "") or "").strip()
+    former_org = (
+        preview_seat_org
+        or (getattr(row, "former_org", None) if row else "")
+        or (getattr(row, "org", None) if row else "")
+        or ""
+    ).strip()
+    holder = ((row.holder if row else "") or "").strip()
+    if not row and not (former_org and title):
+        return {"found": False, "mode": "preview", "note": "not a confirmed mover"}
     if not title or not former_org:
         return {"found": False, "mode": "preview", "note": "no vacated seat on file"}
 
     try:
-        res = await find_seat_successor(org=former_org, title=title, former_holder=holder)
+        # [phase3_v2] preview mirrors apply: resolve the property's city/state to
+        # disambiguate multi-location brands, then grounded-first -> snippet fallback.
+        from app.services.current_employer import grounded_seat_successor
+
+        async with async_session() as _s:
+            _loc_row = (
+                await _s.execute(
+                    _sql(
+                        "SELECT city, state FROM existing_hotels WHERE lower(name)=lower(:o) "
+                        "UNION ALL SELECT city, state FROM potential_leads WHERE lower(hotel_name)=lower(:o) "
+                        "LIMIT 1"
+                    ),
+                    {"o": former_org},
+                )
+            ).first()
+        location = " ".join(
+            p
+            for p in ((_loc_row.city if _loc_row else ""), (_loc_row.state if _loc_row else ""))
+            if p
+        ).strip()
+        res = await grounded_seat_successor(
+            org=former_org, title=title, former_holder=holder, location=location
+        )
+        if not res.get("found"):
+            res = await find_seat_successor(
+                org=former_org, title=title, former_holder=holder, location=location
+            )
     except Exception as e:
         logger.exception(f"find-successor preview failed for {contact_id}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -1876,6 +1967,73 @@ async def enrich_contact_deep_endpoint(
     if result.get("error"):
         raise HTTPException(status_code=404, detail=result["error"])
     return result
+
+
+@router.post("/api/contacts/{contact_id}/find-email", tags=["Contacts"])
+async def find_contact_email_endpoint(
+    contact_id: int,
+    _csrf=Depends(require_ajax),
+):
+    """[find_email_only] Email-ONLY lookup for one inbox contact. Runs Wiza
+    (keyed to the contact LinkedIn) and writes the found email as PRIMARY.
+    Does NOT run deep enrich, web search, move detection, bio synthesis, or
+    successor logic -- so a simple email lookup cannot trigger a hallucinated
+    move. Never nulls the email; only writes when Wiza returns one."""
+    from sqlalchemy import text as _sql
+    from app.services.wiza_enrichment import enrich_contact_email
+
+    async with async_session() as session:
+        row = (
+            await session.execute(
+                _sql(
+                    "SELECT id, first_name, last_name, display_name, email, "
+                    "organization, linkedin_url FROM contacts WHERE id = :id"
+                ),
+                {"id": contact_id},
+            )
+        ).first()
+        if row is None:
+            raise HTTPException(status_code=404, detail="Contact not found")
+        if not (row.linkedin_url or ""):
+            raise HTTPException(
+                status_code=422, detail="Contact has no LinkedIn URL — required for email lookup"
+            )
+        name = (
+            f"{row.first_name or ''} {row.last_name or ''}".strip()
+            or (row.display_name or "").strip()
+        )
+        try:
+            wiza = await enrich_contact_email(
+                linkedin_url=row.linkedin_url,
+                contact_name=name,
+                name=name,
+                company=(row.organization or None),
+            )
+        except Exception as e:
+            logger.exception(f"find-email failed for contact {contact_id}")
+            raise HTTPException(status_code=500, detail=str(e))
+        if not (wiza and wiza.get("email")):
+            return {
+                "status": "not_found",
+                "contact_id": contact_id,
+                "message": "Wiza could not find an email for this contact",
+            }
+        found = wiza["email"].strip()
+        await session.execute(
+            _sql(
+                "UPDATE contacts SET email = :em, enrichment_source = 'wiza', "
+                "enriched_at = NOW(), updated_at = NOW() WHERE id = :id"
+            ),
+            {"em": found, "id": contact_id},
+        )
+        await session.commit()
+    return {
+        "status": "found",
+        "contact_id": contact_id,
+        "email": found,
+        "email_status": wiza.get("email_status"),
+        "credits_used": wiza.get("credits_used"),
+    }
 
 
 @router.post("/api/contacts/enrich-deep-batch", tags=["Contacts"])
