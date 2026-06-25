@@ -45,16 +45,23 @@ export function useInboxContacts(filters: InboxContactFilters = {}) {
  * parallel. Cached for 60s. Filtering/sorting/grouping happen client-side in
  * the page, so this hook takes no filters beyond sort order.
  */
-export function useAllInboxContacts(orderBy = 'priority_score') {
+export function useAllInboxContacts(orderBy = 'priority_score', search = '') {
+  const term = (search || '').trim()
   return useQuery({
-    queryKey: ['inbox-contacts', 'all', orderBy],
+    // [server_side_search] cache per search term; a term-specific query never
+    // collides with the full-browse cache.
+    queryKey: ['inbox-contacts', 'all', orderBy, term],
     queryFn: async () => {
       const per_page = 500
+      // [server_side_search] when searching, let the DB match and return only
+      // the hits -- ONE request, no 87-page load of the whole table.
+      if (term) {
+        const res = await fetchInboxContacts({ page: 1, per_page, order_by: orderBy, search: term })
+        return { items: res.items, total: res.total }
+      }
       const first = await fetchInboxContacts({ page: 1, per_page, order_by: orderBy })
-      // [contacts_load_cap] cover the ACTUAL total (table grew past the old
-      // 40k cap, hiding scraped buyers from client-side search). Ceiling kept
-      // bounded so a runaway table can't try to load everything into the
-      // browser. Durable fix = server-side search (backend supports `search`).
+      // [contacts_load_cap] browse path: load the set the grouped account view
+      // needs. (Search no longer comes through here.)
       const pages = Math.min(first.pages || 1, 200) // ~100k headroom
       const items = [...first.items]
       if (pages > 1) {

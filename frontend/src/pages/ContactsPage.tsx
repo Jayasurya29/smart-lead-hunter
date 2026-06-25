@@ -1947,7 +1947,9 @@ export default function ContactsPage() {
 
   // data — load the FULL table so account grouping + scope counts are real
   const statsQ = useInboxContactStats()
-  const listQ = useAllInboxContacts('priority_score')
+  // [server_side_search] feed the active query to the loader: a non-empty
+  // term fetches DB matches (1 call); empty term browses as before.
+  const listQ = useAllInboxContacts('priority_score', deferredQuery)
   const leadQ = useAllLeadContacts()
   const syncMut = useTriggerInboxSync()
   const bulkApproveMut = useBulkApproveInboxContacts()
@@ -2174,10 +2176,13 @@ export default function ContactsPage() {
     } else if (isShortcutQuery(t)) {
       list = indexed.filter(({ c, hay }) => smartMatch(c, hay, t)).map(({ c }) => c)
     } else {
-      list = fuse.search(t).map((r) => r.item)
-      // [search_name_rank] stable re-rank: real name matches above fragment
-      // hits, preserving Fuse's order within each tier.
-      list = list
+      // [server_side_search] inbox rows are already DB-matched for this term;
+      // Fuse here would RE-FILTER and could drop valid matches. So: keep the
+      // already-present rows and only RE-RANK by name relevance. (Lead-gen
+      // rows, loaded in full, are still narrowed by Fuse via the haystack.)
+      const fuseHits = new Set(fuse.search(t).map((r) => r.item))
+      list = items
+        .filter((c) => sourceOf(c) !== 'lead_generator' || fuseHits.has(c))
         .map((c, i) => ({ c, i, tier: nameMatchTier(c, t) }))
         .sort((a, b) => (b.tier - a.tier) || (a.i - b.i))
         .map((x) => x.c)

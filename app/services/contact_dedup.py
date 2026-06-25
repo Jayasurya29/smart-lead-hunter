@@ -766,16 +766,29 @@ async def list_contacts(
         params["org_pattern"] = f"%{organization}%"
 
     if search:
-        where_clauses.append(
-            "(email ILIKE :search OR "
-            "COALESCE(secondary_email, '') ILIKE :search OR "
-            "COALESCE(first_name, '') ILIKE :search OR "
-            "COALESCE(last_name, '') ILIKE :search OR "
-            "COALESCE(display_name, '') ILIKE :search OR "
-            "COALESCE(organization, '') ILIKE :search OR "
-            "COALESCE(title, '') ILIKE :search)"
+        # [fuzzy_search_fix] EXACT substring primary; fuzzy is a narrow,
+        # index-backed fallback via the <% word_similarity operator (gated by
+        # set_limit below) so a single shared common word can't flood results.
+        _blob = (
+            "COALESCE(display_name,'') || ' ' || COALESCE(first_name,'') || ' ' || "
+            "COALESCE(last_name,'') || ' ' || COALESCE(organization,'') || ' ' || "
+            "COALESCE(title,'') || ' ' || COALESCE(inferred_role,'') || ' ' || "
+            "COALESCE(management_company,'') || ' ' || COALESCE(parent_company,'')"
         )
-        params["search"] = f"%{search}%"
+        _name = "(COALESCE(first_name,'') || ' ' || COALESCE(last_name,''))"
+        where_clauses.append(
+            "("
+            "email ILIKE :search_like OR "
+            "COALESCE(secondary_email,'') ILIKE :search_like OR "
+            f"{_blob} ILIKE :search_like OR "
+            ":search_raw <% COALESCE(display_name,'') OR "
+            f":search_raw <% {_name} OR "
+            ":search_raw <% COALESCE(organization,'') OR "
+            ":search_raw <% COALESCE(title,'')"
+            ")"
+        )
+        params["search_like"] = f"%{search}%"
+        params["search_raw"] = search
 
     if matched_only is True:
         where_clauses.append("(matched_lead_id IS NOT NULL OR matched_hotel_id IS NOT NULL)")
@@ -783,6 +796,12 @@ async def list_contacts(
         where_clauses.append("matched_lead_id IS NULL AND matched_hotel_id IS NULL")
 
     where_sql = f" WHERE {' AND '.join(where_clauses)}" if where_clauses else ""
+
+    if search:
+        # [fuzzy_search_fix] word_similarity threshold for the <% operator.
+        # 0.5 = only genuinely-close strings (real typos) match; a single
+        # shared common word ('solutions') is well under this.
+        await session.execute(text("SELECT set_limit(0.5)"))
 
     # Total count for pagination
     count_result = await session.execute(
@@ -792,7 +811,28 @@ async def list_contacts(
     total = count_result.scalar_one()
 
     # Order clause
-    if order_by == "priority_score":
+    if search:
+        # [fuzzy_search_fix] exact-substring matches first (CASE 0), fuzzy-only
+        # after (CASE 1); within each, best word_similarity first. Keeps an
+        # exact org/name substring above any fuzzy near-miss.
+        _blob_o = (
+            "COALESCE(display_name,'') || ' ' || COALESCE(first_name,'') || ' ' || "
+            "COALESCE(last_name,'') || ' ' || COALESCE(organization,'') || ' ' || "
+            "COALESCE(title,'') || ' ' || COALESCE(inferred_role,'') || ' ' || "
+            "COALESCE(management_company,'') || ' ' || COALESCE(parent_company,'')"
+        )
+        order_sql = (
+            "ORDER BY "
+            f"(CASE WHEN email ILIKE :search_like OR {_blob_o} ILIKE :search_like "
+            "THEN 0 ELSE 1 END), "
+            "GREATEST("
+            "word_similarity(:search_raw, COALESCE(display_name,'')), "
+            "word_similarity(:search_raw, COALESCE(first_name,'') || ' ' || COALESCE(last_name,'')), "
+            "word_similarity(:search_raw, COALESCE(organization,'')), "
+            "word_similarity(:search_raw, COALESCE(title,''))"
+            ") DESC NULLS LAST, opportunity_score DESC NULLS LAST"
+        )
+    elif order_by == "priority_score":
         order_sql = """
             ORDER BY
                 CASE procurement_priority
