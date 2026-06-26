@@ -1,0 +1,94 @@
+[
+  {
+    "survivor_id": 1068,
+    "rows": [
+      {
+        "id": 1068,
+        "hotel_name": "St. Regis at Kapalua Bay",
+        "city": "Kapalua",
+        "state": "Hawaii",
+        "country": "USA",
+        "opening_year": 2027,
+        "opening_date": "2027",
+        "status": "new",
+        "duplicate_of_id": null,
+        "source_urls": []
+      },
+      {
+        "id": 1108,
+        "hotel_name": "St. Regis Resort at Kapalua Bay",
+        "city": "Maui",
+        "state": "Hawaii",
+        "country": "USA",
+        "opening_year": 2027,
+        "opening_date": "2027",
+        "status": "new",
+        "duplicate_of_id": null,
+        "source_urls": [
+          "https://www.hoteldive.com/topic/finances-deals/",
+          "https://adept.travel/topics/hotels-resorts",
+          "https://www.hoteldive.com/topic/development/",
+          "https://www.hoteldive.com/news/outrigger-debuts-premier-suite-collection/817120/"
+        ]
+      },
+      {
+        "id": 1209,
+        "hotel_name": "The St. Regis Resort at Kapalua Bay",
+        "city": "Lahaina",
+        "state": "Hawaii",
+        "country": "USA",
+        "opening_year": 2026,
+        "opening_date": "2027",
+        "status": "new",
+        "duplicate_of_id": null,
+        "source_urls": [
+          "https://www.hoteldive.com/news/outrigger-debuts-premier-suite-collection/817120/",
+          "https://www.hoteldive.com/news/marriott-luxury-portfolio-hawaii-st-regis-conversion/814853/"
+        ]
+      },
+      {
+        "id": 1434,
+        "hotel_name": "St. Regis Kapalua Bay",
+        "city": "Kapalua Bay",
+        "state": "Hawai\u2019I",
+        "country": "USA",
+        "opening_year": null,
+        "opening_date": "2027",
+        "status": "new",
+        "duplicate_of_id": null,
+        "source_urls": []
+      }
+    ]
+  },
+  {
+    "survivor_id": 1447,
+    "rows": [
+      {
+        "id": 1447,
+        "hotel_name": "St. Regis Turks & Caicos",
+        "city": "Grace Bay",
+        "state": "",
+        "country": "Turks & Caicos",
+        "opening_year": 2027,
+        "opening_date": "2027",
+        "status": "new",
+        "duplicate_of_id": null,
+        "source_urls": [
+          "https://luxuryexperiencesturksandcaicos.com/hot-new-luxury-resort-villa-developments-on-the-turks-caicos-horizon-in-2026/"
+        ]
+      },
+      {
+        "id": 1475,
+        "hotel_name": "St. Regis Turks and Caicos",
+        "city": "Turks and Caicos",
+        "state": "Turks And Caicos",
+        "country": "Turks And Caicos",
+        "opening_year": 2027,
+        "opening_date": "Q3 2027",
+        "status": "new",
+        "duplicate_of_id": null,
+        "source_urls": []
+      }
+    ]
+  }
+]

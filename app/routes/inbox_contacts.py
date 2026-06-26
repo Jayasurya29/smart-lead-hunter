@@ -30,6 +30,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
 from app.shared import require_ajax
+from app.services.contacts_export import build_contacts_xlsx
 from app.services.contact_dedup import (
     get_contact_by_id,
     get_contact_stats,
@@ -44,6 +45,22 @@ from app.services.contact_dedup import (
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["Inbox Contacts"])
+
+
+@router.get("/api/inbox-contacts/export.xlsx")
+async def export_inbox_contacts_xlsx(db: AsyncSession = Depends(get_db)):
+    """Download the contacts directory as a polished .xlsx (trash excluded)."""
+    from fastapi.responses import StreamingResponse
+    from io import BytesIO
+    from datetime import datetime
+
+    data = await build_contacts_xlsx(db)
+    fname = f"contacts_{datetime.now():%Y-%m-%d}.xlsx"
+    return StreamingResponse(
+        BytesIO(data),
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{fname}"'},
+    )
 
 
 # ──────────────────────────────────────────────────────────────────────

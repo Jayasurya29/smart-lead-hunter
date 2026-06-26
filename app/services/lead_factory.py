@@ -160,6 +160,35 @@ _SMALL_COUNTRIES = frozenset(
 )
 
 
+def _fold_value(s: str) -> str:
+    """Fold a Python-side location value for pool comparison.
+
+    Lowercases, maps & -> and, strips straight and curly apostrophes,
+    collapses whitespace. Does NOT strip diacritics (callers pass both the
+    diacritic-stripped and raw spellings, so accents stay covered).
+    """
+    if not s:
+        return ""
+    s = s.lower().replace("&", "and").replace("'", "").replace("\u2019", "")
+    return re.sub(r"\s+", " ", s).strip()
+
+
+def _fold_col(column):
+    """Fold a DB column the same way as _fold_value, in SQL.
+
+    `replace()`/`lower()` are core Postgres — no extension needed. Mirrors
+    _fold_value so 'Turks & Caicos' and "Hawai'i" in the column match their
+    normalized forms in the filter pattern.
+    """
+    from sqlalchemy import func
+
+    expr = func.lower(column)
+    expr = func.replace(expr, "&", "and")
+    expr = func.replace(expr, "'", "")
+    expr = func.replace(expr, "\u2019", "")
+    return expr
+
+
 def _normalize_for_dedup(name: str) -> str:
     """Aggressively normalize a hotel name for fuzzy comparison.
 
@@ -236,9 +265,7 @@ def _names_match(core_a: str, core_b: str) -> bool:
     if not words_a or not words_b:
         return False
 
-    short, long = (
-        (words_a, words_b) if len(words_a) <= len(words_b) else (words_b, words_a)
-    )
+    short, long = (words_a, words_b) if len(words_a) <= len(words_b) else (words_b, words_a)
 
     if " ".join(short) in " ".join(long) and short[0] == long[0]:
         return True
@@ -251,6 +278,59 @@ def _names_match(core_a: str, core_b: str) -> bool:
 
     overlap_ratio = len(common) / len(set(short))
     return overlap_ratio >= 0.6
+
+
+# Generic words that never distinguish two properties. Used by the
+# disjoint-identifier safety guard so a shared chain brand alone can't
+# merge two different hotels.
+_GUARD_GENERIC = frozenset(
+    {
+        "hotel",
+        "hotels",
+        "resort",
+        "resorts",
+        "spa",
+        "suites",
+        "suite",
+        "inn",
+        "lodge",
+        "club",
+        "collection",
+        "residences",
+        "residence",
+        "the",
+        "and",
+        "at",
+        "of",
+        "by",
+        "a",
+        "an",
+    }
+)
+
+
+def _disjoint_identifiers(core_a: str, core_b: str) -> bool:
+    """True when A and B each keep a distinctive identifier the other lacks.
+
+    Operates on the FULL normalized cores (location NOT stripped): for a
+    chain hotel the location token is the identifier, so two same-brand
+    properties in the same area ("Sandals Royal Caribbean" vs "Sandals
+    Montego Bay") differ precisely in those tokens. A distinctive token is
+    >=4 chars and not in _GUARD_GENERIC.
+
+    Returns False (i.e. do NOT block) when one side has no distinctive
+    token of its own — that is the "sparsely named same property" case
+    ("Aman Hotel" vs "Aman Hotel at One Beverly Hills"), which should still
+    merge.
+    """
+    if not core_a or not core_b:
+        return False
+    sa = set(core_a.split())
+    sb = set(core_b.split())
+    shared = sa & sb
+    a_only = {w for w in (sa - shared) if len(w) >= 4 and w not in _GUARD_GENERIC}
+    b_only = {w for w in (sb - shared) if len(w) >= 4 and w not in _GUARD_GENERIC}
+    return bool(a_only) and bool(b_only) and a_only.isdisjoint(b_only)
 
 
 def _build_location_filters(lead_dict: Dict) -> list:
@@ -284,12 +364,12 @@ def _build_location_filters(lead_dict: Dict) -> list:
     filters = []
 
     def _both_spellings(column, raw: str, stripped: str):
-        """Add ILIKE filter for the diacritic-stripped value, plus the
-        original if it differs (covers DB rows stored either way)."""
-        out = [column.ilike(f"%{stripped}%")]
-        if raw and raw != stripped:
-            out.append(column.ilike(f"%{raw}%"))
-        return out
+        """Folded ILIKE filters: &->and, apostrophes stripped, on BOTH the
+        column (SQL) and the value, plus the diacritic-stripped spelling.
+        Covers 'Turks & Caicos'/'Turks And Caicos' and "Hawai'i"/'Hawaii'."""
+        col = _fold_col(column)
+        pats = {_fold_value(stripped), _fold_value(raw)}
+        return [col.ilike(f"%{p}%") for p in pats if p]
 
     if city:
         filters.extend(_both_spellings(PotentialLead.city, raw_city, city))
@@ -297,7 +377,7 @@ def _build_location_filters(lead_dict: Dict) -> list:
         filters.extend(_both_spellings(PotentialLead.state, raw_state, state))
         # Also catch when state was accidentally stored in city field
         filters.extend(_both_spellings(PotentialLead.city, raw_state, state))
-    if country and (not state or country in _SMALL_COUNTRIES):
+    if country and (not state or _fold_value(country) in _SMALL_COUNTRIES):
         filters.extend(_both_spellings(PotentialLead.country, raw_country, country))
     return filters
 
@@ -464,18 +544,14 @@ def prepare_lead(
         # 5000 chars. Some scrapers paste full article bodies into these
         # fields; row sizes balloon and list pages slow to render. 5000
         # is the same cap used by dashboard PATCH validation.
-        description=(
-            lead_dict.get("key_insights") or lead_dict.get("description") or ""
-        )[:5000]
+        description=(lead_dict.get("key_insights") or lead_dict.get("description") or "")[:5000]
         or None,
         key_insights=(lead_dict.get("key_insights") or "")[:5000] or None,
         management_company=lead_dict.get("management_company"),
         developer=lead_dict.get("developer"),
         owner=lead_dict.get("owner"),
         source_url=lead_dict.get("source_url"),
-        source_site=lead_dict.get("source_name")
-        or lead_dict.get("source_site")
-        or "manual",
+        source_site=lead_dict.get("source_name") or lead_dict.get("source_site") or "manual",
         lead_score=final_score,
         score_breakdown=score_result.get("breakdown", {}),
         # AUDIT 2026-05-05 (bug #1): Always create with status='new'.
@@ -532,11 +608,7 @@ def enrich_existing_lead(existing: PotentialLead, lead_dict: Dict) -> bool:
             setattr(existing, field, new_val)
             enriched = True
         elif (
-            field == "room_count"
-            and old_val
-            and new_val
-            and int(new_val) > 0
-            and int(old_val) == 0
+            field == "room_count" and old_val and new_val and int(new_val) > 0 and int(old_val) == 0
         ):
             setattr(existing, field, new_val)
             enriched = True
@@ -564,8 +636,7 @@ def enrich_existing_lead(existing: PotentialLead, lead_dict: Dict) -> bool:
                     "contact_email": lead_dict.get("contact_email"),
                     "contact_phone": lead_dict.get("contact_phone"),
                     "key_insights": lead_dict.get("key_insights"),
-                    "source_name": lead_dict.get("source_name")
-                    or lead_dict.get("source_site"),
+                    "source_name": lead_dict.get("source_name") or lead_dict.get("source_site"),
                 }.items()
                 if v
             }
@@ -650,9 +721,7 @@ async def save_lead_to_db(
             # them from fuzzy here ensures (b): a name variation creates a
             # new pipeline lead which sales can choose to re-approve, rather
             # than the old "drop on the floor" behavior.
-            PotentialLead.status.notin_(
-                ["expired", "rejected", "approved", "pushed", "deleted"]
-            )
+            PotentialLead.status.notin_(["expired", "rejected", "approved", "pushed", "deleted"])
         )
         location_filters = _build_location_filters(lead_dict)
         if location_filters:
@@ -663,6 +732,11 @@ async def save_lead_to_db(
         for candidate in candidates:
             cand_core = _normalize_for_dedup(candidate.hotel_name or "")
             if not cand_core or len(cand_core) <= 3:
+                continue
+
+            # SAFETY GUARD: different property sharing only a chain brand
+            # (e.g. "Sandals Royal Caribbean" vs "Sandals Montego Bay").
+            if _disjoint_identifiers(new_core, cand_core):
                 continue
 
             # Strip location words from BOTH cores using locations from
@@ -695,9 +769,7 @@ async def save_lead_to_db(
                         f"(cores: '{new_stripped}' ~ '{cand_stripped}')"
                     )
                 else:
-                    logger.info(
-                        f"   = Fuzzy duplicate: '{hotel_name}' → '{candidate.hotel_name}'"
-                    )
+                    logger.info(f"   = Fuzzy duplicate: '{hotel_name}' → '{candidate.hotel_name}'")
                 if commit:
                     await session.commit()
                 return {
@@ -736,24 +808,17 @@ async def save_lead_to_db(
         country_n = _strip_diacritics(raw_country)
 
         def _eh_both_spellings(column, raw: str, stripped: str):
-            out = [column.ilike(f"%{stripped}%")]
-            if raw and raw != stripped:
-                out.append(column.ilike(f"%{raw}%"))
-            return out
+            col = _fold_col(column)
+            pats = {_fold_value(stripped), _fold_value(raw)}
+            return [col.ilike(f"%{p}%") for p in pats if p]
 
         if city_n:
             eh_filters.extend(_eh_both_spellings(ExistingHotel.city, raw_city, city_n))
         if state_n:
-            eh_filters.extend(
-                _eh_both_spellings(ExistingHotel.state, raw_state, state_n)
-            )
-            eh_filters.extend(
-                _eh_both_spellings(ExistingHotel.city, raw_state, state_n)
-            )
-        if country_n and (not state_n or country_n in _SMALL_COUNTRIES):
-            eh_filters.extend(
-                _eh_both_spellings(ExistingHotel.country, raw_country, country_n)
-            )
+            eh_filters.extend(_eh_both_spellings(ExistingHotel.state, raw_state, state_n))
+            eh_filters.extend(_eh_both_spellings(ExistingHotel.city, raw_state, state_n))
+        if country_n and (not state_n or _fold_value(country_n) in _SMALL_COUNTRIES):
+            eh_filters.extend(_eh_both_spellings(ExistingHotel.country, raw_country, country_n))
 
         eh_query = select(ExistingHotel)
         if eh_filters:
@@ -765,6 +830,10 @@ async def save_lead_to_db(
             cand_name = eh_cand.hotel_name or eh_cand.name or ""
             cand_core = _normalize_for_dedup(cand_name)
             if not cand_core or len(cand_core) <= 3:
+                continue
+
+            # SAFETY GUARD: see potential_leads loop above.
+            if _disjoint_identifiers(new_core, cand_core):
                 continue
 
             # Same location-stripping logic as potential_leads fuzzy
@@ -800,8 +869,7 @@ async def save_lead_to_db(
                     "status": "duplicate",
                     "id": None,
                     "reason": (
-                        f"Fuzzy match in existing_hotels (EH#{eh_cand.id}): "
-                        f"{cand_name}"
+                        f"Fuzzy match in existing_hotels (EH#{eh_cand.id}): " f"{cand_name}"
                     ),
                 }
 
@@ -895,8 +963,7 @@ async def save_lead_to_db(
                 "status": "error",
                 "id": None,
                 "reason": (
-                    f"Direct-to-existing graduation failed for EXPIRED lead: "
-                    f"{str(e)[:200]}"
+                    f"Direct-to-existing graduation failed for EXPIRED lead: " f"{str(e)[:200]}"
                 ),
             }
 

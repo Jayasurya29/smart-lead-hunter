@@ -1,0 +1,297 @@
+[
+  {
+    "survivor_id": 1051,
+    "rows": [
+      {
+        "id": 1051,
+        "hotel_name": "Six Senses South Carolina",
+        "city": "",
+        "state": "South Carolina",
+        "country": "USA",
+        "opening_year": 2026,
+        "opening_date": "2026",
+        "status": "new",
+        "duplicate_of_id": null,
+        "source_urls": [
+          "https://www.hoteldive.com/news/six-senses-pennsylvania-expansion/727462/"
+        ]
+      },
+      {
+        "id": 1211,
+        "hotel_name": "Six Senses South Carolina Islands",
+        "city": "Hilton Head Island",
+        "state": "South Carolina",
+        "country": "USA",
+        "opening_year": 2026,
+        "opening_date": "2026",
+        "status": "new",
+        "duplicate_of_id": null,
+        "source_urls": [
+          "https://www.hoteldive.com/news/six-senses-opens-south-carolina-resort/708852/"
+        ]
+      }
+    ]
+  },
+  {
+    "survivor_id": 919,
+    "rows": [
+      {
+        "id": 919,
+        "hotel_name": "Waldorf Astoria Deer Valley Resort and Residences",
+        "city": "Deer Valley",
+        "state": "Utah",
+        "country": "USA",
+        "opening_year": 2028,
+        "opening_date": "2028",
+        "status": "new",
+        "duplicate_of_id": null,
+        "source_urls": [
+          "https://www.hoteldive.com/news/hilton-waldorf-astoria-resort-development-deer-valley-utah/811075/",
+          "https://stories.hilton.com/releases",
+          "https://www.hoteldive.com/topic/development/?page=2&utm_source=Sailthru&utm_medium=email&utm_campaign=Issue%3A%202026-03-12%20Hotel%20Dive%20%5Bissue%3A82671%5D&utm_term=Hotel%20Dive",
+          "https://stories.hilton.com/releases/new-hilton-openings-in-2026",
+          "https://stories.hilton.com/brands/waldorf-astoria",
+          "https://modernandmain.com/waldorf-astoria-coming-to-deer-valley-east-village-in-2028/"
+        ]
+      },
+      {
+        "id": 1005,
+        "hotel_name": "Waldorf Astoria Deer Valley",
+        "city": "Park City",
+        "state": "Utah",
+        "country": "USA",
+        "opening_year": 2028,
+        "opening_date": "2028",
+        "status": "new",
+        "duplicate_of_id": null,
+        "source_urls": [
+          "https://www.hoteldive.com/topic/development/?page=2",
+          "https://hospitalitydesign.com/news/hotels-resorts/"
+        ]
+      }
+    ]
+  },
+  {
+    "survivor_id": 1326,
+    "rows": [
+      {
+        "id": 1326,
+        "hotel_name": "Anantara Turks and Caicos Resort & Residences",
+        "city": "North Caicos",
+        "state": null,
+        "country": "Turks & Caicos",
+        "opening_year": 2029,
+        "opening_date": "2029",
+        "status": "new",
+        "duplicate_of_id": null,
+        "source_urls": [
+          "https://media.minorhotels.com/en-GLO/releases/?year=2026",
+          "https://airguide.info/anantara-turks-and-caicos-resort-to-open-in-2029/",
+          "https://www.newslinetci.com/post/north-caicos-to-get-first-luxury-resort-development",
+          "https://brandedresi.com/news/",
+          "https://magneticmediatv.com/2026/05/anantara-targets-north-caicos-for-latest-luxury-development/",
+          "https://www.hospitality-interiors.net/news/minor-hotels-announces-anantaras-caribbean-debut-in-turks-and-caicos/",
+          "https://www.tripcast360.com"
+        ]
+      },
+      {
+        "id": 1365,
+        "hotel_name": "Anantara Turks and Caicos",
+        "city": "Turks and Caicos Islands",
+        "state": "Turks and Caicos Islands",
+        "country": "Turks And Caicos Islands",
+        "opening_year": null,
+        "opening_date": "2029",
+        "status": "new",
+        "duplicate_of_id": null,
+        "source_urls": [
+          "https://tophotel.news",
+          "https://www.tripcast360.com",
+          "https://brandedresi.com/news/"
+        ]
+      }
+    ]
+  },
+  {
+    "survivor_id": 205,
+    "rows": [
+      {
+        "id": 205,
+        "hotel_name": "The Hearst Hotel, Auberge Collection",
+        "city": "San Francisco",
+        "state": "California",
+        "country": "USA",
+        "opening_year": 2026,
+        "opening_date": "2026",
+        "status": "new",
+        "duplicate_of_id": null,
+        "source_urls": [
+          "https://opulist.co/blog/the-most-beautiful-new-hotels-opening-in-the-us-in-2026",
+          "https://www.theorangestudio.com/hotel-openings?country=USA&year=2026"
+        ]
+      },
+      {
+        "id": 1098,
+        "hotel_name": "The Hearst Hotel",
+        "city": "San Francisco",
+        "state": "California",
+        "country": "USA",
+        "opening_year": 2026,
+        "opening_date": "late 2026",
+        "status": "new",
+        "duplicate_of_id": null,
+        "source_urls": [
+          "https://opulist.co/blog/the-most-beautiful-new-hotels-opening-in-the-us-in-2026"
+        ]
+      }
+    ]
+  },
+  {
+    "survivor_id": 1052,
+    "rows": [
+      {
+        "id": 1052,
+        "hotel_name": "Six Senses Napa",
+        "city": "Napa",
+        "state": "California",
+        "country": "USA",
+        "opening_year": 2026,
+        "opening_date": "2026",
+        "status": "new",
+        "duplicate_of_id": null,
+        "source_urls": [
+          "https://www.hoteldive.com/news/six-senses-pennsylvania-expansion/727462/"
+        ]
+      },
+      {
+        "id": 1170,
+        "hotel_name": "Six Senses Napa Valley",
+        "city": "Napa Valley",
+        "state": "California",
+        "country": "USA",
+        "opening_year": 2026,
+        "opening_date": "Late 2026",
+        "status": "new",
+        "duplicate_of_id": null,
+        "source_urls": []
+      }
+    ]
+  },
+  {
+    "survivor_id": 293,
+    "rows": [
+      {
+        "id": 293,
+        "hotel_name": "Grand Hyatt Miami Beach",
+        "city": "Miami Beach",
+        "state": "Florida",
+        "country": "USA",
+        "opening_year": 2027,
+        "opening_date": "November 2027",
+        "status": "new",
+        "duplicate_of_id": null,
+        "source_urls": [
+          "https://www.miamiandbeaches.com/hotels/new-and-renovated-miami-hotels",
+          "https://www.hoteldive.com/news/hilton-miami-convention-hotel-financing-opening/814923/"
+        ]
+      },
+      {
+        "id": 1110,
+        "hotel_name": "Grand Hyatt Miami Beach hotel",
+        "city": "Miami Beach",
+        "state": "Florida",
+        "country": "USA",
+        "opening_year": 2027,
+        "opening_date": "November 2027",
+        "status": "new",
+        "duplicate_of_id": null,
+        "source_urls": [
+          "https://www.hoteldive.com/news/hilton-miami-convention-hotel-financing-opening/814923/",
+          "https://worldredeye.com/2025/05/groundbreaking-ceremony-of-miami-beach-convention-center-hotel/"
+        ]
+      }
+    ]
+  },
+  {
+    "survivor_id": 944,
+    "rows": [
+      {
+        "id": 944,
+        "hotel_name": "Four Seasons Resort and Private Residences Deer Valley",
+        "city": "Park City",
+        "state": "Utah",
+        "country": "USA",
+        "opening_year": 2028,
+        "opening_date": "2028",
+        "status": "new",
+        "duplicate_of_id": null,
+        "source_urls": [
+          "https://www.hoteldive.com/news/deer-valley-utah-development-hotel-brands/750105/"
+        ]
+      },
+      {
+        "id": 1237,
+        "hotel_name": "Four Seasons Resort and Residences Deer Valley",
+        "city": "Deer Valley",
+        "state": "Utah",
+        "country": "USA",
+        "opening_year": 2028,
+        "opening_date": "Late 2028",
+        "status": "new",
+        "duplicate_of_id": null,
+        "source_urls": [
+          "https://thealpinedispatch.substack.com/p/the-list-next-seasons-new-ski-hotel"
+        ]
+      }
+    ]
+  },
+  {
+    "survivor_id": 969,
+    "rows": [
+      {
+        "id": 969,
+        "hotel_name": "Aman Hotel at One Beverly Hills",
+        "city": "Beverly Hills",
+        "state": "California",
+        "country": "USA",
+        "opening_year": 2027,
+        "opening_date": "late 2027",
+        "status": "new",
+        "duplicate_of_id": null,
+        "source_urls": [
+          "https://www.hoteldive.com/news/one-beverly-hills-vertical-construction/807320/"
+        ]
+      },
+      {
+        "id": 1099,
+        "hotel_name": "Aman Beverly Hills",
+        "city": "Beverly Hills",
+        "state": "California",
+        "country": "USA",
+        "opening_year": null,
+        "opening_date": "Late 2027",
+        "status": "new",
+        "duplicate_of_id": null,
+        "source_urls": [
+          "https://www.aman.com/news",
+          "https://www.aman.com/leadership",
+          "https://www.aman.com/destinations/country/usa-caribbean",
+          "https://latteluxurynews.com/2026/04/23/aman-unveils-texas-ranch-inspired-retreat/",
+          "https://hotelsforkings.com/best/new-hotel-openings/"
+        ]
+      },
+      {
+        "id": 1145,
+        "hotel_name": "Aman Hotel",
+        "city": "Beverly Hills",
+        "state": "California",
+        "country": "USA",
+        "opening_year": 2027,
+        "opening_date": "late 2027",
+        "status": "new",
+        "duplicate_of_id": null,
+        "source_urls": []
+      }
+    ]
+  }
+]

@@ -23,7 +23,7 @@ import Fuse from 'fuse.js'
 import {
   Sparkles, Wand2, X, RefreshCw, Inbox, Star, ChevronRight, ChevronDown,
   Mail, Phone, Linkedin, ExternalLink, MapPin, Building2, Shield, Hash,
-  Eye, Users, Activity, Send, Check, Loader2, Trash2, CheckSquare, Square,
+  Eye, Users, Activity, Send, Check, Loader2, Trash2, CheckSquare, Square, Download,
   Radar, Briefcase, Layers, Flame, Target, Package, Copy, Pencil,
 } from 'lucide-react'
 import { cn, formatDate, relativeDate, getTierLabel } from '@/lib/utils'
@@ -1888,6 +1888,42 @@ function SearchBox({ initialQuery, onCommit }: {
   )
 }
 
+// [export_ux] fetch the xlsx with a visible 'Generating…' state (the styled
+// 32k-row build takes ~20s) then trigger the download via a Blob, so the
+// button never looks like a dead spinner.
+function ExportButton() {
+  const [busy, setBusy] = useState(false)
+  async function run() {
+    if (busy) return
+    setBusy(true)
+    try {
+      const res = await fetch('/api/inbox-contacts/export.xlsx', { credentials: 'include' })
+      if (!res.ok) throw new Error('export failed')
+      const blob = await res.blob()
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      const today = new Date().toISOString().slice(0, 10)
+      a.download = `contacts_${today}.xlsx`
+      document.body.appendChild(a)
+      a.click()
+      a.remove()
+      URL.revokeObjectURL(url)
+    } catch {
+      // swallow -- a failed export shouldn't crash the page
+    } finally {
+      setBusy(false)
+    }
+  }
+  return (
+    <button onClick={run} disabled={busy}
+      className="flex items-center gap-2 px-4 h-10 rounded-xl text-[13px] font-semibold text-navy-700 bg-white ring-1 ring-stone-200 hover:bg-stone-50 shadow-soft transition-all mr-2 disabled:opacity-60">
+      {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
+      {busy ? 'Generating…' : 'Export'}
+    </button>
+  )
+}
+
 export default function ContactsPage() {
   const [params, setParams] = useSearchParams()
 
@@ -2461,6 +2497,7 @@ export default function ContactsPage() {
               )}
             </p>
           </div>
+          <ExportButton />
           <button onClick={() => syncMut.mutate()} disabled={syncMut.isPending}
             className="flex items-center gap-2 px-4 h-10 rounded-xl text-[13px] font-semibold text-white bg-navy-600 hover:bg-navy-700 shadow-soft transition-all disabled:opacity-60">
             <RefreshCw className={cn('w-4 h-4', syncMut.isPending && 'animate-spin')} />
@@ -2481,7 +2518,7 @@ export default function ContactsPage() {
             { v: 'personal', label: 'Personal', dot: '#3e638c', count: stats?.personal },
             { v: 'uncategorized', label: 'Uncategorized', dot: '#9ca3af', count: stats?.uncategorized },
             { v: 'operational', label: 'Shared inboxes', dot: '#5b7a9e', count: sharedInboxCount },
-            { v: 'junk', label: 'Junk (hidden by default)', dot: '#9ca3af' },
+            { v: 'junk', label: 'Trash', dot: '#9ca3af', count: stats?.junk },
           ]} />
           <Facet icon={Package} label="Vertical" value={vertical || 'all'} onChange={(v) => patch({ vertical: v === 'all' ? null : v })} options={[
             { v: 'all', label: 'All verticals' },

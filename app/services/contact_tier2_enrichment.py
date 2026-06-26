@@ -238,6 +238,53 @@ async def enrich_contact_deep(contact_id: int, find_email: bool = False) -> dict
             logger.warning(f"tier2: current-employer lookup failed for {contact_id}: {e}")
             ce_result = None
 
+    # [move_domain_veto] you don't keep emailing from a company you left. If a
+    # move is claimed but the contact's CURRENT email domain matches the org
+    # they supposedly LEFT (on-file / domain-inferred org), the move is a
+    # same-name web hit -- suppress it. Matches the FORMER org (not the new
+    # employer) so acronym domains on real movers (nyac.org -> New York
+    # Athletic Club) are NOT falsely vetoed. Fires only on a positive match.
+    if ce_result and ce_result.get("moved") and ce_result.get("current_employer"):
+        _dom = (domain or "").lower().strip()
+        _FREE = {
+            "gmail.com",
+            "yahoo.com",
+            "hotmail.com",
+            "outlook.com",
+            "aol.com",
+            "icloud.com",
+            "live.com",
+            "msn.com",
+            "comcast.net",
+            "me.com",
+            "protonmail.com",
+            "ymail.com",
+            "mac.com",
+        }
+        if _dom and _dom not in _FREE:
+            _label = _dom.split("@")[-1].rsplit(".", 1)[0].replace("-", " ")
+            _dom_toks = {t for t in _label.split() if len(t) > 2}
+            _lab = _label.replace(" ", "")
+
+            def _matches(_name: str) -> bool:
+                _n = (_name or "").lower()
+                _nt = {
+                    t
+                    for t in _n.replace("&", " ").replace(",", " ").replace(".", " ").split()
+                    if len(t) > 2
+                }
+                return bool(_dom_toks & _nt) or (bool(_lab) and _lab in _n.replace(" ", ""))
+
+            _left_org = (org or "") or (inferred_org or "")
+            if _left_org and _matches(_left_org):
+                logger.info(
+                    f"tier2: [move_domain_veto] suppressing move for {contact_id}: "
+                    f"email domain '{_dom}' still matches org-left '{_left_org}' -- "
+                    f"claimed move to '{ce_result.get('current_employer')}' is a namesake."
+                )
+                ce_result["moved"] = False
+                ce_result["_domain_vetoed"] = True
+
     # 2) Wiza — only when we lack a USABLE email. 'Usable' = present AND not
     # known-former. A moved contact's on-file email is just a reference, so we
     # look up the current one. We never call Wiza when a good current email

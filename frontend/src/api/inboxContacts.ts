@@ -340,6 +340,12 @@ export async function updateLeadContact(
   return data
 }
 
+/* ── export ── */
+export function contactsExportUrl(): string {
+  // browser GET (download) -- not via the json `api` helper
+  return '/api/inbox-contacts/export.xlsx'
+}
+
 /* ── learning junk system ── */
 
 export async function junkContact(id: number): Promise<void> {
