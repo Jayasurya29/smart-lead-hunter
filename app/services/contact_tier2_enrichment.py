@@ -534,24 +534,77 @@ async def enrich_contact_deep(contact_id: int, find_email: bool = False) -> dict
             s = s.replace(junk, " ")
         return " ".join(s.split())
 
-    if _ce_found:
-        # [move_verified_employer] verified lookup decides the move; its
-        # 'moved' verdict already compared the verified employer to the
-        # on-file org via _judge_relationship.
-        job_changed = bool(
-            ce_result.get("moved")
-            and new_employer
-            and org
-            and _norm_org(new_employer) != _norm_org(org)
+    def _same_employer(a: str, b: str) -> bool:
+        """True when a and b are the SAME employer despite formatting: a spaced
+        name vs its glued domain label, a sub-string, or joiner words. Catches
+        'Corporate Concierge Services' vs 'Corporateconcierge' and 'The Colonnade
+        at Beckett Lake' vs 'Colonnadebeckettlake' WITHOUT touching genuinely
+        different employers ('Reef Parking' vs 'University of Miami')."""
+
+        def _flat(s: str) -> str:
+            s = (s or "").lower()
+            for j in (" the ", "the ", " at ", " of ", " and ", " on ", " a "):
+                s = s.replace(j, " ")
+            return "".join(ch for ch in s if ch.isalpha())
+
+        fa, fb = _flat(a), _flat(b)
+        if not fa or not fb:
+            return False
+        if fa == fb:
+            return True
+        short, lng = (fa, fb) if len(fa) <= len(fb) else (fb, fa)
+        return len(short) >= 6 and short in lng
+
+    # [move_trust_gate] The lookup is namesake-SAFE only when we have a LinkedIn
+    # slug to anchor on (find_current_employer queries that exact profile). With
+    # a slug, a detected move is TRUSTED and auto-applied (this is how Hakeem
+    # Harvey's real Towne Park -> Liberty Parking was caught). WITHOUT a slug,
+    # the lookup is a name+org search that can grab a same-name stranger or a
+    # past job -- so a detected move is NOT written; it is QUEUED in
+    # pending_moves for a human to approve/reject.
+    has_slug = bool((row.linkedin_url or "").strip())
+    _moved_candidate = bool(
+        new_employer
+        and org
+        and _norm_org(new_employer) != _norm_org(org)
+        and (
+            (ce_result.get("moved") if _ce_found else False)
+            or (dossier.get("employer_changed") and conf >= GROUNDED_CONFIDENCE_FLOOR)
         )
+    )
+    queue_pending_move = False
+    if _moved_candidate and _ce_found and has_slug:
+        job_changed = True  # slug-verified -> trust -> auto-apply
+    elif _moved_candidate:
+        job_changed = False  # unverified -> do NOT write; queue for review below
+        queue_pending_move = True
     else:
-        job_changed = bool(
-            dossier.get("employer_changed")
-            and new_employer
-            and org  # there must be a stored org to move away from
-            and _norm_org(new_employer) != _norm_org(org)
-            and conf >= GROUNDED_CONFIDENCE_FLOOR
+        job_changed = False
+    # [reformat_veto] A spaced org name vs its glued domain label (or a sub-string
+    # reformat) is the SAME employer, not a move. Catches 'The Stella Hotel' ->
+    # 'The Stella Hotel', 'Corporate Concierge Services' -> 'Corporateconcierge'.
+    # Safe: genuinely different employers (Reef Parking -> University of Miami)
+    # are not affected.
+    if job_changed and _same_employer(new_employer, org):
+        logger.info(
+            f"tier2: [reformat_veto] contact {contact_id} {org!r} ~= "
+            f"{new_employer!r} (same employer, formatting only); not a move"
         )
+        job_changed = False
+        left_industry = False
+    # also suppress reformats / still-at-email-domain from the review queue --
+    # those aren't moves at all (Lauren Roberts still @royalparkhotel.net)
+    if queue_pending_move:
+        _dom = (domain or "").split(".")[0].lower()
+        _dom_flat = "".join(ch for ch in _dom if ch.isalpha())
+        _new_flat = "".join(ch for ch in (new_employer or "").lower() if ch.isalpha())
+        if _same_employer(new_employer, org) or (len(_dom_flat) >= 5 and _dom_flat in _new_flat):
+            logger.info(
+                f"tier2: [queue_suppress] contact {contact_id} {new_employer!r} "
+                f"is the same place / email-domain employer; not queuing"
+            )
+            queue_pending_move = False
+
     # [departed_out_of_industry] If the new employer is clearly NOT hospitality
     # (realtor, insurance, tech, etc.), the person LEFT the industry: they are no
     # longer a sellable contact. Keep the FORMER affiliation (history + successor
@@ -732,6 +785,46 @@ async def enrich_contact_deep(contact_id: int, find_email: bool = False) -> dict
                     )
             except Exception as e:
                 logger.warning(f"tier2: former-affiliation write failed for {contact_id}: {e}")
+        # [queue_unverified_move] No slug to verify the person -> do NOT touch the
+        # live contact. Park the candidate in pending_moves for human review.
+        if queue_pending_move and new_employer:
+            try:
+                await session.execute(
+                    text(
+                        "INSERT INTO pending_moves "
+                        "(contact_id, email, name, from_org, to_org, to_title, "
+                        " evidence, citations, reason, status, created_at) "
+                        "VALUES (:cid, :em, :nm, :fo, :to, :tt, :ev, :ci, "
+                        "'no_linkedin_slug', 'pending', :now) "
+                        "ON CONFLICT (contact_id) WHERE status='pending' "
+                        "DO UPDATE SET to_org=EXCLUDED.to_org, to_title=EXCLUDED.to_title, "
+                        "evidence=EXCLUDED.evidence, citations=EXCLUDED.citations, "
+                        "created_at=EXCLUDED.created_at"
+                    ),
+                    {
+                        "cid": contact_id,
+                        "em": row.email,
+                        "nm": name,
+                        "fo": org,
+                        "to": new_employer,
+                        "tt": (new_title or "").strip(),
+                        "ev": (
+                            ce_result.get("evidence")
+                            if _ce_found
+                            else dossier.get("background") or ""
+                        )[:300]
+                        if (ce_result or dossier)
+                        else "",
+                        "ci": ",".join((ce_result.get("citations") or [])[:5]) if _ce_found else "",
+                        "now": _now(),
+                    },
+                )
+                logger.info(
+                    f"tier2: [queued_move] contact {contact_id} {org!r} -> "
+                    f"{new_employer!r} queued for review (no slug to verify)"
+                )
+            except Exception as e:
+                logger.warning(f"tier2: pending_moves queue failed for {contact_id}: {e}")
         if job_changed:  # [patch_move_coverage_transition] coverage follows the person
             try:
                 from app.services.contact_autolink import retire_and_relink

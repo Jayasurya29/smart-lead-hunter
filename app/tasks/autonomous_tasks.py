@@ -692,7 +692,46 @@ def auto_smart_fill(self) -> Dict[str, Any]:
 
 
 # =============================================================================
+# TASK 4.7: FRESHNESS SWEEP  (check-status on stale contacts)
+# =============================================================================
+
+
+@celery_app.task(bind=True, base=BaseTask, name="freshness_sweep")
+def freshness_sweep(self) -> Dict[str, Any]:
+    """Re-verify the STALEST contacts so the sales team isn't working off
+    years-old data. Runs the same move-detect -> re-file -> successor flow as
+    the per-contact "Check status" button, bounded to a small batch per run.
+
+    Targets buyers whose last real interaction is older than 365 days, stalest
+    first, skipping role inboxes and anyone already flagged 'former' or checked
+    in a prior sweep. Each run advances through the backlog (rows are stamped
+    'status_checked'), so the campaign self-completes over many days.
+
+    Cost: ~1 Serper + 1 LLM per contact (+ a grounded successor search only on
+    a confirmed move). Capped at 30/run, scheduled 15:45 Mon-Fri in a low-
+    contention slot between the 15:00 scrape and the 16:00 enrich.
+    """
+    logger.info("Freshness Sweep: re-checking stalest contacts...")
+
+    async def _sweep():
+        from app.services.contact_freshness import run_freshness_sweep
+
+        result = await run_freshness_sweep(stale_days=365, limit=30, apply=True)
+        logger.info(
+            f"Freshness Sweep: {result.get('targets', 0)} checked, "
+            f"{result.get('moved', 0)} moved/left, "
+            f"{result.get('successors', 0)} successors filed, "
+            f"{result.get('errors', 0)} errors"
+        )
+        result["success"] = True
+        return result
+
+    return run_async(_sweep())
+
+
+# =============================================================================
 # TASK 4.6: AUTO FULL REFRESH  (added 2026-05-04)
+# =============================================================================
 # =============================================================================
 
 

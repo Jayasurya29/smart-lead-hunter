@@ -232,6 +232,13 @@ celery_app.conf.update(
             "schedule": crontab(hour=16, minute=30, day_of_week="1-5"),
             "options": {"queue": "maintenance"},
         },
+        # Re-verify the stalest contacts (move/successor) so the sales team
+        # isn't working off years-old data. 30/run, advances the backlog.
+        "freshness-sweep": {
+            "task": "freshness_sweep",
+            "schedule": crontab(hour=15, minute=45, day_of_week="1-5"),
+            "options": {"queue": "maintenance"},
+        },
     },
     # Task routing
     task_routes={

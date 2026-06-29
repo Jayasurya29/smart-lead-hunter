@@ -7738,20 +7738,19 @@ async def enrich_lead_contacts(
         result.should_reject = research_state.should_reject
         result.rejection_reason = research_state.rejection_reason
     except Exception as ex:
-        logger.exception(f"Iterative researcher failed, falling back to v4: {ex}")
-        return await _enrich_lead_contacts_v4_legacy(
-            lead_id=lead_id,
-            hotel_name=hotel_name,
-            brand=brand,
-            city=city,
-            state=state,
-            country=country,
-            management_company=management_company,
-            opening_date=opening_date,
-            timeline_label=timeline_label,
-            description=description,
-            project_type_str=project_type_str,
+        # [patch_kill_v4_fallback] v5 carries the verified-employer / move
+        # guards; v4_legacy does NOT -- falling back silently re-opened the
+        # fake-move -> fake-successor -> junk-lead cascade. On a v5 failure we
+        # return only the verified grounding contacts already found (often
+        # empty), flagged, and never run the unguarded legacy path.
+        logger.exception(
+            f"Iterative researcher failed for {hotel_name} (lead {lead_id}); "
+            f"returning grounding-only result, NOT falling back to v4: {ex}"
         )
+        result.errors.append(f"v5_iterative_failed: {str(ex)[:200]}")
+        result.metadata["v5_failed"] = True
+        result.metadata["enrichment_path"] = "grounding_only_v5_failed"
+        return result
 
     # ── Convert ResearchState into EnrichmentResult ──
     # Merge grounding contacts (CEO/COO level) with iterative contacts

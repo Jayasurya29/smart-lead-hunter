@@ -18,6 +18,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from app.database import async_session
 from app.models.sap_client import SAPClient
+from app.services.utils import local_now  # [patch_sap_tz] aware Eastern, matches model defaults
 
 logger = logging.getLogger(__name__)
 
@@ -368,8 +369,11 @@ async def import_sap_csv(
                 stmt = pg_insert(SAPClient).values(**row_data)
 
                 update_dict = {k: v for k, v in row_data.items() if k != "customer_code"}
-                update_dict["last_imported_at"] = datetime.now()
-                update_dict["updated_at"] = datetime.now()
+                # [patch_sap_tz] aware Eastern (local_now) — naive datetime.now()
+                # was written into timestamptz cols on the upsert path, skewing
+                # re-imported rows ~5h vs the local_now() column defaults.
+                update_dict["last_imported_at"] = local_now()
+                update_dict["updated_at"] = local_now()
 
                 stmt = stmt.on_conflict_do_update(
                     index_elements=["customer_code"],

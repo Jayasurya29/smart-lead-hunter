@@ -591,6 +591,36 @@ async def upsert_contact(
     return "updated", contact_id
 
 
+def _dg_bare_domain(email: str) -> str:
+    """[patch_domain_guard] bare lowercased email domain."""
+    return (email or "").split("@")[-1].lower().strip()
+
+
+async def _load_domain_corrections(session) -> tuple[dict, set]:
+    """[patch_domain_guard] Load confirmed typo->real corrections + drop set
+    from domain_corrections. Tolerant: if the table does not exist yet
+    (pre-migration) returns empty rules so ingest is unaffected."""
+    correct: dict[str, str] = {}
+    drop: set[str] = set()
+    try:
+        rows = (
+            await session.execute(
+                text("SELECT typo_domain, correct_domain, action FROM domain_corrections")
+            )
+        ).all()
+        for td, cd, act in rows:
+            td = (td or "").lower().strip()
+            if not td:
+                continue
+            if act == "drop":
+                drop.add(td)
+            elif act == "correct" and cd:
+                correct[td] = cd.lower().strip()
+    except Exception:
+        pass  # table absent (pre-migration) -> no-op guard
+    return correct, drop
+
+
 async def bulk_upsert_contacts(
     session: AsyncSession,
     contacts: list[dict],
@@ -608,7 +638,18 @@ async def bulk_upsert_contacts(
     Returns: {"inserted": N, "updated": N, "errors": N}
     """
     inserted = updated = errors = 0
+    # [patch_domain_guard] load confirmed typo->real corrections / drops once
+    _dg_correct, _dg_drop = await _load_domain_corrections(session)
+    skipped = 0
     for c in contacts:
+        # [patch_domain_guard] correct known typo domains; skip known-dead ones
+        _dg_dom = _dg_bare_domain(c.get("email") or "")
+        if _dg_dom and _dg_dom in _dg_drop:
+            skipped += 1
+            continue
+        if _dg_dom and _dg_dom in _dg_correct:
+            _dg_local = (c.get("email") or "").split("@")[0]
+            c["email"] = f"{_dg_local}@{_dg_correct[_dg_dom]}".lower()
         try:
             async with session.begin_nested():
                 mailbox = source_mailbox or c.get("source_mailbox")
@@ -654,9 +695,14 @@ async def bulk_upsert_contacts(
 
     logger.info(
         f"contact_dedup: bulk_upsert done — "
-        f"inserted={inserted} updated={updated} errors={errors}"
+        f"inserted={inserted} updated={updated} errors={errors} skipped={skipped}"  # [patch_domain_guard]
     )
-    return {"inserted": inserted, "updated": updated, "errors": errors}
+    return {
+        "inserted": inserted,
+        "updated": updated,
+        "errors": errors,
+        "skipped": skipped,
+    }  # [patch_domain_guard]
 
 
 # ──────────────────────────────────────────────────────────────────────

@@ -63,7 +63,7 @@ from app.services.buying_signal_engine import (
     classify_relationship as _classify_relationship,
     DEFAULT_OWN_DOMAINS as _BSE_OWN_DOMAINS,
 )
-from app.services.name_validation import name_fits_email
+from app.services.name_validation import name_fits_email, derive_name_from_email
 
 
 _NAME_JUNK_CHARS = set('*|<>[]{}~^="\\')
@@ -312,12 +312,19 @@ def _apply_name_gate(contact: dict) -> None:
             contact["first_name"] = _pp[0]
             contact["last_name"] = _pp[1] if len(_pp) > 1 else None
 
+    email = contact.get("email") or ""
     fn = contact.get("first_name") or ""
     ln = contact.get("last_name") or ""
     dn = contact.get("display_name") or ""
-    if not (fn or ln):
+    if not (fn or ln or dn):
+        # [patch_name_quality] no name at all -> derive from the address
+        # (deterministic; None for role/ambiguous), else leave blank.
+        _d = derive_name_from_email(email)
+        if _d:
+            contact["first_name"], contact["last_name"] = _d
+            contact["display_name"] = f"{_d[0]} {_d[1]}".strip()
         return
-    verdict = name_fits_email(fn, ln, dn, contact.get("email") or "")
+    verdict = name_fits_email(fn, ln, dn, email)
     if verdict.code == "ROLE":
         contact["first_name"] = None
         contact["last_name"] = None
@@ -327,6 +334,12 @@ def _apply_name_gate(contact: dict) -> None:
         contact["first_name"] = None
         contact["last_name"] = None
         contact["display_name"] = None
+        # [patch_name_quality] cleared a junk/domain name -> derive a real
+        # one from the address when it encodes one; else leave for re-resolution.
+        _d = derive_name_from_email(email)
+        if _d:
+            contact["first_name"], contact["last_name"] = _d
+            contact["display_name"] = f"{_d[0]} {_d[1]}".strip()
 
 
 logger = logging.getLogger(__name__)

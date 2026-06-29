@@ -228,6 +228,22 @@ def name_fits_email(first: str, last: str, display: str, email: str) -> NameVerd
             "ROLE", True, nonpersonal, "shared/role inbox; personal identity not allowed"
         )
 
+    # [patch_name_quality] A "name" that is merely the bare domain or the
+    # full email address is an echo of the address, not a person (e.g.
+    # first_name="premiumparking.com"). Flag MISMATCH only when EVERY
+    # provided name field is such an echo, so a real name in any field
+    # survives. A name matching the LOCAL part (J Bell ~ jbell@) is
+    # legitimate and intentionally NOT flagged here.
+    _dom = (email or "").split("@")[-1].lower()
+    _dom_no_tld = _dom.rsplit(".", 1)[0] if "." in _dom else _dom
+    _echo = {_flat(_dom), _flat(_dom_no_tld), _flat(email)}
+    _echo.discard("")
+    _names = [v for v in (first, last, display) if v]
+    if _names and all(_flat(v) in _echo for v in _names):
+        return NameVerdict(
+            "MISMATCH", False, True, "name is the email domain/address, not a person"
+        )
+
     if personal:
         local = _local(email)
         if _is_clean_personal_local(local):
@@ -238,3 +254,23 @@ def name_fits_email(first: str, last: str, display: str, email: str) -> NameVerd
                 )
 
     return NameVerdict("OK", False, nonpersonal, "name plausible for this address")
+
+
+def _titlecase_token(t: str) -> str:
+    return (t[:1].upper() + t[1:].lower()) if t else t
+
+
+def derive_name_from_email(email: str):
+    """[patch_name_quality] Derive a person name ONLY when the address
+    actually encodes one (dotted or initial+surname locals). Never guesses:
+    returns None for role inboxes, single glued locals (jbell), or
+    digit/garbage locals -- so a real name can still be resolved later from
+    evidence (signature / grounding) instead of being fabricated here."""
+    if not email or "@" not in email or is_role_inbox(email):
+        return None
+    toks = [t for t in _local_tokens(_local(email)) if t.isalpha()]
+    if len(toks) < 2 or not any(len(t) >= 2 for t in toks):
+        return None
+    first = _titlecase_token(toks[0])
+    last = " ".join(_titlecase_token(t) for t in toks[1:])
+    return (first, last)
