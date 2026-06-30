@@ -673,6 +673,23 @@ async def enrich_contact_deep(contact_id: int, find_email: bool = False) -> dict
             logger.warning(f"tier2: current-email lookup failed for {contact_id}: {e}")
 
     # 4) Write back (grounded source; only fill email if Wiza found one)
+    # [bio_trust_gate] Only store the background bio when we can verify it's the
+    # RIGHT person -- i.e. a real LinkedIn slug anchored the lookup (existing on
+    # file, or newly grounded this run). Without a slug the dossier bio can be a
+    # namesake's life story or the LLM narrating that it couldn't ID anyone;
+    # storing that pollutes the AI panel with confident-but-wrong info. Same
+    # trust principle as the move gate.
+    def _is_real_slug(u: str) -> bool:
+        u = (u or "").lower()
+        return "linkedin.com/" in u and ("/in/" in u or "/pub/" in u)
+
+    bio_verified = _is_real_slug(row.linkedin_url or "") or _is_real_slug(grounded_li or "")
+    bg_to_write = (dossier.get("background") or "") if bio_verified else ""
+    if (dossier.get("background") or "").strip() and not bio_verified:
+        logger.info(
+            f"tier2: [bio_unverified] contact {contact_id} has a background bio "
+            f"but no LinkedIn slug to verify the person; NOT storing it."
+        )
     async with async_session() as session:
         await session.execute(
             text(
@@ -715,7 +732,7 @@ async def enrich_contact_deep(contact_id: int, find_email: bool = False) -> dict
                 "sen": dossier.get("seniority") or "",
                 "dept": dossier.get("department") or "",
                 "dm": bool(dossier.get("is_decision_maker")),
-                "bg": dossier.get("background") or "",
+                "bg": bg_to_write,
                 "conf": conf,
                 "now": _now(),
                 "model": MODEL,
