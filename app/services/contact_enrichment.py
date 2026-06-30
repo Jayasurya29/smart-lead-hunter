@@ -156,22 +156,29 @@ _LINKEDIN_SUBDOMAIN_RE = re.compile(r"^https?://([a-z]{2,3})\.linkedin\.com/", r
 
 
 def _canonicalize_linkedin_url(url: Optional[str]) -> Optional[str]:
-    """Normalize country subdomains (tc., za., uk., de., fr., etc.) to www.
-    Returns the URL unchanged if already canonical or not a LinkedIn URL.
-    Returns None / empty for None / empty input."""
+    """Validate AND normalize a LinkedIn profile URL.
+
+    Returns a canonical https://www.linkedin.com/... URL, or None if the input
+    is not a real LinkedIn profile URL. This REJECTS the junk that used to slip
+    through (email-tracking redirects like hubspotlinks.com / list-manage.com,
+    company websites, and literal placeholder text like "View My LinkedIn") --
+    previously such values were returned unchanged and stored as the contact's
+    linkedin_url, which also corrupted the slug-verified move-trust gate.
+    """
     if not url:
-        return url
+        return None
     s = url.strip()
     if not s:
-        return s
+        return None
+    low = s.lower()
+    if "linkedin.com/" not in low:
+        return None
+    if not any(seg in low for seg in ("/in/", "/pub/")):
+        return None
     m = _LINKEDIN_SUBDOMAIN_RE.match(s)
-    if not m:
-        return s
-    sub = m.group(1).lower()
-    if sub == "www":
-        return s
-    # Replace the matched [a-z]{2,3} subdomain with www
-    return _LINKEDIN_SUBDOMAIN_RE.sub("https://www.linkedin.com/", s, count=1)
+    if m and m.group(1).lower() != "www":
+        s = _LINKEDIN_SUBDOMAIN_RE.sub("https://www.linkedin.com/", s, count=1)
+    return s
 
 
 # ═══════════════════════════════════════════════════════════════
