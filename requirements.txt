@@ -147,3 +147,12 @@ langchain-core>=0.3
 langchain-google-vertexai>=2.0
 beautifulsoup4>=4.12
 duckduckgo-search>=6.0
+
+
+# ─── Google API clients (Gmail/People sync, auth, Vertex/genai) ──────────
+# Pinned explicitly so CI installs them (previously only transitive deps).
+google-api-python-client>=2.190,<3.0
+google-auth>=2.40,<3.0
+google-auth-httplib2>=0.2,<1.0
+google-genai>=1.0,<2.0
+google-cloud-aiplatform>=1.140,<2.0
