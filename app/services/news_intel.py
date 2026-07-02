@@ -146,7 +146,7 @@ def serper_news(query: str, num: int = 10) -> list[dict[str, Any]]:
                 "X-API-KEY": SERPER_API_KEY,
                 "Content-Type": "application/json",
             },
-            json={"q": query, "num": num, "gl": "us"},
+            json={"q": query, "num": num, "gl": "us", "tbs": "qdr:m6"},
             timeout=15,
         )
         resp.raise_for_status()

@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Layers, Briefcase, Star, Loader2, ChevronRight, Check } from 'lucide-react'
+import { Layers, Briefcase, Star, Loader2, ChevronRight, ChevronDown, ChevronUp, Check } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { useAccountCoverage, useSaveLeadContact } from '@/hooks/useAffiliations'
 import type { AccountCoveragePerson } from '@/api/affiliations'
@@ -116,6 +116,10 @@ export default function HotelCoverageCard({
   const navigate = useNavigate()
   const saveMut = useSaveLeadContact()
   const [savingId, setSavingId] = useState<number | null>(null)
+  // Portfolio coverage (people pulled in via the management company across the
+  // whole operator's portfolio) is noisy on a single hotel — collapsed by
+  // default. Direct contacts stay visible.
+  const [portfolioOpen, setPortfolioOpen] = useState(false)
 
   function openPerson(p: AccountCoveragePerson) {
     const selected = p.person_type === 'lead_contact' ? p.person_id + LEAD_ID_OFFSET : p.person_id
@@ -152,11 +156,20 @@ export default function HotelCoverageCard({
 
       {portfolio.length > 0 && (
         <div className="mt-1">
-          <div className="flex items-center gap-1 text-2xs uppercase tracking-wide text-stone-400 mb-0.5">
+          <button
+            onClick={() => setPortfolioOpen((v) => !v)}
+            className="w-full flex items-center gap-1 text-2xs uppercase tracking-wide text-stone-400 hover:text-stone-600 mb-0.5 transition"
+          >
             <Briefcase className="w-3 h-3" />
-            Via management company{management_company ? ` · ${management_company}` : ''}
-          </div>
-          {portfolio.map((p) => (
+            <span>
+              Portfolio coverage ({portfolio.length})
+              {management_company ? ` · ${management_company}` : ''}
+            </span>
+            {portfolioOpen
+              ? <ChevronUp className="w-3 h-3 ml-auto" />
+              : <ChevronDown className="w-3 h-3 ml-auto" />}
+          </button>
+          {portfolioOpen && portfolio.map((p) => (
             <PersonRow key={`${p.person_type}-${p.person_id}`} p={p} onOpen={() => openPerson(p)} onSave={() => savePerson(p)} saving={savingId === p.person_id} />
           ))}
         </div>

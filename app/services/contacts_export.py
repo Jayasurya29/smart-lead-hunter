@@ -106,14 +106,24 @@ _COLS = [
 
 
 async def build_contacts_xlsx(session: AsyncSession) -> bytes:
-    """Return the contacts directory as polished .xlsx bytes (trash excluded)."""
+    """Return the contacts directory as polished .xlsx bytes (trash excluded).
+
+    DB read stays async (live data at click time); the CPU-heavy openpyxl build
+    is offloaded to a thread so it never blocks the event loop / freezes the app.
+    """
+    import asyncio
+
+    rows = (await session.execute(text(_SQL.format(where=_WHERE)))).mappings().all()
+    rows = [dict(r) for r in rows]  # detach from the session before threading
+    return await asyncio.to_thread(_render_contacts_xlsx, rows)
+
+
+def _render_contacts_xlsx(rows) -> bytes:
     from datetime import datetime
 
     from openpyxl import Workbook
     from openpyxl.styles import Font, PatternFill, Alignment
     from openpyxl.utils import get_column_letter
-
-    rows = (await session.execute(text(_SQL.format(where=_WHERE)))).mappings().all()
 
     def F(size=10, bold=False, color=INK, name="Calibri"):
         return Font(name=name, size=size, bold=bold, color=color)

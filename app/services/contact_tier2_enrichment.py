@@ -572,6 +572,45 @@ async def enrich_contact_deep(contact_id: int, find_email: bool = False) -> dict
             or (dossier.get("employer_changed") and conf >= GROUNDED_CONFIDENCE_FLOOR)
         )
     )
+    # [same_property_fuller_name] "The Sanctuary Hotel" -> "The Sanctuary at
+    # Kiawah Island Golf Resort" is the SAME property under a fuller/official
+    # name, not a move. _same_employer only catches glued/substring reformats;
+    # this also catches shared-core-token cases. If the two names share a
+    # distinctive core token (>=4 chars, ignoring generic hotel words), treat it
+    # as the same place so a title change reads as a promotion, not a move.
+    if _moved_candidate:
+        _generic = {
+            "hotel",
+            "hotels",
+            "resort",
+            "resorts",
+            "the",
+            "at",
+            "of",
+            "and",
+            "inn",
+            "suites",
+            "spa",
+            "golf",
+            "club",
+            "island",
+            "beach",
+            "bay",
+            "estate",
+            "estates",
+            "collection",
+            "group",
+            "company",
+            "co",
+        }
+        _toks_a = {t for t in _norm_org(org).split() if len(t) >= 4 and t not in _generic}
+        _toks_b = {t for t in _norm_org(new_employer).split() if len(t) >= 4 and t not in _generic}
+        if _toks_a & _toks_b:
+            logger.info(
+                f"tier2: [same_property] contact {contact_id} {org!r} ~= "
+                f"{new_employer!r} (shared core token {_toks_a & _toks_b}); not a move"
+            )
+            _moved_candidate = False
     queue_pending_move = False
     if _moved_candidate and _ce_found and has_slug:
         job_changed = True  # slug-verified -> trust -> auto-apply
@@ -643,7 +682,79 @@ async def enrich_contact_deep(contact_id: int, find_email: bool = False) -> dict
             f"{org!r} -> {new_employer!r} (title {new_title!r})"
         )
 
-    # 3c) Find CURRENT email for a job-changer (2026-06-16): when the person has
+    # [promotion] Same employer, NEW title = internal promotion (e.g. Director of
+    # Rooms -> Hotel Manager at the same hotel). This is NOT a move (job_changed
+    # stays False, org is untouched), but two things must still happen:
+    #   1. write the new title onto the contact, and
+    #   2. flag the OLD title as a vacated seat so the successor hunt can run.
+    # Slug-gated for the same trust reason as moves: without a LinkedIn slug the
+    # title read is a namesake risk, so we don't rewrite the live record.
+    _old_title = (row.title or "").strip()
+
+    def _shared_core(a: str, b: str) -> bool:
+        _generic = {
+            "hotel",
+            "hotels",
+            "resort",
+            "resorts",
+            "the",
+            "at",
+            "of",
+            "and",
+            "inn",
+            "suites",
+            "spa",
+            "golf",
+            "club",
+            "island",
+            "beach",
+            "bay",
+            "estate",
+            "estates",
+            "collection",
+            "group",
+            "company",
+            "co",
+        }
+        ta = {t for t in _norm_org(a).split() if len(t) >= 4 and t not in _generic}
+        tb = {t for t in _norm_org(b).split() if len(t) >= 4 and t not in _generic}
+        return bool(ta & tb)
+
+    _same_place = bool(new_employer) and (
+        _same_employer(new_employer, org)
+        or _norm_org(new_employer) == _norm_org(org)
+        or _shared_core(new_employer, org)
+    )
+    promoted = bool(
+        not job_changed
+        and not left_industry
+        and has_slug
+        and _same_place
+        and new_title
+        and _old_title
+        and _norm_org(new_title) != _norm_org(_old_title)
+    )
+    if promoted:
+        logger.info(
+            f"tier2: contact {contact_id} ({row.email}) PROMOTED at {org!r}: "
+            f"{_old_title!r} -> {new_title!r}; vacating old seat for successor search"
+        )
+
+    # [name_upgrade] Same property, but enrichment returned a FULLER/richer name
+    # ("The Sanctuary Hotel" -> "The Sanctuary at Kiawah Island Golf Resort").
+    # Adopt the fuller name as the org. Slug-gated + same-place only, so it can't
+    # rename to a different employer. Only upgrades when the new name is strictly
+    # longer and shares the core token (already guaranteed by _same_place here).
+    name_upgrade = ""
+    if has_slug and _same_place and new_employer and not job_changed and not left_industry:
+        _no, _oo = new_employer.strip(), org.strip()
+        if len(_no) > len(_oo) and _norm_org(_no) != _norm_org(_oo):
+            name_upgrade = _no
+            logger.info(
+                f"tier2: [name_upgrade] contact {contact_id} org {_oo!r} -> {_no!r} "
+                "(fuller property name)"
+            )
+
     # moved, the email on file is their FORMER employer's address and likely dead.
     # If the caller asked to find an email (find_email=true) and we detected a
     # move, look the person up AT THE NEW EMPLOYER (new org + its domain) and keep
@@ -722,8 +833,9 @@ async def enrich_contact_deep(contact_id: int, find_email: bool = False) -> dict
                     ", management_company = NULL, matched_hotel_id = NULL"
                     ", matched_lead_id = NULL"
                     if job_changed
-                    else ""
+                    else (", title = :new_title" if promoted else "")
                 )
+                + (", organization = :name_upgrade" if (name_upgrade and not job_changed) else "")
                 + (", secondary_email = :secondary_email" if secondary_email else "")
                 + " WHERE id = :id"
             ),
@@ -737,6 +849,7 @@ async def enrich_contact_deep(contact_id: int, find_email: bool = False) -> dict
                 "now": _now(),
                 "model": MODEL,
                 "id": contact_id,
+                **({"name_upgrade": name_upgrade} if (name_upgrade and not job_changed) else {}),
                 **({"found_email": found_email} if found_email else {}),
                 **({"grounded_li": grounded_li} if grounded_li else {}),
                 **({"nf": _nf, "nl": _nl, "nd": f"{_nf} {_nl}"} if do_name_fill else {}),
@@ -746,7 +859,7 @@ async def enrich_contact_deep(contact_id: int, find_email: bool = False) -> dict
                         "new_title": new_title or dossier.get("role") or "",
                     }
                     if job_changed
-                    else {}
+                    else ({"new_title": new_title} if promoted else {})
                 ),
                 **({"secondary_email": secondary_email} if secondary_email else {}),
             },
@@ -802,7 +915,54 @@ async def enrich_contact_deep(contact_id: int, find_email: bool = False) -> dict
                     )
             except Exception as e:
                 logger.warning(f"tier2: former-affiliation write failed for {contact_id}: {e}")
-        # [queue_unverified_move] No slug to verify the person -> do NOT touch the
+
+        # [promotion_seat] On an internal promotion, the person stays at the same
+        # org but the OLD title is now vacant. Record a 'former' edge for the SAME
+        # org carrying the OLD title -- apply_seat_successor reads exactly this
+        # (a.title = vacated seat, a.account_name = property) to find who fills it.
+        # Guarded so re-running enrich doesn't stack duplicate vacated seats.
+        if promoted and org and _old_title:
+            try:
+                seat_exists = (
+                    await session.execute(
+                        text(
+                            "SELECT 1 FROM contact_affiliations "
+                            "WHERE person_type='contact' AND person_id=:pid "
+                            "AND relationship='former' "
+                            "AND lower(COALESCE(account_name,''))=lower(:nm) "
+                            "AND lower(COALESCE(title,''))=lower(:tt) LIMIT 1"
+                        ),
+                        {"pid": contact_id, "nm": org, "tt": _old_title},
+                    )
+                ).one_or_none()
+                if not seat_exists:
+                    await session.execute(
+                        text(
+                            "INSERT INTO contact_affiliations "
+                            "(person_type, person_id, account_type, account_name, "
+                            "relationship, source, confidence, notes, title, created_at, updated_at) "
+                            "VALUES ('contact', :pid, 'management_company', :nm, "
+                            "'former', 'grounded', :conf, :notes, :tt, :now, :now)"
+                        ),
+                        {
+                            "pid": contact_id,
+                            "nm": org,
+                            "conf": conf,
+                            "tt": _old_title,
+                            "notes": (
+                                f"Promoted {_old_title} -> {new_title} at {org} "
+                                "(per deep-enrich); old seat now vacant"
+                            ),
+                            "now": _now(),
+                        },
+                    )
+                    logger.info(
+                        f"tier2: [promotion_seat] contact {contact_id} vacated "
+                        f"{_old_title!r} at {org!r} -> queued for successor search"
+                    )
+            except Exception as e:
+                logger.warning(f"tier2: promotion-seat write failed for {contact_id}: {e}")
+
         # live contact. Park the candidate in pending_moves for human review.
         if queue_pending_move and new_employer:
             try:

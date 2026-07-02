@@ -107,9 +107,7 @@ def _strip_diacritics(s: str) -> str:
         return s
     import unicodedata
 
-    return "".join(
-        c for c in unicodedata.normalize("NFKD", s) if not unicodedata.combining(c)
-    )
+    return "".join(c for c in unicodedata.normalize("NFKD", s) if not unicodedata.combining(c))
 
 
 def normalize_hotel_name(name: str) -> str:
@@ -338,8 +336,11 @@ def months_to_opening(opening_date: str) -> int:
     text = opening_date.lower().strip()
     now = datetime.now()
 
-    # Extract year
-    year_match = re.search(r"20\d{2}", text)
+    # Extract year — accept 19xx as well as 20xx. A pre-2000 opening (e.g. a
+    # resort built in 1998) is decades in the PAST; before this it matched no
+    # year -> returned 99 (unknown) -> mislabeled COOL (far-future) instead of
+    # EXPIRED, so long-open hotels never graduated to existing_hotels.
+    year_match = re.search(r"(?:19|20)\d{2}", text)
     # Handle "2026/27" format — use later year
     dual_year = re.search(r"(20\d{2})/(20)?\d{2}", text)
     if dual_year:
@@ -525,9 +526,7 @@ def _extract_year(value: str | None) -> int | None:
     return int(m.group(1)) if m else None
 
 
-def should_accept_opening_date(
-    current: str | None, candidate: str | None
-) -> tuple[bool, str]:
+def should_accept_opening_date(current: str | None, candidate: str | None) -> tuple[bool, str]:
     """Decide whether a new opening_date should overwrite the current one.
 
     Returns (accept: bool, reason: str). The reason is for logging only.
@@ -566,8 +565,7 @@ def should_accept_opening_date(
     # 2026-05-28: Fixed bug where delays were rejected as "specificity regression"
     if cur_year and cand_year and cand_year > cur_year:
         return True, (
-            f"year shifted forward ({cur_year}→{cand_year}) — "
-            f"project likely delayed, accepting"
+            f"year shifted forward ({cur_year}→{cand_year}) — " f"project likely delayed, accepting"
         )
 
     # Year shifted BACKWARD — suspicious. Only accept if specificity increases
