@@ -115,7 +115,7 @@ RATE_LIMIT_MAX_DELAY = 10.0  # Never wait more than 10s
 # ═══════════════════════════════════════════════════════════════
 # Used by: intelligent_pipeline.py PipelineConfig
 
-CLASSIFIER_MODEL = "gemini-2.5-flash-lite"  # 4,000 RPM / Unlimited RPD
+CLASSIFIER_MODEL = "gemini-3.1-flash-lite"  # 4,000 RPM / Unlimited RPD
 EXTRACTOR_MODEL = "gemini-2.5-flash"  # 1,000 RPM / 10,000 RPD
 CLASSIFIER_CONTENT_LIMIT = 5000  # Chars for classification
 EXTRACTOR_CONTENT_LIMIT = 20000  # Chars for extraction

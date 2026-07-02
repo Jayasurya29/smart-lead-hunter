@@ -35,7 +35,7 @@ class Settings(BaseSettings):
     vertex_location: str = "global"
     vertex_key_path: str = "vertex-key.json"
     gemini_model: str = "gemini-2.5-flash"
-    gemini_model_lite: str = "gemini-2.5-flash-lite"
+    gemini_model_lite: str = "gemini-3.1-flash-lite"
     # Legacy — disabled, kept for fallback reference only
     gemini_api_key: Optional[str] = None
 
