@@ -39,6 +39,7 @@ MODEL = "gemini-2.5-flash"
 # keeps the index US-centric, Caribbean terms pull the islands in.
 NEWS_QUERIES = [
     # ── people moves (the triangulation feed) ──
+    # GM is the #1 target — highest volume, easiest to find — keep it broad.
     "hotel appoints general manager",
     "resort names new general manager",
     "hotel general manager appointed Caribbean",
@@ -46,6 +47,15 @@ NEWS_QUERIES = [
     "hotel names director of operations",
     "appoints hotel manager luxury resort",
     "new general manager luxury hotel",
+    # ── other buyer roles (mirrors the P1/P2 uniform-buyer tiers) ──
+    # role-noun anchors so title variants surface (exec housekeeper, F&B dir…).
+    "hotel appoints executive housekeeper",  # TIER1 — owns uniforms
+    "resort names director of housekeeping",  # TIER1
+    "hotel appoints director of purchasing",  # TIER2 — the buyer
+    "hotel names director of procurement",  # TIER2
+    "hotel appoints director of food and beverage",  # TIER4
+    "resort names director of rooms",  # TIER3
+    "hotel appoints director of human resources",  # TIER5
     # ── market intelligence ──
     "luxury hotel opening",
     "new resort opening Caribbean",
@@ -285,6 +295,12 @@ async def run_news_scan(
 
     # 3. TRIANGULATE + 4. PERSIST
     from app.services.relationship_intel import find_known_relationships
+    from app.services.news_actions import (
+        _looks_like_person,
+        queue_existing_contact,
+        queue_new_hotel,
+        queue_person_flag,
+    )
 
     async with async_session() as db:
         for it, v in judged:
@@ -326,7 +342,7 @@ async def run_news_scan(
             summary["items"].append(record)
 
             if apply:
-                await db.execute(
+                res = await db.execute(
                     text(
                         "INSERT INTO hotel_news (url, title, snippet, source, "
                         "published_hint, category, vertical, region, hotel_name, "
@@ -337,7 +353,7 @@ async def run_news_scan(
                         ":hotel_name, :brand, :person_name, :person_title, "
                         ":luxury, :in_pipeline, :pipeline_ref, :query, "
                         "CAST(:rel AS jsonb)) "
-                        "ON CONFLICT (url) DO NOTHING"
+                        "ON CONFLICT (url) DO NOTHING RETURNING id"
                     ),
                     {
                         **{k: record[k] for k in record if k != "relationship_hits"},
@@ -346,6 +362,48 @@ async def run_news_scan(
                         else None,
                     },
                 )
+                news_id = res.scalar()
+                # NEWS -> ACTION QUEUES (approval-gated; never auto-creates a lead)
+                if news_id is not None:
+                    try:
+                        await queue_new_hotel(
+                            db,
+                            news_id=news_id,
+                            hotel_name=hotel,
+                            brand=record["brand"],
+                            region=record["region"],
+                            vertical=record["vertical"],
+                            category=record["category"],
+                            luxury=record["luxury"],
+                            source=record["source"],
+                            url=record["url"],
+                            in_pipeline=in_pipe,
+                        )
+                        if rel_hits:
+                            await queue_person_flag(
+                                db,
+                                news_id=news_id,
+                                person_name=person or None,
+                                person_title=record["person_title"],
+                                new_hotel=hotel or None,
+                                new_org=record["brand"],
+                                hits=rel_hits,
+                                region=record["region"],
+                            )
+                        # new person at a hotel we already own (and don't know)
+                        elif in_pipe and _looks_like_person(person):
+                            await queue_existing_contact(
+                                db,
+                                news_id=news_id,
+                                hotel_name=hotel,
+                                person_name=person,
+                                person_title=record["person_title"],
+                                region=record["region"],
+                                category=record["category"],
+                            )
+                    except Exception as e:  # queue is best-effort, never blocks the scan
+                        logger.warning(f"news: action-queue failed: {e}")
+                        await db.rollback()
         if apply:
             await db.commit()
     return summary

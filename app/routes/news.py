@@ -20,30 +20,42 @@ async def list_news(
     db: AsyncSession = Depends(get_db),
 ):
     """Recent hospitality news, newest first. only_relationships=true
-    returns just the gold: items whose person matched our contacts."""
-    where = ["created_at > NOW() - make_interval(days => :days)"]
+    returns just the gold: items whose person matched our contacts.
+    Each story also carries its action-queue status (lead_queue_* /
+    person_review_*) so the feed can show badges + approve/action buttons."""
+    where = ["hn.created_at > NOW() - make_interval(days => :days)"]
     params: dict = {"days": days, "lim": min(max(limit, 1), 300)}
     if category:
-        where.append("category = :cat")
+        where.append("hn.category = :cat")
         params["cat"] = category
     if region:
-        where.append("region = :reg")
+        where.append("hn.region = :reg")
         params["reg"] = region
     if vertical:
-        where.append("vertical = :vert")
+        where.append("hn.vertical = :vert")
         params["vert"] = vertical
     if only_relationships:
-        where.append("relationship_hits IS NOT NULL")
+        where.append("hn.relationship_hits IS NOT NULL")
     rows = (
         (
             await db.execute(
                 text(
-                    "SELECT id, url, title, snippet, source, published_hint, "
-                    "category, vertical, region, hotel_name, brand, person_name, "
-                    "person_title, luxury, in_pipeline, pipeline_ref, "
-                    "relationship_hits, created_at FROM hotel_news "
+                    "SELECT hn.id, hn.url, hn.title, hn.snippet, hn.source, "
+                    "hn.published_hint, hn.category, hn.vertical, hn.region, "
+                    "hn.hotel_name, hn.brand, hn.person_name, hn.person_title, "
+                    "hn.luxury, hn.in_pipeline, hn.pipeline_ref, "
+                    "hn.relationship_hits, hn.created_at, "
+                    "lq.id AS lead_queue_id, lq.status AS lead_queue_status, "
+                    "lq.created_lead_id AS lead_queue_lead_id, "
+                    "pr.id AS person_review_id, pr.status AS person_review_status, "
+                    "cr.id AS contact_review_id, cr.status AS contact_review_status, "
+                    "cr.hotel_name AS contact_review_hotel "
+                    "FROM hotel_news hn "
+                    "LEFT JOIN news_lead_queue lq ON lq.news_id = hn.id "
+                    "LEFT JOIN news_person_review pr ON pr.news_id = hn.id "
+                    "LEFT JOIN news_contact_review cr ON cr.news_id = hn.id "
                     "WHERE " + " AND ".join(where) + " "
-                    "ORDER BY created_at DESC LIMIT :lim"
+                    "ORDER BY hn.created_at DESC LIMIT :lim"
                 ),
                 params,
             )
@@ -106,3 +118,53 @@ async def news_source_stats(db: AsyncSession = Depends(get_db)):
         "queries": [dict(r) for r in queries],
         "sources": [dict(r) for r in sources],
     }
+
+
+# ── ACTION QUEUES: approve/reject hotels · action/dismiss person moves ──────
+# Thin wrappers over app.services.news_actions (same logic the review CLI uses).
+
+
+@router.post("/api/news/lead-queue/{queue_id}/approve")
+async def approve_news_lead(queue_id: int, db: AsyncSession = Depends(get_db)):
+    """Approve a queued hotel → save_lead_to_db (its own dedup runs)."""
+    from app.services.news_actions import approve_lead
+
+    return await approve_lead(db, queue_id)
+
+
+@router.post("/api/news/lead-queue/{queue_id}/reject")
+async def reject_news_lead(queue_id: int, db: AsyncSession = Depends(get_db)):
+    from app.services.news_actions import reject_lead
+
+    return {"ok": await reject_lead(db, queue_id)}
+
+
+@router.post("/api/news/person-review/{review_id}/action")
+async def action_news_person(review_id: int, db: AsyncSession = Depends(get_db)):
+    """Apply a job-change: former edge + employed_by + warm lead_contact.
+    Blocks (leaves pending) if the destination hotel isn't a lead yet."""
+    from app.services.news_actions import apply_person_move
+
+    return await apply_person_move(db, review_id)
+
+
+@router.post("/api/news/person-review/{review_id}/dismiss")
+async def dismiss_news_person(review_id: int, db: AsyncSession = Depends(get_db)):
+    from app.services.news_actions import set_person_status
+
+    return {"ok": await set_person_status(db, review_id, "dismissed")}
+
+
+@router.post("/api/news/contact-review/{review_id}/add")
+async def add_news_contact(review_id: int, db: AsyncSession = Depends(get_db)):
+    """Attach a queued person to a hotel we already own as a new contact."""
+    from app.services.news_actions import approve_contact
+
+    return await approve_contact(db, review_id)
+
+
+@router.post("/api/news/contact-review/{review_id}/skip")
+async def skip_news_contact(review_id: int, db: AsyncSession = Depends(get_db)):
+    from app.services.news_actions import set_contact_status
+
+    return {"ok": await set_contact_status(db, review_id, "dismissed")}

@@ -703,6 +703,7 @@ async def save_lead_to_db(
         return {
             "status": "duplicate",
             "id": None,
+            "matched_existing_hotel_id": eh_existing.id,
             "reason": f"Already exists in existing_hotels (EH#{eh_existing.id})",
         }
 
@@ -868,6 +869,7 @@ async def save_lead_to_db(
                 return {
                     "status": "duplicate",
                     "id": None,
+                    "matched_existing_hotel_id": eh_cand.id,
                     "reason": (
                         f"Fuzzy match in existing_hotels (EH#{eh_cand.id}): " f"{cand_name}"
                     ),

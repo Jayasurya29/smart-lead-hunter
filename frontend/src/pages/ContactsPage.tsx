@@ -24,7 +24,7 @@ import {
   Sparkles, Wand2, X, RefreshCw, Inbox, Star, ChevronRight, ChevronDown,
   Mail, Phone, Linkedin, ExternalLink, MapPin, Building2, Shield, Hash,
   Eye, Users, Activity, Send, Check, Loader2, Trash2, CheckSquare, Square, Download,
-  Radar, Briefcase, Layers, Flame, Target, Package, Copy, Pencil,
+  Radar, Briefcase, Layers, Flame, Target, Package, Copy, Pencil, ArrowUpRight,
 } from 'lucide-react'
 import { cn, formatDate, relativeDate, getTierLabel } from '@/lib/utils'
 import type { InboxContact, InboxContactStats } from '@/api/inboxContacts'
@@ -70,6 +70,10 @@ function recencyFactor(iso: string | null): number {
 }
 function accountWarmth(known: UnifiedContact[]): number {
   return Math.round(known.reduce((s, c) => s + (c.interaction_count || 0) * recencyFactor(c.last_seen), 0))
+}
+/** Warmth for a single person (same model as accountWarmth, one contact). */
+function contactWarmth(c: UnifiedContact): number {
+  return Math.round((c.interaction_count || 0) * recencyFactor(c.last_seen))
 }
 type WarmthLevel = 'hot' | 'warm' | 'cool' | 'cold'
 function warmthLevel(w: number): WarmthLevel {
@@ -328,6 +332,11 @@ function confidencePct(c: InboxContact): number {
   const v = c.confidence ?? c.enrichment_confidence ?? 0
   return Math.round(v <= 1 ? v * 100 : v)
 }
+/** Whether we actually have an AI confidence value (vs. defaulting to 0 because
+ *  the contact was never enriched) — drives the "–" state on the ring. */
+function hasConfidence(c: InboxContact): boolean {
+  return c.confidence != null || c.enrichment_confidence != null
+}
 function roleText(c: InboxContact): string | null {
   return c.title || c.inferred_role || null
 }
@@ -494,6 +503,31 @@ function CategoryBadge({ category }: { category: string | null }) {
     <span className={cn('inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold capitalize', CATEGORY_BADGE[category] || CATEGORY_BADGE.junk)}>
       {category}
     </span>
+  )
+}
+
+/** Small circular confidence gauge (the donut in each row + the drawer header).
+ *  Colour tracks strength: green when strong, gold when middling, stone when thin. */
+function ConfidenceRing({ pct, size = 34, stroke = 3.5, label = false, unknown = false }: { pct: number; size?: number; stroke?: number; label?: boolean; unknown?: boolean }) {
+  const p = Math.max(0, Math.min(100, Math.round(pct)))
+  const r = (size - stroke) / 2
+  const circ = 2 * Math.PI * r
+  const color = unknown ? '#cfcbc4' : p >= 80 ? '#1a7a55' : p >= 60 ? '#c49a3c' : '#b0a99e'
+  return (
+    <div className="relative flex-shrink-0" style={{ width: size, height: size }}
+      title={unknown ? 'AI confidence — not enriched yet' : `AI confidence ${p}%`} role="img"
+      aria-label={unknown ? 'Confidence not available' : `Confidence ${p} percent`}>
+      <svg width={size} height={size} className="-rotate-90">
+        <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="#eceae5" strokeWidth={stroke} />
+        {!unknown && (
+          <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke={color} strokeWidth={stroke}
+            strokeLinecap="round" strokeDasharray={circ} strokeDashoffset={circ * (1 - p / 100)}
+            style={{ transition: 'stroke-dashoffset .5s ease' }} />
+        )}
+      </svg>
+      <span className="absolute inset-0 flex items-center justify-center tabular-nums font-bold"
+        style={{ color, fontSize: size * (label ? 0.3 : 0.32) }}>{unknown ? '–' : p}</span>
+    </div>
   )
 }
 
@@ -708,13 +742,19 @@ function DirRow({
   onOpenOrg?: (org: string) => void
 }) {
   const isLead = sourceOf(contact) === 'lead_generator'
+  const email = contact.email && !contact.email_is_former ? contact.email : null
+  const signal = contact.buying_signal_deal || (contact.buying_signal_label === 'buyer_evidence' ? contact.buying_signal_products : null)
+  const warmth = contactWarmth(contact)
+  const wLevel = warmthLevel(warmth)
+  const role = roleText(contact)
   return (
     <div onClick={onOpen} role="button" tabIndex={0}
       aria-label={`Open ${fullName(contact)}`}
       onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onOpen() } }}
-      className={cn('group flex items-center gap-3 pl-3 pr-4 py-2.5 rounded-xl cursor-pointer transition-colors',
+      className={cn('group flex items-center gap-3 pl-3 pr-4 py-3 rounded-xl cursor-pointer transition-colors',
         'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-navy-500',
         selected ? 'bg-white shadow-card ring-1 ring-navy-100' : 'hover:bg-white')}>
+      {/* selection: hidden until hover / select-mode (lead-gen rows aren't selectable) */}
       {isLead ? (
         <span className="w-4 flex-shrink-0" />
       ) : (
@@ -726,50 +766,91 @@ function DirRow({
         </button>
       )}
       <div className="relative flex-shrink-0">
-        <Avatar contact={contact} size={38} />
+        <Avatar contact={contact} size={40} />
+        {/* origin: inbox contact vs lead-generator target */}
         <span className="absolute -bottom-0.5 -left-0.5 w-3.5 h-3.5 rounded-full ring-2 ring-stone-50 flex items-center justify-center"
-          style={{ background: isLead ? '#7c3aed' : '#2e4a6e' }} title={isLead ? 'Lead Generator' : 'Email'}>
+          style={{ background: isLead ? '#7c3aed' : '#2e4a6e' }} title={isLead ? 'Lead-generator target' : 'From your inbox'}>
           {isLead ? <Radar className="w-2 h-2 text-white" /> : <Inbox className="w-2 h-2 text-white" />}
         </span>
       </div>
-      {/* name + role */}
-      <div className="min-w-0 w-[34%] flex-shrink-0">
-        <div className="flex items-center gap-1.5">
-          <span className="truncate font-semibold text-navy-900 text-sm">{fullName(contact)}</span>
-          {contact.is_decision_maker && <span className="inline-flex items-center gap-0.5 text-[10px] font-bold text-gold-700 bg-gold-50 px-1.5 py-0.5 rounded-full flex-shrink-0" title="Decision-maker">★ DM</span>}
-          {(contact.affiliation_count || 0) > 1 && <span className="inline-flex items-center text-[10px] font-bold text-violet-700 bg-violet-50 px-1.5 py-0.5 rounded-full flex-shrink-0" title={`Resolved across ${contact.affiliation_count} records / properties`}>{contact.affiliation_count} affiliations</span>}
-          {contact.target_match && <span className="text-[10px] font-bold text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded-full flex-shrink-0" title="Lead-generator target you already email — verified relationship">verified</span>}
+
+      {/* identity: name + high-opp, role · org, method icons + email */}
+      <div className="min-w-0 flex-1">
+        <div className="flex items-center gap-2 min-w-0">
+          <span className="truncate font-semibold text-navy-900 text-[15px]">{fullName(contact)}</span>
+          {isHighOpportunity(contact) && (
+            <span className="inline-flex items-center gap-0.5 text-[10px] font-bold text-coral-600 flex-shrink-0" title="High-opportunity account — prioritize outreach">
+              <ArrowUpRight className="w-3 h-3" />High opp
+            </span>
+          )}
+          {(contact.affiliation_count || 0) > 1 && (
+            <span className="hidden xl:inline-flex items-center text-[10px] font-bold text-violet-700 bg-violet-50 px-1.5 py-0.5 rounded-full flex-shrink-0"
+              title={`Resolved across ${contact.affiliation_count} records / properties`}>{contact.affiliation_count} affiliations</span>
+          )}
+          {contact.target_match && (
+            <span className="hidden lg:inline-flex items-center gap-0.5 text-[10px] font-bold text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded-full flex-shrink-0"
+              title="Verified relationship — a lead-generator target you already email">
+              <Target className="w-2.5 h-2.5" />verified
+            </span>
+          )}
         </div>
-        <div className="truncate text-stone-500 text-[13px] mt-0.5">{roleText(contact) || 'role unknown'}</div>
+        <div className="truncate text-stone-500 text-[13px] mt-0.5">
+          {role || <span className="italic text-stone-400">role unknown</span>}
+          {!hideOrg && contact.organization && (
+            <>
+              <span className="text-stone-300"> · </span>
+              <button onClick={(e) => { e.stopPropagation(); onOpenOrg?.(contact.organization!) }}
+                title={`See everyone at ${contact.organization}`}
+                className="font-semibold text-navy-700 hover:text-navy-900 hover:underline">{contact.organization}</button>
+            </>
+          )}
+        </div>
+        <div className="flex items-center gap-2 mt-1 min-w-0">
+          {/* email first: envelope + address */}
+          {email
+            ? <a href={`mailto:${email}`} onClick={(e) => e.stopPropagation()} className="inline-flex items-center gap-1.5 min-w-0 text-navy-500 hover:text-navy-800 group/em">
+                <Mail className="w-3.5 h-3.5 text-stone-400 flex-shrink-0 group-hover/em:text-navy-500" />
+                <span className="truncate text-[12.5px] group-hover/em:underline">{email}</span>
+              </a>
+            : <span className="inline-flex items-center gap-1.5 min-w-0 text-stone-400">
+                <Mail className="w-3.5 h-3.5 flex-shrink-0" />
+                <span className="truncate text-[12px] italic">{contact.email_is_former ? 'no current email' : 'no email yet'}</span>
+              </span>}
+          {/* then linkedin + phone symbols (brand-coloured when present) */}
+          {contact.linkedin_url && (
+            <a href={contact.linkedin_url} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()} title="LinkedIn"
+              className="flex-shrink-0 hover:opacity-75" style={{ color: '#0a66c2' }}><Linkedin className="w-3.5 h-3.5" /></a>
+          )}
+          {contact.phone && (
+            <a href={`tel:${contact.phone}`} onClick={(e) => e.stopPropagation()} title="Call"
+              className="flex-shrink-0 text-emerald-600 hover:opacity-75"><Phone className="w-3.5 h-3.5" /></a>
+          )}
+        </div>
       </div>
-      {/* email — the field reps need most. [listrow_former_email] a former/
-          stale email is treated as "no current email" (it lives in history),
-          so the list never shows or links a dead address. */}
-      <div className="min-w-0 flex-1 hidden md:block">
-        {contact.email && !contact.email_is_former
-          ? <a href={`mailto:${contact.email}`} onClick={(e) => e.stopPropagation()} className="truncate block text-[13px] text-navy-600 hover:text-navy-800 hover:underline font-medium">{contact.email}</a>
-          : <span className="text-[12px] text-stone-500 italic">{contact.email_is_former ? 'no current email' : 'no email yet'}</span>}
-      </div>
-      {/* quick actions — appear on hover, act without opening the drawer */}
-      <div className="hidden lg:flex items-center gap-1 flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
-        {contact.email && !contact.email_is_former && <a href={`mailto:${contact.email}`} onClick={(e) => e.stopPropagation()} title="Email" className="w-7 h-7 rounded-lg hover:bg-stone-100 flex items-center justify-center text-stone-500"><Mail className="w-4 h-4" /></a>}
-        {contact.phone && <a href={`tel:${contact.phone}`} onClick={(e) => e.stopPropagation()} title="Call" className="w-7 h-7 rounded-lg hover:bg-stone-100 flex items-center justify-center text-stone-500"><Phone className="w-4 h-4" /></a>}
-      </div>
-      {/* org + meta (status pills removed — org name is more useful here). Org is a link → jumps to that company. */}
+
+      {/* right cluster: buying signal · interactions · last activity · warmth · category · confidence */}
       <div className="flex items-center gap-3 flex-shrink-0">
-        {isHighOpportunity(contact) && <span className="hidden sm:inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-coral-50 text-coral-600 ring-1 ring-coral-200" title="High-opportunity account — prioritize outreach"><Flame className="w-3 h-3" />High opp</span>}
-        {!hideOrg && contact.organization
-          ? <button onClick={(e) => { e.stopPropagation(); onOpenOrg?.(contact.organization!) }} title={`See everyone at ${contact.organization}`}
-              className="hidden sm:block w-[200px] text-right truncate text-[12px] font-semibold text-navy-700 hover:text-navy-900 hover:underline">{contact.organization}</button>
-          : <span className="hidden sm:block w-[200px]" />}
+        {signal && (
+          <span className="hidden md:inline-flex items-center gap-1 max-w-[150px] px-2 py-1 rounded-lg text-[11px] font-semibold bg-coral-50 text-coral-600 ring-1 ring-coral-100"
+            title={contact.buying_signal_reason ? contact.buying_signal_reason.split('  |  ')[0] : 'Active buying signal'}>
+            <Flame className="w-3 h-3 flex-shrink-0" /><span className="truncate">{signal}</span>
+          </span>
+        )}
         {!isLead && contact.interaction_count > 0 && (
-          <span className="hidden lg:inline-flex items-center gap-1 text-[11px] tabular-nums text-stone-500 whitespace-nowrap"
-            title={`${contact.interaction_count} email${contact.interaction_count > 1 ? 's' : ''} exchanged — relationship warmth`}>
+          <span className="hidden lg:inline-flex items-center gap-1 text-[11px] tabular-nums text-stone-500 whitespace-nowrap w-9 justify-end"
+            title={`${contact.interaction_count} email${contact.interaction_count > 1 ? 's' : ''} exchanged`}>
             <Activity className="w-3 h-3 text-stone-400" aria-hidden="true" />{contact.interaction_count}
           </span>
         )}
-        <span className="w-12 text-right text-[11px] text-stone-500 whitespace-nowrap hidden xl:block">{isLead && contact.interaction_count === 0 ? 'new' : relativeDate(contact.last_seen)}</span>
-        <ChevronRight className="w-4 h-4 text-stone-300 group-hover:text-navy-400 transition-colors" />
+        <span className="w-[74px] text-right text-[11px] tabular-nums text-stone-500 whitespace-nowrap hidden xl:block">
+          {isLead && contact.interaction_count === 0 ? 'new' : relativeDate(contact.last_seen)}
+        </span>
+        <span className="hidden sm:block w-2.5 h-2.5 rounded-full flex-shrink-0 ml-0.5" style={{ background: WARMTH_COLOR[wLevel] }}
+          title={`${wLevel} · warmth ${warmth}`} />
+        {contact.contact_category && contact.contact_category !== 'junk' && (
+          <span className="hidden md:block"><CategoryBadge category={contact.contact_category} /></span>
+        )}
+        <ConfidenceRing pct={confidencePct(contact)} unknown={!hasConfidence(contact)} />
       </div>
     </div>
   )
@@ -1499,13 +1580,38 @@ function ProfilePanel({ contact, onDeleted }: { contact: UnifiedContact | null; 
               <span className="text-white/40">{'  at  '}</span>
               <span className="font-semibold text-white">{contact.organization || '—'}</span>
             </p>
+            {/* headline metrics — confidence · warmth · category */}
+            <div className="flex items-center gap-2 mt-2.5 flex-wrap">
+              <span className="inline-flex items-center gap-1.5 pl-1 pr-2.5 h-7 rounded-full bg-white/10 ring-1 ring-white/15 text-[11px] font-semibold text-white/85">
+                <ConfidenceRing pct={confidencePct(contact)} size={22} stroke={3} label unknown={!hasConfidence(contact)} /> confidence
+              </span>
+              {(() => {
+                const w = contactWarmth(contact); const lv = warmthLevel(w)
+                return (
+                  <span className="inline-flex items-center gap-1.5 px-2.5 h-7 rounded-full bg-white/10 ring-1 ring-white/15 text-[11px] font-semibold text-white/85">
+                    <span className="w-2 h-2 rounded-full" style={{ background: WARMTH_COLOR[lv] }} />
+                    <span className="capitalize">{lv}</span> · {w} warmth
+                  </span>
+                )
+              })()}
+              {contact.contact_category && (() => {
+                const chip: Record<string, string> = {
+                  buyer: 'bg-emerald-500/20 text-emerald-200 ring-emerald-300/30',
+                  seller: 'bg-gold-400/15 text-gold-200 ring-gold-300/30',
+                  competitor: 'bg-coral-500/20 text-coral-200 ring-coral-300/30',
+                  personal: 'bg-white/10 text-white/80 ring-white/15',
+                  operational: 'bg-white/10 text-white/80 ring-white/15',
+                  junk: 'bg-white/10 text-white/50 ring-white/10',
+                }
+                return <span className={cn('inline-flex items-center px-2.5 h-7 rounded-full ring-1 text-[11px] font-bold capitalize', chip[contact.contact_category!] || chip.junk)}>{contact.contact_category}</span>
+              })()}
+            </div>
             <div className="flex items-center gap-2 mt-2 flex-wrap text-[12px] text-white/60">
               {contact.address && <span className="inline-flex items-center gap-1"><MapPin className="w-3 h-3" />{contact.address}</span>}
               {sourceOf(contact) === 'lead_generator'
                 ? <span className="inline-flex items-center gap-1"><Radar className="w-3 h-3" />Found via Lead Generator · {relativeDate(contact.first_seen)}</span>
                 : <span className="inline-flex items-center gap-1"><Mail className="w-3 h-3" />{contact.last_inbound_at ? <>Last reply · {relativeDate(contact.last_inbound_at)}</> : <>In inbox · {relativeDate(contact.last_seen)}</>}</span>}
               <span className="inline-flex items-center gap-1">{accountTypeOf(contact) === 'management_company' ? <Briefcase className="w-3 h-3" /> : <Building2 className="w-3 h-3" />}{accountTypeOf(contact) === 'management_company' ? 'Management co.' : 'Hotel'}</span>
-              <CategoryBadge category={contact.contact_category} />
             </div>
           </div>
         </div>
@@ -2497,12 +2603,14 @@ export default function ContactsPage() {
               )}
             </p>
           </div>
-          <ExportButton />
-          <button onClick={() => syncMut.mutate()} disabled={syncMut.isPending}
-            className="flex items-center gap-2 px-4 h-10 rounded-xl text-[13px] font-semibold text-white bg-navy-600 hover:bg-navy-700 shadow-soft transition-all disabled:opacity-60">
-            <RefreshCw className={cn('w-4 h-4', syncMut.isPending && 'animate-spin')} />
-            {syncMut.isPending ? 'Syncing…' : 'Sync inbox'}
-          </button>
+          <div className="flex items-center gap-2">
+            <ExportButton />
+            <button onClick={() => syncMut.mutate()} disabled={syncMut.isPending}
+              className="flex items-center gap-2 px-4 h-10 rounded-xl text-[13px] font-semibold text-white bg-navy-600 hover:bg-navy-700 shadow-soft transition-all disabled:opacity-60">
+              <RefreshCw className={cn('w-4 h-4', syncMut.isPending && 'animate-spin')} />
+              {syncMut.isPending ? 'Syncing…' : 'Sync inbox'}
+            </button>
+          </div>
         </div>
 
         {/* search — the one hero control (isolated; see SearchBox) */}

@@ -6,7 +6,9 @@ Usage:
     python scripts/probe_successor_queries.py --org "Conrad Fort Lauderdale Beach" --title "F&B Manager"
 """
 from __future__ import annotations
-import argparse, asyncio, sys
+import argparse
+import asyncio
+import sys
 from pathlib import Path
 _ROOT = Path(__file__).resolve().parent.parent
 if str(_ROOT) not in sys.path:
@@ -44,7 +46,8 @@ async def main():
         try:
             res = await _search_serper(q, max_results=6)
         except Exception as e:
-            print(f"  ERROR: {e}"); continue
+            print(f"  ERROR: {e}")
+            continue
         if not res:
             print("  (no results)")
         for r in res:

@@ -1,8 +1,9 @@
 import { useState } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { cn } from '@/lib/utils'
 import {
   Newspaper, Loader2, ExternalLink, Handshake, Target, Star, RefreshCw,
+  Check, X, UserCheck, CheckCircle2, Search, ClipboardCheck,
 } from 'lucide-react'
 import { formatDistanceToNow } from 'date-fns'
 
@@ -32,6 +33,14 @@ interface NewsItem {
   pipeline_ref: string | null
   relationship_hits: RelationshipHit[] | null
   created_at: string
+  lead_queue_id: number | null
+  lead_queue_status: string | null      // pending | approved | rejected
+  lead_queue_lead_id: number | null
+  person_review_id: number | null
+  person_review_status: string | null   // pending | actioned | dismissed
+  contact_review_id: number | null
+  contact_review_status: string | null  // pending | actioned | dismissed
+  contact_review_hotel: string | null
 }
 
 const CATEGORIES = [
@@ -82,6 +91,8 @@ export default function NewsPage() {
   const [region, setRegion] = useState('')
   const [vertical, setVertical] = useState('')
   const [relOnly, setRelOnly] = useState(false)
+  const [q, setQ] = useState('')
+  const [reviewOnly, setReviewOnly] = useState(false)
 
   const params = new URLSearchParams()
   if (category) params.set('category', category)
@@ -100,6 +111,79 @@ export default function NewsPage() {
   const relCount = items.filter(
     (n) => n.relationship_hits && n.relationship_hits.length > 0,
   ).length
+
+  const qc = useQueryClient()
+  const inv = () => qc.invalidateQueries({ queryKey: ['news'] })
+  const post = async (url: string) => {
+    const res = await fetch(url, { method: 'POST', credentials: 'include' })
+    if (!res.ok) throw new Error(`Action failed (${res.status})`)
+    return res.json()
+  }
+  const approveLead = useMutation({
+    mutationFn: (id: number) => post(`/api/news/lead-queue/${id}/approve`),
+    onSuccess: (d) => {
+      if (d?.status === 'not_created') alert(`Not added — ${d.reason}`)
+      else if (d?.status === 'merged_contact')
+        alert(
+          d.attached_contact
+            ? `Hotel already exists — added ${d.attached_contact} as a contact instead.`
+            : 'Hotel already exists — nothing new to add.',
+        )
+      inv()
+    },
+  })
+  const rejectLead = useMutation({
+    mutationFn: (id: number) => post(`/api/news/lead-queue/${id}/reject`),
+    onSuccess: inv,
+  })
+  const actionPerson = useMutation({
+    mutationFn: (id: number) => post(`/api/news/person-review/${id}/action`),
+    onSuccess: (d) => {
+      if (d?.status === 'blocked') alert(d.reason)
+      inv()
+    },
+  })
+  const dismissPerson = useMutation({
+    mutationFn: (id: number) => post(`/api/news/person-review/${id}/dismiss`),
+    onSuccess: inv,
+  })
+  const addContact = useMutation({
+    mutationFn: (id: number) => post(`/api/news/contact-review/${id}/add`),
+    onSuccess: (d) => {
+      if (d?.status === 'not_found') alert('That contact review is no longer pending.')
+      inv()
+    },
+  })
+  const skipContact = useMutation({
+    mutationFn: (id: number) => post(`/api/news/contact-review/${id}/skip`),
+    onSuccess: inv,
+  })
+  const m: CardMutations = {
+    approveLead, rejectLead, actionPerson, dismissPerson, addContact, skipContact,
+  }
+
+  const pendingLeads = items.filter((n) => n.lead_queue_status === 'pending').length
+  const pendingMoves = items.filter((n) => n.person_review_status === 'pending').length
+  const pendingContacts = items.filter((n) => n.contact_review_status === 'pending').length
+
+  // client-side search + "needs review" filter over the fetched feed
+  const needle = q.trim().toLowerCase()
+  const visible = items.filter((n) => {
+    if (
+      reviewOnly &&
+      !(
+        n.lead_queue_status === 'pending' ||
+        n.person_review_status === 'pending' ||
+        n.contact_review_status === 'pending'
+      )
+    )
+      return false
+    if (needle) {
+      const hay = `${n.title} ${n.hotel_name ?? ''} ${n.person_name ?? ''} ${n.brand ?? ''} ${n.source ?? ''}`.toLowerCase()
+      if (!hay.includes(needle)) return false
+    }
+    return true
+  })
 
   return (
     <div className="h-full flex flex-col">
@@ -124,6 +208,30 @@ export default function NewsPage() {
                     </span>
                   </>
                 )}
+                {pendingLeads > 0 && (
+                  <>
+                    {' · '}
+                    <span className="text-amber-600 font-semibold">
+                      {pendingLeads} to approve
+                    </span>
+                  </>
+                )}
+                {pendingMoves > 0 && (
+                  <>
+                    {' · '}
+                    <span className="text-navy-600 font-semibold">
+                      {pendingMoves} move{pendingMoves > 1 ? 's' : ''} to review
+                    </span>
+                  </>
+                )}
+                {pendingContacts > 0 && (
+                  <>
+                    {' · '}
+                    <span className="text-emerald-600 font-semibold">
+                      {pendingContacts} contact{pendingContacts > 1 ? 's' : ''} to add
+                    </span>
+                  </>
+                )}
               </p>
             </div>
           </div>
@@ -138,6 +246,24 @@ export default function NewsPage() {
 
         {/* filters */}
         <div className="max-w-6xl mx-auto w-full px-6 pb-3 flex flex-wrap items-center gap-2">
+          <div className="relative w-full mb-1">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-stone-400" />
+            <input
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+              placeholder="Search stories — hotel, person, source…"
+              className="w-full h-9 pl-9 pr-8 text-sm rounded-lg border border-stone-200 bg-white text-navy-900 placeholder:text-stone-400 focus:outline-none focus:ring-2 focus:ring-navy-500/30 focus:border-navy-300"
+            />
+            {q && (
+              <button
+                onClick={() => setQ('')}
+                aria-label="Clear search"
+                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-stone-400 hover:text-stone-600"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            )}
+          </div>
           {CATEGORIES.map((c) => (
             <button
               key={c.key}
@@ -201,6 +327,29 @@ export default function NewsPage() {
             <Handshake className="w-3.5 h-3.5" />
             Relationships only
           </button>
+
+          <button
+            onClick={() => setReviewOnly((v) => !v)}
+            className={cn(
+              'h-8 px-3.5 inline-flex items-center gap-1.5 text-xs font-semibold rounded-full border transition',
+              reviewOnly
+                ? 'bg-amber-500 text-white border-amber-500 shadow-sm'
+                : 'bg-white text-amber-700 border-amber-200 hover:bg-amber-50',
+            )}
+          >
+            <ClipboardCheck className="w-3.5 h-3.5" />
+            Needs review
+            {pendingLeads + pendingMoves + pendingContacts > 0 && (
+              <span
+                className={cn(
+                  'ml-0.5 px-1.5 rounded-full text-[10px] font-bold',
+                  reviewOnly ? 'bg-white/25' : 'bg-amber-100 text-amber-700',
+                )}
+              >
+                {pendingLeads + pendingMoves + pendingContacts}
+              </span>
+            )}
+          </button>
         </div>
       </div>
 
@@ -215,15 +364,15 @@ export default function NewsPage() {
             <div className="h-60 flex items-center justify-center text-sm text-red-500">
               Couldn&apos;t load news. Try Refresh.
             </div>
-          ) : items.length === 0 ? (
+          ) : visible.length === 0 ? (
             <div className="h-60 flex flex-col items-center justify-center text-stone-400 gap-2">
               <Newspaper className="w-8 h-8" />
               <p className="text-sm">No stories match these filters.</p>
             </div>
           ) : (
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-3.5 items-start">
-              {items.map((n) => (
-                <NewsCard key={n.id} n={n} />
+              {visible.map((n) => (
+                <NewsCard key={n.id} n={n} m={m} />
               ))}
             </div>
           )}
@@ -233,7 +382,17 @@ export default function NewsPage() {
   )
 }
 
-function NewsCard({ n }: { n: NewsItem }) {
+type Mut = { mutate: (id: number) => void; isPending: boolean; variables?: number }
+type CardMutations = {
+  approveLead: Mut
+  rejectLead: Mut
+  actionPerson: Mut
+  dismissPerson: Mut
+  addContact: Mut
+  skipContact: Mut
+}
+
+function NewsCard({ n, m }: { n: NewsItem; m: CardMutations }) {
   const cat = CAT_STYLE[n.category ?? 'other'] ?? CAT_STYLE.other
   const hits = n.relationship_hits ?? []
   const hasRel = hits.length > 0
@@ -328,7 +487,7 @@ function NewsCard({ n }: { n: NewsItem }) {
         </div>
       )}
 
-      {(hasRel || n.in_pipeline) && (
+      {(hasRel || n.in_pipeline || n.lead_queue_status || n.person_review_status || n.contact_review_status) && (
         <div className="flex flex-wrap items-center gap-1.5 mt-3 pt-2.5 border-t border-slate-100">
           {hasRel && (
             <span className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-2xs font-bold bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200">
@@ -343,6 +502,106 @@ function NewsCard({ n }: { n: NewsItem }) {
               <Target className="w-3 h-3" />
               {n.pipeline_ref || 'In pipeline'}
             </span>
+          )}
+
+          {/* ── new hotel: approve into the pipeline ── */}
+          {n.lead_queue_status === 'approved' && (
+            <span className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-2xs font-bold bg-emerald-600 text-white">
+              <CheckCircle2 className="w-3 h-3" />
+              Added to pipeline{n.lead_queue_lead_id ? ` #${n.lead_queue_lead_id}` : ''}
+            </span>
+          )}
+          {n.lead_queue_status === 'rejected' && (
+            <span className="inline-flex items-center px-2 py-1 rounded-md text-2xs font-bold bg-stone-100 text-stone-400 line-through">
+              rejected
+            </span>
+          )}
+          {n.lead_queue_status === 'pending' && n.lead_queue_id != null && (
+            <>
+              <span className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-2xs font-bold bg-amber-50 text-amber-700 ring-1 ring-amber-200">
+                <Target className="w-3 h-3" />New hotel — queued
+              </span>
+              <button
+                disabled={m.approveLead.isPending}
+                onClick={() => m.approveLead.mutate(n.lead_queue_id!)}
+                className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-2xs font-bold bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50 transition"
+              >
+                {m.approveLead.isPending && m.approveLead.variables === n.lead_queue_id
+                  ? <Loader2 className="w-3 h-3 animate-spin" />
+                  : <Check className="w-3 h-3" />}
+                Approve
+              </button>
+              <button
+                disabled={m.rejectLead.isPending}
+                onClick={() => m.rejectLead.mutate(n.lead_queue_id!)}
+                className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-2xs font-bold bg-white text-stone-500 ring-1 ring-stone-200 hover:bg-stone-50 disabled:opacity-50 transition"
+              >
+                <X className="w-3 h-3" />Reject
+              </button>
+            </>
+          )}
+
+          {/* ── known person moved: apply the move ── */}
+          {n.person_review_status === 'actioned' && (
+            <span className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-2xs font-bold bg-emerald-600 text-white">
+              <CheckCircle2 className="w-3 h-3" />Move applied
+            </span>
+          )}
+          {n.person_review_status === 'pending' && n.person_review_id != null && (
+            <>
+              <span className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-2xs font-bold bg-navy-50 text-navy-700 ring-1 ring-navy-100">
+                <UserCheck className="w-3 h-3" />Known contact moved
+              </span>
+              <button
+                disabled={m.actionPerson.isPending}
+                onClick={() => m.actionPerson.mutate(n.person_review_id!)}
+                className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-2xs font-bold bg-navy-900 text-white hover:bg-navy-700 disabled:opacity-50 transition"
+              >
+                {m.actionPerson.isPending && m.actionPerson.variables === n.person_review_id
+                  ? <Loader2 className="w-3 h-3 animate-spin" />
+                  : <UserCheck className="w-3 h-3" />}
+                Apply move
+              </button>
+              <button
+                disabled={m.dismissPerson.isPending}
+                onClick={() => m.dismissPerson.mutate(n.person_review_id!)}
+                className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-2xs font-bold bg-white text-stone-500 ring-1 ring-stone-200 hover:bg-stone-50 disabled:opacity-50 transition"
+              >
+                <X className="w-3 h-3" />Dismiss
+              </button>
+            </>
+          )}
+
+          {/* ── new person at a hotel we own: add as a contact ── */}
+          {n.contact_review_status === 'actioned' && (
+            <span className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-2xs font-bold bg-emerald-600 text-white">
+              <CheckCircle2 className="w-3 h-3" />Contact added
+            </span>
+          )}
+          {n.contact_review_status === 'pending' && n.contact_review_id != null && (
+            <>
+              <span className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-2xs font-bold bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200">
+                <UserCheck className="w-3 h-3" />
+                New contact{n.contact_review_hotel ? ` · ${n.contact_review_hotel}` : ''}
+              </span>
+              <button
+                disabled={m.addContact.isPending}
+                onClick={() => m.addContact.mutate(n.contact_review_id!)}
+                className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-2xs font-bold bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50 transition"
+              >
+                {m.addContact.isPending && m.addContact.variables === n.contact_review_id
+                  ? <Loader2 className="w-3 h-3 animate-spin" />
+                  : <UserCheck className="w-3 h-3" />}
+                Add contact
+              </button>
+              <button
+                disabled={m.skipContact.isPending}
+                onClick={() => m.skipContact.mutate(n.contact_review_id!)}
+                className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-2xs font-bold bg-white text-stone-500 ring-1 ring-stone-200 hover:bg-stone-50 disabled:opacity-50 transition"
+              >
+                <X className="w-3 h-3" />Skip
+              </button>
+            </>
           )}
         </div>
       )}

@@ -39,6 +39,7 @@ from sqlalchemy import text  # noqa: E402
 from app.database import async_session  # noqa: E402
 from app.services.news_actions import (  # noqa: E402
     apply_person_move,
+    approve_contact,
     approve_lead,
     list_actions,
     looks_like_real_hotel,
@@ -46,6 +47,7 @@ from app.services.news_actions import (  # noqa: E402
     reopen_person,
     reset_stuck_leads,
     revert_action,
+    set_contact_status,
     set_person_status,
 )
 
@@ -59,6 +61,10 @@ async def show_list(db):
         "SELECT id, person_name, person_title, new_hotel, match_strength, "
         "known_account FROM news_person_review WHERE status='pending' ORDER BY id"
     ))).mappings().all()
+    contacts = (await db.execute(text(
+        "SELECT id, person_name, person_title, hotel_name, account_type "
+        "FROM news_contact_review WHERE status='pending' ORDER BY id"
+    ))).mappings().all()
 
     print(f"\n=== PENDING HOTEL LEADS ({len(hotels)}) — approve to add to pipeline ===")
     for h in hotels:
@@ -70,8 +76,14 @@ async def show_list(db):
         print(f"  [{p['id']:>4}] {(p['person_name'] or '')[:22]:<22} — "
               f"{(p['person_title'] or 'role?')[:20]:<20} @ {(p['new_hotel'] or '?')[:24]:<24} "
               f"[{p['match_strength']}: known from {(p['known_account'] or '?')[:22]}]")
-    print("\n  approve/reject a hotel: --approve ID / --reject ID")
-    print("  action/dismiss a flag : --action ID / --dismiss ID\n")
+    print(f"\n=== PENDING CONTACT REVIEWS ({len(contacts)}) — new person at a hotel we own ===")
+    for c in contacts:
+        print(f"  [{c['id']:>4}] {(c['person_name'] or '')[:22]:<22} — "
+              f"{(c['person_title'] or 'role?')[:20]:<20} @ {(c['hotel_name'] or '?')[:30]:<30} "
+              f"[{c['account_type']}]")
+    print("\n  approve/reject a hotel  : --approve ID / --reject ID")
+    print("  action/dismiss a flag   : --action ID / --dismiss ID")
+    print("  add/skip a contact      : --add-contact ID / --skip-contact ID\n")
 
 
 async def prune_bad(db):
@@ -117,6 +129,10 @@ async def main():
     ap.add_argument("--action", type=int)
     ap.add_argument("--reopen", type=int, help="reset a person flag to pending")
     ap.add_argument("--dismiss", type=int)
+    ap.add_argument("--add-contact", type=int, dest="add_contact",
+                    help="attach a queued contact to its existing hotel")
+    ap.add_argument("--skip-contact", type=int, dest="skip_contact",
+                    help="dismiss a queued contact review")
     args = ap.parse_args()
 
     async with async_session() as db:
@@ -145,6 +161,12 @@ async def main():
         elif args.dismiss is not None:
             ok = await set_person_status(db, args.dismiss, "dismissed")
             print(f"dismiss #{args.dismiss}: {'done' if ok else 'not found / not pending'}")
+        elif args.add_contact is not None:
+            r = await approve_contact(db, args.add_contact)
+            print(f"add-contact #{args.add_contact}: {r}")
+        elif args.skip_contact is not None:
+            ok = await set_contact_status(db, args.skip_contact, "dismissed")
+            print(f"skip-contact #{args.skip_contact}: {'done' if ok else 'not found / not pending'}")
         else:
             await show_list(db)
 
