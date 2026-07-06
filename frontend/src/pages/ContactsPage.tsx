@@ -24,10 +24,11 @@ import {
   Sparkles, Wand2, X, RefreshCw, Inbox, Star, ChevronRight, ChevronDown,
   Mail, Phone, Linkedin, ExternalLink, MapPin, Building2, Shield, Hash,
   Eye, Users, Activity, Send, Check, Loader2, Trash2, CheckSquare, Square, Download,
-  Radar, Briefcase, Layers, Flame, Target, Package, Copy, Pencil, ArrowUpRight,
+  Radar, Briefcase, Layers, Flame, Target, Package, Copy, Pencil, ArrowUpRight, Undo2,
 } from 'lucide-react'
 import { cn, formatDate, relativeDate, getTierLabel } from '@/lib/utils'
 import type { InboxContact, InboxContactStats } from '@/api/inboxContacts'
+import { previewMergeContacts } from '@/api/inboxContacts'
 import AffiliationCard from '@/components/contacts/AffiliationCard'
 import {
   useAllInboxContacts,
@@ -41,6 +42,9 @@ import {
   useFindSuccessor,
   useApproveInboxContact,
   useBulkApproveInboxContacts,
+  useBulkJunkContacts,
+  useBulkUnjunkContacts,
+  useMergeContacts,
   useDeleteInboxContact,
   useUpdateInboxContact,
   useUpdateLeadContact,
@@ -2030,6 +2034,99 @@ function ExportButton() {
   )
 }
 
+// [merge_ux] preview-then-merge modal. Shown when exactly 2 contacts are
+// selected. Survivor defaults to the richer row; user can flip direction.
+function MergeModal({ a, b, onClose, onDone }: {
+  a: UnifiedContact; b: UnifiedContact; onClose: () => void
+  onDone: (primaryId: number, mergeId: number) => void
+}) {
+  const richer = (x: UnifiedContact) =>
+    (x.email ? 1 : 0) + (x.linkedin_url ? 1 : 0) + (x.phone ? 1 : 0) +
+    (x.title ? 1 : 0) + (x.background ? 1 : 0) + (x.interaction_count || 0) * 0.1
+  const [primary, setPrimary] = useState<UnifiedContact>(richer(a) >= richer(b) ? a : b)
+  const loser = primary.id === a.id ? b : a
+  const [preview, setPreview] = useState<Record<string, { primary: any; loser: any; merged: any }> | null>(null)
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState<string | null>(null)
+
+  useEffect(() => {
+    let live = true
+    setPreview(null); setErr(null)
+    previewMergeContacts(primary.id, loser.id)
+      .then((r) => { if (live) setPreview(r.fields) })
+      .catch(() => { if (live) setErr('Could not load preview.') })
+    return () => { live = false }
+  }, [primary.id, loser.id])
+
+  const rows = preview
+    ? Object.entries(preview).filter(([, v]) => v.primary || v.loser)
+    : []
+
+  return (
+    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
+      <div onClick={(e) => e.stopPropagation()}
+        className="w-full max-w-2xl max-h-[85vh] overflow-hidden flex flex-col bg-white rounded-2xl shadow-lift ring-1 ring-stone-200">
+        <div className="flex items-center justify-between px-5 py-3.5 border-b border-stone-100">
+          <h3 className="text-sm font-bold text-navy-900">Merge two contacts</h3>
+          <button onClick={onClose} className="text-stone-400 hover:text-stone-600"><X className="w-4 h-4" /></button>
+        </div>
+
+        <div className="px-5 py-3 flex items-center gap-2 text-[13px]">
+          <span className="text-stone-500">Keep:</span>
+          <button onClick={() => setPrimary(a)}
+            className={cn('px-2.5 py-1.5 rounded-lg text-left flex-1 ring-1 transition',
+              primary.id === a.id ? 'bg-navy-50 ring-navy-200 font-semibold text-navy-900' : 'ring-stone-200 text-stone-500 hover:bg-stone-50')}>
+            <div className="truncate">{fullName(a)}</div><div className="text-[11px] text-stone-400 truncate">{a.email}</div>
+          </button>
+          <button onClick={() => setPrimary(b)}
+            className={cn('px-2.5 py-1.5 rounded-lg text-left flex-1 ring-1 transition',
+              primary.id === b.id ? 'bg-navy-50 ring-navy-200 font-semibold text-navy-900' : 'ring-stone-200 text-stone-500 hover:bg-stone-50')}>
+            <div className="truncate">{fullName(b)}</div><div className="text-[11px] text-stone-400 truncate">{b.email}</div>
+          </button>
+        </div>
+
+        <div className="flex-1 overflow-y-auto px-5 pb-2">
+          {err ? <p className="text-[13px] text-red-600 py-4">{err}</p>
+            : !preview ? <div className="flex items-center gap-2 text-stone-400 text-[13px] py-6"><Loader2 className="w-4 h-4 animate-spin" /> Loading preview…</div>
+            : (
+              <table className="w-full text-[12.5px]">
+                <thead><tr className="text-[10px] uppercase tracking-wide text-stone-400">
+                  <th className="text-left font-bold py-1 w-28">Field</th>
+                  <th className="text-left font-bold py-1">Result after merge</th>
+                </tr></thead>
+                <tbody>
+                  {rows.map(([f, v]) => (
+                    <tr key={f} className="border-t border-stone-50">
+                      <td className="py-1.5 text-stone-400 capitalize align-top">{f.replace(/_/g, ' ')}</td>
+                      <td className="py-1.5 text-navy-800 break-words">
+                        {String(v.merged ?? '—')}
+                        {v.loser && v.merged !== v.loser && (
+                          <span className="ml-1.5 text-[11px] text-stone-400 line-through">{String(v.loser)}</span>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+        </div>
+
+        <div className="px-5 py-3 border-t border-stone-100 flex items-center justify-between">
+          <span className="text-[11px] text-stone-400">{fullName(loser)} moves to Trash (reversible).</span>
+          <div className="flex items-center gap-2">
+            <button onClick={onClose} className="px-3 py-1.5 text-[13px] font-medium text-stone-500 hover:text-stone-700">Cancel</button>
+            <button disabled={busy || !preview}
+              onClick={async () => { setBusy(true); try { onDone(primary.id, loser.id) } finally { setBusy(false) } }}
+              className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-[13px] font-bold text-white bg-navy-600 hover:bg-navy-700 disabled:opacity-60">
+              {busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />} Merge
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 export default function ContactsPage() {
   const [params, setParams] = useSearchParams()
 
@@ -2095,6 +2192,18 @@ export default function ContactsPage() {
   const leadQ = useAllLeadContacts()
   const syncMut = useTriggerInboxSync()
   const bulkApproveMut = useBulkApproveInboxContacts()
+  const bulkJunkMut = useBulkJunkContacts()
+  const bulkUnjunkMut = useBulkUnjunkContacts()
+  const mergeMut = useMergeContacts()
+  const [mergeOpen, setMergeOpen] = useState(false)
+  // [action_feedback] lightweight confirmation toast for bulk actions
+  const [toast, setToast] = useState<{ msg: string; kind: 'ok' | 'err' } | null>(null)
+  const toastTimer = useRef<number | null>(null)
+  function showToast(msg: string, kind: 'ok' | 'err' = 'ok') {
+    setToast({ msg, kind })
+    if (toastTimer.current) window.clearTimeout(toastTimer.current)
+    toastTimer.current = window.setTimeout(() => setToast(null), 3000)
+  }
 
   const stats: InboxContactStats | undefined = statsQ.data
 
@@ -2581,7 +2690,27 @@ export default function ContactsPage() {
     })
   }
   function clearSelection() { setSelected(new Set()) }
-  function bulkApprove() { bulkApproveMut.mutate(Array.from(selected), { onSuccess: clearSelection }) }
+  function bulkApprove() {
+    const n = selected.size
+    bulkApproveMut.mutate(Array.from(selected), {
+      onSuccess: () => { clearSelection(); showToast(`${n} approved`) },
+      onError: () => showToast('Approve failed — try again', 'err'),
+    })
+  }
+  function bulkTrash() {
+    const n = selected.size
+    bulkJunkMut.mutate(Array.from(selected), {
+      onSuccess: () => { clearSelection(); showToast(`${n} moved to Trash`) },
+      onError: () => showToast('Move to Trash failed — try again', 'err'),
+    })
+  }
+  function bulkRestore() {
+    const n = selected.size
+    bulkUnjunkMut.mutate(Array.from(selected), {
+      onSuccess: () => { clearSelection(); showToast(`${n} restored`) },
+      onError: () => showToast('Restore failed — try again', 'err'),
+    })
+  }
   function selectAllVisible() { setSelected(new Set(filtered.filter((c) => sourceOf(c) !== 'lead_generator').map((c) => c.id))) }
 
   return (
@@ -2815,11 +2944,32 @@ export default function ContactsPage() {
             <button onClick={selectAllVisible} className="text-[11px] font-semibold text-white/60 hover:text-white">Select all {filtered.filter((c) => sourceOf(c) !== 'lead_generator').length}</button>
             <div className="w-px h-4 bg-white/20" />
             <button onClick={clearSelection} className="text-[11px] font-semibold text-white/60 hover:text-white">Clear</button>
-            <button onClick={bulkApprove} disabled={bulkApproveMut.isPending}
-              className="inline-flex items-center gap-1.5 h-8 px-3 rounded-lg text-xs font-bold text-navy-900 bg-gold-300 hover:bg-gold-200 transition-all disabled:opacity-60">
-              {bulkApproveMut.isPending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />}
-              Approve {selected.size}
-            </button>
+            {category !== 'junk' && selected.size === 2 && (
+              <button onClick={() => setMergeOpen(true)}
+                className="inline-flex items-center gap-1.5 h-8 px-3 rounded-lg text-xs font-bold text-white/90 ring-1 ring-white/25 hover:bg-white/10 transition-all">
+                <Copy className="w-3.5 h-3.5" /> Merge
+              </button>
+            )}
+            {category === 'junk' ? (
+              <button onClick={bulkRestore} disabled={bulkUnjunkMut.isPending}
+                className="inline-flex items-center gap-1.5 h-8 px-3 rounded-lg text-xs font-bold text-navy-900 bg-emerald-300 hover:bg-emerald-200 transition-all disabled:opacity-60">
+                {bulkUnjunkMut.isPending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Undo2 className="w-3.5 h-3.5" />}
+                Restore {selected.size}
+              </button>
+            ) : (
+              <>
+                <button onClick={bulkTrash} disabled={bulkJunkMut.isPending} title="Move to Trash (reversible)"
+                  className="inline-flex items-center gap-1.5 h-8 px-3 rounded-lg text-xs font-bold text-white/90 ring-1 ring-white/25 hover:bg-white/10 transition-all disabled:opacity-60">
+                  {bulkJunkMut.isPending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Trash2 className="w-3.5 h-3.5" />}
+                  Trash {selected.size}
+                </button>
+                <button onClick={bulkApprove} disabled={bulkApproveMut.isPending}
+                  className="inline-flex items-center gap-1.5 h-8 px-3 rounded-lg text-xs font-bold text-navy-900 bg-gold-300 hover:bg-gold-200 transition-all disabled:opacity-60">
+                  {bulkApproveMut.isPending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />}
+                  Approve {selected.size}
+                </button>
+              </>
+            )}
           </div>
         )}
       </div>
@@ -2856,6 +3006,35 @@ export default function ContactsPage() {
           </div>
         </div>
       </div>
+
+      {/* ════ MERGE MODAL ════ */}
+      {mergeOpen && selected.size === 2 && (() => {
+        const [id1, id2] = Array.from(selected)
+        const c1 = items.find((c) => c.id === id1)
+        const c2 = items.find((c) => c.id === id2)
+        if (!c1 || !c2) return null
+        return (
+          <MergeModal a={c1} b={c2}
+            onClose={() => setMergeOpen(false)}
+            onDone={(primaryId, mergeId) => {
+              mergeMut.mutate({ primaryId, mergeId }, {
+                onSuccess: () => { setMergeOpen(false); clearSelection(); showToast('Contacts merged') },
+                onError: () => showToast('Merge failed — try again', 'err'),
+              })
+            }} />
+        )
+      })()}
+
+      {/* ════ ACTION TOAST ════ */}
+      {toast && (
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-[70] animate-fadeIn">
+          <div className={cn('flex items-center gap-2 px-4 py-2.5 rounded-xl shadow-lift text-[13px] font-semibold text-white',
+            toast.kind === 'ok' ? 'bg-navy-900' : 'bg-coral-500')}>
+            {toast.kind === 'ok' ? <Check className="w-4 h-4 text-emerald-300" /> : <X className="w-4 h-4" />}
+            {toast.msg}
+          </div>
+        </div>
+      )}
     </div>
   )
 }

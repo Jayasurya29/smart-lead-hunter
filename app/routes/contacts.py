@@ -1653,6 +1653,7 @@ async def _apply_lead_contact_move(contact_id: int) -> dict:
         "mode": "apply",
         "found": True,
         "employer_changed": (not left_industry),
+        "internal_move": bool(ce.get("internal_move")),
         "left_industry": left_industry,
         "current_employer": new_emp,
         "former_employer": former_org,

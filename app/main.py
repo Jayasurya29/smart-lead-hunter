@@ -16,6 +16,7 @@ from pathlib import Path
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.types import ASGIApp, Receive, Scope, Send
@@ -315,6 +316,9 @@ app.add_middleware(
     allow_methods=["GET", "POST", "PATCH", "DELETE"],
     allow_headers=["Content-Type", "Authorization", "X-Requested-With", "X-API-Key"],
 )
+
+# gzip — the 43k-row contacts payload compresses ~10x; near-free CPU cost.
+app.add_middleware(GZipMiddleware, minimum_size=1024)
 
 # Pure ASGI middlewares (added in reverse — last added = outermost wrapper)
 app.add_middleware(RateLimitMiddleware)

@@ -3057,6 +3057,17 @@ async def sync_mailbox(
                     _kcv = (_kc.scalar() or "").strip().lower()
                     if _kcv in ("seller", "vendor", "competitor"):
                         _hit["label"] = "vendor_or_noise"
+                    # [role_learning] buyer_evidence = we can SEE this person
+                    # purchasing -> their TITLE is confirmed buyer-role
+                    # knowledge. Teach the contact_roles dictionary so future
+                    # contacts with the same role are auto-recognized.
+                    if _hit.get("label") == "buyer_evidence":
+                        try:
+                            from app.services.role_learning import learn_role_from_buyer
+
+                            await learn_role_from_buyer(session, _bemail)
+                        except Exception as _rl_err:
+                            logger.warning(f"role_learning skipped for {_bemail}: {_rl_err}")
                     await session.execute(
                         text(
                             "UPDATE contacts SET "

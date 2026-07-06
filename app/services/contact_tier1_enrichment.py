@@ -220,7 +220,7 @@ async def run_tier1(
         resolver = await ClientResolver().load(session)
         # Rep-curated junk domains: a contact from one of these is junk
         # deterministically (no LLM) — the learning junk system.
-        from app.services.junk_rules import load_junk_domains, is_junk_domain
+        from app.services.junk_rules import load_junk_domains, is_junk_domain, classify_by_rule
 
         _junk_domains = await load_junk_domains(session)
         # Known-hotel domains: a contact whose email domain is a confirmed hotel
@@ -257,6 +257,10 @@ async def run_tier1(
         # the vendor list) still falls through to the competitor check below.
         if is_junk_domain(email, _junk_domains):
             category, source = "junk", "junk_domain"
+        elif rule_v := classify_by_rule(email):
+            # deterministic pattern rules (machine/automated locals, SaaS
+            # domains -> junk; role inboxes -> operational). No LLM cost.
+            category, source = rule_v, "rule"
         elif is_vendor(r.organization, email):
             category, source = "seller", "vendor_list"
         elif is_competitor(r.organization, email):

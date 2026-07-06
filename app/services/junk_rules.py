@@ -21,6 +21,8 @@ category, so a manual or domain junk drops out immediately.
 
 from __future__ import annotations
 
+import re as _re
+
 from typing import Optional
 
 from sqlalchemy import text
@@ -184,3 +186,184 @@ async def junk_domain_suggestions(session: AsyncSession, threshold: int = 3) -> 
         .all()
     )
     return [dict(r) for r in rows if r["domain"]]
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# Tier 0: deterministic PATTERN rules (2026-07-06, built from the real 32k
+# export). Runs before any LLM. Three conservative classes only — the ambiguous
+# one-email long tail is deliberately left for the classifier/human:
+#   machine locals        -> junk        (hex/uuid blobs, sourcing+hash, digit IDs)
+#   automated locals      -> junk        (noreply/notifications/newsletter/...)
+#   SaaS/carrier domains  -> junk        (ups/dhl/adp/intuit/docusign/... ANCHORED:
+#                                         'stripe.com' must not catch 'pinstripes.com')
+#   role-inbox locals     -> operational (sales@/admin@/accounting@/ap@/hr@/...;
+#                                         purchasing@/procurement@ EXCLUDED — buying
+#                                         inboxes stay buyer by policy)
+# Human overrides always win: rows with manual_category set are never touched.
+# ═════════════════════════════════════════════════════════════════════════════
+
+
+_MACHINE_LOCAL = _re.compile(
+    r"^(?:"
+    r"[a-f0-9]{12,}"
+    r"|\d{6,}.*"
+    r"|.{30,}"
+    r"|(?:bounce|prvs=|msprvs|btv1|srs0|srs1)\S*"
+    r"|\S+\+[a-f0-9]{10,}"
+    r")$"
+)
+
+_AUTOMATED_LOCAL = _re.compile(
+    r"^(?:no-?reply|donotreply|do-not-reply|notifications?|alerts?|newsletters?"
+    r"|marketing|mailer(?:-daemon)?|bounces?|auto(?:mated|reply)?|system"
+    r"|updates?|digest|confirm(?:ations?)?|receipts?|broadcast"
+    r"|campaigns?|promo(?:tions?)?|unsubscribe|listserv|majordomo|postmaster"
+    r"|webmaster|daemon)"
+    r"(?:[._\-\d].*)?$"
+)
+
+_JUNK_DOMAINS_STATIC = {
+    # NOTE: carriers (ups/dhl/fedex/usps) are deliberately NOT here — their
+    # staff (aviation purchasing, ops) are uniform BUYERS; carrier notification
+    # noise comes from automated locals, which the local rules catch.
+    "adp.com",
+    "paychex.com",
+    "gusto.com",
+    "paylocity.com",
+    "ukg.com",
+    "bamboohr.com",
+    "workday.com",
+    "intuit.com",
+    "quickbooks.com",
+    "bill.com",
+    "avidbill.com",
+    "docusign.com",
+    "docusign.net",
+    "stripe.com",
+    "paypal.com",
+    "squareup.com",
+    "shopify.com",
+    "concursolutions.com",
+    "expensify.com",
+    "mailchimp.com",
+    "mailchimpapp.com",
+    "sendgrid.net",
+    "sendgrid.com",
+    "constantcontact.com",
+    "klaviyo.com",
+    "hubspot.com",
+    "hubspotemail.net",
+    "salesforce.com",
+    "marketo.com",
+    "pardot.com",
+    "braze.com",
+    "zendesk.com",
+    "freshdesk.com",
+    "surveymonkey.com",
+    "typeform.com",
+    "eventbrite.com",
+    "calendly.com",
+    "zoominfo.com",
+    "apollo.io",
+    "linkedin.com",
+    "facebookmail.com",
+    "amazonses.com",
+    "mandrillapp.com",
+    "postmarkapp.com",
+    "mailgun.org",
+    "mailgun.net",
+    "iterable.com",
+    "glassdoor.com",
+    "indeed.com",
+    "ziprecruiter.com",
+}
+
+_OPERATIONAL_LOCAL = _re.compile(
+    r"^(?:sales|admin|accounting|accounts?|ap|ar|payroll|billing|invoices?"
+    r"|orders?|office|frontdesk|reception|reservations?|bookings?|events?"
+    r"|catering|banquets?|hr|humanresources|careers?|jobs|recruiting"
+    r"|helpdesk|support|service|customerservice|customercare|feedback"
+    r"|info|contact|hello|team|mail|email|enquir(?:y|ies)|inquir(?:y|ies)"
+    r"|security|facilities|maintenance|housekeeping|engineering|it"
+    r"|press|media|pr|concierge|guestservices?|frontoffice)"
+    r"(?:[._\-\d].*)?$"
+)
+
+
+def _registrable(domain: str) -> str:
+    parts = (domain or "").lower().strip().split(".")
+    return ".".join(parts[-2:]) if len(parts) >= 2 else (domain or "").lower()
+
+
+def classify_by_rule(email: str) -> Optional[str]:
+    """'junk' | 'operational' | None — deterministic, no DB, no LLM."""
+    em = (email or "").strip().lower()
+    if "@" not in em:
+        return None
+    local, _, domain = em.partition("@")
+    if _registrable(domain) in _JUNK_DOMAINS_STATIC or domain in _JUNK_DOMAINS_STATIC:
+        return "junk"
+    if _MACHINE_LOCAL.match(local):
+        return "junk"
+    if _AUTOMATED_LOCAL.match(local):
+        return "junk"
+    if _OPERATIONAL_LOCAL.match(local):
+        return "operational"
+    return None
+
+
+async def apply_junk_rules(dry_run: bool = True, limit: int = 200_000) -> dict:
+    """Backfill existing contacts through the pattern rules.
+
+    Skips rows with manual_category (human wins) and rows already
+    junk/operational. Writes contact_category + category_source='rule'.
+    """
+    from app.database import async_session
+
+    stats: dict = {"scanned": 0, "junk": 0, "operational": 0, "dry_run": dry_run, "samples": []}
+    async with async_session() as session:
+        rows = (
+            await session.execute(
+                text(
+                    "SELECT id, email FROM contacts "
+                    "WHERE manual_category IS NULL "
+                    "AND COALESCE(contact_category,'') NOT IN ('junk','operational') "
+                    "ORDER BY id LIMIT :lim"
+                ),
+                {"lim": limit},
+            )
+        ).all()
+        to_junk: list[int] = []
+        to_oper: list[int] = []
+        for r in rows:
+            stats["scanned"] += 1
+            v = classify_by_rule(r.email or "")
+            if v == "junk":
+                to_junk.append(r.id)
+                if len(stats["samples"]) < 30:
+                    stats["samples"].append(f"junk: {r.email}")
+            elif v == "operational":
+                to_oper.append(r.id)
+                if len(stats["samples"]) < 30:
+                    stats["samples"].append(f"oper: {r.email}")
+        stats["junk"] = len(to_junk)
+        stats["operational"] = len(to_oper)
+        if not dry_run:
+            if to_junk:
+                await session.execute(
+                    text(
+                        "UPDATE contacts SET contact_category='junk', "
+                        "category_source='rule', updated_at=now() WHERE id = ANY(:ids)"
+                    ),
+                    {"ids": to_junk},
+                )
+            if to_oper:
+                await session.execute(
+                    text(
+                        "UPDATE contacts SET contact_category='operational', "
+                        "category_source='rule', updated_at=now() WHERE id = ANY(:ids)"
+                    ),
+                    {"ids": to_oper},
+                )
+            await session.commit()
+    return stats

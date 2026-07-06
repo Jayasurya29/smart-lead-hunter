@@ -221,10 +221,20 @@ async def wiza_current_employer(
 
 
 async def _judge_relationship(org: str, found: str) -> str:
-    """Classify the on-file org vs the found employer: 'same' | 'parent' | 'moved'.
-    Cheap _norm match short-circuits to 'same'; only ambiguous pairs hit the LLM
-    (so a punctuation/parent-naming difference like 'Ritz-Carlton Club St. Thomas'
-    vs 'Ritz-Carlton Hotel Company' is judged 'same', not a false 'moved')."""
+    """Classify on-file org vs found employer: 'same' | 'internal_move' | 'moved'.
+
+    Three states, because "same company?" and "same seat?" are different questions:
+      - same          : identical employer (rename / punctuation / parent-vs-parent)
+      - internal_move : SAME brand family but a DIFFERENT property or a
+                        corporate<->property shift (e.g. 'Marriott International'
+                        -> 'The Westin Tampa Bay'). A real seat change worth
+                        tracking -- new location, possibly new buying authority,
+                        and the OLD seat is vacated -- but NOT a company change.
+      - moved         : a genuinely different company (changed employers).
+    Cheap _norm match short-circuits to 'same'; brand-token overlap with a
+    differing specific name becomes 'internal_move'; only truly ambiguous pairs
+    hit the LLM.
+    """
 
     def _norm(s: str) -> str:
         s = (s or "").lower()
@@ -251,33 +261,73 @@ async def _judge_relationship(org: str, found: str) -> str:
         return "moved" if found else "unknown"
     if _norm(org) == _norm(found):
         return "same"
-    # token-overlap fast path: strong shared brand token -> treat as same/parent
-    a, b = set(_norm(org).split()), set(_norm(found).split())
-    if a and b and len(a & b) >= 1 and (a <= b or b <= a):
-        return "same"
+    # Brand-token overlap: the two names share a distinctive brand token but are
+    # NOT identical. This is the corporate<->property / property<->property case.
+    # Generic hospitality words are stripped so the overlap must be a real brand
+    # token (marriott, hilton, westin...), not "hotel"/"resort".
+    _GENERIC = {
+        "international",
+        "hospitality",
+        "group",
+        "management",
+        "properties",
+        "collection",
+        "worldwide",
+        "global",
+        "corporation",
+        "services",
+        "spa",
+        "suites",
+        "inn",
+        "club",
+        "beach",
+        "bay",
+        "golf",
+        "island",
+        "downtown",
+    }
+    a = {t for t in _norm(org).split() if len(t) >= 3 and t not in _GENERIC}
+    b = {t for t in _norm(found).split() if len(t) >= 3 and t not in _GENERIC}
+    shared = a & b
+    if shared:
+        # subset either way with NO distinguishing extra token = same entity
+        # ('Ritz-Carlton Club St Thomas' vs 'Ritz-Carlton Hotel Company').
+        # shared brand token BUT each side has its own extra token = the person
+        # sits at a different specific place within the brand = internal move.
+        extra_org = a - shared
+        extra_found = b - shared
+        if extra_found and (extra_org != extra_found):
+            return "internal_move"
+        if a <= b or b <= a:
+            return "same"
 
     try:
         import httpx
         from app.services.ai_client import ai_generate
 
         prompt = (
-            "Two company names for one person's employer. Decide their relationship.\n"
+            "Two employer names for ONE person: what we have ON FILE, and what a "
+            "fresh search shows they're at NOW. Classify the relationship.\n"
             f"ON FILE: {org}\nFOUND NOW: {found}\n"
-            "Answer with ONE word only:\n"
-            "SAME  - same employer (incl. rename, punctuation, or property-vs-parent "
-            "of the SAME company/brand, e.g. a specific Ritz-Carlton property vs "
-            "Ritz-Carlton Hotel Company, or 'X Resort & Villas' vs 'X Resort + Villas')\n"
-            "MOVED - a genuinely DIFFERENT company (they changed jobs)\n"
-            "Answer SAME or MOVED."
+            "Answer with ONE word:\n"
+            "SAME     - the same employer (rename, punctuation, or parent-vs-parent "
+            "of the same company, e.g. a Ritz-Carlton property vs Ritz-Carlton Hotel Company)\n"
+            "INTERNAL - the SAME hotel brand/parent company, but a DIFFERENT specific "
+            "property or a corporate<->property shift (e.g. 'Marriott International' -> "
+            "'The Westin Tampa Bay', or 'Hilton' -> 'Hilton Chicago'). Same company, new seat.\n"
+            "MOVED    - a genuinely DIFFERENT company (changed employers)\n"
+            "Answer SAME, INTERNAL, or MOVED."
         )
         async with httpx.AsyncClient(timeout=40) as c:
             ans = await ai_generate(c, prompt, temperature=0.0, max_tokens=8)
         verdict = (ans or "").strip().upper()
+        if verdict.startswith("INTERNAL"):
+            return "internal_move"
         return "same" if verdict.startswith("SAME") else "moved"
     except Exception as e:
         logger.warning(f"current_employer: relationship judge failed: {e}")
         # conservative on failure: don't cry 'moved' on a maybe-same pair
-        return "moved" if not (a & b) else "same"
+        return "moved" if not shared else "same"
 
 
 async def find_current_employer(
@@ -301,7 +351,11 @@ async def find_current_employer(
     emp = result.get("current_employer") or ""
     rel = await _judge_relationship(org, emp) if emp else "unknown"
     result["relationship"] = rel
-    result["moved"] = rel == "moved"
+    # 'internal_move' = same company, new property/seat. It is a real seat change
+    # (re-file the property, vacate the old seat) but NOT an employer change, so
+    # it sets moved=True with an internal flag downstream can treat specially.
+    result["internal_move"] = rel == "internal_move"
+    result["moved"] = rel in ("moved", "internal_move")
     result["same"] = rel == "same"
     return result
 

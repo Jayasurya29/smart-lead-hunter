@@ -1,5 +1,6 @@
 import { useQuery, useMutation, useQueryClient, type QueryClient } from '@tanstack/react-query'
 import {
+  fetchAllInboxContacts,
   fetchInboxContacts,
   fetchLeadContacts,
   fetchInboxContactStats,
@@ -15,6 +16,8 @@ import {
   updateInboxContact,
   updateLeadContact,
   junkContact,
+  junkContactsBulk,
+  mergeContacts,
   unjunkContact,
   junkDomain,
   type InboxContactFilters,
@@ -59,9 +62,16 @@ export function useAllInboxContacts(orderBy = 'priority_score', search = '') {
         const res = await fetchInboxContacts({ page: 1, per_page, order_by: orderBy, search: term })
         return { items: res.items, total: res.total }
       }
+      // [contacts_perf] browse path: ONE gzip'd request for the whole table
+      // (was 87 parallel 500-row pages). Old fan-out kept as fallback so the
+      // page still works against a backend that predates /all.
+      try {
+        const all = await fetchAllInboxContacts(orderBy)
+        return { items: all.items, total: all.total }
+      } catch {
+        /* fall through to legacy fan-out */
+      }
       const first = await fetchInboxContacts({ page: 1, per_page, order_by: orderBy })
-      // [contacts_load_cap] browse path: load the set the grouped account view
-      // needs. (Search no longer comes through here.)
       const pages = Math.min(first.pages || 1, 200) // ~100k headroom
       const items = [...first.items]
       if (pages > 1) {
@@ -232,6 +242,33 @@ export function useUnjunkContact() {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: (id: number) => unjunkContact(id),
+    onSuccess: () => invalidateInboxContacts(qc),
+  })
+}
+
+// [trash_ux] bulk trash / restore for the Contacts grid selection bar
+export function useBulkJunkContacts() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (ids: number[]) => junkContactsBulk(ids),
+    onSuccess: () => invalidateInboxContacts(qc),
+  })
+}
+
+export function useBulkUnjunkContacts() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async (ids: number[]) => { await Promise.all(ids.map((id) => unjunkContact(id))) },
+    onSuccess: () => invalidateInboxContacts(qc),
+  })
+}
+
+// [merge_ux] commit a merge (preview is called directly, no cache to touch)
+export function useMergeContacts() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ primaryId, mergeId }: { primaryId: number; mergeId: number }) =>
+      mergeContacts(primaryId, mergeId),
     onSuccess: () => invalidateInboxContacts(qc),
   })
 }

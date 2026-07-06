@@ -178,6 +178,56 @@ async def inbox_contacts_list(
     }
 
 
+@router.get("/api/inbox-contacts/all")
+async def inbox_contacts_all(
+    order_by: Optional[str] = "priority_score",
+    db: AsyncSession = Depends(get_db),
+):
+    """[contacts_perf] Whole-table browse in ONE response (gzip'd by middleware).
+
+    Replaces the frontend's 87-parallel-page fan-out: one query, one payload.
+    Filters/search stay on the paginated endpoint; this is the grouped-view
+    bulk load only.
+    """
+    try:
+        rows, total = await list_contacts(
+            db, limit=200_000, offset=0, order_by=order_by or "priority_score"
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    return {"items": [_serialize_contact(r) for r in rows], "total": total}
+
+
+@router.post("/api/inbox-contacts/merge-preview")
+async def inbox_contacts_merge_preview(
+    payload: dict, _csrf=Depends(require_ajax), db: AsyncSession = Depends(get_db)
+):
+    """Preview merging merge_id INTO primary_id (read-only)."""
+    from app.services.contact_merge import preview_merge
+
+    pid = int(payload.get("primary_id") or 0)
+    mid = int(payload.get("merge_id") or 0)
+    res = await preview_merge(pid, mid)
+    if res.get("error"):
+        raise HTTPException(status_code=422, detail=res["error"])
+    return res
+
+
+@router.post("/api/inbox-contacts/merge")
+async def inbox_contacts_merge(
+    payload: dict, _csrf=Depends(require_ajax), db: AsyncSession = Depends(get_db)
+):
+    """Merge merge_id INTO primary_id. Loser is soft-deleted to Trash."""
+    from app.services.contact_merge import commit_merge
+
+    pid = int(payload.get("primary_id") or 0)
+    mid = int(payload.get("merge_id") or 0)
+    res = await commit_merge(pid, mid)
+    if res.get("error"):
+        raise HTTPException(status_code=422, detail=res["error"])
+    return res
+
+
 @router.get("/api/inbox-contacts/{contact_id}")
 async def inbox_contact_detail(
     contact_id: int,

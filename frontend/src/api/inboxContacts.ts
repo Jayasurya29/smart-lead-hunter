@@ -137,6 +137,16 @@ export async function fetchInboxContacts(
   return data
 }
 
+/** [contacts_perf] Whole table in ONE gzip'd request (grouped-view browse). */
+export async function fetchAllInboxContacts(
+  orderBy = 'priority_score',
+): Promise<{ items: InboxContact[]; total: number }> {
+  const { data } = await api.get<{ items: InboxContact[]; total: number }>(
+    `/api/inbox-contacts/all?order_by=${encodeURIComponent(orderBy)}`,
+  )
+  return data
+}
+
 /**
  * Lead-generator contacts (lead_contacts joined to their potential lead /
  * existing hotel), served by the backend already shaped like InboxContact
@@ -359,6 +369,26 @@ export async function unjunkContact(id: number): Promise<void> {
 export async function junkContactsBulk(ids: number[]): Promise<{ junked: number }> {
   const { data } = await api.post('/api/contacts/junk-bulk', { ids })
   return data
+}
+
+/** [merge_ux] preview merging merge_id INTO primary_id (read-only). */
+export async function previewMergeContacts(primaryId: number, mergeId: number) {
+  const { data } = await api.post('/api/inbox-contacts/merge-preview', {
+    primary_id: primaryId, merge_id: mergeId,
+  })
+  return data as {
+    primary_id: number; merge_id: number; primary_email: string; merge_email: string
+    interaction_count_sum: number
+    fields: Record<string, { primary: any; loser: any; merged: any }>
+  }
+}
+
+/** [merge_ux] commit the merge; loser is soft-deleted to Trash. */
+export async function mergeContacts(primaryId: number, mergeId: number) {
+  const { data } = await api.post('/api/inbox-contacts/merge', {
+    primary_id: primaryId, merge_id: mergeId,
+  })
+  return data as { status: string; survivor_id: number; merged_id: number }
 }
 
 export async function junkDomain(
