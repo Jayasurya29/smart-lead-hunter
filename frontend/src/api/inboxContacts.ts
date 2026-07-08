@@ -314,6 +314,7 @@ export async function findSuccessor(
 }
 
 export interface ContactEditFields {
+  manual_category?: string
   first_name?: string
   last_name?: string
   display_name?: string

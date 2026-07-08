@@ -31,6 +31,23 @@ export function invalidateInboxContacts(qc: QueryClient) {
   qc.invalidateQueries({ queryKey: ['inbox-contacts-stats'] })
 }
 
+// [contacts_perf] Patch cached rows in place instead of refetching the 32k /all
+// payload after every trash/restore/approve — the refetch+regroup was the
+// visible hitch. Stats stay invalidated (cheap); list data is edited surgically.
+function patchCachedContacts(qc: QueryClient, ids: number[], patch: Record<string, unknown>) {
+  const idset = new Set(ids)
+  qc.setQueriesData({ queryKey: ['inbox-contacts'] }, (old: any) => {
+    if (!old?.items) return old
+    let touched = false
+    const items = old.items.map((c: any) => {
+      if (idset.has(c.id)) { touched = true; return { ...c, ...patch } }
+      return c
+    })
+    return touched ? { ...old, items } : old
+  })
+  qc.invalidateQueries({ queryKey: ['inbox-contacts-stats'] })
+}
+
 export function useInboxContacts(filters: InboxContactFilters = {}) {
   return useQuery({
     queryKey: ['inbox-contacts', filters],
@@ -140,7 +157,7 @@ export function useBulkApproveInboxContacts() {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: (ids: number[]) => bulkApproveInboxContacts(ids),
-    onSuccess: () => invalidateInboxContacts(qc),
+    onSuccess: (_d, ids) => patchCachedContacts(qc, ids, { approval_status: 'approved' }),
   })
 }
 
@@ -186,7 +203,7 @@ export function useUpdateInboxContact() {
   return useMutation({
     mutationFn: ({ id, fields }: { id: number; fields: import('../api/inboxContacts').ContactEditFields }) =>
       updateInboxContact(id, fields),
-    onSuccess: () => invalidateInboxContacts(qc),
+    onSuccess: (_d, vars) => patchCachedContacts(qc, [vars.id], vars.fields as Record<string, unknown>),
   })
 }
 
@@ -234,7 +251,7 @@ export function useJunkContact() {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: (id: number) => junkContact(id),
-    onSuccess: () => invalidateInboxContacts(qc),
+    onSuccess: (_d, id) => patchCachedContacts(qc, [id], { manual_category: 'junk' }),
   })
 }
 
@@ -242,7 +259,7 @@ export function useUnjunkContact() {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: (id: number) => unjunkContact(id),
-    onSuccess: () => invalidateInboxContacts(qc),
+    onSuccess: (_d, id) => patchCachedContacts(qc, [id], { manual_category: null }),
   })
 }
 
@@ -251,7 +268,7 @@ export function useBulkJunkContacts() {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: (ids: number[]) => junkContactsBulk(ids),
-    onSuccess: () => invalidateInboxContacts(qc),
+    onSuccess: (_d, ids) => patchCachedContacts(qc, ids, { manual_category: 'junk' }),
   })
 }
 
@@ -259,7 +276,19 @@ export function useBulkUnjunkContacts() {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: async (ids: number[]) => { await Promise.all(ids.map((id) => unjunkContact(id))) },
-    onSuccess: () => invalidateInboxContacts(qc),
+    onSuccess: (_d, ids) => patchCachedContacts(qc, ids, { manual_category: null }),
+  })
+}
+
+// [category_ux] bulk-set the human category override. '' clears back to auto.
+export function useBulkSetCategory() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async ({ ids, category }: { ids: number[]; category: string }) => {
+      await Promise.all(ids.map((id) => updateInboxContact(id, { manual_category: category })))
+    },
+    onSuccess: (_d, vars) =>
+      patchCachedContacts(qc, vars.ids, { manual_category: vars.category || null }),
   })
 }
 

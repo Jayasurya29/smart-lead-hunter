@@ -277,6 +277,7 @@ async def inbox_contact_update(
         "email",
         "phone",
         "linkedin_url",
+        "manual_category",
     }
     changes = {
         k: (v.strip() if isinstance(v, str) else v)
@@ -298,6 +299,17 @@ async def inbox_contact_update(
         and "linkedin.com" not in changes["linkedin_url"].lower()
     ):
         raise HTTPException(status_code=422, detail="linkedin_url must be a linkedin.com URL")
+    # [manual_category] the human category override. '' clears it (back to the
+    # classifier's contact_category via the usual COALESCE).
+    _CATS = {"buyer", "seller", "competitor", "personal", "operational", "junk", "prospect"}
+    if (
+        "manual_category" in changes
+        and changes["manual_category"]
+        and changes["manual_category"] not in _CATS
+    ):
+        raise HTTPException(
+            status_code=422, detail=f"manual_category must be one of {sorted(_CATS)}"
+        )
 
     # [patch_inbox_edit_dup_email] An email edit that collides with another
     # contact's UNIQUE email would raise a raw UniqueViolation -> ugly 500.

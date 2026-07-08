@@ -17,14 +17,14 @@
  * Client-side (over the loaded page, per_page 200): smart-search, DM focus, sort.
  * For very large inboxes, push `search` to the server (marked below).
  */
-import { useDeferredValue, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { memo, useDeferredValue, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import Fuse from 'fuse.js'
 import {
   Sparkles, Wand2, X, RefreshCw, Inbox, Star, ChevronRight, ChevronDown,
   Mail, Phone, Linkedin, ExternalLink, MapPin, Building2, Shield, Hash,
   Eye, Users, Activity, Send, Check, Loader2, Trash2, CheckSquare, Square, Download,
-  Radar, Briefcase, Layers, Flame, Target, Package, Copy, Pencil, ArrowUpRight, Undo2,
+  Radar, Briefcase, Layers, Flame, Target, Package, Copy, Pencil, ArrowUpRight, Undo2, Tag,
 } from 'lucide-react'
 import { cn, formatDate, relativeDate, getTierLabel } from '@/lib/utils'
 import type { InboxContact, InboxContactStats } from '@/api/inboxContacts'
@@ -44,6 +44,7 @@ import {
   useBulkApproveInboxContacts,
   useBulkJunkContacts,
   useBulkUnjunkContacts,
+  useBulkSetCategory,
   useMergeContacts,
   useDeleteInboxContact,
   useUpdateInboxContact,
@@ -354,6 +355,20 @@ const BUYING_ROLE = /procure|purchas|sourc|supply chain|f\s*&\s*b|food\s*(?:and|
 function isStale(c: InboxContact): boolean {
   if (!c.last_inbound_at) return false
   return Date.now() - new Date(c.last_inbound_at).getTime() > 18 * 30.4 * 24 * 3600 * 1000
+}
+
+// [freshness] how recently THEY wrote to us — the honest proxy for "probably
+// still in that seat". Sales triage: fresh = safe to work; aging = glance at
+// LinkedIn first; stale/never = verify before spending time (people move).
+const effCategory = (c: UnifiedContact) => c.manual_category || c.contact_category
+
+type Freshness = 'fresh' | 'aging' | 'stale' | 'never'
+function freshnessOf(c: UnifiedContact): Freshness {
+  if (!c.last_inbound_at) return 'never'
+  const days = (Date.now() - new Date(c.last_inbound_at).getTime()) / 86_400_000
+  if (days <= 365) return 'fresh'
+  if (days <= 548) return 'aging'
+  return 'stale'
 }
 
 function isHighOpportunity(c: InboxContact): boolean {
@@ -733,7 +748,14 @@ function collapsePeople(list: UnifiedContact[]): UnifiedContact[] {
   return out
 }
 
-function DirRow({
+// [contacts_perf] memoized: a checkbox tick / toast / drawer change used to
+// re-render every visible row. Comparator ignores the per-row closures
+// (onOpen/onToggleCheck/onOpenOrg are recreated each parent render by design).
+const DirRow = memo(DirRowImpl, (a, b) =>
+  a.contact === b.contact && a.selected === b.selected && a.checked === b.checked
+  && a.selectMode === b.selectMode && a.hideOrg === b.hideOrg)
+
+function DirRowImpl({
   contact, selected, checked, selectMode, onOpen, onToggleCheck, hideOrg, onOpenOrg,
 }: {
   contact: UnifiedContact
@@ -751,6 +773,7 @@ function DirRow({
   const warmth = contactWarmth(contact)
   const wLevel = warmthLevel(warmth)
   const role = roleText(contact)
+  const fr = freshnessOf(contact)
   return (
     <div onClick={onOpen} role="button" tabIndex={0}
       aria-label={`Open ${fullName(contact)}`}
@@ -851,8 +874,15 @@ function DirRow({
         </span>
         <span className="hidden sm:block w-2.5 h-2.5 rounded-full flex-shrink-0 ml-0.5" style={{ background: WARMTH_COLOR[wLevel] }}
           title={`${wLevel} · warmth ${warmth}`} />
-        {contact.contact_category && contact.contact_category !== 'junk' && (
-          <span className="hidden md:block"><CategoryBadge category={contact.contact_category} /></span>
+        {!isLead && (fr === 'stale' || fr === 'aging') && (
+          <span className={cn('hidden md:inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[10px] font-bold ring-1',
+            fr === 'stale' ? 'bg-coral-50 text-coral-600 ring-coral-100' : 'bg-gold-50 text-gold-700 ring-gold-200/60')}
+            title={`Last reply ${relativeDate(contact.last_inbound_at)} — may have moved; verify on LinkedIn before outreach`}>
+            {fr === 'stale' ? 'stale' : '1y+'}
+          </span>
+        )}
+        {effCategory(contact) && effCategory(contact) !== 'junk' && (
+          <span className="hidden md:block"><CategoryBadge category={effCategory(contact)!} /></span>
         )}
         <ConfidenceRing pct={confidencePct(contact)} unknown={!hasConfidence(contact)} />
       </div>
@@ -2138,6 +2168,7 @@ export default function ContactsPage() {
   const deferredQuery = useDeferredValue(query)
   const category = params.get('category') || ''
   const status = params.get('status') || ''
+  const fresh = params.get('fresh') || ''
   const source = (params.get('source') as Source | '') || ''     // '' = all
   const account = (params.get('account') as AccountType | '') || '' // '' = all
   const lifecycle = (params.get('stage') as Stage | '') || ''      // '' = all
@@ -2195,6 +2226,8 @@ export default function ContactsPage() {
   const bulkJunkMut = useBulkJunkContacts()
   const bulkUnjunkMut = useBulkUnjunkContacts()
   const mergeMut = useMergeContacts()
+  const bulkCatMut = useBulkSetCategory()
+  const [catMenuOpen, setCatMenuOpen] = useState(false)
   const [mergeOpen, setMergeOpen] = useState(false)
   // [action_feedback] lightweight confirmation toast for bulk actions
   const [toast, setToast] = useState<{ msg: string; kind: 'ok' | 'err' } | null>(null)
@@ -2319,6 +2352,13 @@ export default function ContactsPage() {
     [listQ.data],
   )
 
+  // [freshness] facet counts over the loaded set (inbox rows only)
+  const freshCounts = useMemo(() => {
+    const f = { fresh: 0, aging: 0, stale: 0, never: 0 }
+    for (const c of items) { if (sourceOf(c) !== 'lead_generator') f[freshnessOf(c)]++ }
+    return f
+  }, [items])
+
   // scope counts (computed over the loaded page; for full-inbox totals expose these from the backend)
   const scope = useMemo(() => {
     const s = { emailScrape: 0, leadGen: 0, hotels: 0, mgmtCos: 0, potential: 0, existing: 0 }
@@ -2439,8 +2479,9 @@ export default function ContactsPage() {
         .map((x) => x.c)
       fuzzyRanked = true
     }
-    if (category === 'uncategorized') list = list.filter((c) => !c.contact_category)
-    else if (category && category !== 'junk' && category !== 'operational') list = list.filter((c) => c.contact_category === category)
+    if (category === 'uncategorized') list = list.filter((c) => !effCategory(c))
+    else if (category && category !== 'junk' && category !== 'operational') list = list.filter((c) => effCategory(c) === category)
+    if (fresh) list = list.filter((c) => freshnessOf(c) === fresh)
     if (status) list = list.filter((c) => c.approval_status === status)
     if (dmOnly) list = list.filter((c) => c.is_decision_maker)
     if (source) list = list.filter((c) => sourceOf(c) === source)
@@ -2464,7 +2505,7 @@ export default function ContactsPage() {
     }
     return [...list].sort(sorters[sort])
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [items, indexed, fuse, accountIntel, deferredQuery, category, status, dmOnly, source, account, lifecycle, vertical, priority, sort])
+  }, [items, indexed, fuse, accountIntel, deferredQuery, category, status, dmOnly, source, account, lifecycle, vertical, priority, fresh, sort])
 
   // group filtered contacts by account (hotel OR management company)
   const groups = useMemo(() => {
@@ -2704,6 +2745,14 @@ export default function ContactsPage() {
       onError: () => showToast('Move to Trash failed — try again', 'err'),
     })
   }
+  function bulkSetCategory(cat: string) {
+    const n = selected.size
+    setCatMenuOpen(false)
+    bulkCatMut.mutate({ ids: Array.from(selected), category: cat }, {
+      onSuccess: () => { clearSelection(); showToast(cat ? `${n} set to ${cat}` : `${n} reset to auto`) },
+      onError: () => showToast('Category update failed — try again', 'err'),
+    })
+  }
   function bulkRestore() {
     const n = selected.size
     bulkUnjunkMut.mutate(Array.from(selected), {
@@ -2773,6 +2822,13 @@ export default function ContactsPage() {
             { v: 'P3', label: 'P3', count: stats?.p3 },
             { v: 'P4', label: 'P4', count: stats?.p4 },
             { v: 'P_unknown', label: 'No priority yet', count: stats?.p_unknown },
+          ]} />
+          <Facet label="Freshness" value={fresh || 'all'} onChange={(v) => patch({ fresh: v === 'all' ? null : v })} options={[
+            { v: 'all', label: 'Any freshness' },
+            { v: 'fresh', label: 'Fresh — replied ≤ 1y', dot: '#1a7a55', count: freshCounts.fresh },
+            { v: 'aging', label: 'Aging — 12–18 mo', dot: '#c49a3c', count: freshCounts.aging },
+            { v: 'stale', label: 'Stale — 18 mo+ (verify first)', dot: '#e85d4a', count: freshCounts.stale },
+            { v: 'never', label: 'Never replied', count: freshCounts.never },
           ]} />
           <button onClick={() => patch({ dm: dmOnly ? null : '1' })} aria-pressed={dmOnly}
             className={cn('inline-flex items-center gap-1.5 h-9 px-3 rounded-lg text-[13px] font-medium transition-colors',
@@ -2944,6 +3000,25 @@ export default function ContactsPage() {
             <button onClick={selectAllVisible} className="text-[11px] font-semibold text-white/60 hover:text-white">Select all {filtered.filter((c) => sourceOf(c) !== 'lead_generator').length}</button>
             <div className="w-px h-4 bg-white/20" />
             <button onClick={clearSelection} className="text-[11px] font-semibold text-white/60 hover:text-white">Clear</button>
+            {category !== 'junk' && (
+              <div className="relative">
+                <button onClick={() => setCatMenuOpen((o) => !o)} disabled={bulkCatMut.isPending}
+                  className="inline-flex items-center gap-1.5 h-8 px-3 rounded-lg text-xs font-bold text-white/90 ring-1 ring-white/25 hover:bg-white/10 transition-all disabled:opacity-60">
+                  {bulkCatMut.isPending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Tag className="w-3.5 h-3.5" />}
+                  Category
+                </button>
+                {catMenuOpen && (
+                  <div className="absolute bottom-full mb-1.5 left-0 z-30 w-44 py-1 bg-white rounded-xl shadow-lift ring-1 ring-stone-200">
+                    {[['buyer', 'Buyer'], ['seller', 'Seller'], ['competitor', 'Competitor'], ['personal', 'Personal'], ['operational', 'Shared inbox'], ['', 'Reset to auto']].map(([v, label]) => (
+                      <button key={v || 'auto'} onClick={() => bulkSetCategory(v)}
+                        className="w-full text-left px-3 py-1.5 text-[12.5px] font-medium text-navy-800 hover:bg-stone-50">
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
             {category !== 'junk' && selected.size === 2 && (
               <button onClick={() => setMergeOpen(true)}
                 className="inline-flex items-center gap-1.5 h-8 px-3 rounded-lg text-xs font-bold text-white/90 ring-1 ring-white/25 hover:bg-white/10 transition-all">
