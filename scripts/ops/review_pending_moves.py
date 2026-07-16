@@ -1,152 +1,113 @@
 """
-review_news_queue.py  --  work the news action queues by hand.
+review_pending_moves.py
+======================
+The human side of the move-review queue. Unverified moves (contacts with no
+LinkedIn slug, where the lookup can't prove it's the right person) are parked in
+pending_moves instead of being written. This tool lets you review them.
 
-  --list                 show pending hotel candidates + person job-change flags
-  --approve ID           approve a queued hotel -> creates a lead (save_lead_to_db,
-                         which dedups; auto_smart_fill enriches it next morning)
-  --reject  ID           reject a queued hotel
-  --action  ID           mark a person flag actioned (you followed up)
-  --dismiss ID           dismiss a person flag
+    python review_pending_moves.py                 # list pending candidates
+    python review_pending_moves.py --approve "1,5" # apply those moves (re-file +
+                                                   #   former affiliation)
+    python review_pending_moves.py --reject "2,3"  # mark rejected (no change)
 
-Same review pattern as review_pending_names.py / review_pending_moves.py.
+Approving does exactly what a verified move does: sets the contact's
+organization to the new employer and records the old org as a 'former'
+affiliation (preserving the stale email in notes). Rejecting just closes the
+candidate so it won't resurface.
 
-USAGE (repo root, venv active, DATABASE_URL set)
-  python scripts/ops/review_news_queue.py --list
-  python scripts/ops/review_news_queue.py --approve 12
-  python scripts/ops/review_news_queue.py --dismiss 4
+Run from repo root, venv active, DATABASE_URL set.
 """
 
-from __future__ import annotations
-
-import argparse
 import asyncio
 import sys
-from pathlib import Path
+from datetime import datetime, timezone
 
-_ROOT = Path(__file__).resolve().parents[2]
-if str(_ROOT) not in sys.path:
-    sys.path.insert(0, str(_ROOT))
+from sqlalchemy import text
 
-try:
-    from dotenv import load_dotenv
-
-    load_dotenv()
-except ImportError:
-    pass
-
-from sqlalchemy import text  # noqa: E402
-
-from app.database import async_session  # noqa: E402
-from app.services.news_actions import (  # noqa: E402
-    apply_person_move,
-    approve_lead,
-    list_actions,
-    looks_like_real_hotel,
-    reject_lead,
-    reopen_person,
-    reset_stuck_leads,
-    revert_action,
-    set_person_status,
-)
+from app.database import async_session
 
 
-async def show_list(db):
-    hotels = (await db.execute(text(
-        "SELECT id, hotel_name, category, region, vertical, luxury, source "
-        "FROM news_lead_queue WHERE status='pending' ORDER BY luxury DESC, id"
-    ))).mappings().all()
-    people = (await db.execute(text(
-        "SELECT id, person_name, person_title, new_hotel, match_strength, "
-        "known_account FROM news_person_review WHERE status='pending' ORDER BY id"
-    ))).mappings().all()
-
-    print(f"\n=== PENDING HOTEL LEADS ({len(hotels)}) — approve to add to pipeline ===")
-    for h in hotels:
-        lux = "★" if h["luxury"] else " "
-        print(f"  [{h['id']:>4}] {lux} {(h['hotel_name'] or '')[:46]:<46} "
-              f"{(h['category'] or ''):<16} {(h['region'] or ''):<9} {h['vertical'] or ''}")
-    print(f"\n=== PENDING PERSON FLAGS ({len(people)}) — known people who moved ===")
-    for p in people:
-        print(f"  [{p['id']:>4}] {(p['person_name'] or '')[:22]:<22} — "
-              f"{(p['person_title'] or 'role?')[:20]:<20} @ {(p['new_hotel'] or '?')[:24]:<24} "
-              f"[{p['match_strength']}: known from {(p['known_account'] or '?')[:22]}]")
-    print("\n  approve/reject a hotel: --approve ID / --reject ID")
-    print("  action/dismiss a flag : --action ID / --dismiss ID\n")
+def _ids(flag):
+    if flag in sys.argv:
+        try:
+            return [int(x) for x in sys.argv[sys.argv.index(flag) + 1].split(",")
+                    if x.strip().isdigit()]
+        except Exception:
+            return []
+    return []
 
 
-async def prune_bad(db):
-    """Auto-reject queued hotels whose extracted name is junk (fragments,
-    zoos, descriptor blobs) — the name-quality gate applied retroactively."""
-    rows = (await db.execute(text(
-        "SELECT id, hotel_name FROM news_lead_queue WHERE status='pending'"
-    ))).mappings().all()
-    bad = [r for r in rows if not looks_like_real_hotel(r["hotel_name"])]
-    for r in bad:
-        await reject_lead(db, r["id"])
-    print(f"pruned {len(bad)} junk-name rows:")
-    for r in bad:
-        print(f"  rejected [{r['id']}] {r['hotel_name']}")
-    if not bad:
-        print("  (none — queue names look clean)")
+APPROVE = _ids("--approve")
+REJECT = _ids("--reject")
 
 
-async def show_log(db, days: int):
-    rows = await list_actions(db, days=days)
-    print(f"\n=== NEWS ACTIVITY — last {days} day(s) ({len(rows)} actions) ===")
-    if not rows:
-        print("  (nothing logged in this window)")
-        return
-    for r in rows:
-        ts = r["created_at"].strftime("%m-%d %H:%M") if r["created_at"] else "?"
-        flag = "  [REVERTED]" if r["reverted"] else ""
-        print(f"  [{r['id']:>4}] {ts}  {r['action']:<13} {(r['summary'] or '')[:70]}{flag}")
-    print("\n  revert a bad one:  --revert ID\n")
+async def main() -> None:
+    async with async_session() as s:
+        if APPROVE:
+            n = 0
+            for pid in APPROVE:
+                row = (await s.execute(text(
+                    "SELECT contact_id, email, from_org, to_org, to_title "
+                    "FROM pending_moves WHERE id=:id AND status='pending'"),
+                    {"id": pid})).mappings().one_or_none()
+                if not row:
+                    print(f"  #{pid}: not a pending candidate, skipped")
+                    continue
+                cid, from_org, to_org = row["contact_id"], row["from_org"], row["to_org"]
+                # re-file the contact to the new employer
+                await s.execute(text(
+                    "UPDATE contacts SET organization=:org, title=COALESCE(NULLIF(:t,''), title), "
+                    "enrichment_source='grounded', updated_at=:now WHERE id=:id"),
+                    {"org": to_org, "t": row["to_title"] or "", "now": datetime.now(timezone.utc), "id": cid})
+                # record the old org as 'former' (idempotent on account_name)
+                exists = (await s.execute(text(
+                    "SELECT 1 FROM contact_affiliations WHERE person_type='contact' "
+                    "AND person_id=:id AND relationship='former' "
+                    "AND lower(COALESCE(account_name,''))=lower(:nm) LIMIT 1"),
+                    {"id": cid, "nm": from_org})).one_or_none()
+                if not exists and from_org:
+                    await s.execute(text(
+                        "INSERT INTO contact_affiliations (person_type, person_id, "
+                        "account_type, account_name, relationship, source, confidence, "
+                        "notes, created_at, updated_at) VALUES ('contact', :id, "
+                        "'management_company', :nm, 'former', 'review_approved', 0.7, "
+                        ":notes, :now, :now)"),
+                        {"id": cid, "nm": from_org,
+                         "notes": f"Moved to {to_org} (human-approved from review queue)"
+                                  + (f" | former_email={row['email']}" if row["email"] else ""),
+                         "now": datetime.now(timezone.utc)})
+                await s.execute(text(
+                    "UPDATE pending_moves SET status='approved', reviewed_at=:now WHERE id=:id"),
+                    {"now": datetime.now(timezone.utc), "id": pid})
+                n += 1
+                print(f"  approved #{pid}: {from_org!r} -> {to_org!r} (contact {cid})")
+            await s.commit()
+            print(f"\n  DONE — applied {n} approved move(s).")
+            if not REJECT:
+                return
 
+        if REJECT:
+            res = await s.execute(text(
+                "UPDATE pending_moves SET status='rejected', reviewed_at=:now "
+                "WHERE id = ANY(:ids) AND status='pending'"),
+                {"now": datetime.now(timezone.utc), "ids": REJECT})
+            await s.commit()
+            print(f"  rejected {res.rowcount} candidate(s): {REJECT}")
+            return
 
-async def main():
-    ap = argparse.ArgumentParser(description="Review the news action queues")
-    ap.add_argument("--list", action="store_true")
-    ap.add_argument("--log", action="store_true", help="show the activity log")
-    ap.add_argument("--days", type=int, default=7, help="window for --log")
-    ap.add_argument("--revert", type=int, help="undo a logged action by id")
-    ap.add_argument("--prune", action="store_true", help="auto-reject junk-name hotels")
-    ap.add_argument("--reset-stuck", action="store_true",
-                    help="re-open hotels marked approved but with no lead created")
-    ap.add_argument("--approve", type=int)
-    ap.add_argument("--reject", type=int)
-    ap.add_argument("--action", type=int)
-    ap.add_argument("--reopen", type=int, help="reset a person flag to pending")
-    ap.add_argument("--dismiss", type=int)
-    args = ap.parse_args()
-
-    async with async_session() as db:
-        if args.log:
-            await show_log(db, args.days)
-        elif args.revert is not None:
-            r = await revert_action(db, args.revert)
-            print(f"revert #{args.revert}: {r}")
-        elif args.prune:
-            await prune_bad(db)
-        elif args.reset_stuck:
-            n = await reset_stuck_leads(db)
-            print(f"reset {n} stuck (approved-but-no-lead) row(s) back to pending")
-        elif args.approve is not None:
-            r = await approve_lead(db, args.approve)
-            print(f"approve #{args.approve}: {r}")
-        elif args.reject is not None:
-            ok = await reject_lead(db, args.reject)
-            print(f"reject #{args.reject}: {'done' if ok else 'not found / not pending'}")
-        elif args.action is not None:
-            r = await apply_person_move(db, args.action)
-            print(f"action #{args.action}: {r}")
-        elif args.reopen is not None:
-            ok = await reopen_person(db, args.reopen)
-            print(f"reopen #{args.reopen}: {'done — now pending' if ok else 'not found'}")
-        elif args.dismiss is not None:
-            ok = await set_person_status(db, args.dismiss, "dismissed")
-            print(f"dismiss #{args.dismiss}: {'done' if ok else 'not found / not pending'}")
-        else:
-            await show_list(db)
+        rows = (await s.execute(text(
+            "SELECT id, contact_id, email, name, from_org, to_org, to_title, created_at "
+            "FROM pending_moves WHERE status='pending' ORDER BY created_at DESC"
+        ))).mappings().all()
+        print("=" * 78)
+        print(f" PENDING MOVES — awaiting review: {len(rows)}")
+        print(" These had NO LinkedIn slug to verify the person. Approve real ones,")
+        print(" reject namesake/work-history noise.")
+        print("=" * 78)
+        for r in rows:
+            print(f"  #{r['id']:<5} {r['name'] or '?':<22} {r['from_org'] or '?':<26} -> {r['to_org']}")
+            print(f"         {r['email']}  ({r['to_title'] or 'no title'})")
+        print("\n  --approve \"id,id\"  applies the move   |   --reject \"id,id\"  discards")
 
 
 if __name__ == "__main__":

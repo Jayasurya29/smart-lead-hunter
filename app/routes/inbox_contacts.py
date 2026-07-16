@@ -254,6 +254,7 @@ class ContactUpdateBody(BaseModel):
     email: Optional[str] = None
     phone: Optional[str] = None
     linkedin_url: Optional[str] = None
+    manual_category: Optional[str] = None
 
 
 @router.patch("/api/inbox-contacts/{contact_id}")

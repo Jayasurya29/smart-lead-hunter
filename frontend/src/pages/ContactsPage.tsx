@@ -362,13 +362,25 @@ function isStale(c: InboxContact): boolean {
 // LinkedIn first; stale/never = verify before spending time (people move).
 const effCategory = (c: UnifiedContact) => c.manual_category || c.contact_category
 
-type Freshness = 'fresh' | 'aging' | 'stale' | 'never'
+type Freshness = 'fresh' | 'aging' | 'stale' | 'never' | 'unknown'
 function freshnessOf(c: UnifiedContact): Freshness {
-  if (!c.last_inbound_at) return 'never'
-  const days = (Date.now() - new Date(c.last_inbound_at).getTime()) / 86_400_000
-  if (days <= 365) return 'fresh'
-  if (days <= 548) return 'aging'
-  return 'stale'
+  if (c.last_inbound_at) {
+    const days = (Date.now() - new Date(c.last_inbound_at).getTime()) / 86_400_000
+    if (days <= 365) return 'fresh'
+    if (days <= 548) return 'aging'
+    return 'stale'
+  }
+  // no inbound on record. Only claim "never replied" when we've WATCHED long
+  // enough to mean it: direction tracking is young (live ~Jun 23 2026), so a
+  // contact with two weeks of outbound stamps and no inbound proves nothing --
+  // their replies may simply predate tracking. Require >= 60 days of observed
+  // one-way outbound before making the claim; everything thinner is 'unknown'.
+  // The bucket starts near-zero and earns its size as the data matures.
+  if (c.last_outbound_at && c.first_message_at) {
+    const observedDays = (Date.now() - new Date(c.first_message_at).getTime()) / 86_400_000
+    if (observedDays >= 60) return 'never'
+  }
+  return 'unknown'
 }
 
 function isHighOpportunity(c: InboxContact): boolean {
@@ -2354,7 +2366,7 @@ export default function ContactsPage() {
 
   // [freshness] facet counts over the loaded set (inbox rows only)
   const freshCounts = useMemo(() => {
-    const f = { fresh: 0, aging: 0, stale: 0, never: 0 }
+    const f = { fresh: 0, aging: 0, stale: 0, never: 0, unknown: 0 }
     for (const c of items) { if (sourceOf(c) !== 'lead_generator') f[freshnessOf(c)]++ }
     return f
   }, [items])
@@ -2828,7 +2840,8 @@ export default function ContactsPage() {
             { v: 'fresh', label: 'Fresh — replied ≤ 1y', dot: '#1a7a55', count: freshCounts.fresh },
             { v: 'aging', label: 'Aging — 12–18 mo', dot: '#c49a3c', count: freshCounts.aging },
             { v: 'stale', label: 'Stale — 18 mo+ (verify first)', dot: '#e85d4a', count: freshCounts.stale },
-            { v: 'never', label: 'Never replied', count: freshCounts.never },
+            { v: 'never', label: 'Never replied — outbound only', count: freshCounts.never },
+            { v: 'unknown', label: 'No data yet', count: freshCounts.unknown },
           ]} />
           <button onClick={() => patch({ dm: dmOnly ? null : '1' })} aria-pressed={dmOnly}
             className={cn('inline-flex items-center gap-1.5 h-9 px-3 rounded-lg text-[13px] font-medium transition-colors',
