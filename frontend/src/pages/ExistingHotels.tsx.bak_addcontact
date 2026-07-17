@@ -1688,7 +1688,7 @@ function HotelContactsTab({
     )
   }
 
-  if (!contacts.length && !showAdd) {
+  if (!contacts.length) {
     return (
       <>
         {progressCard}
@@ -1698,13 +1698,6 @@ function HotelContactsTab({
             <p className="text-sm font-medium text-stone-500">No contacts found</p>
             <button onClick={onEnrich} className="mt-3 px-5 py-2.5 text-xs font-semibold bg-navy-900 text-white rounded-lg hover:bg-navy-800 transition">
               Run Enrichment
-            </button>
-            {/* manual-add-empty-state */}
-            <button
-              onClick={() => setShowAdd(true)}
-              className="mt-3 ml-2 px-5 py-2.5 text-xs font-semibold text-navy-700 border border-dashed border-navy-300 rounded-lg hover:bg-navy-50 transition"
-            >
-              + Add Contact
             </button>
           </div>
         )}

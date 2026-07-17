@@ -871,9 +871,7 @@ Records:
 # Regex precompiles
 # ──────────────────────────────────────────────────────────────────────────
 
-_EMAIL_RE = re.compile(
-    r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.(?:[a-z]{2,}|[A-Z]{2,})"
-)  # single-case TLD run: stops at glued 'Subject'/'From' header words
+_EMAIL_RE = re.compile(r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}")
 _HTML_TAG_RE = re.compile(r"<[^>]+>")
 _ANGLE_URL_RE = re.compile(r"<https?://[^>\s]*>", re.IGNORECASE)
 _IMAGE_MARKER_RE = re.compile(r"\[image:[^\]]*\]", re.IGNORECASE)

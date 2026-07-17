@@ -236,7 +236,8 @@ async def parse_upload(
     if "hotel_name" not in col_map:
         return {
             "error": (
-                "Could not find a 'Hotel Name' column. " f"Headers found: {', '.join(headers)}"
+                "Could not find a 'Hotel Name' column. "
+                f"Headers found: {', '.join(headers)}"
             ),
             "rows": [],
         }
@@ -504,7 +505,6 @@ async def import_hotels(
                 if target == "existing":
                     hotel = ExistingHotel(
                         hotel_name=hotel_name,
-                        name=hotel_name,  # legacy NOT NULL column, mirrors hotel_name
                         hotel_name_normalized=row["hotel_name_normalized"],
                         brand=row.get("brand"),
                         city=row.get("city"),
@@ -524,9 +524,8 @@ async def import_hotels(
                         data_source="bulk_upload",
                         status="new",
                     )
-                    async with session.begin_nested():
-                        session.add(hotel)
-                        await session.flush()
+                    session.add(hotel)
+                    await session.flush()
                     imported.append(
                         {
                             "id": hotel.id,
@@ -568,9 +567,8 @@ async def import_hotels(
                         source_site="bulk_upload",
                         status="new",
                     )
-                    async with session.begin_nested():
-                        session.add(lead)
-                        await session.flush()
+                    session.add(lead)
+                    await session.flush()
                     imported.append(
                         {
                             "id": lead.id,
