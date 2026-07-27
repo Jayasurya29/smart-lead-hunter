@@ -441,14 +441,32 @@ async def find_seat_successor(
     queries = [q for q in queries if q.strip() and not (q in _seen_q or _seen_q.add(q))][
         :SEAT_SUCCESSOR_MAX_QUERIES
     ]
+    # [patch_successor_parallel] Run the seat queries CONCURRENTLY, not one at a
+    # time. Sequential + 30s-per-search timeouts made this take minutes and look
+    # hung. gather() collapses it to ~one search's latency; wait_for caps the
+    # whole batch so a slow Serper can't stall the UI.
+    import asyncio as _asyncio
+
+    SEAT_SEARCH_BUDGET_S = 20
+
+    async def _one(_q: str):
+        try:
+            return await _search_serper(_q, max_results=6)
+        except Exception as _e:  # noqa: BLE001
+            logger.warning(f"seat_successor: serper failed for {_q!r}: {_e}")
+            return []
+
     snippets: list[str] = []
     cites: list[str] = []
-    for q in queries:
-        try:
-            results = await _search_serper(q, max_results=6)
-        except Exception as e:
-            logger.warning(f"seat_successor: serper failed for {q!r}: {e}")
-            results = []
+    try:
+        all_results = await _asyncio.wait_for(
+            _asyncio.gather(*[_one(q) for q in queries]),
+            timeout=SEAT_SEARCH_BUDGET_S,
+        )
+    except _asyncio.TimeoutError:
+        logger.warning("seat_successor: search budget exceeded — using partial results")
+        all_results = []
+    for results in all_results:
         for r in results:
             t, sn, ln = r.get("title", ""), r.get("snippet", ""), r.get("url", "")
             snippets.append(f"{t} -- {sn} ({ln})")

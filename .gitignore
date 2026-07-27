@@ -98,3 +98,6 @@ frontend/tsconfig.tsbuildinfo
 credentials/
 
 *_preview.csv
+
+*.bak_*
+*.bak

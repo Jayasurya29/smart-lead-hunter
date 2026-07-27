@@ -217,61 +217,207 @@ async def _cover_edge(s, pid, atype, aid, aname, src):
     )
 
 
-async def run_autolink() -> dict:
-    """Link every still-unmatched, non-junk inbox contact it confidently can."""
-    out = {"domain": 0, "name": 0, "company": 0}
-    async with async_session() as s:
-        idx = await _build_host_index(s)
-        rows = (
+async def _build_name_index(s):
+    """[patch_autolink_namekey] normalized hotel name -> (atype, id, hotel_name).
+
+    BOTH sides of the name comparison now use normalize_organization().
+
+    The stored hotel_name_normalized column is written by normalize_hotel_name(),
+    which preserves word order and keeps "the". normalize_organization() sorts
+    tokens and drops article/legal stopwords. Comparing one against the other
+    only matched when a name's tokens happened to already be alphabetical
+    ("Cheeca Lodge") — which is why the NAME path returned zero. The stored
+    column is the right key for hotel-vs-hotel dedup and the wrong key here.
+
+    Semantics otherwise unchanged:
+      - a normalized name matching >1 row WITHIN a table is ambiguous -> dropped
+      - bare-brand names are never a valid target
+      - existing_hotels wins over potential_leads on a cross-table collision
+    """
+    idx: dict = {}
+    for atype, table, extra in (
+        ("potential_lead", "potential_leads", " AND status <> 'rejected'"),
+        ("existing_hotel", "existing_hotels", ""),
+    ):
+        seen: dict = {}
+        for r in (
             await s.execute(
                 text(
-                    "SELECT id, email, organization FROM contacts "
-                    "WHERE matched_hotel_id IS NULL AND matched_lead_id IS NULL "
-                    "AND COALESCE(contact_category,'') <> 'junk' AND email LIKE '%@%'"
+                    f"SELECT id, hotel_name FROM {table} "
+                    f"WHERE COALESCE(hotel_name,'') <> ''{extra}"
                 )
             )
-        ).all()
+        ).all():
+            n = normalize_organization(r.hotel_name)
+            if not n:
+                continue
+            if n not in seen:
+                seen[n] = (atype, r.id, r.hotel_name)
+            elif seen[n] is not None and seen[n][1] != r.id:
+                seen[n] = None  # ambiguous within this table
+        for n, v in seen.items():
+            if v and not _is_bare_brand(v[2]):
+                idx[n] = v
+    return idx
+
+
+async def run_autolink(
+    *,
+    dry_run: bool = False,
+    limit=None,
+    contact_ids=None,
+    batch_size: int = 500,
+) -> dict:
+    """[patch_autolink_wire] Link every still-unmatched, non-junk inbox contact
+    it confidently can.
+
+    dry_run:     resolve every link, report it, write nothing (rolls back).
+    contact_ids: restrict to these ids — the incremental post-sync path.
+    limit:       cap rows examined (proof runs, backlog chunking).
+    batch_size:  commit every N writes rather than holding one transaction
+                 open across the whole contacts table.
+
+    Returns counters plus up to 25 sample links for review.
+
+    NOTE: the company path writes a portfolio 'covers' edge but no matched_*
+    column (there is no single hotel id to point at), so those contacts stay
+    in the unmatched pool and are re-examined on every run. The insert is
+    ON CONFLICT DO NOTHING so this is wasted work, not duplicate data. A
+    proper fix needs an autolink_checked_at column — deliberately out of
+    scope here.
+    """
+    out = {
+        "examined": 0,
+        "domain": 0,
+        "name": 0,
+        "company": 0,
+        # [patch_autolink_chain] company contacts already carrying their edge
+        "company_edge_exists": 0,
+        "unmatched": 0,
+        "dry_run": dry_run,
+    }
+    samples: list = []
+    async with async_session() as s:
+        idx = await _build_host_index(s)
+        nidx = await _build_name_index(s)
+
+        # [patch_autolink_chain] The company path writes a portfolio 'covers'
+        # edge but no matched_* column, so those contacts stay in the unmatched
+        # pool and come back every run. Preloading the edges that already exist
+        # turns thousands of ON CONFLICT DO NOTHING no-ops per run into one
+        # SELECT.
+        # [patch_autolink_edgecase] lowercased to match the unique index in
+        # alembic 034, which keys on COALESCE(lower(account_name), '').
+        _company_edges = {
+            (row.person_id, (row.account_name or "").strip().lower())
+            for row in (
+                await s.execute(
+                    text(
+                        "SELECT person_id, account_name FROM contact_affiliations "
+                        "WHERE person_type = 'contact' AND relationship = 'covers' "
+                        "AND account_type = 'management_company'"
+                    )
+                )
+            ).all()
+        }
+
+        sql = (
+            "SELECT id, email, organization FROM contacts "
+            "WHERE matched_hotel_id IS NULL AND matched_lead_id IS NULL "
+            "AND COALESCE(contact_category,'') <> 'junk' AND email LIKE '%@%'"
+        )
+        params: dict = {}
+        if contact_ids is not None:
+            ids = [int(i) for i in contact_ids]
+            if not ids:
+                out["note"] = "contact_ids was empty — nothing to do"
+                return out
+            # int()-coerced above, so inlining is injection-safe and avoids
+            # asyncpg array-parameter typing.
+            sql += " AND id IN (" + ",".join(str(i) for i in ids) + ")"
+        sql += " ORDER BY id"
+        if limit:
+            sql += " LIMIT :lim"
+            params["lim"] = int(limit)
+
+        rows = (await s.execute(text(sql), params)).all()
+        out["examined"] = len(rows)
+
+        pending = 0
         for r in rows:
             domain = (r.email or "").split("@")[-1].lower()
+
             # 1) management-company portfolio coverage (no single-hotel FK)
             company = COMPANY_BY_DOMAIN.get(domain)
             if company:
-                await _cover_edge(s, r.id, "management_company", None, company, "company")
                 out["company"] += 1
+                # [patch_autolink_chain] already covered -> nothing to write
+                _co_key = (r.id, company.strip().lower())  # [patch_autolink_edgecase]
+                if _co_key in _company_edges:
+                    out["company_edge_exists"] += 1
+                    continue
+                if len(samples) < 25:
+                    samples.append(
+                        {"id": r.id, "email": r.email, "via": "company", "target": company}
+                    )
+                if not dry_run:
+                    await _cover_edge(s, r.id, "management_company", None, company, "company")
+                    _company_edges.add(_co_key)  # [patch_autolink_edgecase]
+                    pending += 1
+                    if pending >= batch_size:
+                        await s.commit()
+                        pending = 0
                 continue
+
             # 2) single property by exact host
             hit = idx.get(domain) if domain and domain not in SKIP_HOSTS else None
             method = "domain" if hit else None
+
             # 3) else exact normalized name (no bare brands)
             if not hit and r.organization and not _is_bare_brand(r.organization):
                 nrm = normalize_organization(r.organization)
                 if nrm:
-                    for atype, table, extra in (
-                        ("existing_hotel", "existing_hotels", ""),
-                        ("potential_lead", "potential_leads", " AND status <> 'rejected'"),
-                    ):
-                        cand = (
-                            await s.execute(
-                                text(
-                                    f"SELECT id, hotel_name FROM {table} WHERE hotel_name_normalized = :n{extra}"
-                                ),
-                                {"n": nrm},
-                            )
-                        ).all()
-                        if len(cand) == 1 and not _is_bare_brand(cand[0].hotel_name):
-                            hit, method = (atype, cand[0].id, cand[0].hotel_name), "name"
-                            break
+                    cand = nidx.get(nrm)
+                    if cand:
+                        hit, method = cand, "name"
+
             if not hit:
+                out["unmatched"] += 1
                 continue
+
             atype, aid, aname = hit
+            out[method] += 1
+            if len(samples) < 25:
+                samples.append(
+                    {
+                        "id": r.id,
+                        "email": r.email,
+                        "org": r.organization,
+                        "via": method,
+                        "target": aname,
+                        "account": f"{atype}:{aid}",
+                    }
+                )
+            if dry_run:
+                continue
+
             col = "matched_hotel_id" if atype == "existing_hotel" else "matched_lead_id"
             await s.execute(
                 text(f"UPDATE contacts SET {col} = :aid, updated_at = NOW() WHERE id = :id"),
                 {"aid": aid, "id": r.id},
             )
             await _cover_edge(s, r.id, atype, aid, aname, method)
-            out[method] += 1
-        await s.commit()
+            pending += 1
+            if pending >= batch_size:
+                await s.commit()
+                pending = 0
+
+        if dry_run:
+            await s.rollback()
+        else:
+            await s.commit()
+
+    out["samples"] = samples
     return out
 
 

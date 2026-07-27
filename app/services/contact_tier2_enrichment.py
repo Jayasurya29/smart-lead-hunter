@@ -755,6 +755,31 @@ async def enrich_contact_deep(contact_id: int, find_email: bool = False) -> dict
                 "(fuller property name)"
             )
 
+    # [property_upgrade] The grounded fill captured the SPECIFIC property
+    # ("Loews Miami Beach Hotel") while the stored org is the bare brand
+    # ("Loews"). The name_upgrade path above only fires via the stale-contact
+    # current-employer pass, so FRESH contacts never got the property. Same
+    # trust bar (verified slug, no job change / industry exit) plus a
+    # brand-containment guard: the old org token must appear inside the new
+    # name, so this can only enrich within the same family, never swap
+    # employers.
+    if not name_upgrade and not job_changed and not left_industry:
+        _go = (dossier.get("grounded_org") or "").strip()
+        _oo2 = org.strip()
+        _slug_ok = has_slug or bool((grounded_li or "").strip())
+        if (
+            _go
+            and _slug_ok
+            and len(_go) > len(_oo2)
+            and _norm_org(_go) != _norm_org(_oo2)
+            and (not _oo2 or _norm_org(_oo2) in _norm_org(_go))
+        ):
+            name_upgrade = _go
+            logger.info(
+                f"tier2: [property_upgrade] contact {contact_id} org {_oo2!r} -> "
+                f"{_go!r} (specific property from grounded fill)"
+            )
+
     # moved, the email on file is their FORMER employer's address and likely dead.
     # If the caller asked to find an email (find_email=true) and we detected a
     # move, look the person up AT THE NEW EMPLOYER (new org + its domain) and keep

@@ -38,6 +38,10 @@ COUNTRY_TO_REGIONS: dict[str, list[str]] = {
     "U.S. Virgin Islands": ["Caribbean", "Latin America", "Americas"],
     "Bermuda": ["Caribbean", "Atlantic", "Americas"],
     "Haiti": ["Caribbean", "Latin America", "Americas"],
+    # [patch_add_belize] Caribbean-basin, English-speaking. Absent until now,
+    # so Belizean properties were rejected by the location gate — e.g. Four
+    # Seasons Caye Chapel (104 keys, 2027).
+    "Belize": ["Caribbean", "Central America", "Latin America", "Americas"],
 }
 
 # Common country-name aliases. Normalize before lookup.

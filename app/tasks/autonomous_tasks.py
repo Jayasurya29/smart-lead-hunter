@@ -848,9 +848,53 @@ def classify_pending_contacts(self) -> Dict[str, Any]:
             summary.get("enriched"),
             summary.get("by_category"),
         )
+        # [patch_autolink_chain] Autolink runs HERE rather than off the sync
+        # tail: run_autolink skips contacts categorized 'junk', so it has to
+        # see the categories this task just wrote. Chaining both off the sync
+        # would race them and link rows destined for the bin.
+        try:
+            # [patch_chain_queue] see note on the classify chain above
+            autolink_contacts.apply_async(queue="maintenance")
+            logger.info("classify_pending_contacts: enqueued autolink_contacts")
+        except Exception as e:
+            logger.warning("classify_pending_contacts: failed to enqueue autolink: %s", e)
         return summary
 
     return run_async(_classify())
+
+
+@celery_app.task(bind=True, base=BaseTask, name="autolink_contacts")
+def autolink_contacts(self) -> Dict[str, Any]:
+    """[patch_autolink_chain] Link unmatched inbox contacts to a property, a
+    lead, or a management-company portfolio.
+
+    Chained off classify_pending_contacts, which is itself chained off the
+    inbox sync — event-driven, never on a clock.
+
+    Costs nothing external: pure SQL plus in-memory matching. No Gemini, no
+    Serper, no Wiza, no grounding.
+
+    Contacts matching nothing are left alone and re-examined next run — a hotel
+    added later can make a previously unmatchable contact match.
+    """
+    from app.services.contact_autolink import run_autolink
+
+    async def _link():
+        res = await run_autolink()
+        logger.info(
+            "autolink_contacts: examined=%s domain=%s name=%s company=%s "
+            "already_covered=%s unmatched=%s",
+            res.get("examined"),
+            res.get("domain"),
+            res.get("name"),
+            res.get("company"),
+            res.get("company_edge_exists"),
+            res.get("unmatched"),
+        )
+        res.pop("samples", None)  # keep the celery result payload small
+        return res
+
+    return run_async(_link())
 
 
 @celery_app.task(bind=True, base=BaseTask, name="rescue_junk_contacts")
@@ -1264,7 +1308,11 @@ def sync_inbox_contacts(self) -> Dict[str, Any]:
         # overlap with the sync that produced the rows.
         if (results["total_new_contacts"] + results["total_updated_contacts"]) > 0:
             try:
-                classify_pending_contacts.delay()
+                # [patch_chain_queue] Explicit queue required. task_queues is
+                # set to scraping/maintenance/crm, so the worker does NOT
+                # consume the default "celery" queue a bare .delay() targets —
+                # the message would publish fine and never be executed.
+                classify_pending_contacts.apply_async(queue="maintenance")
                 logger.info(
                     "Inbox Contact Sync: enqueued classify_pending_contacts "
                     "(%s new + %s updated)",

@@ -741,13 +741,50 @@ async def apply_person_move(db: AsyncSession, review_id: int) -> dict[str, Any]:
         if acct_type == "potential_lead"
         else ("existing_hotel_id" if acct_type == "existing_hotel" else None)
     )
+    # [patch_news_autocreate] Destination not in the DB yet — create it as a
+    # lead automatically instead of dead-ending, then re-resolve. This is what
+    # "Apply move" visually promises: one click records the move, standing up
+    # the hotel if needed. Uses save_lead_to_db so the new lead still gets full
+    # dedup / scoring / region-gating.
+    if not (fk_col and acct_id):
+        try:
+            from app.services.lead_factory import save_lead_to_db
+
+            # [patch_news_seed_country] news_person_review has no location
+            # columns, and the lead_factory gate rejects a lead with no
+            # state/country/known-city. The feed is region-filtered upstream
+            # and appointments are overwhelmingly US, so default country=USA to
+            # clear the gate. Hotel-name dedup still matches any existing
+            # Caribbean property first, so none is lost.
+            seed = {
+                "hotel_name": row["new_hotel"],
+                "country": "USA",
+                "source_site": "Hospitality News",
+                "hotel_type": "hotel",
+                "description": (
+                    f"Auto-created from a news appointment: {row['person_name']}"
+                    f" -> {row['new_hotel']}."
+                ),
+            }
+            res = await save_lead_to_db(seed, db, commit=False)
+            if res.get("status") in ("saved", "duplicate") and res.get("id"):
+                acct_type, acct_id, lead_id = await _resolve_destination(db, row["new_hotel"])
+                fk_col = (
+                    "lead_id"
+                    if acct_type == "potential_lead"
+                    else ("existing_hotel_id" if acct_type == "existing_hotel" else None)
+                )
+        except Exception as _e:  # noqa: BLE001
+            fk_col = fk_col  # fall through to the block below
+
     if not (fk_col and acct_id):
         return {
             "status": "blocked",
             "person": row["person_name"],
             "reason": (
-                f"'{row['new_hotel']}' isn't a lead yet — approve that hotel "
-                "first, then re-run --action (flag left pending)."
+                f"Couldn't stand up '{row['new_hotel']}' as a lead automatically "
+                "(likely out of region or a junk name). Add it manually, then "
+                "re-run. Flag left pending."
             ),
         }
 

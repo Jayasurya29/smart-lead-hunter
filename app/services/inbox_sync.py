@@ -779,6 +779,11 @@ MAX_BODY_MENTIONS_PER_MSG = 15  # cap body-text address harvest per message
 _FETCH_WORKERS = 8  # parallel messages.get threads (~40 quota units/s of 250)
 _FETCH_CHUNK = 200  # prefetch window — bounds memory during big backfills
 
+# [patch_history_pagination] Max history pages walked in one incremental run
+# (40 x 500 = 20k records). Past this the backlog is deep enough that a date
+# scan is both safer and cheaper than continuing to page.
+_HISTORY_MAX_PAGES = 40
+
 # Parallel Gemini limits
 _SIG_PARSE_SEMAPHORE = 20  # concurrent sig-parse calls
 _ORG_SPLIT_SEMAPHORE = 10  # concurrent org-split calls
@@ -1168,12 +1173,37 @@ def _is_bulk_subdomain(domain: str) -> bool:
     return head in BULK_SUBDOMAIN_PREFIXES or bool(_BULK_NUMBERED_RE.match(head))
 
 
+# [patch_reject_message_ids] Message-ID headers look exactly like addresses
+# (<32hex@mail.gmail.com>) and appear in every quoted reply. Image filenames
+# from HTML bodies do too (logo@2x.png). Neither is a person.
+_MSGID_HEX_LOCAL = re.compile(r"^[0-9a-f]{32}$", re.I)
+_MSGID_UUID_LOCAL = re.compile(
+    r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", re.I
+)
+_ASSET_DOMAIN = re.compile(r"\.(png|jpe?g|gif|svg|webp|bmp|ico|css|js)$", re.I)
+
+
+def _is_message_id_or_asset(local: str, domain: str) -> str:
+    """[patch_reject_message_ids] Reason string if this is not a real address."""
+    if domain == "mail.gmail.com" or domain.endswith(".mail.gmail.com"):
+        return "message_id"
+    if _MSGID_HEX_LOCAL.match(local) or _MSGID_UUID_LOCAL.match(local):
+        return "message_id"
+    if _ASSET_DOMAIN.search(domain):
+        return "image_asset"
+    return ""
+
+
 def _passes_hard_filters(email: str, own_mailbox: str) -> tuple[bool, str]:
     if "@" not in email:
         return False, "malformed"
     if email == own_mailbox:
         return False, "self"
     d = _domain(email)
+    # [patch_reject_message_ids] before anything else — these are not addresses
+    _bad = _is_message_id_or_asset(email.split("@")[0].lower(), d)
+    if _bad:
+        return False, _bad
     if d in OWN_DOMAINS:
         return False, "own_company"
     local = email.split("@")[0].lower()
@@ -1853,41 +1883,94 @@ def _list_message_ids_windowed(
     return ids
 
 
+def _history_gap_scan(gmail, mailbox: str, days: int) -> list[str]:
+    """[patch_history_pagination] Date-based scan covering a history gap.
+
+    Routes through the windowed lister past the large-backfill threshold so
+    the flat-query MAX_EMAILS_PER_RUN cap cannot silently truncate a long
+    outage (Gmail returns newest-first, so a flat query drops the OLDEST
+    messages in the gap — exactly the ones a gap scan exists to recover).
+    """
+    days = max(int(days or 0), SCAN_DAYS_BACK_INITIAL)
+    if days > LARGE_BACKFILL_THRESHOLD_DAYS:
+        return _list_message_ids_windowed(gmail, mailbox, days)
+    return _list_message_ids_full(gmail, mailbox, days)
+
+
 def _list_message_ids_incremental(
     gmail,
     mailbox: str,
     history_id: str,
+    fallback_days: Optional[int] = None,
 ) -> tuple[list[str], Optional[str]]:
-    try:
-        resp = (
-            gmail.users()
-            .history()
-            .list(
-                userId="me",
-                startHistoryId=history_id,
-                historyTypes=["messageAdded"],
-                maxResults=500,
-            )
-            .execute()
-        )
-    except HttpError as e:
-        if e.resp.status == 404:
-            logger.warning(
-                f"inbox_sync: history expired for {mailbox} "
-                f"(history_id={history_id}), falling back to full scan"
-            )
-            return _list_message_ids_full(gmail, mailbox), None
-        raise
+    """[patch_history_pagination] Delta listing via the Gmail History API.
 
+    Every page is walked before the cursor moves. The previous single-page
+    version advanced the cursor to HEAD while dropping every record past
+    page 1; those messages were never scanned again.
+
+    fallback_days: how far back the history-expired (404) path scans. The
+    caller derives it from mailbox_sync_state.last_synced_at so an outage
+    longer than SCAN_DAYS_BACK_INITIAL no longer loses the gap.
+    """
     ids: list[str] = []
-    for record in resp.get("history", []):
-        for added in record.get("messagesAdded", []):
-            msg_id = added.get("message", {}).get("id")
-            if msg_id:
-                ids.append(msg_id)
+    seen: set[str] = set()
+    page_token = None
+    new_history_id: Optional[str] = None
+    pages = 0
 
-    new_history_id = resp.get("historyId") or history_id
-    return ids, new_history_id
+    while True:
+        try:
+            resp = (
+                gmail.users()
+                .history()
+                .list(
+                    userId="me",
+                    startHistoryId=history_id,
+                    historyTypes=["messageAdded"],
+                    maxResults=500,
+                    pageToken=page_token,
+                )
+                .execute()
+            )
+        except HttpError as e:
+            if e.resp.status == 404:
+                _days = fallback_days or SCAN_DAYS_BACK_INITIAL
+                logger.warning(
+                    f"inbox_sync: history expired for {mailbox} "
+                    f"(history_id={history_id}), falling back to a {_days}d date scan"
+                )
+                return _history_gap_scan(gmail, mailbox, _days), None
+            raise
+
+        pages += 1
+        for record in resp.get("history", []):
+            for added in record.get("messagesAdded", []):
+                msg_id = added.get("message", {}).get("id")
+                if msg_id and msg_id not in seen:
+                    seen.add(msg_id)
+                    ids.append(msg_id)
+
+        new_history_id = resp.get("historyId") or new_history_id
+        page_token = resp.get("nextPageToken")
+        if not page_token:
+            break
+        if pages >= _HISTORY_MAX_PAGES:
+            # Backlog too deep to page safely. Never advance the cursor off an
+            # incomplete read — scan the gap by date instead (complete by
+            # construction) and let the caller reset the cursor to HEAD.
+            _days = fallback_days or SCAN_DAYS_BACK_INITIAL
+            logger.warning(
+                f"inbox_sync: {mailbox} history backlog exceeded "
+                f"{_HISTORY_MAX_PAGES} pages — switching to a {_days}d date scan"
+            )
+            return _history_gap_scan(gmail, mailbox, _days), None
+
+    if pages > 1:
+        logger.info(
+            f"inbox_sync: {mailbox} — history walked {pages} pages, {len(ids)} new message ids"
+        )
+    return ids, (new_history_id or history_id)
 
 
 def _get_current_history_id(gmail) -> Optional[str]:
@@ -2457,11 +2540,35 @@ async def sync_mailbox(
         )
 
         state_row = await session.execute(
-            text("SELECT last_history_id FROM mailbox_sync_state WHERE mailbox = :m"),
+            text(
+                "SELECT last_history_id, last_synced_at FROM mailbox_sync_state "
+                "WHERE mailbox = :m"
+            ),
             {"m": mailbox},
         )
         state = state_row.mappings().first()
         last_history_id = (state or {}).get("last_history_id") if state else None
+
+        # [patch_history_pagination] How far back a history-gap fallback must
+        # reach. Beat does not replay missed schedules and the host may be off,
+        # so the old fixed SCAN_DAYS_BACK_INITIAL default silently dropped every
+        # day of an outage beyond the second. +2 days of overlap is deliberate:
+        # re-reading a message is idempotent for contact identity, missing one
+        # is permanent.
+        _last_synced = (state or {}).get("last_synced_at") if state else None
+        _gap_days = SCAN_DAYS_BACK_INITIAL
+        if _last_synced is not None:
+            try:
+                if _last_synced.tzinfo is None:
+                    _last_synced = _last_synced.replace(tzinfo=timezone.utc)
+                _gap_days = max(
+                    SCAN_DAYS_BACK_INITIAL,
+                    int((run_start - _last_synced).total_seconds() // 86400) + 2,
+                )
+            except Exception as _gexc:
+                logger.debug(f"inbox_sync: gap-day derivation failed for {mailbox}: {_gexc}")
+                _gap_days = SCAN_DAYS_BACK_INITIAL
+
         new_history_id: Optional[str] = None
 
         if message_ids_override is not None:
@@ -2486,7 +2593,7 @@ async def sync_mailbox(
         else:
             logger.info(f"inbox_sync: {mailbox} — incremental from history_id={last_history_id}")
             message_ids, new_history_id = _list_message_ids_incremental(
-                gmail, mailbox, last_history_id
+                gmail, mailbox, last_history_id, fallback_days=_gap_days
             )
             if new_history_id is None:
                 new_history_id = _get_current_history_id(gmail)

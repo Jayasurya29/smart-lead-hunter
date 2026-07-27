@@ -53,6 +53,7 @@ WHERE (display_name IS NULL OR display_name = '')
        NOT IN ('junk', 'operational')
    OR COALESCE(manual_category, contact_category) IS NULL)
 ORDER BY
+  last_inbound_at DESC NULLS LAST,
   CASE COALESCE(manual_category, contact_category)
        WHEN 'buyer' THEN 0 ELSE 1 END,
   id
@@ -132,6 +133,10 @@ def resolve_one(email: str, org: str) -> tuple[str, str, str] | None:
     if not surnames:
         return None
     domain_core = email.split("@")[1].split(".")[0] if "@" in email else ""
+    # marketing-sender style domains: marriott@email-marriott.com
+    dom_words = set(re.split(r"[.-]", email.split("@")[1].lower())) if "@" in email else set()
+    if RX_ALPHA.sub("", local) in dom_words or local == domain_core:
+        return None                     # local IS the brand, not a person
     anchor = (org or "").strip() or domain_core
     if not anchor:
         return None
@@ -142,6 +147,9 @@ def resolve_one(email: str, org: str) -> tuple[str, str, str] | None:
         q = f'site:linkedin.com/in {surname} "{anchor}"'
         results = _serper_linkedin_raw(q)
         for first, last, url in _extract_candidates(results):
+            # reject org-account "names" whose surname is the company/domain
+            if _flat(last) in dom_words or _flat(last) == _flat(anchor):
+                continue
             if _name_matches_local(first, last, local):
                 return (first, last, url)
     return None

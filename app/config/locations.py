@@ -57,6 +57,7 @@ SOUTH_FLORIDA_CITIES = [
 ]
 
 CARIBBEAN_COUNTRIES = [
+    "belize",  # [patch_add_belize]
     "dominican republic",
     "bahamas",
     "jamaica",
