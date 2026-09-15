@@ -115,8 +115,10 @@ RATE_LIMIT_MAX_DELAY = 10.0  # Never wait more than 10s
 # ═══════════════════════════════════════════════════════════════
 # Used by: intelligent_pipeline.py PipelineConfig
 
-CLASSIFIER_MODEL = "gemini-3.1-flash-lite"  # 4,000 RPM / Unlimited RPD
-EXTRACTOR_MODEL = "gemini-2.5-flash"  # 1,000 RPM / 10,000 RPD
+from app.config_app import settings as _app_settings  # noqa: E402
+
+CLASSIFIER_MODEL = _app_settings.gemini_model_lite  # env: GEMINI_MODEL_LITE
+EXTRACTOR_MODEL = _app_settings.gemini_model  # env: GEMINI_MODEL
 CLASSIFIER_CONTENT_LIMIT = 5000  # Chars for classification
 EXTRACTOR_CONTENT_LIMIT = 20000  # Chars for extraction
 CLASSIFICATION_CONFIDENCE = 0.45  # Min confidence to extract

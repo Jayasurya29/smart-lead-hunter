@@ -29,10 +29,11 @@ from sqlalchemy import text
 
 from app.database import async_session
 from app.services.ai_client import ai_generate
+from app.config import settings as _settings
 
 logger = logging.getLogger(__name__)
 
-MODEL = "gemini-2.5-flash"  # synthesis wants the fuller model, not lite
+MODEL = _settings.gemini_model  # env: GEMINI_MODEL (synthesis wants full, not lite)
 GROUNDED_CONFIDENCE_FLOOR = 0.6  # grounded research outranks signals (cap 0.7)
 
 SYNTH_PROMPT = """You are building a CRM dossier for a sales team at JA Uniforms

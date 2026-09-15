@@ -32,9 +32,7 @@ from app.services.utils import get_timeline_label
 
 logger = logging.getLogger(__name__)
 
-GEMINI_API_KEY = (
-    "vertex-ai"  # Auth handled by gemini_client.py (Vertex AI $300 credits)
-)
+GEMINI_API_KEY = "vertex-ai"  # Auth handled by gemini_client.py (Vertex AI $300 credits)
 SERPER_API_KEY = os.getenv("SERPER_API_KEY")
 
 
@@ -159,9 +157,7 @@ async def _search_web(query: str, max_results: int = 5) -> list[dict]:
                 # Extract answer box — often has direct answers like room counts
                 if data.get("answerBox"):
                     ab = data["answerBox"]
-                    answer_text = (
-                        ab.get("answer") or ab.get("snippet") or ab.get("title") or ""
-                    )
+                    answer_text = ab.get("answer") or ab.get("snippet") or ab.get("title") or ""
                     if answer_text:
                         results.append(
                             {
@@ -175,9 +171,7 @@ async def _search_web(query: str, max_results: int = 5) -> list[dict]:
                 if data.get("knowledgeGraph"):
                     kg = data["knowledgeGraph"]
                     kg_desc = kg.get("description") or kg.get("title") or ""
-                    kg_attrs = " ".join(
-                        f"{k}: {v}" for k, v in kg.get("attributes", {}).items()
-                    )
+                    kg_attrs = " ".join(f"{k}: {v}" for k, v in kg.get("attributes", {}).items())
                     if kg_desc or kg_attrs:
                         results.append(
                             {
@@ -224,7 +218,7 @@ async def _call_gemini(
     """
     from app.services.gemini_client import get_gemini_url, get_gemini_headers
 
-    url = get_gemini_url("gemini-2.5-flash")
+    url = get_gemini_url()  # env: GEMINI_MODEL
     headers = get_gemini_headers()
 
     generation_config = {
@@ -271,8 +265,7 @@ async def _call_gemini(
 
             # Non-retryable (4xx other than 429) — bail immediately
             logger.warning(
-                f"Gemini error {resp.status_code} (non-retryable): "
-                f"{resp.text[:200]}"
+                f"Gemini error {resp.status_code} (non-retryable): " f"{resp.text[:200]}"
             )
             return None
 
@@ -285,16 +278,12 @@ async def _call_gemini(
             if attempt < max_attempts:
                 await _asyncio.sleep(wait)
                 continue
-            logger.warning(
-                f"Gemini call failed after {max_attempts} attempts: {type(e).__name__}"
-            )
+            logger.warning(f"Gemini call failed after {max_attempts} attempts: {type(e).__name__}")
             return None
 
         except Exception as e:
             # Non-transient errors (JSON decode, auth, etc.) — no retry
-            logger.warning(
-                f"Gemini call failed [{type(e).__name__}]: {e}", exc_info=True
-            )
+            logger.warning(f"Gemini call failed [{type(e).__name__}]: {e}", exc_info=True)
             return None
 
     # Exhausted retries
@@ -453,8 +442,7 @@ def _validate_grounding_response(parsed: Dict) -> Dict:
             clean["room_count"] = rc_int
         elif rc_int > 5000:
             logger.warning(
-                f"Grounding room_count={rc_int} exceeds 5000 — likely parsing error, "
-                f"discarding"
+                f"Grounding room_count={rc_int} exceeds 5000 — likely parsing error, " f"discarding"
             )
     except (TypeError, ValueError):
         pass
@@ -614,11 +602,7 @@ async def _enrich_lead_data_grounded(
             {
                 "role": "user",
                 "parts": [
-                    {
-                        "text": _build_grounding_prompt(
-                            hotel_name, city, state, country, brand
-                        )
-                    }
+                    {"text": _build_grounding_prompt(hotel_name, city, state, country, brand)}
                 ],
             }
         ],
@@ -656,8 +640,7 @@ async def _enrich_lead_data_grounded(
         content = candidate["content"]["parts"][0]["text"].strip()
     except (KeyError, IndexError) as e:
         logger.warning(
-            f"Grounding: couldn't parse response shape for '{hotel_name}': "
-            f"{e} — falling back"
+            f"Grounding: couldn't parse response shape for '{hotel_name}': " f"{e} — falling back"
         )
         return None
 
@@ -741,9 +724,7 @@ Return ONLY a JSON object — no preamble, no markdown fences.
             },
         }
         async with _httpx.AsyncClient(timeout=30) as lite_client:
-            lite_resp = await lite_client.post(
-                lite_url, headers=lite_headers, json=lite_payload
-            )
+            lite_resp = await lite_client.post(lite_url, headers=lite_headers, json=lite_payload)
         lite_data = lite_resp.json()
         lite_text = lite_data["candidates"][0]["content"]["parts"][0]["text"].strip()
     except Exception as e:
@@ -766,15 +747,12 @@ Return ONLY a JSON object — no preamble, no markdown fences.
         parsed = json.loads(lite_text)
     except json.JSONDecodeError as e:
         logger.warning(
-            f"Grounding Call 2: JSON decode failed for '{hotel_name}': {e} "
-            f"— falling back"
+            f"Grounding Call 2: JSON decode failed for '{hotel_name}': {e} " f"— falling back"
         )
         return None
 
     if not isinstance(parsed, dict):
-        logger.warning(
-            f"Grounding Call 2: response not a dict for '{hotel_name}' — falling back"
-        )
+        logger.warning(f"Grounding Call 2: response not a dict for '{hotel_name}' — falling back")
         return None
 
     cleaned = _validate_grounding_response(parsed)
@@ -794,9 +772,7 @@ Return ONLY a JSON object — no preamble, no markdown fences.
         f"{len(sources)} sources read"
     )
     logger.info(f"Grounding raw [{hotel_name}]: " + json.dumps(parsed, default=str))
-    logger.info(
-        f"Grounding cleaned [{hotel_name}]: " + json.dumps(cleaned, default=str)
-    )
+    logger.info(f"Grounding cleaned [{hotel_name}]: " + json.dumps(cleaned, default=str))
 
     # Also store the grounded text as description if we didn't extract one.
     # The grounded text often contains rich sales intel (construction updates,
@@ -832,9 +808,7 @@ Return ONLY a JSON object — no preamble, no markdown fences.
         "phase two",
     }
     _grounding_desc = cleaned.get("description", "")
-    if _grounding_desc and any(
-        kw in _grounding_desc.lower() for kw in _SALES_INTEL_KEYWORDS
-    ):
+    if _grounding_desc and any(kw in _grounding_desc.lower() for kw in _SALES_INTEL_KEYWORDS):
         cleaned["key_insights"] = _grounding_desc
         logger.info(
             f"Grounding: extracted key_insights from description for '{hotel_name}' "
@@ -843,9 +817,7 @@ Return ONLY a JSON object — no preamble, no markdown fences.
 
     # Build return shape compatible with what enrich_lead_data normally returns
     cleaned["changes"] = [k for k in cleaned if k not in ("confidence",)]
-    cleaned["source_url"] = (
-        None  # grounding URLs are vertexaisearch redirects, not useful
-    )
+    cleaned["source_url"] = None  # grounding URLs are vertexaisearch redirects, not useful
     cleaned["source_titles"] = sources
     cleaned["enrichment_path"] = "grounding"  # for log/debug only
 
@@ -1201,9 +1173,7 @@ async def enrich_lead_data(
                 if "_geo_source" in geo_extra:
                     grounded["_geo_source"] = geo_extra["_geo_source"]
             except Exception as e:
-                logger.warning(
-                    f"Hybrid geocode failed (non-fatal) for '{hotel_name}': {e}"
-                )
+                logger.warning(f"Hybrid geocode failed (non-fatal) for '{hotel_name}': {e}")
 
             return grounded
         # else: silently fall through to the 6-stage pipeline below
@@ -1236,9 +1206,7 @@ async def enrich_lead_data(
     if project_type:
         result["project_type"] = project_type
         result["changes"].append("project_type")
-        logger.info(
-            f"Smart Fill [{hotel_name}] classified as project_type={project_type!r}"
-        )
+        logger.info(f"Smart Fill [{hotel_name}] classified as project_type={project_type!r}")
     else:
         project_type = "new_opening"
         logger.info(
@@ -1297,8 +1265,7 @@ async def enrich_lead_data(
         missing=[
             f
             for f in missing
-            if f
-            not in ("management_company", "owner", "developer", "address", "zip_code")
+            if f not in ("management_company", "owner", "developer", "address", "zip_code")
         ],
         mode=mode,
         current_brand=brand,
@@ -1329,9 +1296,7 @@ async def enrich_lead_data(
     detected_country = (
         (data_extraction.get("country") if data_extraction else None) or country or ""
     )
-    detected_city = (
-        (data_extraction.get("city") if data_extraction else None) or city or ""
-    )
+    detected_city = (data_extraction.get("city") if data_extraction else None) or city or ""
     address_extraction = await _extract_address(
         hotel_name=hotel_name,
         location=location,
@@ -1342,9 +1307,7 @@ async def enrich_lead_data(
 
     logger.info(f"Smart Fill [{hotel_name}] data extraction raw: {data_extraction}")
     logger.info(f"Smart Fill [{hotel_name}] entity extraction raw: {entity_extraction}")
-    logger.info(
-        f"Smart Fill [{hotel_name}] address extraction raw: {address_extraction}"
-    )
+    logger.info(f"Smart Fill [{hotel_name}] address extraction raw: {address_extraction}")
 
     # ── MERGE all extractions ──
     extraction = data_extraction or {}
@@ -1469,9 +1432,7 @@ Default to "new_opening" if truly ambiguous.
         "required": ["project_type"],
     }
     try:
-        resp = await _call_gemini(
-            prompt, temperature=0.1, response_schema=classify_schema
-        )
+        resp = await _call_gemini(prompt, temperature=0.1, response_schema=classify_schema)
         if not resp:
             return None
         parsed = json.loads(resp)
@@ -2447,9 +2408,7 @@ def _validate_extraction(
             logger.info(f"Address extraction: rejecting '{addr}' — identical to city")
             addr = ""
         elif country and addr_l == country.strip().lower():
-            logger.info(
-                f"Address extraction: rejecting '{addr}' — identical to country"
-            )
+            logger.info(f"Address extraction: rejecting '{addr}' — identical to country")
             addr = ""
         elif len(addr) <= 3:
             # Too short to be useful (e.g. "St.")
@@ -2633,9 +2592,7 @@ async def _extract_address(
     snippets_text = "\n".join(f"- {s}" for s in addr_snippets)
 
     if not addr_snippets:
-        logger.warning(
-            f"Address extraction [{hotel_name}]: no snippets to extract from"
-        )
+        logger.warning(f"Address extraction [{hotel_name}]: no snippets to extract from")
         return None
 
     # ── STAGE 4: Build country-specific prompt ───────────────────────
@@ -2815,11 +2772,7 @@ def _map_extraction_to_result(
     reopening_signal = (extraction.get("reopening_date") or "").strip()
     already_opened_signal = bool(extraction.get("already_opened"))
 
-    if (
-        project_type not in REOPENING_TYPES
-        and reopening_signal
-        and already_opened_signal
-    ):
+    if project_type not in REOPENING_TYPES and reopening_signal and already_opened_signal:
         logger.info(
             f"Smart Fill: extraction evidence overrides classifier. "
             f"Was project_type={project_type!r} → reclassifying as 'renovation'"
@@ -2909,9 +2862,7 @@ def _map_extraction_to_result(
     current_tier_l = (current_brand_tier or "").strip().lower()
     current_is_valid = current_tier_l in _GROUNDING_VALID_TIERS
     is_downgrade_to_skip = (
-        coerced_new_tier == "tier5_skip"
-        and current_is_valid
-        and current_tier_l != "tier5_skip"
+        coerced_new_tier == "tier5_skip" and current_is_valid and current_tier_l != "tier5_skip"
     )
     if coerced_new_tier and not is_downgrade_to_skip:
         if mode == "full" and not current_is_valid:
@@ -3128,9 +3079,7 @@ async def batch_smart_fill(limit: int = 10, mode: str = "smart") -> Dict:
             )
 
             if not enriched.get("changes"):
-                stats["details"].append(
-                    {"name": lead.hotel_name, "status": "no_data_found"}
-                )
+                stats["details"].append({"name": lead.hotel_name, "status": "no_data_found"})
                 continue
 
             changes = []
@@ -3388,9 +3337,7 @@ async def batch_full_refresh(limit: int = 5, stale_days: int = 14) -> Dict:
                 current_tier = (lead.brand_tier or "").strip().lower()
                 current_is_valid = current_tier in _GROUNDING_VALID_TIERS
                 is_downgrade_to_skip = (
-                    coerced == "tier5_skip"
-                    and current_is_valid
-                    and current_tier != "tier5_skip"
+                    coerced == "tier5_skip" and current_is_valid and current_tier != "tier5_skip"
                 )
                 if coerced and not is_downgrade_to_skip:
                     if current_is_valid and coerced == "tier5_skip":
@@ -3460,8 +3407,7 @@ async def batch_full_refresh(limit: int = 5, stale_days: int = 14) -> Dict:
                     await rescore_lead(lead.id, session)
                 except Exception as rescore_err:
                     logger.warning(
-                        f"rescore after full refresh failed for "
-                        f"{lead.id}: {rescore_err}"
+                        f"rescore after full refresh failed for " f"{lead.id}: {rescore_err}"
                     )
                     lead.lead_score = score_result["total_score"]
 

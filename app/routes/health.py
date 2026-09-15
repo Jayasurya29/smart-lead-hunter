@@ -23,12 +23,7 @@ async def root():
     from pathlib import Path
     from fastapi.responses import FileResponse
 
-    index = (
-        Path(__file__).resolve().parent.parent.parent
-        / "frontend"
-        / "dist"
-        / "index.html"
-    )
+    index = Path(__file__).resolve().parent.parent.parent / "frontend" / "dist" / "index.html"
     if index.is_file():
         return FileResponse(str(index))
     return {
@@ -68,7 +63,7 @@ async def health_check(db: AsyncSession = Depends(get_db)):
             is_vertex_ai,
         )
 
-        url = get_gemini_url("gemini-2.5-flash")
+        url = get_gemini_url()  # env: GEMINI_MODEL
         headers = get_gemini_headers()
         async with httpx.AsyncClient(timeout=5.0) as client:
             resp = await client.post(
@@ -99,9 +94,7 @@ async def health_check(db: AsyncSession = Depends(get_db)):
             import redis.asyncio as aioredis
 
             if _shared._health_redis is None:
-                _shared._health_redis = aioredis.from_url(
-                    redis_url, socket_connect_timeout=3
-                )
+                _shared._health_redis = aioredis.from_url(redis_url, socket_connect_timeout=3)
             try:
                 await _shared._health_redis.ping()
                 components["redis"] = "healthy"
@@ -110,9 +103,7 @@ async def health_check(db: AsyncSession = Depends(get_db)):
                     await _shared._health_redis.aclose()
                 except Exception:
                     pass
-                _shared._health_redis = aioredis.from_url(
-                    redis_url, socket_connect_timeout=3
-                )
+                _shared._health_redis = aioredis.from_url(redis_url, socket_connect_timeout=3)
                 await _shared._health_redis.ping()
                 components["redis"] = "healthy"
     except Exception as e:

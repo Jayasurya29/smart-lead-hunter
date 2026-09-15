@@ -708,15 +708,11 @@ async def _call_gemini_single(
 _GEMINI_FALLBACK_CHAIN: list[tuple] = [
     # ── Primary model (env-configured, currently gemini-3.5-flash) ──
     (None, "global"),  # 1. primary on global (required for 3.x)
-    # ── gemini-2.5-flash fallback — 4 endpoints ──
-    ("gemini-2.5-flash", "global"),  # 2. older model, still good
-    ("gemini-2.5-flash", "us-central1"),  # 3. regional
-    ("gemini-2.5-flash", "us-east4"),  # 4. east coast
-    ("gemini-2.5-flash", "us-west1"),  # 5. west coast
-    # ── Lite models — last resort ──
-    ("gemini-3.1-flash-lite", "global"),  # 6. lite 3.x
-    ("gemini-2.5-flash-lite", "global"),  # 7. lite 2.x
-    ("gemini-2.5-flash-lite", "us-central1"),  # 8. absolute last resort
+    # 2.5 retired on Vertex (Lite Jan 2027, Flash Mar 2027) -- 3.x only.
+    # 3.x is global-only, so fallback = different model (separate quota pool).
+    # Duplicates of the env primary are skipped at call time.
+    ("gemini-3.5-flash", "global"),  # 2. full 3.x
+    ("gemini-3.1-flash-lite", "global"),  # 3. lite 3.x -- last resort
 ]
 
 

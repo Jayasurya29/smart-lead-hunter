@@ -22,13 +22,9 @@ from app.config import settings
 logger = logging.getLogger(__name__)
 
 
-SERPER_API_KEY = os.getenv("SERPER_API_KEY") or getattr(
-    settings, "serper_api_key", None
-)
+SERPER_API_KEY = os.getenv("SERPER_API_KEY") or getattr(settings, "serper_api_key", None)
 
-APOLLO_API_KEY = os.getenv("APOLLO_API_KEY") or getattr(
-    settings, "apollo_api_key", None
-)
+APOLLO_API_KEY = os.getenv("APOLLO_API_KEY") or getattr(settings, "apollo_api_key", None)
 
 
 def _vertex_project() -> str:
@@ -40,9 +36,7 @@ def _vertex_project() -> str:
 
 
 def _vertex_location() -> str:
-    return getattr(settings, "vertex_location", None) or os.getenv(
-        "VERTEX_LOCATION", "us-central1"
-    )
+    return getattr(settings, "vertex_location", None) or os.getenv("VERTEX_LOCATION", "us-central1")
 
 
 def _vertex_key_path() -> str:
@@ -63,9 +57,7 @@ def _load_service_account_credentials():
     """
     key_path = Path(_vertex_key_path())
     if not key_path.is_file():
-        key_path = (
-            Path(__file__).resolve().parent.parent.parent.parent / _vertex_key_path()
-        )
+        key_path = Path(__file__).resolve().parent.parent.parent.parent / _vertex_key_path()
     if not key_path.is_file():
         logger.warning(
             f"Vertex AI key not found at {_vertex_key_path()} — outreach "
@@ -130,7 +122,7 @@ def _build_llm(model: str, temperature: float, max_tokens: int):
 def get_researcher_llm():
     """Researcher synthesis — fact extraction, near-zero creativity.
     Hallucinated facts here poison every downstream agent."""
-    return _build_llm("gemini-2.5-flash", temperature=0.1, max_tokens=8192)
+    return _build_llm(settings.gemini_model, temperature=0.1, max_tokens=8192)
 
 
 @lru_cache(maxsize=1)
@@ -141,7 +133,7 @@ def get_analyst_llm():
     rationale + primary_angle. 4096 was still getting truncated mid-
     rationale, which failed JSON parse and silently dropped the score
     back to default."""
-    return _build_llm("gemini-2.5-flash", temperature=0.1, max_tokens=8192)
+    return _build_llm(settings.gemini_model, temperature=0.1, max_tokens=8192)
 
 
 @lru_cache(maxsize=1)
@@ -150,20 +142,20 @@ def get_writer_llm():
     But still capped at 0.4 — beyond that the model starts inventing facts.
     4096 tokens — combined email body + LinkedIn message + tone field
     plus Critic-feedback regeneration on retry runs."""
-    return _build_llm("gemini-2.5-flash", temperature=0.4, max_tokens=4096)
+    return _build_llm(settings.gemini_model, temperature=0.4, max_tokens=4096)
 
 
 @lru_cache(maxsize=1)
 def get_critic_llm():
     """Critic — strict rubric judge, fully deterministic."""
-    return _build_llm("gemini-2.5-flash-lite", temperature=0.0, max_tokens=2048)
+    return _build_llm(settings.gemini_model_lite, temperature=0.0, max_tokens=2048)
 
 
 @lru_cache(maxsize=1)
 def get_validator_llm():
     """Validator (between Researcher and Analyst) — checks claims against
     source. Must be deterministic and cheap (Flash Lite)."""
-    return _build_llm("gemini-2.5-flash-lite", temperature=0.0, max_tokens=4096)
+    return _build_llm(settings.gemini_model_lite, temperature=0.0, max_tokens=4096)
 
 
 # ─────────────────────────────────────────────────────────────────────────────

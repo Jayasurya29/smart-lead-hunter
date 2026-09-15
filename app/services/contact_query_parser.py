@@ -21,10 +21,11 @@ import logging
 import httpx
 
 from app.services.ai_client import ai_generate
+from app.config import settings as _settings
 
 logger = logging.getLogger(__name__)
 
-MODEL = "gemini-2.5-flash-lite"
+MODEL = _settings.gemini_model_lite  # env: GEMINI_MODEL_LITE
 
 _VALID_CATEGORY = {"buyer", "seller", "competitor", "personal", "junk"}
 _VALID_OPP = {"high"}

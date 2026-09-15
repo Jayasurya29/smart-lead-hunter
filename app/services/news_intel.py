@@ -30,10 +30,11 @@ from sqlalchemy import text
 
 from app.database import async_session
 from app.services.ai_client import ai_generate
+from app.config import settings as _settings
 
 logger = logging.getLogger(__name__)
 
-MODEL = "gemini-2.5-flash"
+MODEL = _settings.gemini_model  # env: GEMINI_MODEL
 
 # Query ladder. Serper /news already biases to recent items; "gl: us"
 # keeps the index US-centric, Caribbean terms pull the islands in.

@@ -18,7 +18,7 @@ Usage:
     text = await ai_generate(client, "What is 2+2?")
 
     # With specific model override
-    text = await ai_generate(client, prompt, model="gemini-2.5-flash-lite")
+    text = await ai_generate(client, prompt, model="gemini-3.1-flash-lite")
 
     # Low-level access for custom requests
     url = get_ai_url()
@@ -46,16 +46,12 @@ def _get_config() -> dict:
         from app.config import settings
 
         return {
-            "provider": os.getenv(
-                "AI_PROVIDER", getattr(settings, "ai_provider", "vertex_ai")
-            ),
-            "model": getattr(
-                settings, "gemini_model", os.getenv("AI_MODEL", "gemini-2.5-flash")
-            ),
+            "provider": os.getenv("AI_PROVIDER", getattr(settings, "ai_provider", "vertex_ai")),
+            "model": getattr(settings, "gemini_model", os.getenv("AI_MODEL", "gemini-3.5-flash")),
             "model_lite": getattr(
                 settings,
                 "gemini_model_lite",
-                os.getenv("AI_MODEL_LITE", "gemini-2.5-flash-lite"),
+                os.getenv("AI_MODEL_LITE", "gemini-3.1-flash-lite"),
             ),
             # Vertex AI
             "vertex_project_id": getattr(
@@ -71,9 +67,7 @@ def _get_config() -> dict:
             ),
             # OpenAI
             "openai_api_key": os.getenv("OPENAI_API_KEY", ""),
-            "openai_base_url": os.getenv(
-                "OPENAI_BASE_URL", "https://api.openai.com/v1"
-            ),
+            "openai_base_url": os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1"),
             # Anthropic
             "anthropic_api_key": os.getenv("ANTHROPIC_API_KEY", ""),
             # Ollama
@@ -87,15 +81,13 @@ def _get_config() -> dict:
         # Fallback if settings not available (scripts, tests)
         return {
             "provider": os.getenv("AI_PROVIDER", "vertex_ai"),
-            "model": os.getenv("AI_MODEL", "gemini-2.5-flash"),
-            "model_lite": os.getenv("AI_MODEL_LITE", "gemini-2.5-flash-lite"),
+            "model": os.getenv("AI_MODEL", "gemini-3.5-flash"),
+            "model_lite": os.getenv("AI_MODEL_LITE", "gemini-3.1-flash-lite"),
             "vertex_project_id": os.getenv("VERTEX_PROJECT_ID", ""),
             "vertex_location": os.getenv("VERTEX_LOCATION", "global"),
             "vertex_key_path": os.getenv("VERTEX_KEY_PATH", "vertex-key.json"),
             "openai_api_key": os.getenv("OPENAI_API_KEY", ""),
-            "openai_base_url": os.getenv(
-                "OPENAI_BASE_URL", "https://api.openai.com/v1"
-            ),
+            "openai_base_url": os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1"),
             "anthropic_api_key": os.getenv("ANTHROPIC_API_KEY", ""),
             "ollama_url": os.getenv("OLLAMA_URL", "http://localhost:11434"),
         }
@@ -125,9 +117,7 @@ def _init():
         else:
             logger.info(f"Anthropic initialized: model={config['model']}")
     elif _provider == "ollama":
-        logger.info(
-            f"Ollama initialized: url={config['ollama_url']}, model={config['model']}"
-        )
+        logger.info(f"Ollama initialized: url={config['ollama_url']}, model={config['model']}")
     else:
         logger.error(
             f"Unknown AI_PROVIDER: {_provider}. Valid: vertex_ai, openai, anthropic, ollama"
@@ -140,9 +130,7 @@ def _init_vertex(config: dict):
 
     key_path = Path(config["vertex_key_path"])
     if not key_path.is_file():
-        key_path = (
-            Path(__file__).resolve().parent.parent.parent / config["vertex_key_path"]
-        )
+        key_path = Path(__file__).resolve().parent.parent.parent / config["vertex_key_path"]
 
     if not key_path.is_file():
         logger.error(
@@ -186,9 +174,7 @@ def get_ai_url(model: str = None) -> str:
 
     if _provider == "vertex_ai":
         if _creds is None:
-            raise RuntimeError(
-                "Vertex AI not configured. Place vertex-key.json in project root."
-            )
+            raise RuntimeError("Vertex AI not configured. Place vertex-key.json in project root.")
         project = config["vertex_project_id"]
         location = config["vertex_location"]
         # Gemini 2.5 models are served from the "global" endpoint on Vertex AI,
@@ -299,9 +285,7 @@ async def ai_generate(
 
     try:
         if _provider == "vertex_ai":
-            return await _generate_vertex(
-                client, prompt, model, temperature, max_tokens, timeout
-            )
+            return await _generate_vertex(client, prompt, model, temperature, max_tokens, timeout)
         elif _provider == "openai":
             return await _generate_openai(
                 client, prompt, model, temperature, max_tokens, timeout, config
@@ -311,9 +295,7 @@ async def ai_generate(
                 client, prompt, model, temperature, max_tokens, timeout, config
             )
         elif _provider == "ollama":
-            return await _generate_ollama(
-                client, prompt, model, temperature, timeout, config
-            )
+            return await _generate_ollama(client, prompt, model, temperature, timeout, config)
         else:
             logger.error(f"Unknown provider: {_provider}")
             return None
@@ -355,9 +337,7 @@ async def _generate_vertex(client, prompt, model, temperature, max_tokens, timeo
     return parts[0].get("text", "").strip()
 
 
-async def _generate_openai(
-    client, prompt, model, temperature, max_tokens, timeout, config
-):
+async def _generate_openai(client, prompt, model, temperature, max_tokens, timeout, config):
     """OpenAI / GPT models."""
     url = f"{config['openai_base_url']}/chat/completions"
     headers = {
@@ -381,9 +361,7 @@ async def _generate_openai(
     return data["choices"][0]["message"]["content"].strip()
 
 
-async def _generate_anthropic(
-    client, prompt, model, temperature, max_tokens, timeout, config
-):
+async def _generate_anthropic(client, prompt, model, temperature, max_tokens, timeout, config):
     """Anthropic / Claude models."""
     url = "https://api.anthropic.com/v1/messages"
     headers = {

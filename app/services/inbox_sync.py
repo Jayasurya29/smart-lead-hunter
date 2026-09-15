@@ -49,6 +49,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.services.ai_client import ai_generate
+from app.config import settings as _settings
 from app.config.brand_registry import BrandRegistry, BrandInfo
 from app.config.procurement_intelligence import (
     MANAGEMENT_COMPANY_INTEL,  # noqa: F401  (imported for future use)
@@ -1730,7 +1731,7 @@ async def _normalize_saved_contact_orgs(
         prompt = ORG_SPLIT_PROMPT + json.dumps(entries, ensure_ascii=False)
         async with sem:
             try:
-                raw = await ai_generate(client, prompt, model="gemini-2.5-flash-lite")
+                raw = await ai_generate(client, prompt, model=_settings.gemini_model_lite)
             except Exception as exc:
                 logger.debug(f"inbox_sync: org-split Gemini error: {exc}")
                 return batch_emails, []
@@ -2365,7 +2366,7 @@ async def _parse_sig(client: httpx.AsyncClient, sig_block: str) -> dict:
         return {}
     prompt = SIGNATURE_PROMPT + sig_block
     try:
-        text_out = await ai_generate(client, prompt, model="gemini-2.5-flash-lite")
+        text_out = await ai_generate(client, prompt, model=_settings.gemini_model_lite)
     except Exception as e:
         logger.debug(f"inbox_sync: Gemini sig parse error: {e}")
         return {}
@@ -2450,7 +2451,7 @@ async def _resolve_messy_names(contacts: list[dict]) -> int:
         prompt = NAME_RESOLVE_PROMPT + _json.dumps(entries, ensure_ascii=False)
         async with sem:
             try:
-                raw = await ai_generate(client, prompt, model="gemini-2.5-flash-lite")
+                raw = await ai_generate(client, prompt, model=_settings.gemini_model_lite)
             except Exception as exc:
                 logger.debug(f"inbox_sync: name-resolve error: {exc}")
                 return

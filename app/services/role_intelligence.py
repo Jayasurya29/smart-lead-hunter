@@ -414,10 +414,13 @@ _LLM_HEADER = (
 )
 
 
-async def label_roles_llm(client, items: list[dict], model: str = "gemini-2.5-flash-lite") -> dict:
+async def label_roles_llm(client, items: list[dict], model: str | None = None) -> dict:
     """items: [{role, org_hint}]. Returns {normalized_role: {vertical, priority,
     is_relevant, seniority}}. Best-effort; returns {} on parse failure."""
+    from app.config import settings as _settings
     from app.services.ai_client import ai_generate
+
+    model = model or _settings.gemini_model_lite
 
     if not items:
         return {}

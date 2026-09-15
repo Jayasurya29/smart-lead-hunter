@@ -12,8 +12,8 @@ STAGES:
 5. Priority & Contact Analysis - Timing and contact relevance
 
 AI PROVIDER: Google Gemini
--Classifier: gemini-2.5-flash-lite (4,000 RPM / Unlimited RPD)
--Extractor: gemini-2.5-flash (1,000 RPM / 10,000 RPD)
+-Classifier: GEMINI_MODEL_LITE (.env)
+-Extractor: GEMINI_MODEL (.env)
 
 
 Usage:
@@ -340,9 +340,7 @@ class ExtractedLead:
             "investment_amount": self.investment_amount,
             "source_url": self.source_url,
             "source_name": self.source_name,
-            "source_urls": " | ".join(self.source_urls)
-            if self.source_urls
-            else self.source_url,
+            "source_urls": " | ".join(self.source_urls) if self.source_urls else self.source_url,
             "source_names": " | ".join(self.source_names)
             if self.source_names
             else self.source_name,
@@ -416,18 +414,12 @@ class PipelineResult:
             "pages_scraped": self.pages_scraped,
             "pages_relevant": self.pages_relevant,
             "pages_rejected": self.pages_rejected,
-            "relevance_rate": round(
-                self.pages_relevant / max(self.pages_classified, 1), 3
-            ),
+            "relevance_rate": round(self.pages_relevant / max(self.pages_classified, 1), 3),
             "leads_extracted": self.leads_extracted,
             "leads_validated": self.leads_validated,
             "leads_qualified": self.leads_qualified,
-            "extraction_rate": round(
-                self.leads_extracted / max(self.pages_relevant, 1), 2
-            ),
-            "qualification_rate": round(
-                self.leads_qualified / max(self.leads_extracted, 1), 3
-            ),
+            "extraction_rate": round(self.leads_extracted / max(self.pages_relevant, 1), 2),
+            "qualification_rate": round(self.leads_qualified / max(self.leads_extracted, 1), 3),
             "avg_confidence": round(self.avg_classification_confidence, 3),
             "avg_lead_score": round(self.avg_lead_score, 1),
             "cache_hits": self.cache_hits,
@@ -518,9 +510,7 @@ class LeadPriorityCalculator:
         date_lower = date_str.lower().strip()
 
         # Already opened?
-        if any(
-            word in date_lower for word in ["opened", "open now", "recently opened"]
-        ):
+        if any(word in date_lower for word in ["opened", "open now", "recently opened"]):
             return (datetime.now().year, datetime.now().month)
 
         # Extract year
@@ -562,9 +552,7 @@ class LeadPriorityCalculator:
 
         return months
 
-    def calculate_priority(
-        self, date_str: str
-    ) -> Tuple[LeadPriority, str, Optional[int], str]:
+    def calculate_priority(self, date_str: str) -> Tuple[LeadPriority, str, Optional[int], str]:
         """
         Calculate lead priority.
         Returns: (priority, reason, months_to_opening, decision_window)
@@ -982,9 +970,7 @@ Respond in JSON:
 
             except httpx.TimeoutException:
                 wait = (2**attempt) * 2
-                logger.warning(
-                    f"Classifier timeout, retry {attempt + 1}/{max_retries} in {wait}s"
-                )
+                logger.warning(f"Classifier timeout, retry {attempt + 1}/{max_retries} in {wait}s")
                 await asyncio.sleep(wait)
                 continue
             except Exception as e:
@@ -1223,9 +1209,7 @@ Return [] if no new hotels found."""
                 self._redis_ready = True
                 logger.info("Extraction cache: async Redis configured")
             except Exception as e:
-                logger.warning(
-                    f"Extraction cache: Redis unavailable ({e}), caching disabled"
-                )
+                logger.warning(f"Extraction cache: Redis unavailable ({e}), caching disabled")
                 self._redis = None
 
     @staticmethod
@@ -1259,9 +1243,7 @@ Return [] if no new hotels found."""
         except Exception:
             pass
 
-    async def extract(
-        self, url: str, content: str, source_name: str = ""
-    ) -> List[ExtractedLead]:
+    async def extract(self, url: str, content: str, source_name: str = "") -> List[ExtractedLead]:
         """Extract leads from content with retry logic and Redis caching."""
         self._stats["extracted"] += 1
         model = self.config.extractor_model
@@ -1330,11 +1312,7 @@ Return [] if no new hotels found."""
                             {
                                 "role": "user",
                                 "parts": [
-                                    {
-                                        "text": self._build_prompt(
-                                            truncated, url, source_name
-                                        )
-                                    }
+                                    {"text": self._build_prompt(truncated, url, source_name)}
                                 ],
                             }
                         ],
@@ -1378,8 +1356,7 @@ Return [] if no new hotels found."""
                     jitter = random.uniform(0, base)  # 0-2s, 0-4s, 0-8s added
                     wait = base + jitter
                     logger.warning(
-                        f"Rate limited (429), retry "
-                        f"{attempt + 1}/{max_retries} in {wait:.1f}s"
+                        f"Rate limited (429), retry " f"{attempt + 1}/{max_retries} in {wait:.1f}s"
                     )
                     await asyncio.sleep(wait)
                     continue
@@ -1420,9 +1397,7 @@ Return [] if no new hotels found."""
                                     depth -= 1
                                     if depth == 0:
                                         try:
-                                            hotels = json.loads(
-                                                text[bracket_start : i + 1]
-                                            )
+                                            hotels = json.loads(text[bracket_start : i + 1])
                                         except json.JSONDecodeError:
                                             pass
                                         break
@@ -1447,9 +1422,7 @@ Return [] if no new hotels found."""
                                 country=hotel.get("country", "USA"),
                                 opening_date=hotel.get("opening_date", ""),
                                 opening_status=hotel.get("opening_status", ""),
-                                room_count=_safe_int(
-                                    hotel.get("room_count")
-                                ),  # Audit Fix #5,
+                                room_count=_safe_int(hotel.get("room_count")),  # Audit Fix #5,
                                 management_company=hotel.get("management_company", ""),
                                 developer=hotel.get("developer", ""),
                                 owner=hotel.get("owner", ""),
@@ -1478,9 +1451,7 @@ Return [] if no new hotels found."""
 
                 # Non-retryable error
                 _gemini_breaker.record_failure()  # (400, 401, 403, etc.)
-                logger.error(
-                    f"Extraction failed: HTTP {response.status_code} for {url}"
-                )
+                logger.error(f"Extraction failed: HTTP {response.status_code} for {url}")
                 self._stats["errors"] += 1
                 return []
 
@@ -1583,9 +1554,7 @@ class LeadValidator:
         current_year = datetime.now().year
         opening_year = self._extract_year(lead.opening_date)
         if opening_year and opening_year < current_year - 1:
-            return self._reject(
-                "past_opening", f"Old opening ({opening_year}): '{name}'"
-            )
+            return self._reject("past_opening", f"Old opening ({opening_year}): '{name}'")
 
         # Rule 4: Room count sanity (if provided, must be realistic)
         if lead.room_count and (lead.room_count < 3 or lead.room_count > 5000):
@@ -1598,9 +1567,7 @@ class LeadValidator:
         brand_lower = (lead.brand or "").lower()
         city_lower = (lead.city or "").lower()
         if name_lower == brand_lower or name_lower == city_lower:
-            return self._reject(
-                "name_is_brand_or_city", f"Name is just brand/city: '{name}'"
-            )
+            return self._reject("name_is_brand_or_city", f"Name is just brand/city: '{name}'")
 
         # Reject descriptive / anonymous hotel "names" — these are planning
         # rumors, not real leads. A real hotel name is a proper noun; if the
@@ -1686,8 +1653,7 @@ class LeadValidator:
         # Reject names containing parentheses with descriptive phrases
         # e.g. "Boutique hotel (planned adjacent to Union West Development)"
         if "(" in name and any(
-            word in name_lower
-            for word in ["planned", "proposed", "adjacent", "near", "next to"]
+            word in name_lower for word in ["planned", "proposed", "adjacent", "near", "next to"]
         ):
             return self._reject(
                 "name_has_descriptive_parenthetical",
@@ -1708,9 +1674,7 @@ class LeadValidator:
 
         rejected = len(leads) - len(valid)
         if rejected > 0:
-            logger.info(
-                f"   🔍 Validation: {rejected} leads rejected, {len(valid)} passed"
-            )
+            logger.info(f"   🔍 Validation: {rejected} leads rejected, {len(valid)} passed")
 
         return valid
 
@@ -1828,18 +1792,12 @@ class LeadQualifier:
                 )
             else:
                 skipped += 1
-                logger.debug(
-                    f"⏭️ Skipped: {lead.hotel_name} - {qualified_lead.skip_reason}"
-                )
+                logger.debug(f"⏭️ Skipped: {lead.hotel_name} - {qualified_lead.skip_reason}")
 
         if routed_to_existing > 0:
-            logger.info(
-                f"   🏨 Routing {routed_to_existing} expired leads to existing_hotels"
-            )
+            logger.info(f"   🏨 Routing {routed_to_existing} expired leads to existing_hotels")
         if skipped > 0:
-            logger.info(
-                f"   🚫 Filtered out {skipped} leads (budget/international/old)"
-            )
+            logger.info(f"   🚫 Filtered out {skipped} leads (budget/international/old)")
 
         return qualified
 
@@ -1922,9 +1880,7 @@ class IntelligentPipeline:
         # =====================================================================
         # STAGE 2: CLASSIFICATION (PARALLEL)
         # =====================================================================
-        logger.info(
-            f"\n📊 STAGE 2: Classifying {len(pages_after_reject)} pages (parallel)..."
-        )
+        logger.info(f"\n📊 STAGE 2: Classifying {len(pages_after_reject)} pages (parallel)...")
         classification_start = time.time()
 
         async def classify_one(page):
@@ -1966,9 +1922,7 @@ class IntelligentPipeline:
         # =====================================================================
         # STAGE 3: EXTRACTION (PARALLEL)
         # =====================================================================
-        logger.info(
-            f"\n🔍 STAGE 3: Extracting from {len(relevant_pages)} pages (parallel)..."
-        )
+        logger.info(f"\n🔍 STAGE 3: Extracting from {len(relevant_pages)} pages (parallel)...")
         extraction_start = time.time()
 
         async def extract_one(page):
@@ -2018,18 +1972,10 @@ class IntelligentPipeline:
 
         # Categorize
         high_quality = len(
-            [
-                lead
-                for lead in final_leads
-                if lead.qualification_score >= SCORE_HOT_THRESHOLD
-            ]
+            [lead for lead in final_leads if lead.qualification_score >= SCORE_HOT_THRESHOLD]
         )
-        medium_quality = len(
-            [lead for lead in final_leads if 40 <= lead.qualification_score < 70]
-        )
-        low_quality = len(
-            [lead for lead in final_leads if lead.qualification_score < 40]
-        )
+        medium_quality = len([lead for lead in final_leads if 40 <= lead.qualification_score < 70])
+        low_quality = len([lead for lead in final_leads if lead.qualification_score < 40])
 
         # Count by priority
         hot_leads = len([lead for lead in final_leads if "HOT" in lead.lead_priority])
@@ -2038,12 +1984,8 @@ class IntelligentPipeline:
         total_time = time.time() - start_time
 
         # Quality metrics
-        avg_confidence = sum(classification_confidences) / max(
-            len(classification_confidences), 1
-        )
-        avg_score = sum(lead.qualification_score for lead in final_leads) / max(
-            len(final_leads), 1
-        )
+        avg_confidence = sum(classification_confidences) / max(len(classification_confidences), 1)
+        avg_score = sum(lead.qualification_score for lead in final_leads) / max(len(final_leads), 1)
         cache_hits = self.extractor._stats.get("cache_hits", 0)
         validation_rejects = len(all_leads) - len(validated_leads)
         source_type = LeadExtractor._detect_source_type(
@@ -2059,9 +2001,7 @@ class IntelligentPipeline:
             f"📊 Classified: {len(relevant_pages)} relevant / {len(pages_after_reject)} checked (avg confidence: {avg_confidence:.2f})"
         )
         logger.info(f"📝 Extracted: {len(all_leads)} leads (cache hits: {cache_hits})")
-        logger.info(
-            f"🔍 Validated: {len(validated_leads)} passed, {validation_rejects} rejected"
-        )
+        logger.info(f"🔍 Validated: {len(validated_leads)} passed, {validation_rejects} rejected")
         logger.info(
             f"✅ Qualified: {len(final_leads)} leads (score >= {self.config.qualification_threshold}, avg: {avg_score:.0f})"
         )

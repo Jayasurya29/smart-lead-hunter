@@ -29,6 +29,7 @@ from sqlalchemy import text
 
 from app.database import async_session
 from app.services.ai_client import ai_generate
+from app.config import settings as _settings
 from app.services.contact_intelligence import assess
 from app.services.known_hotel_domains import get_known_hotel_domains
 from app.services.client_resolver import (
@@ -44,7 +45,7 @@ BATCH_SIZE = 25
 CONCURRENCY = 2  # Vertex 429s easily — keep this low
 BATCH_DELAY_SEC = 2.0  # pause between batch waves to stay under quota
 MAX_RETRIES_429 = 4  # on a 429, back off and retry this many times
-MODEL = "gemini-2.5-flash-lite"
+MODEL = _settings.gemini_model_lite  # env: GEMINI_MODEL_LITE
 REFRESH_DAYS = 30
 SIGNALS_CONFIDENCE_CAP = 0.7  # signals-only can't claim higher than grounded
 

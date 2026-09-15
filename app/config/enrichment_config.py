@@ -490,8 +490,8 @@ def get_enrichment_gemini_model() -> str:
     try:
         from app.config import settings
 
-        model = getattr(settings, "gemini_model", "gemini-2.5-flash")
+        model = getattr(settings, "gemini_model", "gemini-3.5-flash")
         ENRICHMENT_SETTINGS["gemini_model"] = model
         return model
     except Exception:
-        return "gemini-2.5-flash"
+        return "gemini-3.5-flash"

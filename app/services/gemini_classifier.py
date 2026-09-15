@@ -147,16 +147,12 @@ def _get_client():
     # Set credentials env var if key file exists and isn't already set
     if settings.vertex_key_path and os.path.exists(settings.vertex_key_path):
         if "GOOGLE_APPLICATION_CREDENTIALS" not in os.environ:
-            os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = os.path.abspath(
-                settings.vertex_key_path
-            )
+            os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = os.path.abspath(settings.vertex_key_path)
 
     try:
         from google import genai
     except ImportError as ex:
-        raise RuntimeError(
-            "google-genai SDK not installed. Run: pip install google-genai"
-        ) from ex
+        raise RuntimeError("google-genai SDK not installed. Run: pip install google-genai") from ex
 
     _client = genai.Client(
         vertexai=True,  # ← Vertex AI endpoint, not AI Studio
@@ -235,7 +231,7 @@ def _classify_batch(batch: List[dict]) -> Dict[str, Tuple[str, float, str]]:
     for attempt in range(1, MAX_RETRIES + 1):
         try:
             response = client.models.generate_content(
-                model=settings.gemini_model_lite,  # gemini-2.5-flash-lite (higher quota, perfect for classification)
+                model=settings.gemini_model_lite,  # env: GEMINI_MODEL_LITE
                 contents=prompt,
                 config=config,
             )
@@ -350,9 +346,7 @@ def classify_unknowns(
         groups.setdefault(_norm(h), []).append(h)
 
     representatives = [grp[0] for grp in groups.values()]
-    print(
-        f"      → Deduped {len(hotels)} unknowns to {len(representatives)} unique names"
-    )
+    print(f"      → Deduped {len(hotels)} unknowns to {len(representatives)} unique names")
     print(f"      → Classifying {len(representatives)} unknowns with Gemini Flash...")
 
     # Run classification on representatives only, then fan out to all members

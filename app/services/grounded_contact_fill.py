@@ -424,7 +424,7 @@ async def grounded_job_history(
     # next. _build_grounding_url picks the right endpoint per model.
     _primary = config["model"]
     _models = [_primary]
-    for _m in ("gemini-2.5-flash", "gemini-2.5-flash-lite"):
+    for _m in ("gemini-3.5-flash", "gemini-3.1-flash-lite"):
         if _m != _primary:
             _models.append(_m)
     data = None
